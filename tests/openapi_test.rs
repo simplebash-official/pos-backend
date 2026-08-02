@@ -4,13 +4,14 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use jana2u_pos_backend::{app, app::AppState, core::config::Config};
 use mongodb::Client;
-use mongodb::options::ClientOptions;
+use mongodb::options::{ClientOptions, ResolverConfig};
 use tower::ServiceExt;
 
 async fn build_test_app() -> axum::Router {
     dotenvy::dotenv().ok();
     let config = Config::from_env().expect("invalid configuration for test run");
     let options = ClientOptions::parse(&config.mongodb_uri)
+        .resolver_config(ResolverConfig::cloudflare())
         .await
         .expect("valid mongodb uri");
     let client = Client::with_options(options).expect("client construction");

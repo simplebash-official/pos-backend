@@ -44,7 +44,7 @@ Integration tests in `tests/scenarios_test.rs` connect to a **real** MongoDB (no
 
 **`domain/`** — pure business types shared across modules (no I/O, no Axum/Mongo types beyond `serde`/`utoipa` derives). Currently holds `HealthResponse`/`ModuleStatusResponse`, the OpenAPI response schemas for the placeholder status routes; populate further as modules grow instead of putting business logic directly in `routes.rs`.
 
-**`clients/mongo.rs`** — `connect(uri, db_name)` builds the `mongodb::Client`, pings the target database, and returns a `Database` handle. This is the only place Mongo connection setup happens; modules access `AppState.db` rather than reconnecting.
+**`clients/mongo.rs`** — `connect(uri, db_name)` builds the `mongodb::Client`, pings the target database, and returns a `Database` handle. This is the only place Mongo connection setup happens; modules access `AppState.db` rather than reconnecting. `ClientOptions::parse` is explicitly given `ResolverConfig::cloudflare()` rather than the OS default — on some hosts (observed on macOS with a link-local IPv6 nameserver like `fe80::...%en0`) the driver's built-in resolver fails to parse the system DNS config, which breaks `mongodb+srv://` SRV/TXT lookups with a `DnsResolve` error even though the URI and credentials are correct. Any other place a `ClientOptions` gets built directly from a URI (e.g. `tests/openapi_test.rs`) needs the same `.resolver_config(ResolverConfig::cloudflare())` call for the same reason.
 
 **`workers/`** — placeholder for background jobs (e.g. scheduled reports, print queue processing); empty so far.
 
