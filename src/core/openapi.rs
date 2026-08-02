@@ -1,0 +1,45 @@
+use utoipa::{
+    Modify, OpenApi,
+    openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme},
+};
+
+/// Root OpenAPI document. Paths are populated at router build time by
+/// merging each module's `OpenApiRouter` (see `app::build_router`) — this
+/// struct only carries top-level metadata and shared components.
+#[derive(OpenApi)]
+#[openapi(
+    modifiers(&SecurityAddon),
+    info(
+        title = "jana2u-pos API",
+        description = "POS backend for a repair/retail shop: billing, repairs, print jobs, inventory, customers, reports.",
+        version = "0.1.0"
+    ),
+    tags(
+        (name = "auth", description = "Authentication"),
+        (name = "billing", description = "Billing"),
+        (name = "customers", description = "Customers"),
+        (name = "inventory", description = "Inventory"),
+        (name = "print_jobs", description = "Print jobs"),
+        (name = "repairs", description = "Repairs"),
+        (name = "reports", description = "Reports"),
+    )
+)]
+pub struct ApiDoc;
+
+struct SecurityAddon;
+
+impl Modify for SecurityAddon {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        if let Some(components) = openapi.components.as_mut() {
+            components.add_security_scheme(
+                "bearerAuth",
+                SecurityScheme::Http(
+                    HttpBuilder::new()
+                        .scheme(HttpAuthScheme::Bearer)
+                        .bearer_format("JWT")
+                        .build(),
+                ),
+            );
+        }
+    }
+}

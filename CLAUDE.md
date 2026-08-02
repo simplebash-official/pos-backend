@@ -1,0 +1,62 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project
+
+The Rust/Axum API backend for **jana2u-pos**, a point-of-sale system for a repair/retail shop (billing, repairs, print jobs, inventory, customers, reports). Persistence is MongoDB. The sibling `../frontend` (React + Vite + Mantine) is the client this API serves, expecting endpoints under `env.apiBaseUrl` (`/api` by default).
+
+## Commands
+
+- `cargo build` — compile
+- `cargo run` — run the server (equivalent to `cargo run --bin jana2u_pos_backend`; required explicitly if disambiguating from the seed binaries)
+- `cargo test` — run all tests (`tests/scenarios_test.rs` requires a reachable MongoDB — see below; `tests/openapi_test.rs` does not)
+- `cargo test --test scenarios_test health_route_returns_ok` — run a single integration test by name
+- `cargo fmt` / `cargo fmt --check` — format / verify formatting
+- `cargo run --bin seed_api_key` — generate and insert a random API key into the `api_keys` collection
+- `cargo run --bin seed_providers` — placeholder seed routine for reference/lookup data
+
+**After every change**, run the following and fix anything it reports before considering the work done:
+
+```
+cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo check && cargo test && cargo build --release
+```
+
+(`cargo fmt --check` fails on unformatted code without rewriting it; `clippy -D warnings` treats every lint as an error; `cargo check` is the fast type/borrow check; `cargo build --release` is the pre-deploy build. `rustfmt`/`clippy` components must be installed — `rustup component add rustfmt clippy` — if either command is missing.)
+
+Config is loaded from `.env` (via `dotenvy`) in every binary and integration test. Copy `.env.example` to `.env` and point `MONGODB_URI` at a running MongoDB instance before running or testing — `Config::from_env()` fails fast (process exits) on missing/invalid vars, and the Mongo client pings the server at startup, so a bad connection string is caught immediately rather than on first request.
+
+Integration tests in `tests/scenarios_test.rs` connect to a **real** MongoDB (no mocking) using `MONGODB_TEST_DB_NAME` (defaults to `jana2u_pos_test`) instead of the dev database, so they never touch dev data — see `tests/common/mod.rs::spawn_app()`. `tests/openapi_test.rs` builds `AppState` from a `mongodb::Client` that is never pinged (still needs `MONGODB_URI` to be a syntactically valid connection string via `.env`, but no live Mongo), since it only exercises the docs/status routes.
+
+## Architecture
+
+**Binary/library split**: `src/lib.rs` re-exports `app`, `clients`, `core`, `domain`, `modules`, `workers` as a library crate. `src/main.rs` is a thin binary that wires config → Mongo → router → serve. This split exists so `src/bin/*.rs` (seed scripts) and `tests/*.rs` (integration tests) can reuse the same modules via `jana2u_pos_backend::...` — Cargo integration tests and extra `src/bin/` binaries are separate crates and cannot use `crate::` paths from `main.rs`.
+
+**Request flow**: `main.rs` calls `Config::from_env()` (`core/config/env.rs`) → `clients::mongo::connect()` → builds `AppState { config: Arc<Config>, db: Database }` (defined in `app.rs`) → `app::build_router(state)`. `app.rs` builds an `OpenApiRouter` (nesting each feature module's router under `/api/<module>`, e.g. `/api/billing`, `/api/print-jobs`), splits it into an `axum::Router` + `utoipa::openapi::OpenApi`, merges in Swagger UI, then applies `CorsLayer` (all origins allowed) and `TraceLayer`.
+
+**Feature modules** (`src/modules/<name>/`): `auth`, `billing`, `customers`, `inventory`, `print_jobs`, `repairs`, `reports` — one per frontend feature. Each has `mod.rs` + `routes.rs` exporting `pub fn router() -> OpenApiRouter<AppState>`; currently each only has a placeholder `GET /` status route. See **API docs** below for the required pattern when adding routes.
+
+**`core/`** — cross-cutting infrastructure, not domain logic:
+- `core/config/env.rs` — `Config::from_env()` parses all required env vars once at startup and fails fast (`MONGODB_URI`, `MONGODB_DB_NAME`, `JWT_SECRET` required; `PORT` defaults to 8080).
+- `core/middleware/auth.rs` — `CurrentUser` is an Axum extractor (`FromRequestParts<AppState>`) that verifies the `Authorization: Bearer <jwt>` header with `jsonwebtoken` using `Config::jwt_secret`. Add `CurrentUser` as a handler argument to require auth on a route; omit it to keep a route public. There is deliberately no tenant/org-membership middleware yet — this is a single-shop deployment for now.
+- `core/error.rs` — `AppError` (`NotFound`, `Validation`, `Unauthorized`, `Internal`) implements `IntoResponse` (JSON `{ "error": "..." }` + matching status) and `From<mongodb::error::Error>` / `From<jsonwebtoken::errors::Error>`, so handlers can `?`-propagate Mongo/JWT failures directly. Use `AppResult<T>` as the handler return type.
+- `core/openapi.rs` — `ApiDoc` (`#[derive(utoipa::OpenApi)]`) holds only top-level metadata (title/description/version, tags, the `bearerAuth` security scheme); actual paths are collected from the modules at router-build time, not listed here.
+
+**`domain/`** — pure business types shared across modules (no I/O, no Axum/Mongo types beyond `serde`/`utoipa` derives). Currently holds `HealthResponse`/`ModuleStatusResponse`, the OpenAPI response schemas for the placeholder status routes; populate further as modules grow instead of putting business logic directly in `routes.rs`.
+
+**`clients/mongo.rs`** — `connect(uri, db_name)` builds the `mongodb::Client`, pings the target database, and returns a `Database` handle. This is the only place Mongo connection setup happens; modules access `AppState.db` rather than reconnecting.
+
+**`workers/`** — placeholder for background jobs (e.g. scheduled reports, print queue processing); empty so far.
+
+**`src/bin/`** — standalone binaries sharing the lib's config/Mongo plumbing, run via `cargo run --bin <name>`, not part of the HTTP server.
+
+## API docs (OpenAPI/Swagger)
+
+Swagger UI: `http://localhost:8080/docs`. Raw OpenAPI 3.1 JSON: `http://localhost:8080/api-docs/openapi.json`. Generated via `utoipa` + `utoipa-axum` + `utoipa-swagger-ui` — there is no hand-written spec file to fall out of sync.
+
+**The docs are only correct if every route follows this pattern** (see any `modules/*/routes.rs` for a working example):
+1. Annotate the handler with `#[utoipa::path(get, path = "/foo", tag = "<module>", responses((status = 200, body = SomeResponseType)))]` (also add `request_body = ...` / path or query params as needed, and `security(("bearerAuth" = []))` if the route requires `CurrentUser`).
+2. Response/request payload types need `#[derive(utoipa::ToSchema)]` alongside `serde::Serialize`/`Deserialize`.
+3. Register the handler in that module's `router()` via `OpenApiRouter::new().routes(routes!(handler_one, handler_two, ...))` — **never** mount a handler with plain `axum::routing::get/post/...` inside a module's `router()`, since only handlers passed through the `routes!()` macro get collected into the OpenAPI document.
+
+`tests/openapi_test.rs` asserts `/api-docs/openapi.json` contains a path for every module and that `/docs/` serves — run it after adding a module or route to catch a handler that was wired with plain `axum::routing` instead of `routes!()`.
