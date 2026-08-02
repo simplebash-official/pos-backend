@@ -2,7 +2,12 @@ use std::sync::Arc;
 
 use axum::{Json, Router, http::Method};
 use mongodb::Database;
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use tower_http::{
+    LatencyUnit,
+    cors::CorsLayer,
+    trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, TraceLayer},
+};
+use tracing::Level;
 use utoipa::OpenApi;
 use utoipa_axum::{router::OpenApiRouter, routes};
 use utoipa_swagger_ui::SwaggerUi;
@@ -31,6 +36,19 @@ pub fn build_router(state: AppState) -> Router {
         ])
         .allow_headers(tower_http::cors::Any);
 
+    // Logs every request/response to the terminal (method, path, status,
+    // latency) at INFO level, so nothing extra needs to be set (e.g.
+    // RUST_LOG) to see request activity — tower_http's defaults for these
+    // callbacks are DEBUG, which stays silent under the app's default filter.
+    let trace = TraceLayer::new_for_http()
+        .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
+        .on_request(DefaultOnRequest::new().level(Level::INFO))
+        .on_response(
+            DefaultOnResponse::new()
+                .level(Level::INFO)
+                .latency_unit(LatencyUnit::Millis),
+        );
+
     let api_router: OpenApiRouter<AppState> = OpenApiRouter::new()
         .routes(routes!(health))
         .nest("/auth", modules::auth::routes::router())
@@ -48,7 +66,7 @@ pub fn build_router(state: AppState) -> Router {
     router
         .merge(SwaggerUi::new("/docs").url("/api-docs/openapi.json", openapi))
         .layer(cors)
-        .layer(TraceLayer::new_for_http())
+        .layer(trace)
         .with_state(state)
 }
 

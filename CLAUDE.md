@@ -34,6 +34,8 @@ Integration tests in `tests/scenarios_test.rs` connect to a **real** MongoDB (no
 
 **Request flow**: `main.rs` calls `Config::from_env()` (`core/config/env.rs`) → `clients::mongo::connect()` → builds `AppState { config: Arc<Config>, db: Database }` (defined in `app.rs`) → `app::build_router(state)`. `app.rs` builds an `OpenApiRouter` (nesting each feature module's router under `/api/<module>`, e.g. `/api/billing`, `/api/print-jobs`), splits it into an `axum::Router` + `utoipa::openapi::OpenApi`, merges in Swagger UI, then applies `CorsLayer` (all origins allowed) and `TraceLayer`.
 
+**Request logging**: every request is printed to the terminal (method, URI, status, latency) with no setup needed — `main.rs` sets a default `EnvFilter` of `jana2u_pos_backend=info,tower_http=info,info` (overridable via `RUST_LOG`), and `app.rs`'s `TraceLayer` is explicitly configured with `DefaultMakeSpan`/`DefaultOnRequest`/`DefaultOnResponse` at `Level::INFO` — tower_http's own defaults for those three are `DEBUG`, which would stay silent under an `info`-level filter. If this layer is ever touched, keep it at `INFO` (or lower the filter instead) so request activity doesn't silently disappear.
+
 **Feature modules** (`src/modules/<name>/`): `auth`, `billing`, `customers`, `inventory`, `print_jobs`, `repairs`, `reports` — one per frontend feature. Each has `mod.rs` + `routes.rs` exporting `pub fn router() -> OpenApiRouter<AppState>`; currently each only has a placeholder `GET /` status route. See **API docs** below for the required pattern when adding routes.
 
 **`core/`** — cross-cutting infrastructure, not domain logic:

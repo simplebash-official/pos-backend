@@ -19,7 +19,10 @@ async fn main() {
     });
     let port = config.port;
 
-    tracing::info!("Connecting to MongoDB database '{}'...", config.mongodb_db_name);
+    tracing::info!(
+        "Connecting to MongoDB database '{}'...",
+        config.mongodb_db_name
+    );
     let db = clients::mongo::connect(&config.mongodb_uri, &config.mongodb_db_name)
         .await
         .unwrap_or_else(|err| {
@@ -44,11 +47,13 @@ async fn main() {
     tracing::info!("Server started successfully on port {}", port);
     tracing::info!("   - API Base URL:  http://localhost:{}/api", port);
     tracing::info!("   - Swagger Docs:  http://localhost:{}/docs", port);
-    tracing::info!("   - OpenAPI Spec:  http://localhost:{}/api-docs/openapi.json", port);
+    tracing::info!(
+        "   - OpenAPI Spec:  http://localhost:{}/api-docs/openapi.json",
+        port
+    );
 
     axum::serve(listener, router).await.unwrap_or_else(|err| {
         tracing::error!(%err, "server error");
         std::process::exit(1);
     });
 }
-
