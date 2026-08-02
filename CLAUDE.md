@@ -10,8 +10,8 @@ The Rust/Axum API backend for **jana2u-pos**, a point-of-sale system for a repai
 
 - `cargo build` — compile
 - `cargo run` — run the server (equivalent to `cargo run --bin jana2u_pos_backend`; required explicitly if disambiguating from the seed binaries)
-- `cargo test` — run all tests (`tests/scenarios_test.rs` requires a reachable MongoDB — see below; `tests/openapi_test.rs` does not)
-- `cargo test --test scenarios_test health_route_returns_ok` — run a single integration test by name
+- `cargo test` — run all tests (`tests/scenarios_test.rs` requires a reachable MongoDB — see below; `tests/openapi_test.rs` and `tests/response_format_test.rs` do not)
+- `cargo test --test scenarios_test health_route_returns_success_format` — run a single integration test by name
 - `cargo fmt` / `cargo fmt --check` — format / verify formatting
 - `cargo run --bin seed_api_key` — generate and insert a random API key into the `api_keys` collection
 - `cargo run --bin seed_providers` — placeholder seed routine for reference/lookup data
@@ -24,9 +24,17 @@ cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings &&
 
 (`cargo fmt --check` fails on unformatted code without rewriting it; `clippy -D warnings` treats every lint as an error; `cargo check` is the fast type/borrow check; `cargo build --release` is the pre-deploy build. `rustfmt`/`clippy` components must be installed — `rustup component add rustfmt clippy` — if either command is missing.)
 
+**Every change must be tested — this is mandatory, not just running the pipeline above.** `cargo test` in that pipeline only re-runs whatever tests already exist; it does not by itself prove a new change works. So for any change:
+1. Find the test file that already covers the part of the code you're touching (see the three `tests/*.rs` files below) and extend it with a case for the change.
+2. If no test file covers that part yet, **create one** — follow the existing naming (`tests/<area>_test.rs`) and pick the right style: no-Mongo unit/integration style (`tests/response_format_test.rs`, `tests/openapi_test.rs`) for anything that doesn't need real data, or the full-stack style (`tests/scenarios_test.rs` via `tests/common::spawn_app()`) for anything that does.
+3. Run it and confirm it passes before considering the change done.
+
 Config is loaded from `.env` (via `dotenvy`) in every binary and integration test. Copy `.env.example` to `.env` and point `MONGODB_URI` at a running MongoDB instance before running or testing — `Config::from_env()` fails fast (process exits) on missing/invalid vars, and the Mongo client pings the server at startup, so a bad connection string is caught immediately rather than on first request.
 
-Integration tests in `tests/scenarios_test.rs` connect to a **real** MongoDB (no mocking) using `MONGODB_TEST_DB_NAME` (defaults to `jana2u_pos_test`) instead of the dev database, so they never touch dev data — see `tests/common/mod.rs::spawn_app()`. `tests/openapi_test.rs` builds `AppState` from a `mongodb::Client` that is never pinged (still needs `MONGODB_URI` to be a syntactically valid connection string via `.env`, but no live Mongo), since it only exercises the docs/status routes.
+Three integration test files, each a different tradeoff between speed and realism:
+- `tests/scenarios_test.rs` (+ `tests/common/mod.rs::spawn_app()`) — builds the real router against a **real** MongoDB (no mocking), using `MONGODB_TEST_DB_NAME` (defaults to `jana2u_pos_test`) instead of the dev database so it never touches dev data. Use for anything that actually reads/writes Mongo.
+- `tests/openapi_test.rs` — builds the real router with a `mongodb::Client` that is never pinged (still needs `MONGODB_URI` to be a syntactically valid connection string via `.env`, but no live Mongo needed). Asserts the OpenAPI spec lists every module path and Swagger UI serves. Use for anything about routing/docs wiring rather than data.
+- `tests/response_format_test.rs` — no router, no Mongo at all; calls `core::response::ApiResponse`/`core::error::AppError` directly and asserts the JSON shape. Use for anything about the response/error envelope itself.
 
 ## Architecture
 
@@ -41,10 +49,11 @@ Integration tests in `tests/scenarios_test.rs` connect to a **real** MongoDB (no
 **`core/`** — cross-cutting infrastructure, not domain logic:
 - `core/config/env.rs` — `Config::from_env()` parses all required env vars once at startup and fails fast (`MONGODB_URI`, `MONGODB_DB_NAME`, `JWT_SECRET` required; `PORT` defaults to 8080).
 - `core/middleware/auth.rs` — `CurrentUser` is an Axum extractor (`FromRequestParts<AppState>`) that verifies the `Authorization: Bearer <jwt>` header with `jsonwebtoken` using `Config::jwt_secret`. Add `CurrentUser` as a handler argument to require auth on a route; omit it to keep a route public. There is deliberately no tenant/org-membership middleware yet — this is a single-shop deployment for now.
-- `core/error.rs` — `AppError` (`NotFound`, `Validation`, `Unauthorized`, `Internal`) implements `IntoResponse` (JSON `{ "error": "..." }` + matching status) and `From<mongodb::error::Error>` / `From<jsonwebtoken::errors::Error>`, so handlers can `?`-propagate Mongo/JWT failures directly. Use `AppResult<T>` as the handler return type.
+- `core/error.rs` — `AppError` (`NotFound`, `Validation`, `Unauthorized`, `Forbidden`, `Internal` — each `{ message, code: Option<String> }` — plus `Custom { status, code, message }` for anything else) implements `IntoResponse`, serializing to `core::response::ErrorResponse` (`{ success: false, message, code, statusCode }`, camelCase) with the matching HTTP status; also `From<mongodb::error::Error>` / `From<jsonwebtoken::errors::Error>`, so handlers can `?`-propagate Mongo/JWT failures directly. Use `AppResult<T>` as the handler return type. Construct via `AppError::not_found("msg")` / `AppError::not_found_with_code("msg", "SOME_CODE")` (same pattern for `validation`/`unauthorized`/`forbidden`/`internal`), or `AppError::custom(status, "CODE", "msg")` for anything outside those five. A missing `code` on the non-`Custom` variants defaults to the upper-snake-case of the variant name (e.g. `NOT_FOUND`).
+- `core/response.rs` — `ApiResponse<T>` is the success envelope every handler should return: `{ success: true, data: Option<T>, message: Option<String> }` (both fields omitted from JSON when `None`), built via `ApiResponse::success(data, message)` / `::data(data)` / `::message(message)`. Its `IntoResponse` impl **always returns HTTP 200** — a handler returning `Json<ApiResponse<T>>` directly (as opposed to `AppResult<Json<ApiResponse<T>>>` returning `Err(AppError::...)`) cannot produce a non-2xx status; failure cases must go through `AppError`, not `ApiResponse`. Also defines `ErrorResponse`, the JSON shape `AppError::into_response` produces (see above) — don't construct `ErrorResponse` directly outside `core/error.rs`.
 - `core/openapi.rs` — `ApiDoc` (`#[derive(utoipa::OpenApi)]`) holds only top-level metadata (title/description/version, tags, the `bearerAuth` security scheme); actual paths are collected from the modules at router-build time, not listed here.
 
-**`domain/`** — pure business types shared across modules (no I/O, no Axum/Mongo types beyond `serde`/`utoipa` derives). Currently holds `HealthResponse`/`ModuleStatusResponse`, the OpenAPI response schemas for the placeholder status routes; populate further as modules grow instead of putting business logic directly in `routes.rs`.
+**`domain/`** — pure business types shared across modules (no I/O, no Axum/Mongo types beyond `serde`/`utoipa` derives). Currently holds `HealthResponse`/`ModuleStatusResponse`, the inner `data` payloads that route handlers wrap in `core::response::ApiResponse<T>` before returning (e.g. `Json<ApiResponse<ModuleStatusResponse>>`, not the raw type) — populate further as modules grow instead of putting business logic directly in `routes.rs`.
 
 **`clients/mongo.rs`** — `connect(uri, db_name)` builds the `mongodb::Client`, pings the target database, and returns a `Database` handle. This is the only place Mongo connection setup happens; modules access `AppState.db` rather than reconnecting. `ClientOptions::parse` is explicitly given `ResolverConfig::cloudflare()` rather than the OS default — on some hosts (observed on macOS with a link-local IPv6 nameserver like `fe80::...%en0`) the driver's built-in resolver fails to parse the system DNS config, which breaks `mongodb+srv://` SRV/TXT lookups with a `DnsResolve` error even though the URI and credentials are correct. Any other place a `ClientOptions` gets built directly from a URI (e.g. `tests/openapi_test.rs`) needs the same `.resolver_config(ResolverConfig::cloudflare())` call for the same reason.
 
@@ -57,8 +66,8 @@ Integration tests in `tests/scenarios_test.rs` connect to a **real** MongoDB (no
 Swagger UI: `http://localhost:8080/docs`. Raw OpenAPI 3.1 JSON: `http://localhost:8080/api-docs/openapi.json`. Generated via `utoipa` + `utoipa-axum` + `utoipa-swagger-ui` — there is no hand-written spec file to fall out of sync.
 
 **The docs are only correct if every route follows this pattern** (see any `modules/*/routes.rs` for a working example):
-1. Annotate the handler with `#[utoipa::path(get, path = "/foo", tag = "<module>", responses((status = 200, body = SomeResponseType)))]` (also add `request_body = ...` / path or query params as needed, and `security(("bearerAuth" = []))` if the route requires `CurrentUser`).
-2. Response/request payload types need `#[derive(utoipa::ToSchema)]` alongside `serde::Serialize`/`Deserialize`.
+1. Annotate the handler with `#[utoipa::path(get, path = "/foo", tag = "<module>", responses((status = 200, body = ApiResponse<SomeResponseType>)))]` (also add `request_body = ...` / path or query params as needed, and `security(("bearerAuth" = []))` if the route requires `CurrentUser`). Success responses are wrapped in `core::response::ApiResponse<T>`, not the bare domain type — see `core/response.rs` above.
+2. Response/request payload types (the `T` inside `ApiResponse<T>`, and any request body type) need `#[derive(utoipa::ToSchema)]` alongside `serde::Serialize`/`Deserialize`.
 3. Register the handler in that module's `router()` via `OpenApiRouter::new().routes(routes!(handler_one, handler_two, ...))` — **never** mount a handler with plain `axum::routing::get/post/...` inside a module's `router()`, since only handlers passed through the `routes!()` macro get collected into the OpenAPI document.
 
 `tests/openapi_test.rs` asserts `/api-docs/openapi.json` contains a path for every module and that `/docs/` serves — run it after adding a module or route to catch a handler that was wired with plain `axum::routing` instead of `routes!()`.

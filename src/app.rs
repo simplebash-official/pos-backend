@@ -13,7 +13,7 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::{
-    core::{config::Config, openapi::ApiDoc},
+    core::{config::Config, openapi::ApiDoc, response::ApiResponse},
     domain::HealthResponse,
     modules,
 };
@@ -71,10 +71,13 @@ pub fn build_router(state: AppState) -> Router {
 }
 
 #[utoipa::path(get, path = "/health", tag = "health", responses(
-    (status = 200, description = "Service is up", body = HealthResponse)
+    (status = 200, description = "Service is up", body = ApiResponse<HealthResponse>)
 ))]
-async fn health() -> Json<HealthResponse> {
-    Json(HealthResponse {
-        status: "ok".to_string(),
-    })
+async fn health() -> Json<ApiResponse<HealthResponse>> {
+    Json(ApiResponse::success(
+        HealthResponse {
+            status: "ok".to_string(),
+        },
+        "Service is healthy",
+    ))
 }

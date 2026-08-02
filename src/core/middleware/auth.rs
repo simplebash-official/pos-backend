@@ -31,11 +31,11 @@ impl FromRequestParts<AppState> for CurrentUser {
             .headers
             .get(axum::http::header::AUTHORIZATION)
             .and_then(|value| value.to_str().ok())
-            .ok_or_else(|| AppError::Unauthorized("missing authorization header".to_string()))?;
+            .ok_or_else(|| AppError::unauthorized("missing authorization header"))?;
 
         let token = header
             .strip_prefix("Bearer ")
-            .ok_or_else(|| AppError::Unauthorized("expected Bearer token".to_string()))?;
+            .ok_or_else(|| AppError::unauthorized("expected Bearer token"))?;
 
         let decoded = decode::<Claims>(
             token,

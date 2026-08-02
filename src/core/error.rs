@@ -3,54 +3,194 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use serde_json::json;
+
+use crate::core::response::ErrorResponse;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
-    #[error("not found: {0}")]
-    NotFound(String),
+    #[error("{message}")]
+    NotFound {
+        message: String,
+        code: Option<String>,
+    },
 
-    #[error("validation error: {0}")]
-    Validation(String),
+    #[error("{message}")]
+    Validation {
+        message: String,
+        code: Option<String>,
+    },
 
-    #[error("unauthorized: {0}")]
-    Unauthorized(String),
+    #[error("{message}")]
+    Unauthorized {
+        message: String,
+        code: Option<String>,
+    },
 
-    #[error("internal error: {0}")]
-    Internal(String),
+    #[error("{message}")]
+    Forbidden {
+        message: String,
+        code: Option<String>,
+    },
+
+    #[error("{message}")]
+    Internal {
+        message: String,
+        code: Option<String>,
+    },
+
+    #[error("{message}")]
+    Custom {
+        status: StatusCode,
+        code: String,
+        message: String,
+    },
 }
 
 impl AppError {
-    fn status_and_message(&self) -> (StatusCode, String) {
+    pub fn not_found(message: impl Into<String>) -> Self {
+        AppError::NotFound {
+            message: message.into(),
+            code: None,
+        }
+    }
+
+    pub fn not_found_with_code(message: impl Into<String>, code: impl Into<String>) -> Self {
+        AppError::NotFound {
+            message: message.into(),
+            code: Some(code.into()),
+        }
+    }
+
+    pub fn validation(message: impl Into<String>) -> Self {
+        AppError::Validation {
+            message: message.into(),
+            code: None,
+        }
+    }
+
+    pub fn validation_with_code(message: impl Into<String>, code: impl Into<String>) -> Self {
+        AppError::Validation {
+            message: message.into(),
+            code: Some(code.into()),
+        }
+    }
+
+    pub fn unauthorized(message: impl Into<String>) -> Self {
+        AppError::Unauthorized {
+            message: message.into(),
+            code: None,
+        }
+    }
+
+    pub fn unauthorized_with_code(message: impl Into<String>, code: impl Into<String>) -> Self {
+        AppError::Unauthorized {
+            message: message.into(),
+            code: Some(code.into()),
+        }
+    }
+
+    pub fn forbidden(message: impl Into<String>) -> Self {
+        AppError::Forbidden {
+            message: message.into(),
+            code: None,
+        }
+    }
+
+    pub fn forbidden_with_code(message: impl Into<String>, code: impl Into<String>) -> Self {
+        AppError::Forbidden {
+            message: message.into(),
+            code: Some(code.into()),
+        }
+    }
+
+    pub fn internal(message: impl Into<String>) -> Self {
+        AppError::Internal {
+            message: message.into(),
+            code: None,
+        }
+    }
+
+    pub fn internal_with_code(message: impl Into<String>, code: impl Into<String>) -> Self {
+        AppError::Internal {
+            message: message.into(),
+            code: Some(code.into()),
+        }
+    }
+
+    pub fn custom(status: StatusCode, code: impl Into<String>, message: impl Into<String>) -> Self {
+        AppError::Custom {
+            status,
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+
+    pub fn status_code_code_and_message(&self) -> (StatusCode, String, String) {
         match self {
-            AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
-            AppError::Validation(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
-            AppError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg.clone()),
-            AppError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
+            AppError::NotFound { message, code } => (
+                StatusCode::NOT_FOUND,
+                code.clone().unwrap_or_else(|| "NOT_FOUND".to_string()),
+                message.clone(),
+            ),
+            AppError::Validation { message, code } => (
+                StatusCode::BAD_REQUEST,
+                code.clone()
+                    .unwrap_or_else(|| "VALIDATION_ERROR".to_string()),
+                message.clone(),
+            ),
+            AppError::Unauthorized { message, code } => (
+                StatusCode::UNAUTHORIZED,
+                code.clone().unwrap_or_else(|| "UNAUTHORIZED".to_string()),
+                message.clone(),
+            ),
+            AppError::Forbidden { message, code } => (
+                StatusCode::FORBIDDEN,
+                code.clone().unwrap_or_else(|| "FORBIDDEN".to_string()),
+                message.clone(),
+            ),
+            AppError::Internal { message, code } => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                code.clone()
+                    .unwrap_or_else(|| "INTERNAL_SERVER_ERROR".to_string()),
+                message.clone(),
+            ),
+            AppError::Custom {
+                status,
+                code,
+                message,
+            } => (*status, code.clone(), message.clone()),
         }
     }
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        if let AppError::Internal(ref msg) = self {
-            tracing::error!(error = %msg, "internal error");
+        let (status, code, message) = self.status_code_code_and_message();
+
+        if status.is_server_error() {
+            tracing::error!(code = %code, error = %message, "internal server error");
         }
 
-        let (status, message) = self.status_and_message();
-        (status, Json(json!({ "error": message }))).into_response()
+        let body = ErrorResponse {
+            success: false,
+            message,
+            code,
+            status_code: status.as_u16(),
+        };
+
+        (status, Json(body)).into_response()
     }
 }
 
 impl From<mongodb::error::Error> for AppError {
     fn from(err: mongodb::error::Error) -> Self {
-        AppError::Internal(err.to_string())
+        AppError::internal(err.to_string())
     }
 }
 
 impl From<jsonwebtoken::errors::Error> for AppError {
     fn from(err: jsonwebtoken::errors::Error) -> Self {
-        AppError::Unauthorized(err.to_string())
+        AppError::unauthorized(err.to_string())
     }
 }
 
