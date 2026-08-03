@@ -19,7 +19,8 @@ The Rust/Axum API backend for **jana2u-pos**, a point-of-sale system for a repai
 **After every change**, run the following and fix anything it reports before considering the work done:
 
 ```
-cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo check && cargo test && cargo build --release
+make check
+# (or: cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo test)
 ```
 
 (`cargo fmt --check` fails on unformatted code without rewriting it; `clippy -D warnings` treats every lint as an error; `cargo check` is the fast type/borrow check; `cargo build --release` is the pre-deploy build. `rustfmt`/`clippy` components must be installed — `rustup component add rustfmt clippy` — if either command is missing.)
