@@ -129,29 +129,33 @@ impl AppError {
         match self {
             AppError::NotFound { message, code } => (
                 StatusCode::NOT_FOUND,
-                code.clone().unwrap_or_else(|| "NOT_FOUND".to_string()),
+                code.clone()
+                    .unwrap_or_else(|| crate::core::constants::codes::NOT_FOUND.to_string()),
                 message.clone(),
             ),
             AppError::Validation { message, code } => (
                 StatusCode::BAD_REQUEST,
                 code.clone()
-                    .unwrap_or_else(|| "VALIDATION_ERROR".to_string()),
+                    .unwrap_or_else(|| crate::core::constants::codes::VALIDATION_ERROR.to_string()),
                 message.clone(),
             ),
             AppError::Unauthorized { message, code } => (
                 StatusCode::UNAUTHORIZED,
-                code.clone().unwrap_or_else(|| "UNAUTHORIZED".to_string()),
+                code.clone()
+                    .unwrap_or_else(|| crate::core::constants::codes::UNAUTHORIZED.to_string()),
                 message.clone(),
             ),
             AppError::Forbidden { message, code } => (
                 StatusCode::FORBIDDEN,
-                code.clone().unwrap_or_else(|| "FORBIDDEN".to_string()),
+                code.clone()
+                    .unwrap_or_else(|| crate::core::constants::codes::FORBIDDEN.to_string()),
                 message.clone(),
             ),
             AppError::Internal { message, code } => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                code.clone()
-                    .unwrap_or_else(|| "INTERNAL_SERVER_ERROR".to_string()),
+                code.clone().unwrap_or_else(|| {
+                    crate::core::constants::codes::INTERNAL_SERVER_ERROR.to_string()
+                }),
                 message.clone(),
             ),
             AppError::Custom {

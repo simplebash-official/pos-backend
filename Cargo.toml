@@ -7,11 +7,22 @@ default-run = "jana2u_pos_backend"
 [dependencies]
 argon2 = "0.5.3"
 axum = "0.8.9"
-bson = "3.1.0"
+bson = { version = "3.1.0", features = ["chrono-0_4"] }
 chrono = { version = "0.4.45", features = ["serde"] }
 dotenvy = "0.15.7"
-jsonwebtoken = "11.0.0"
-mongodb = "3.8.0"
+futures-util = "0.3.33"
+# `jsonwebtoken` 11's default features include no crypto backend at all —
+# `decode`/`encode` panic at runtime ("Could not automatically determine the
+# process-level CryptoProvider") without one of `rust_crypto`/`aws_lc_rs`
+# explicitly enabled. `rust_crypto` covers HS256 (the algorithm used here)
+# with pure-Rust deps, no C bindings.
+jsonwebtoken = { version = "11.0.0", features = ["rust_crypto"] }
+# `bson-3` makes `mongodb::bson` re-export bson 3.x (matching the direct
+# `bson` dependency above) instead of the bson 2.x it pulls in by default;
+# without it, `chrono::DateTime<Utc>` fields on Mongo documents can't use
+# bson's chrono-0_4 serde helpers.
+mongodb = { version = "3.8.0", features = ["bson-3"] }
+nanoid = "0.5.0"
 rand = "0.10.2"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"

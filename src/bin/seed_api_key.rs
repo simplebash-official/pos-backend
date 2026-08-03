@@ -1,5 +1,8 @@
 use chrono::Utc;
-use jana2u_pos_backend::{clients, core::config::Config};
+use jana2u_pos_backend::{
+    clients,
+    core::{config::Config, constants::prefixes, id::generate_id},
+};
 use mongodb::bson::doc;
 use rand::{RngExt, distr::Alphanumeric};
 
@@ -15,19 +18,21 @@ async fn main() {
         .await
         .expect("failed to connect to MongoDB");
 
-    let key: String = rand::rng()
+    let secret_key: String = rand::rng()
         .sample_iter(&Alphanumeric)
         .take(48)
         .map(char::from)
         .collect();
+    let model_key = generate_id(prefixes::API_KEY);
 
     db.collection::<mongodb::bson::Document>("api_keys")
         .insert_one(doc! {
-            "key": &key,
+            "key": &model_key,
+            "secret": &secret_key,
             "created_at": Utc::now().to_rfc3339(),
         })
         .await
         .expect("failed to insert api key");
 
-    println!("seeded api key: {key}");
+    println!("seeded api key: key={model_key}, secret={secret_key}");
 }

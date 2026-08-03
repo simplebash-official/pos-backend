@@ -49,15 +49,38 @@ pub fn build_router(state: AppState) -> Router {
                 .latency_unit(LatencyUnit::Millis),
         );
 
+    use crate::core::constants::modules as mod_names;
+
     let api_router: OpenApiRouter<AppState> = OpenApiRouter::new()
         .routes(routes!(health))
-        .nest("/auth", modules::auth::routes::router())
-        .nest("/billing", modules::billing::routes::router())
-        .nest("/customers", modules::customers::routes::router())
-        .nest("/inventory", modules::inventory::routes::router())
-        .nest("/print-jobs", modules::print_jobs::routes::router())
-        .nest("/repairs", modules::repairs::routes::router())
-        .nest("/reports", modules::reports::routes::router());
+        .nest(
+            &format!("/{}", mod_names::AUTH),
+            modules::auth::routes::router(),
+        )
+        .nest(
+            &format!("/{}", mod_names::BILLING),
+            modules::billing::routes::router(),
+        )
+        .nest(
+            &format!("/{}", mod_names::CUSTOMERS),
+            modules::customers::routes::router(),
+        )
+        .nest(
+            &format!("/{}", mod_names::INVENTORY),
+            modules::inventory::routes::router(),
+        )
+        .nest(
+            &format!("/{}", mod_names::PRINT_JOBS.replace('_', "-")),
+            modules::print_jobs::routes::router(),
+        )
+        .nest(
+            &format!("/{}", mod_names::REPAIRS),
+            modules::repairs::routes::router(),
+        )
+        .nest(
+            &format!("/{}", mod_names::REPORTS),
+            modules::reports::routes::router(),
+        );
 
     let (router, openapi) = OpenApiRouter::<AppState>::with_openapi(ApiDoc::openapi())
         .nest("/api", api_router)

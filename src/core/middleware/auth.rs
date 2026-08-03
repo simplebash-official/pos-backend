@@ -5,11 +5,15 @@ use serde::{Deserialize, Serialize};
 use crate::{app::AppState, core::error::AppError};
 
 /// Claims embedded in the JWT issued at login and verified on every
-/// authenticated request.
+/// authenticated request. `role` is optional so existing tokens without it
+/// still decode; it's only checked by extractors (like `AdminUser`) that
+/// require a specific role.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: String,
     pub exp: usize,
+    #[serde(default)]
+    pub role: Option<String>,
 }
 
 /// Identifies the caller. Extracting `CurrentUser` from a handler's
@@ -18,6 +22,7 @@ pub struct Claims {
 #[derive(Debug, Clone)]
 pub struct CurrentUser {
     pub user_id: String,
+    pub role: Option<String>,
 }
 
 impl FromRequestParts<AppState> for CurrentUser {
@@ -45,6 +50,35 @@ impl FromRequestParts<AppState> for CurrentUser {
 
         Ok(CurrentUser {
             user_id: decoded.claims.sub,
+            role: decoded.claims.role,
         })
+    }
+}
+
+/// Identifies a caller whose JWT carries `role: "admin"`. This is the
+/// pattern to reach for any admin-only endpoint (not just inventory's
+/// category management) — add `AdminUser` as a handler argument the same
+/// way `CurrentUser` gates a route to "any authenticated user", and it
+/// rejects with 403 before the handler body runs.
+#[derive(Debug, Clone)]
+pub struct AdminUser(pub CurrentUser);
+
+impl FromRequestParts<AppState> for AdminUser {
+    type Rejection = AppError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let current_user = CurrentUser::from_request_parts(parts, state).await?;
+
+        if current_user.role.as_deref() != Some("admin") {
+            return Err(AppError::forbidden_with_code(
+                "Admin access required",
+                crate::core::constants::codes::ADMIN_REQUIRED,
+            ));
+        }
+
+        Ok(AdminUser(current_user))
     }
 }
