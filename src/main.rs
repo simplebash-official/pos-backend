@@ -1,3 +1,9 @@
+// Thin binary: load config, connect to Mongo, build the router, serve.
+// Each step below fails fast (log + `process::exit(1)`) rather than
+// letting the server start in a half-working state — a bad `.env`,
+// unreachable Mongo, or an already-bound port should never look like a
+// running server that then fails on the first real request.
+
 use std::sync::Arc;
 
 use jana2u_pos_backend::{app, app::AppState, clients, core::config::Config};
@@ -5,6 +11,9 @@ use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() {
+    // `.ok()`: a missing `.env` is fine in prod (real env vars are already
+    // set); `Config::from_env()` below is what actually enforces the
+    // required variables are present.
     dotenvy::dotenv().ok();
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -37,6 +46,9 @@ async fn main() {
     };
     let router = app::build_router(state);
 
+    // Bound to 0.0.0.0 (not localhost) so the container/host can route
+    // external traffic to it — the frontend and any reverse proxy sit
+    // outside this process.
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
         .await
         .unwrap_or_else(|err| {

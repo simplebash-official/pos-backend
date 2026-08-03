@@ -1,3 +1,7 @@
+// Business rules for product CRUD/listing: price/stock invariants, SKU
+// uniqueness, and category/subcategory validation against the `categories`
+// collection. Delegates all Mongo access to `repository::product`.
+
 use axum::http::StatusCode;
 use mongodb::{
     Database,
@@ -73,6 +77,10 @@ async fn ensure_valid_category(db: &Database, category: &str, subcategory: &str)
     Ok(())
 }
 
+/// Builds the Mongo filter/sort from query params (category, subcategory,
+/// free-text search across name/sku/barcode/category/subcategory, and the
+/// low-stock flag) and delegates execution + pagination math to
+/// `repository::product::list_products`.
 pub(crate) async fn list_products(
     db: &Database,
     query: ProductListQuery,
@@ -142,6 +150,8 @@ pub(crate) async fn list_products(
     Ok(ProductListResponse { items, pagination })
 }
 
+/// Fetch by id, 404ing with the module-specific `PRODUCT_NOT_FOUND` code
+/// rather than the generic `NOT_FOUND`.
 pub(crate) async fn get_product(db: &Database, id: ObjectId) -> AppResult<Product> {
     let document = repository::product::find_product_by_id(db, id)
         .await?
@@ -150,6 +160,10 @@ pub(crate) async fn get_product(db: &Database, id: ObjectId) -> AppResult<Produc
     Ok(document.into_product())
 }
 
+/// Validates required fields, price/stock invariants, and category
+/// membership, then enforces SKU uniqueness before inserting — in that
+/// order, so a request with both a bad price and a duplicate SKU reports
+/// the validation error first rather than a confusing conflict.
 pub(crate) async fn create_product(
     db: &Database,
     body: CreateProductRequest,
@@ -198,6 +212,9 @@ pub(crate) async fn create_product(
     Ok(inserted.into_product())
 }
 
+/// Partial update — every field in `body` is optional, so each one falls
+/// back to the existing document's value before the merged result is
+/// re-validated (numbers, category) as if it were a fresh `create`.
 pub(crate) async fn update_product(
     db: &Database,
     id: ObjectId,
@@ -255,6 +272,8 @@ pub(crate) async fn update_product(
     Ok(updated.into_product())
 }
 
+/// Deletes and returns the deleted document (so the handler can echo back
+/// what was removed), 404ing if it never existed.
 pub(crate) async fn delete_product(db: &Database, id: ObjectId) -> AppResult<Product> {
     let deleted = repository::product::delete_product(db, id)
         .await?
@@ -263,6 +282,10 @@ pub(crate) async fn delete_product(db: &Database, id: ObjectId) -> AppResult<Pro
     Ok(deleted.into_product())
 }
 
+/// Batch delete. Ids that aren't valid `ObjectId`s are silently dropped
+/// rather than failing the whole request — a client sending a mixed batch
+/// (some stale/malformed ids alongside valid ones) still gets the valid
+/// ones deleted instead of an all-or-nothing rejection.
 pub(crate) async fn delete_products(db: &Database, product_ids: Vec<String>) -> AppResult<u64> {
     let object_ids: Vec<ObjectId> = product_ids
         .iter()

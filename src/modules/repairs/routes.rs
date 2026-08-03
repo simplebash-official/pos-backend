@@ -11,6 +11,8 @@ pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new().routes(routes!(status))
 }
 
+// Placeholder — replace with real repair-ticket handlers once this module
+// is built out.
 #[utoipa::path(get, path = "/", tag = modules::REPAIRS, responses(
     (status = 200, description = "Repairs module status", body = ApiResponse<ModuleStatusResponse>)
 ))]

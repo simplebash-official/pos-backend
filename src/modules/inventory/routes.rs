@@ -1,3 +1,10 @@
+// HTTP layer only: extractors, path/query parsing, and OpenAPI docs
+// (`#[utoipa::path]`). Every handler follows the same shape — extract
+// params, make exactly one `service::*` call, wrap the result in
+// `ApiResponse`/`StatusCode` — so individual handlers aren't commented
+// beyond that pattern; the business logic they call into lives in
+// `service/` and is commented there.
+
 use axum::{
     Json,
     extract::{Path, Query, State},
@@ -61,6 +68,9 @@ pub fn router() -> OpenApiRouter<AppState> {
 // Helpers
 // ============================================================================
 
+/// Parses a `Path<String>` id param — this is the only place in the file
+/// that turns a raw path segment into an `ObjectId`; every handler that
+/// needs one calls this before delegating to `service::*`.
 fn parse_object_id(id: &str) -> AppResult<ObjectId> {
     parse_mongo_id(id, "Product")
 }
@@ -326,6 +336,9 @@ async fn update_category(
     let (updated, renamed_product_count) =
         service::category::update_category(&state.db, category, body).await?;
 
+    // The only handler that builds its success message from data rather
+    // than a fixed string — mentions the cascade so a caller who renamed a
+    // category can tell how many products were updated along with it.
     let message = if renamed_product_count > 0 {
         format!(
             "Category updated successfully ({renamed_product_count} product(s) renamed to match)"

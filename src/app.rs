@@ -18,12 +18,21 @@ use crate::{
     modules,
 };
 
+/// Shared application state injected into every handler via Axum's
+/// `State` extractor. `Arc<Config>` because `Config` is read-only after
+/// startup and cloned into every request's extensions; `Database` is
+/// already an internally-`Arc`'d handle in the Mongo driver, so cloning it
+/// per-request is cheap.
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<Config>,
     pub db: Database,
 }
 
+/// Assembles the full HTTP router: the top-level `/health` check, every
+/// feature module nested under `/api/<module>` (see `mod_names` below),
+/// Swagger UI, CORS, and request tracing — this is the one place all of
+/// that gets wired together, called once from `main.rs`.
 pub fn build_router(state: AppState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(tower_http::cors::Any)
@@ -69,6 +78,10 @@ pub fn build_router(state: AppState) -> Router {
             &format!("/{}", mod_names::INVENTORY),
             modules::inventory::routes::router(),
         )
+        // `PRINT_JOBS` is `"print_jobs"` (matches the Rust module name and
+        // OpenAPI tag) but the URL should read `/print-jobs`, so the
+        // underscore is swapped for a hyphen only at mount time — the
+        // constant itself stays snake_case everywhere else it's used.
         .nest(
             &format!("/{}", mod_names::PRINT_JOBS.replace('_', "-")),
             modules::print_jobs::routes::router(),
@@ -96,6 +109,10 @@ pub fn build_router(state: AppState) -> Router {
 #[utoipa::path(get, path = "/health", tag = "health", responses(
     (status = 200, description = "Service is up", body = ApiResponse<HealthResponse>)
 ))]
+/// Liveness check — always returns 200 if the process is up and able to
+/// handle a request at all. Doesn't touch Mongo, so it can't distinguish
+/// "server up, database down"; use a module's own status route or a real
+/// query for that.
 async fn health() -> Json<ApiResponse<HealthResponse>> {
     Json(ApiResponse::success(
         HealthResponse {

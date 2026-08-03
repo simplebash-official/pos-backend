@@ -11,6 +11,8 @@ pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new().routes(routes!(status))
 }
 
+// Placeholder — replace with real customer CRUD handlers once this module
+// is built out.
 #[utoipa::path(get, path = "/", tag = modules::CUSTOMERS, responses(
     (status = 200, description = "Customers module status", body = ApiResponse<ModuleStatusResponse>)
 ))]

@@ -1,3 +1,8 @@
+// Business rules for category/subcategory management: uniqueness checks,
+// the cascading category rename, and the "still referenced by products"
+// guards that block deleting a category/subcategory while products still
+// point at it by name.
+
 use std::collections::HashMap;
 
 use axum::http::StatusCode;
@@ -16,6 +21,8 @@ use crate::{
     modules::inventory::{model::CategoryDocument, repository},
 };
 
+/// All categories with their subcategories, alphabetically sorted (see
+/// `repository::category::list_categories`).
 pub(crate) async fn list_categories(db: &Database) -> AppResult<CategoriesResponse> {
     let documents = repository::category::list_categories(db).await?;
     let categories = documents
@@ -26,6 +33,7 @@ pub(crate) async fn list_categories(db: &Database) -> AppResult<CategoriesRespon
     Ok(CategoriesResponse { categories })
 }
 
+/// Validates required fields and name uniqueness before inserting.
 pub(crate) async fn create_category(
     db: &Database,
     body: CreateCategoryRequest,
@@ -64,6 +72,11 @@ pub(crate) async fn create_category(
     Ok(document.into_category_info())
 }
 
+/// Updates a category's fields and, if `name` changes, cascades the rename
+/// onto every product referencing the old name (see the comment below).
+/// Returns the renamed-product count alongside the updated category so the
+/// caller (`routes::update_category`) can mention it in the response
+/// message.
 pub(crate) async fn update_category(
     db: &Database,
     category: String,
@@ -128,6 +141,9 @@ pub(crate) async fn update_category(
     Ok((updated.into_category_info(), renamed_product_count))
 }
 
+/// Refuses to delete (409 `CATEGORY_IN_USE`) while any product still
+/// references this category by name — deleting would otherwise leave those
+/// products pointing at a category that no longer exists.
 pub(crate) async fn delete_category(db: &Database, category: String) -> AppResult<CategoryInfo> {
     let products_using_category =
         repository::product::count_products_in_category(db, &category).await?;
@@ -149,6 +165,9 @@ pub(crate) async fn delete_category(db: &Database, category: String) -> AppResul
     Ok(deleted.into_category_info())
 }
 
+/// Same underlying data as `list_categories`, reshaped into a flat name
+/// list + name-to-subcategories map for callers that want direct lookup
+/// (e.g. a product form validating category/subcategory client-side).
 pub(crate) async fn get_valid_categories(db: &Database) -> AppResult<ValidCategoriesResponse> {
     let documents = repository::category::list_categories(db).await?;
 
@@ -165,6 +184,8 @@ pub(crate) async fn get_valid_categories(db: &Database) -> AppResult<ValidCatego
     })
 }
 
+/// The allow-listed subcategories for one category, 404ing if the category
+/// itself doesn't exist.
 pub(crate) async fn get_category_subcategories(
     db: &Database,
     category: String,
@@ -181,6 +202,9 @@ pub(crate) async fn get_category_subcategories(
     })
 }
 
+/// Adds a subcategory to a category's allow-list, rejecting duplicates
+/// (409 `SUBCATEGORY_ALREADY_EXISTS`) so the list can't grow the same
+/// entry twice.
 pub(crate) async fn add_subcategory(
     db: &Database,
     category: String,
@@ -213,6 +237,10 @@ pub(crate) async fn add_subcategory(
     Ok(updated.into_category_info())
 }
 
+/// Removes a subcategory from a category's allow-list. Checks existence
+/// (404 `SUBCATEGORY_NOT_FOUND`) and, like `delete_category`, refuses
+/// (409 `SUBCATEGORY_IN_USE`) while any product still references this
+/// exact category+subcategory pair.
 pub(crate) async fn remove_subcategory(
     db: &Database,
     category: String,

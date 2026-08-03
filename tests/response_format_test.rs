@@ -1,3 +1,8 @@
+// No router, no Mongo — calls `ApiResponse`/`AppError` directly and
+// asserts the JSON envelope shape. The fastest/narrowest of the three test
+// tiers (see CLAUDE.md); use this style for anything about the
+// response/error envelope itself, not endpoint behavior.
+
 use axum::{http::StatusCode, response::IntoResponse};
 use jana2u_pos_backend::core::{error::AppError, response::ApiResponse};
 use serde_json::json;

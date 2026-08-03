@@ -1,3 +1,9 @@
+// Builds the real router with a Mongo client that's never pinged (needs
+// `MONGODB_URI` to be a syntactically valid connection string via `.env`,
+// but no live Mongo) — for asserting routing/OpenAPI-doc wiring, not data.
+// See CLAUDE.md's "three integration test files" breakdown for how this
+// compares to `scenarios_test.rs`/`response_format_test.rs`.
+
 use std::sync::Arc;
 
 use axum::body::Body;

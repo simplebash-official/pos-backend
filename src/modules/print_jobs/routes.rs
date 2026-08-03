@@ -11,6 +11,8 @@ pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new().routes(routes!(status))
 }
 
+// Placeholder — replace with real print-queue handlers once this module
+// is built out.
 #[utoipa::path(get, path = "/", tag = modules::PRINT_JOBS, responses(
     (status = 200, description = "Print jobs module status", body = ApiResponse<ModuleStatusResponse>)
 ))]

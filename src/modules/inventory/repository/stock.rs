@@ -1,3 +1,7 @@
+// Mongo access for the `stock_movements` collection only — the append-only
+// audit trail behind every stock change. Movements are never updated or
+// deleted here, only inserted and read.
+
 use futures_util::TryStreamExt;
 use mongodb::{Collection, Database, bson::doc, bson::oid::ObjectId};
 
@@ -15,6 +19,8 @@ pub(crate) async fn insert_stock_movement(
     Ok(())
 }
 
+/// Sorted oldest-first so `GET /products/{id}/movements` reads as a
+/// chronological history rather than most-recent-first.
 pub(crate) async fn find_stock_movements_for_product(
     db: &Database,
     product_id: ObjectId,

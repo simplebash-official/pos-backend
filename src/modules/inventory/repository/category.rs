@@ -1,3 +1,8 @@
+// Mongo access for the `categories` collection only. This collection is
+// the single source of truth for both `GET /categories`-style reads and
+// product validation (`service::product::ensure_valid_category`) — there
+// is no separate hardcoded category list anywhere else in the codebase.
+
 use futures_util::TryStreamExt;
 use mongodb::{Collection, Database, bson::Document, bson::doc, options::ReturnDocument};
 
@@ -14,6 +19,7 @@ pub(crate) async fn find_category_by_name(
     Ok(categories(db).find_one(doc! { "name": name }).await?)
 }
 
+/// Sorted by name for stable, predictable `GET /categories` output.
 pub(crate) async fn list_categories(db: &Database) -> AppResult<Vec<CategoryDocument>> {
     let mut cursor = categories(db)
         .find(doc! {})
@@ -32,6 +38,11 @@ pub(crate) async fn insert_category(db: &Database, document: &CategoryDocument) 
     Ok(())
 }
 
+/// `set_doc` is assembled by the caller
+/// (`service::category::update_category`); this just applies it. Note this
+/// only ever touches `name`/`icon`/`color` — the cascading rename onto
+/// `products` is a separate call the service layer makes to
+/// `repository::product::rename_products_category`.
 pub(crate) async fn update_category_fields(
     db: &Database,
     name: &str,
@@ -80,6 +91,10 @@ pub(crate) async fn remove_subcategory(
         .await?)
 }
 
+/// Backs `service::product::ensure_valid_category` — a single query that
+/// answers "is `subcategory` actually one of `category`'s subcategories"
+/// without fetching the whole document just to scan its `subcategories`
+/// array in application code.
 pub(crate) async fn category_has_subcategory(
     db: &Database,
     category: &str,

@@ -26,6 +26,11 @@ use utoipa::{
 )]
 pub struct ApiDoc;
 
+/// Registers the `bearerAuth` security scheme referenced by every route's
+/// `security(("bearerAuth" = []))` annotation. Without this, `utoipa` would
+/// emit those annotations pointing at a scheme that doesn't exist in the
+/// generated document, and Swagger UI's "Authorize" button would have
+/// nothing to configure.
 struct SecurityAddon;
 
 impl Modify for SecurityAddon {

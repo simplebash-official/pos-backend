@@ -11,6 +11,8 @@ pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new().routes(routes!(status))
 }
 
+// Placeholder — replace with real reporting handlers once this module is
+// built out.
 #[utoipa::path(get, path = "/", tag = modules::REPORTS, responses(
     (status = 200, description = "Reports module status", body = ApiResponse<ModuleStatusResponse>)
 ))]

@@ -31,7 +31,10 @@ async fn main() {
             ..
         } = category;
 
-        // Check if existing document already has a key
+        // Upserting must not overwrite an already-assigned `key` on re-run
+        // (it's meant to be stable), so look up any existing document's key
+        // first and only fall back to a freshly generated one if it's
+        // missing (a legacy doc from before `key` existed) or genuinely new.
         let existing = collection
             .find_one(doc! { "name": &name })
             .await
@@ -72,6 +75,9 @@ async fn main() {
     }
 }
 
+/// The shop's fixed starter category/subcategory set. Hardcoded here rather
+/// than read from a config file since it changes rarely and only via a
+/// deliberate code change + re-run of this binary.
 fn default_categories() -> Vec<CategoryDocument> {
     vec![
         CategoryDocument {

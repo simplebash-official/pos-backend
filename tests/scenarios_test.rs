@@ -1,3 +1,9 @@
+// Builds the real router against a real MongoDB (via `common::spawn_app()`,
+// targeting the isolated test database) — the slowest but most realistic
+// of the three test tiers (see CLAUDE.md). Use for anything that actually
+// reads/writes Mongo; `tests/inventory_test.rs` is the larger example of
+// this style.
+
 mod common;
 
 use axum::body::Body;

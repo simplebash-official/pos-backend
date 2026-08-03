@@ -1,3 +1,8 @@
+// Business rules for stock changes: the adjustment invariant (never let
+// stock go negative), and the fact that every adjustment must also produce
+// a `StockMovement` audit record — the two collections are always written
+// together from here, never independently.
+
 use mongodb::{
     Database,
     bson::{DateTime as BsonDateTime, oid::ObjectId},
@@ -16,6 +21,11 @@ use crate::{
     modules::inventory::{model::StockMovementDocument, repository},
 };
 
+/// Applies a signed `delta` to a product's stock and records the change as
+/// a `StockMovement`. Rejects with `INSUFFICIENT_STOCK` rather than
+/// clamping to zero, since a caller requesting a delta larger than
+/// available stock is almost always a bug (e.g. double-submitted sale)
+/// that should surface as an error, not silently produce a wrong quantity.
 pub(crate) async fn adjust_stock(
     db: &Database,
     id: ObjectId,
@@ -73,6 +83,7 @@ pub(crate) async fn adjust_stock(
     })
 }
 
+/// Products at or below their configured reorder threshold.
 pub(crate) async fn low_stock(db: &Database) -> AppResult<LowStockResponse> {
     let documents = repository::product::find_low_stock_products(db).await?;
 
@@ -97,6 +108,9 @@ pub(crate) async fn low_stock(db: &Database) -> AppResult<LowStockResponse> {
     Ok(LowStockResponse { items, total })
 }
 
+/// The audit-trail history for one product. 404s if the product itself
+/// doesn't exist (rather than just returning an empty list), so a typo'd
+/// id is distinguishable from a real product with no movements yet.
 pub(crate) async fn product_movements(
     db: &Database,
     id: ObjectId,

@@ -1,5 +1,8 @@
 use std::env;
 
+/// Resolved application configuration. Built once in `main.rs` via
+/// `Config::from_env()` and shared through `AppState` — nothing downstream
+/// reads environment variables directly.
 #[derive(Debug, Clone)]
 pub struct Config {
     pub mongodb_uri: String,
@@ -8,6 +11,8 @@ pub struct Config {
     pub port: u16,
 }
 
+/// Why startup configuration failed to load. `main.rs` logs this and exits
+/// rather than letting the process start half-configured.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error("missing required env var {0}")]
@@ -38,6 +43,9 @@ impl Config {
     }
 }
 
+/// Reads a required env var, turning "unset" into a named `ConfigError`
+/// instead of a generic `VarError` so the failure message says which
+/// variable is missing.
 fn required(key: &'static str) -> Result<String, ConfigError> {
     env::var(key).map_err(|_| ConfigError::Missing(key))
 }
