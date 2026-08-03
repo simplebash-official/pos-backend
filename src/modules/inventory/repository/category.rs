@@ -1,0 +1,92 @@
+use futures_util::TryStreamExt;
+use mongodb::{Collection, Database, bson::Document, bson::doc, options::ReturnDocument};
+
+use crate::{core::error::AppResult, modules::inventory::model::CategoryDocument};
+
+fn categories(db: &Database) -> Collection<CategoryDocument> {
+    db.collection("categories")
+}
+
+pub(crate) async fn find_category_by_name(
+    db: &Database,
+    name: &str,
+) -> AppResult<Option<CategoryDocument>> {
+    Ok(categories(db).find_one(doc! { "name": name }).await?)
+}
+
+pub(crate) async fn list_categories(db: &Database) -> AppResult<Vec<CategoryDocument>> {
+    let mut cursor = categories(db)
+        .find(doc! {})
+        .sort(doc! { "name": 1 })
+        .await?;
+
+    let mut items = Vec::new();
+    while let Some(document) = cursor.try_next().await? {
+        items.push(document);
+    }
+    Ok(items)
+}
+
+pub(crate) async fn insert_category(db: &Database, document: &CategoryDocument) -> AppResult<()> {
+    categories(db).insert_one(document).await?;
+    Ok(())
+}
+
+pub(crate) async fn update_category_fields(
+    db: &Database,
+    name: &str,
+    set_doc: Document,
+) -> AppResult<Option<CategoryDocument>> {
+    Ok(categories(db)
+        .find_one_and_update(doc! { "name": name }, doc! { "$set": set_doc })
+        .return_document(ReturnDocument::After)
+        .await?)
+}
+
+pub(crate) async fn delete_category(
+    db: &Database,
+    name: &str,
+) -> AppResult<Option<CategoryDocument>> {
+    Ok(categories(db)
+        .find_one_and_delete(doc! { "name": name })
+        .await?)
+}
+
+pub(crate) async fn add_subcategory(
+    db: &Database,
+    category: &str,
+    subcategory: &str,
+) -> AppResult<Option<CategoryDocument>> {
+    Ok(categories(db)
+        .find_one_and_update(
+            doc! { "name": category },
+            doc! { "$push": { "subcategories": subcategory } },
+        )
+        .return_document(ReturnDocument::After)
+        .await?)
+}
+
+pub(crate) async fn remove_subcategory(
+    db: &Database,
+    category: &str,
+    subcategory: &str,
+) -> AppResult<Option<CategoryDocument>> {
+    Ok(categories(db)
+        .find_one_and_update(
+            doc! { "name": category },
+            doc! { "$pull": { "subcategories": subcategory } },
+        )
+        .return_document(ReturnDocument::After)
+        .await?)
+}
+
+pub(crate) async fn category_has_subcategory(
+    db: &Database,
+    category: &str,
+    subcategory: &str,
+) -> AppResult<bool> {
+    Ok(categories(db)
+        .find_one(doc! { "name": category, "subcategories": subcategory })
+        .await?
+        .is_some())
+}
