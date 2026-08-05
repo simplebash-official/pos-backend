@@ -5,6 +5,7 @@
 // beyond that pattern; the business logic they call into lives in
 // `service/` and is commented there. No placeholder status route here for
 // the same reason as `suppliers`: the collection root is a real endpoint.
+// Every route — reads included — requires `AdminUser`, matching `suppliers`.
 
 use axum::{
     Json,
@@ -18,7 +19,7 @@ use crate::{
     core::{
         constants::modules,
         error::AppResult,
-        middleware::auth::CurrentUser,
+        middleware::auth::AdminUser,
         response::{ApiResponse, ErrorResponse},
     },
     domain::supplier_products::{
@@ -44,12 +45,16 @@ pub fn router() -> OpenApiRouter<AppState> {
 // ============================================================================
 
 #[utoipa::path(get, path = "/", tag = modules::SUPPLIER_PRODUCTS, params(SupplierProductLinkQuery),
+    security(("bearerAuth" = [])),
     responses(
         (status = 200, description = "Links for a supplier and/or product", body = ApiResponse<SupplierProductLinksResponse>),
         (status = 400, description = "Neither supplierKey nor productKey provided", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Admin access required", body = ErrorResponse),
     )
 )]
 async fn list_links(
+    _admin: AdminUser,
     State(state): State<AppState>,
     Query(query): Query<SupplierProductLinkQuery>,
 ) -> AppResult<Json<ApiResponse<SupplierProductLinksResponse>>> {
@@ -67,11 +72,12 @@ async fn list_links(
         (status = 201, description = "Link created or updated", body = ApiResponse<SupplierProductLink>),
         (status = 400, description = "Validation error", body = ErrorResponse),
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Admin access required", body = ErrorResponse),
         (status = 404, description = "Supplier or product not found", body = ErrorResponse),
     )
 )]
 async fn upsert_link(
-    _user: CurrentUser,
+    _admin: AdminUser,
     State(state): State<AppState>,
     Json(body): Json<UpsertSupplierProductLinkRequest>,
 ) -> AppResult<(StatusCode, Json<ApiResponse<SupplierProductLink>>)> {
@@ -92,11 +98,12 @@ async fn upsert_link(
     responses(
         (status = 200, description = "Link removed"),
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Admin access required", body = ErrorResponse),
         (status = 404, description = "Link not found", body = ErrorResponse),
     )
 )]
 async fn delete_link(
-    _user: CurrentUser,
+    _admin: AdminUser,
     State(state): State<AppState>,
     Path((supplier_key, product_key)): Path<(String, String)>,
 ) -> AppResult<Json<ApiResponse<()>>> {
@@ -112,11 +119,12 @@ async fn delete_link(
     responses(
         (status = 200, description = "Supplier's product links replaced", body = ApiResponse<Vec<SupplierProductLink>>),
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Admin access required", body = ErrorResponse),
         (status = 404, description = "Supplier or one of the products not found", body = ErrorResponse),
     )
 )]
 async fn replace_links_for_supplier(
-    _user: CurrentUser,
+    _admin: AdminUser,
     State(state): State<AppState>,
     Path(supplier_key): Path<String>,
     Json(body): Json<BulkReplaceLinksRequest>,

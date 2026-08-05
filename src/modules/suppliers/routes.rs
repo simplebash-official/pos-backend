@@ -6,8 +6,9 @@
 // `service/` and is commented there. Unlike most other modules, there's no
 // placeholder `GET /` status route here — the collection root (`GET /`,
 // nested at `/api/suppliers`) is itself the real "list suppliers" endpoint
-// from day one, so there's no unused path left for a status ping.
-
+// from day one, so there's no unused path left for a status ping. Every
+// route — reads included — requires `AdminUser`: supplier data (pricing,
+// contacts) is treated as business-sensitive, not general shop-floor data.
 use axum::{
     Json,
     extract::{Path, Query, State},
@@ -21,7 +22,7 @@ use crate::{
     core::{
         constants::modules,
         error::AppResult,
-        middleware::auth::CurrentUser,
+        middleware::auth::AdminUser,
         response::{ApiResponse, ErrorResponse},
         utils::parse_object_id as parse_mongo_id,
     },
@@ -66,11 +67,15 @@ fn parse_object_id(id: &str) -> AppResult<ObjectId> {
 // ============================================================================
 
 #[utoipa::path(get, path = "/", tag = modules::SUPPLIERS, params(SupplierListQuery),
+    security(("bearerAuth" = [])),
     responses(
         (status = 200, description = "List suppliers", body = ApiResponse<SuppliersResponse>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Admin access required", body = ErrorResponse),
     )
 )]
 async fn list_suppliers(
+    _admin: AdminUser,
     State(state): State<AppState>,
     Query(query): Query<SupplierListQuery>,
 ) -> AppResult<Json<ApiResponse<SuppliersResponse>>> {
@@ -88,10 +93,11 @@ async fn list_suppliers(
         (status = 201, description = "Supplier created", body = ApiResponse<Supplier>),
         (status = 400, description = "Validation error", body = ErrorResponse),
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Admin access required", body = ErrorResponse),
     )
 )]
 async fn create_supplier(
-    _user: CurrentUser,
+    _admin: AdminUser,
     State(state): State<AppState>,
     Json(body): Json<CreateSupplierRequest>,
 ) -> AppResult<(StatusCode, Json<ApiResponse<Supplier>>)> {
@@ -108,12 +114,16 @@ async fn create_supplier(
 
 #[utoipa::path(get, path = "/{id}", tag = modules::SUPPLIERS,
     params(("id" = String, Path, description = "Supplier id")),
+    security(("bearerAuth" = [])),
     responses(
         (status = 200, description = "Get a supplier", body = ApiResponse<Supplier>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Admin access required", body = ErrorResponse),
         (status = 404, description = "Supplier not found", body = ErrorResponse),
     )
 )]
 async fn get_supplier(
+    _admin: AdminUser,
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> AppResult<Json<ApiResponse<Supplier>>> {
@@ -134,11 +144,12 @@ async fn get_supplier(
         (status = 200, description = "Supplier replaced", body = ApiResponse<Supplier>),
         (status = 400, description = "Validation error", body = ErrorResponse),
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Admin access required", body = ErrorResponse),
         (status = 404, description = "Supplier not found", body = ErrorResponse),
     )
 )]
 async fn replace_supplier(
-    _user: CurrentUser,
+    _admin: AdminUser,
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(body): Json<CreateSupplierRequest>,
@@ -160,11 +171,12 @@ async fn replace_supplier(
         (status = 200, description = "Supplier updated", body = ApiResponse<Supplier>),
         (status = 400, description = "Validation error", body = ErrorResponse),
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Admin access required", body = ErrorResponse),
         (status = 404, description = "Supplier not found", body = ErrorResponse),
     )
 )]
 async fn update_supplier(
-    _user: CurrentUser,
+    _admin: AdminUser,
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(body): Json<UpdateSupplierRequest>,
@@ -184,12 +196,13 @@ async fn update_supplier(
     responses(
         (status = 200, description = "Supplier deleted", body = ApiResponse<Supplier>),
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Admin access required", body = ErrorResponse),
         (status = 404, description = "Supplier not found", body = ErrorResponse),
         (status = 409, description = "Supplier is still referenced by purchase history", body = ErrorResponse),
     )
 )]
 async fn delete_supplier(
-    _user: CurrentUser,
+    _admin: AdminUser,
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> AppResult<Json<ApiResponse<Supplier>>> {
@@ -207,10 +220,11 @@ async fn delete_supplier(
     responses(
         (status = 200, description = "Suppliers deleted", body = ApiResponse<DeleteSuppliersResponse>),
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Admin access required", body = ErrorResponse),
     )
 )]
 async fn delete_suppliers_batch(
-    _user: CurrentUser,
+    _admin: AdminUser,
     State(state): State<AppState>,
     Json(body): Json<DeleteSuppliersRequest>,
 ) -> AppResult<Json<ApiResponse<DeleteSuppliersResponse>>> {
@@ -223,11 +237,15 @@ async fn delete_suppliers_batch(
 }
 
 #[utoipa::path(get, path = "/categories", tag = modules::SUPPLIERS,
+    security(("bearerAuth" = [])),
     responses(
         (status = 200, description = "Distinct supplied-category tags in use", body = ApiResponse<SupplierCategoriesResponse>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Admin access required", body = ErrorResponse),
     )
 )]
 async fn get_supplier_categories(
+    _admin: AdminUser,
     State(state): State<AppState>,
 ) -> AppResult<Json<ApiResponse<SupplierCategoriesResponse>>> {
     let response = service::get_supplier_categories(&state.db).await?;

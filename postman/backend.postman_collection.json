@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "32f8d03c-bdaf-46ba-8fd5-f0be13ee0083",
     "name": "jana2u-pos backend",
-    "description": "Rust/Axum API backend for jana2u-pos, a point-of-sale system for a repair/retail shop.\n\nAll requests inherit the collection-level Bearer auth (`{{accessToken}}`) \u2014 set it once per environment (Developement/Production) after obtaining a JWT via Auth > Login (its Tests script auto-populates `{{accessToken}}` for you on success, so nothing to copy/paste). Admin-gated endpoints (inventory category/subcategory writes) additionally require the token's `role` claim to be `admin`. Permission-gated endpoints (Users CRUD, Auth > List Login Sessions) require the token's `permissions` claim to include a specific permission (e.g. `users:manage`, `sessions:view`) \u2014 see CLAUDE.md's \"Auth, users & permissions\" section for the full role\u2192permission table; the seeded Admin (`cargo run --bin seed_admin`) has every permission.\n\nBase URL, and the access token, are environment variables \u2014 switch the active Postman environment to point requests at dev vs prod.",
+    "description": "Rust/Axum API backend for jana2u-pos, a point-of-sale system for a repair/retail shop.\n\nAll requests inherit the collection-level Bearer auth (`{{accessToken}}`) \u2014 set it once per environment (Developement/Production) after obtaining a JWT via Auth > Login (its Tests script auto-populates `{{accessToken}}`/`{{userId}}` for you on success, so nothing to copy/paste). Admin-gated endpoints (inventory category/subcategory writes, and every Suppliers/Supplier Products/Purchases request \u2014 reads included) require the token's `role` claim to be `admin`. Permission-gated endpoints (Users CRUD, Auth > List Login Sessions) require the token's `permissions` claim to include a specific permission (e.g. `users:manage`, `sessions:view`) \u2014 see CLAUDE.md's \"Auth, users & permissions\" section for the full role\u2192permission table; the seeded Admin (`cargo run --bin seed_admin`) has every permission. Users CRUD is additionally scoped by an Admin/Manager hierarchy on top of that permission gate \u2014 see the Users folder's description.\n\nBase URL, and the access token, are environment variables \u2014 switch the active Postman environment to point requests at dev vs prod.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "_exporter_id": "46626151"
   },
@@ -28,37 +28,37 @@
       "key": "categoryKey",
       "value": "cat_xxxxxxxxxxxxxxxx",
       "type": "string",
-      "description": "A category's system-generated `key` (seeded via `cargo run --bin seed_providers`) — grab a real value from the List Categories / Create Category / Valid Categories response, never the display name."
+      "description": "A category's system-generated `key` (seeded via `cargo run --bin seed_providers`) \u2014 grab a real value from the List Categories / Create Category / Valid Categories response, never the display name."
     },
     {
       "key": "subcategoryKey",
       "value": "subcat_xxxxxxxxxxxxxxxx",
       "type": "string",
-      "description": "A subcategory's system-generated `key`, valid under categoryKey — grab a real value from the same responses as categoryKey, never the display name."
+      "description": "A subcategory's system-generated `key`, valid under categoryKey \u2014 grab a real value from the same responses as categoryKey, never the display name."
     },
     {
       "key": "productKey",
       "value": "prod_xxxxxxxxxxxxxxxx",
       "type": "string",
-      "description": "A product's system-generated `key` (from List/Get/Create Product) — used by Supplier Products/Purchases requests, never the raw productId."
+      "description": "A product's system-generated `key` (from List/Get/Create Product) \u2014 used by Supplier Products/Purchases requests, never the raw productId."
     },
     {
       "key": "supplierId",
       "value": "65f1a2b3c4d5e6f7a8b9c0d1",
       "type": "string",
-      "description": "Sample supplier ObjectId — replace with a real id from List Suppliers / Create Supplier."
+      "description": "Sample supplier ObjectId \u2014 replace with a real id from List Suppliers / Create Supplier."
     },
     {
       "key": "supplierKey",
       "value": "sup_xxxxxxxxxxxxxxxx",
       "type": "string",
-      "description": "A supplier's system-generated `key` (from List/Get/Create Supplier) — used by Supplier Products/Purchases requests, never the raw supplierId."
+      "description": "A supplier's system-generated `key` (from List/Get/Create Supplier) \u2014 used by Supplier Products/Purchases requests, never the raw supplierId."
     },
     {
       "key": "userId",
       "value": "65f1a2b3c4d5e6f7a8b9c0d1",
       "type": "string",
-      "description": "A user account's Mongo ObjectId (from Login's response, or List/Create User) — used by Get/Update/Delete User and to filter List Login Sessions."
+      "description": "A user account's Mongo ObjectId (from Login's response, or List/Create User) \u2014 used by Get/Update/Delete User and to filter List Login Sessions."
     }
   ],
   "item": [
@@ -129,7 +129,7 @@
                 "login"
               ]
             },
-            "description": "Exchanges email/password for a JWT carrying the account's role and its role's default permission set. No auth required. On success, this request's Tests script auto-populates the `{{accessToken}}`/`{{userId}}` environment variables, so every other request's inherited Bearer auth picks it up immediately.\n\nUse `cargo run --bin seed_admin` to bootstrap the very first Admin account (registration is admin-provisioned only — there is no public register endpoint).",
+            "description": "Exchanges email/password for a JWT carrying the account's role and its role's default permission set. No auth required. On success, this request's Tests script auto-populates the `{{accessToken}}`/`{{userId}}` environment variables, so every other request's inherited Bearer auth picks it up immediately.\n\nUse `cargo run --bin seed_admin` to bootstrap the very first Admin account (registration is admin-provisioned only \u2014 there is no public register endpoint).",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"admin@jana2u.local\",\n  \"password\": \"ChangeMe123!\"\n}",
@@ -196,12 +196,12 @@
                 }
               ]
             },
-            "description": "Login history audit log — newest first. Each entry snapshots the account's name/email/role at the moment of that login, so it keeps reading the same way even if the account is later renamed. Not paginated the way Suppliers/Products are — this is an append-only log that grows without bound.\n\n**Requires the token's `permissions` claim to include `sessions:view`** (granted to Admin/Manager by default) or the API returns 403 `PERMISSION_DENIED`."
+            "description": "Login history audit log \u2014 newest first. Each entry snapshots the account's name/email/role at the moment of that login, so it keeps reading the same way even if the account is later renamed. Not paginated the way Suppliers/Products are \u2014 this is an append-only log that grows without bound.\n\n**Requires the token's `permissions` claim to include `sessions:view`** (granted to Admin/Manager by default) or the API returns 403 `PERMISSION_DENIED`."
           },
           "response": []
         }
       ],
-      "description": "Login, \"who am I\", and login-session (audit) history. `users` (below) owns account CRUD/role management — see CLAUDE.md's \"Auth, users & permissions\" section."
+      "description": "Login, \"who am I\", and login-session (audit) history. `users` (below) owns account CRUD/role management \u2014 see CLAUDE.md's \"Auth, users & permissions\" section."
     },
     {
       "name": "Billing",
@@ -909,7 +909,7 @@
                 }
               ]
             },
-            "description": "List all suppliers (not paginated). No auth required."
+            "description": "List all suppliers (not paginated).\n\n**Requires Admin JWT** (`role: admin` claim) \u2014 every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
           },
           "response": []
         },
@@ -933,7 +933,7 @@
                 "suppliers"
               ]
             },
-            "description": "Create a new supplier. `key` is server-generated, never client-supplied. The response's `key` is what Supplier Products/Purchases requests reference — copy it into the `supplierKey` collection variable (and the `id` into `supplierId`).\n\n**Requires a valid JWT** (any authenticated user — not admin-gated) or the API returns 401.",
+            "description": "Create a new supplier. `key` is server-generated, never client-supplied. The response's `key` is what Supplier Products/Purchases requests reference \u2014 copy it into the `supplierKey` collection variable (and the `id` into `supplierId`).\n\n**Requires Admin JWT** (`role: admin` claim) \u2014 every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Colombo Mobile Parts\",\n  \"contactPerson\": \"Ranjith Silva\",\n  \"primaryPhone\": \"077 123 4567\",\n  \"secondaryPhone\": \"011 234 5678\",\n  \"address\": \"No. 45, First Cross Street, Pettah, Colombo 11\",\n  \"suppliedCategories\": [\n    \"Phone Parts\",\n    \"Display Assemblies\",\n    \"Batteries\",\n    \"Repair Tools\"\n  ],\n  \"email\": \"sales@colombomobileparts.lk\",\n  \"notes\": \"Preferred supplier for iPhone and Samsung original displays.\"\n}",
@@ -962,7 +962,7 @@
                 "{{supplierId}}"
               ]
             },
-            "description": "Fetch a single supplier by its Mongo ObjectId. No auth required."
+            "description": "Fetch a single supplier by its Mongo ObjectId.\n\n**Requires Admin JWT** (`role: admin` claim) \u2014 every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
           },
           "response": []
         },
@@ -987,7 +987,7 @@
                 "{{supplierId}}"
               ]
             },
-            "description": "Full replace — same shape as Create Supplier. Any optional field (secondaryPhone/email/notes) omitted from the body is cleared, unlike Update Supplier (PATCH) which leaves omitted fields untouched.\n\n**Requires a valid JWT** (any authenticated user) or the API returns 401.",
+            "description": "Full replace \u2014 same shape as Create Supplier. Any optional field (secondaryPhone/email/notes) omitted from the body is cleared, unlike Update Supplier (PATCH) which leaves omitted fields untouched.\n\n**Requires Admin JWT** (`role: admin` claim) \u2014 every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Colombo Mobile Parts\",\n  \"contactPerson\": \"Ranjith Silva\",\n  \"primaryPhone\": \"077 999 8888\",\n  \"address\": \"No. 45, First Cross Street, Pettah, Colombo 11\",\n  \"suppliedCategories\": [\n    \"Phone Parts\",\n    \"Display Assemblies\"\n  ]\n}",
@@ -1021,7 +1021,7 @@
                 "{{supplierId}}"
               ]
             },
-            "description": "Partial update — omit any field to leave it unchanged.\n\n**Requires a valid JWT** (any authenticated user) or the API returns 401.",
+            "description": "Partial update \u2014 omit any field to leave it unchanged.\n\n**Requires Admin JWT** (`role: admin` claim) \u2014 every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"primaryPhone\": \"077 999 8888\",\n  \"notes\": \"Updated delivery schedule\"\n}",
@@ -1050,7 +1050,7 @@
                 "{{supplierId}}"
               ]
             },
-            "description": "Delete a single supplier by id. Cascades to remove its Supplier Product links. Blocked with 409 `SUPPLIER_HAS_PURCHASES` while any purchase still references it.\n\n**Requires a valid JWT** (any authenticated user) or the API returns 401."
+            "description": "Delete a single supplier by id. Cascades to remove its Supplier Product links. Blocked with 409 `SUPPLIER_HAS_PURCHASES` while any purchase still references it.\n\n**Requires Admin JWT** (`role: admin` claim) \u2014 every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
           },
           "response": []
         },
@@ -1075,7 +1075,7 @@
                 "batch"
               ]
             },
-            "description": "Delete multiple suppliers at once. Ids that fail to parse as ObjectId, don't resolve, or are blocked by the purchase-history guard are silently skipped — the response count reflects only what was actually deleted.\n\n**Requires a valid JWT** (any authenticated user) or the API returns 401.",
+            "description": "Delete multiple suppliers at once. Ids that fail to parse as ObjectId, don't resolve, or are blocked by the purchase-history guard are silently skipped \u2014 the response count reflects only what was actually deleted.\n\n**Requires Admin JWT** (`role: admin` claim) \u2014 every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"ids\": [\n    \"65f1a2b3c4d5e6f7a8b9c0d1\",\n    \"65f1a2b3c4d5e6f7a8b9c0d2\"\n  ]\n}",
@@ -1104,12 +1104,12 @@
                 "categories"
               ]
             },
-            "description": "Every distinct `suppliedCategories` tag currently in use across all suppliers, for autocomplete. No auth required."
+            "description": "Every distinct `suppliedCategories` tag currently in use across all suppliers, for autocomplete.\n\n**Requires Admin JWT** (`role: admin` claim) \u2014 every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
           },
           "response": []
         }
       ],
-      "description": "Supplier CRUD: contact/business info plus the free-text category tags a supplier deals in."
+      "description": "Supplier CRUD: contact/business info plus the free-text category tags a supplier deals in. Every route (reads included) requires Admin \u2014 see the Admin note on each request."
     },
     {
       "name": "Supplier Products",
@@ -1142,7 +1142,7 @@
                 }
               ]
             },
-            "description": "Lists links scoped to a supplier, a product, or their intersection. At least one of supplierKey/productKey is required (400 otherwise). No auth required."
+            "description": "Lists links scoped to a supplier, a product, or their intersection. At least one of supplierKey/productKey is required (400 otherwise).\n\n**Requires Admin JWT** (`role: admin` claim) \u2014 every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
           },
           "response": []
         },
@@ -1166,7 +1166,7 @@
                 "supplier-products"
               ]
             },
-            "description": "Links a supplier to a product. If the (supplierKey, productKey) pair already has a link, updates its costPriceCents/notes in place instead of creating a duplicate. Both keys must reference existing documents (404 otherwise).\n\n**Requires a valid JWT** (any authenticated user) or the API returns 401.",
+            "description": "Links a supplier to a product. If the (supplierKey, productKey) pair already has a link, updates its costPriceCents/notes in place instead of creating a duplicate. Both keys must reference existing documents (404 otherwise).\n\n**Requires Admin JWT** (`role: admin` claim) \u2014 every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"supplierKey\": \"{{supplierKey}}\",\n  \"productKey\": \"{{productKey}}\",\n  \"costPriceCents\": 75000,\n  \"notes\": \"Bulk discount on 100+ units\"\n}",
@@ -1196,7 +1196,7 @@
                 "{{productKey}}"
               ]
             },
-            "description": "Removes a supplier-product link. 404 `SUPPLIER_PRODUCT_LINK_NOT_FOUND` if no such link exists.\n\n**Requires a valid JWT** (any authenticated user) or the API returns 401."
+            "description": "Removes a supplier-product link. 404 `SUPPLIER_PRODUCT_LINK_NOT_FOUND` if no such link exists.\n\n**Requires Admin JWT** (`role: admin` claim) \u2014 every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
           },
           "response": []
         },
@@ -1222,7 +1222,7 @@
                 "{{supplierKey}}"
               ]
             },
-            "description": "Replaces every product link for a supplier with the given set of productKeys. Links for product keys that already existed keep their costPriceCents/notes; ones no longer listed are removed.\n\n**Requires a valid JWT** (any authenticated user) or the API returns 401.",
+            "description": "Replaces every product link for a supplier with the given set of productKeys. Links for product keys that already existed keep their costPriceCents/notes; ones no longer listed are removed.\n\n**Requires Admin JWT** (`role: admin` claim) \u2014 every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"productKeys\": [\n    \"{{productKey}}\"\n  ]\n}",
@@ -1236,7 +1236,7 @@
           "response": []
         }
       ],
-      "description": "The many-to-many join between suppliers and inventory products."
+      "description": "The many-to-many join between suppliers and inventory products. Every route (reads included) requires Admin \u2014 see the Admin note on each request."
     },
     {
       "name": "Purchases",
@@ -1269,7 +1269,7 @@
                 }
               ]
             },
-            "description": "Purchase history scoped to a supplier, a product, or their intersection — enriched with supplier/product display data. At least one of supplierKey/productKey is required (400 otherwise). No auth required."
+            "description": "Purchase history scoped to a supplier, a product, or their intersection \u2014 enriched with supplier/product display data. At least one of supplierKey/productKey is required (400 otherwise).\n\n**Requires Admin JWT** (`role: admin` claim) \u2014 every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
           },
           "response": []
         },
@@ -1293,7 +1293,7 @@
                 "purchases"
               ]
             },
-            "description": "Records a stock intake from a supplier. Also increments the product's stockQuantity and writes a PurchaseReceipt stock movement (see Inventory > Stock > Product Stock Movements). Both keys must reference existing documents (404 otherwise).\n\n**Requires a valid JWT** (any authenticated user) or the API returns 401.",
+            "description": "Records a stock intake from a supplier. Also increments the product's stockQuantity and writes a PurchaseReceipt stock movement (see Inventory > Stock > Product Stock Movements). Both keys must reference existing documents (404 otherwise).\n\n**Requires Admin JWT** (`role: admin` claim) \u2014 every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"supplierKey\": \"{{supplierKey}}\",\n  \"productKey\": \"{{productKey}}\",\n  \"quantity\": 50,\n  \"unitCostCents\": 150000,\n  \"date\": \"2026-07-30T10:00:00Z\",\n  \"referenceNo\": \"INV-1001\",\n  \"notes\": \"Monthly restock\"\n}",
@@ -1307,7 +1307,7 @@
           "response": []
         }
       ],
-      "description": "Supplier purchase / stock-intake history — recording a stock receipt also bumps the referenced product's stock in Inventory."
+      "description": "Supplier purchase / stock-intake history \u2014 recording a stock receipt also bumps the referenced product's stock in Inventory. Every route (reads included) requires Admin \u2014 see the Admin note on each request."
     },
     {
       "name": "Users",
@@ -1341,7 +1341,7 @@
                 }
               ]
             },
-            "description": "List all user accounts (not paginated — a shop's staff roster is small).\n\n**Requires the token's `permissions` claim to include `users:manage`** (granted to Admin by default) or the API returns 403 `PERMISSION_DENIED`."
+            "description": "List user accounts (not paginated \u2014 a shop's staff roster is small). An Admin's list never includes the Admin account; a Manager's list is filtered to Staff accounts only (any `role` query param a Manager sends is ignored in favor of that).\n\n**Requires `users:manage` (Admin) or `users:manage:staff` (Manager)** in the token's `permissions` claim, or the API returns 403 `PERMISSION_DENIED`. Scope beyond that gate is role-based: an Admin may create/view/edit/delete Manager and Staff accounts; a Manager may do the same to Staff accounts only. An Admin account is never reachable through this endpoint by anyone \u2014 not even by another Admin, and not even by itself \u2014 this is a single-shop deployment with exactly one Admin, bootstrapped via `cargo run --bin seed_admin` and otherwise untouchable via the API."
           },
           "response": []
         },
@@ -1365,7 +1365,7 @@
                 "users"
               ]
             },
-            "description": "Creates a new user account — admin-provisioned only, there is no public self-registration endpoint. `role` must be one of `admin`/`manager`/`staff`; its default permission set is computed fresh at that user's next login, never stored on the account.\n\n**Requires the token's `permissions` claim to include `users:manage`** (granted to Admin by default) or the API returns 403 `PERMISSION_DENIED`.",
+            "description": "Creates a new user account \u2014 admin-provisioned only, there is no public self-registration endpoint. `role` must be within what the caller may create (Admin: manager/staff; Manager: staff) \u2014 requesting `admin`, or a role outside the caller's scope, is rejected with 403 `PERMISSION_DENIED`, not just 401. Its default permission set is computed fresh at that user's next login, never stored on the account.\n\n**Requires `users:manage` (Admin) or `users:manage:staff` (Manager)** in the token's `permissions` claim, or the API returns 403 `PERMISSION_DENIED`. Scope beyond that gate is role-based: an Admin may create/view/edit/delete Manager and Staff accounts; a Manager may do the same to Staff accounts only. An Admin account is never reachable through this endpoint by anyone \u2014 not even by another Admin, and not even by itself \u2014 this is a single-shop deployment with exactly one Admin, bootstrapped via `cargo run --bin seed_admin` and otherwise untouchable via the API.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Jane Fernando\",\n  \"email\": \"jane.fernando@example.com\",\n  \"password\": \"Password123!\",\n  \"role\": \"staff\"\n}",
@@ -1394,7 +1394,7 @@
                 "{{userId}}"
               ]
             },
-            "description": "Fetch a single user account by its Mongo ObjectId.\n\n**Requires the token's `permissions` claim to include `users:manage`** or the API returns 403 `PERMISSION_DENIED`."
+            "description": "Fetch a single user account by its Mongo ObjectId. Returns 404 (not 403) if `{{userId}}` resolves to an account outside what the caller may manage \u2014 including an Admin account, which reads as \"not found\" to every caller, Admin included.\n\n**Requires `users:manage` (Admin) or `users:manage:staff` (Manager)** in the token's `permissions` claim, or the API returns 403 `PERMISSION_DENIED`. Scope beyond that gate is role-based: an Admin may create/view/edit/delete Manager and Staff accounts; a Manager may do the same to Staff accounts only. An Admin account is never reachable through this endpoint by anyone \u2014 not even by another Admin, and not even by itself \u2014 this is a single-shop deployment with exactly one Admin, bootstrapped via `cargo run --bin seed_admin` and otherwise untouchable via the API."
           },
           "response": []
         },
@@ -1419,7 +1419,7 @@
                 "{{userId}}"
               ]
             },
-            "description": "Partial update — omit any field to leave it unchanged. `password` present means rehash to the new value (takes effect on that user's next login); `isActive: false` deactivates the account, blocking both future logins and its already-issued tokens' next `GET /auth/me` call.\n\n**Requires the token's `permissions` claim to include `users:manage`** or the API returns 403 `PERMISSION_DENIED`.",
+            "description": "Partial update \u2014 omit any field to leave it unchanged. `password` present means rehash to the new value (takes effect on that user's next login); `isActive: false` deactivates the account, blocking both future logins and its already-issued tokens' next `GET /auth/me` call. A `role` change is checked the same way Create User's `role` is \u2014 e.g. a Manager can never promote a Staff account to Manager, and no one can ever set `role: admin`.\n\n**Requires `users:manage` (Admin) or `users:manage:staff` (Manager)** in the token's `permissions` claim, or the API returns 403 `PERMISSION_DENIED`. Scope beyond that gate is role-based: an Admin may create/view/edit/delete Manager and Staff accounts; a Manager may do the same to Staff accounts only. An Admin account is never reachable through this endpoint by anyone \u2014 not even by another Admin, and not even by itself \u2014 this is a single-shop deployment with exactly one Admin, bootstrapped via `cargo run --bin seed_admin` and otherwise untouchable via the API.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"role\": \"manager\",\n  \"isActive\": true\n}",
@@ -1448,12 +1448,12 @@
                 "{{userId}}"
               ]
             },
-            "description": "Delete a user account. Blocked with a validation error `CANNOT_DELETE_SELF` if `{{userId}}` is the caller's own account.\n\n**Requires the token's `permissions` claim to include `users:manage`** or the API returns 403 `PERMISSION_DENIED`."
+            "description": "Delete a user account. Returns 404 (not 403) if `{{userId}}` is outside what the caller may manage \u2014 since no role is ever able to manage its own role (Admin doesn't manage Admin, Manager doesn't manage Manager), this also means a caller can never delete their own account through this endpoint; it 404s the same as targeting anyone else out of scope.\n\n**Requires `users:manage` (Admin) or `users:manage:staff` (Manager)** in the token's `permissions` claim, or the API returns 403 `PERMISSION_DENIED`. Scope beyond that gate is role-based: an Admin may create/view/edit/delete Manager and Staff accounts; a Manager may do the same to Staff accounts only. An Admin account is never reachable through this endpoint by anyone \u2014 not even by another Admin, and not even by itself \u2014 this is a single-shop deployment with exactly one Admin, bootstrapped via `cargo run --bin seed_admin` and otherwise untouchable via the API."
           },
           "response": []
         }
       ],
-      "description": "Admin-provisioned user account CRUD and role management. `auth` (above) owns login/token issuance and login-session history — see CLAUDE.md's \"Auth, users & permissions\" section."
+      "description": "Admin-provisioned user account CRUD and role management, scoped by an Admin/Manager hierarchy: Admin manages Manager + Staff accounts, Manager manages Staff accounts only, and an Admin account is never manageable through this API by anyone (see CLAUDE.md's \"Auth, users & permissions\" section). `auth` (above) owns login/token issuance and login-session history."
     }
   ]
 }

@@ -9,6 +9,7 @@ use axum::{
 };
 use jana2u_pos_backend::{
     core::{config::Config, id::generate_id},
+    domain::users::Role,
     modules::inventory::model::{CategoryDocument, SubcategoryDocument},
 };
 use mongodb::bson::DateTime as BsonDateTime;
@@ -49,8 +50,8 @@ async fn send(
 }
 
 /// Same as `send`, but with an `Authorization: Bearer <token>` header — for
-/// the write endpoints in `suppliers`/`supplier_products`/`purchases`,
-/// which require `CurrentUser` (any authenticated caller).
+/// `suppliers`/`supplier_products`/`purchases`, where every route (reads
+/// included) requires `AdminUser`.
 async fn send_authed(
     router: &axum::Router,
     method: &str,
@@ -71,10 +72,11 @@ async fn send_authed(
     execute(router, request).await
 }
 
-/// Mints a JWT with no `role`/permissions — these endpoints only require
-/// `CurrentUser`, not `AdminUser` or a specific permission.
-fn user_token(config: &Config) -> String {
-    common::mint_token(config, None, &[])
+/// Mints an Admin-role JWT — every `suppliers`/`supplier_products`/
+/// `purchases` route requires `AdminUser`, which only checks `role`, never
+/// `permissions`, so an empty permission list is correct here.
+fn admin_token(config: &Config) -> String {
+    common::mint_token(config, Some(Role::Admin), &[])
 }
 
 /// Seeds a category + subcategory directly (bypassing the admin-gated
@@ -200,9 +202,22 @@ async fn create_supplier_requires_auth() {
 }
 
 #[tokio::test]
+async fn suppliers_endpoints_require_admin_role() {
+    let app = common::spawn_app().await;
+
+    let (status, body) = send(&app.router, "GET", "/api/suppliers", None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+
+    let non_admin = common::mint_token(&app.config, Some(Role::Staff), &[]);
+    let (status, body) = send_authed(&app.router, "GET", "/api/suppliers", None, &non_admin).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["code"], "ADMIN_REQUIRED");
+}
+
+#[tokio::test]
 async fn create_supplier_validates_required_fields() {
     let app = common::spawn_app().await;
-    let token = user_token(&app.config);
+    let token = admin_token(&app.config);
 
     let (status, body) = send_authed(
         &app.router,
@@ -224,7 +239,7 @@ async fn create_supplier_validates_required_fields() {
 #[tokio::test]
 async fn create_supplier_validates_email_format() {
     let app = common::spawn_app().await;
-    let token = user_token(&app.config);
+    let token = admin_token(&app.config);
 
     let mut payload = sample_supplier_payload();
     payload["email"] = json!("not-an-email");
@@ -236,12 +251,19 @@ async fn create_supplier_validates_email_format() {
 #[tokio::test]
 async fn create_and_get_supplier() {
     let app = common::spawn_app().await;
-    let token = user_token(&app.config);
+    let token = admin_token(&app.config);
 
     let (id, _key, data) = create_supplier(&app.router, &token).await;
     assert_eq!(data["primaryPhone"], "077 123 4567");
 
-    let (status, body) = send(&app.router, "GET", &format!("/api/suppliers/{id}"), None).await;
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/suppliers/{id}"),
+        None,
+        &token,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["data"]["id"], id);
 }
@@ -249,7 +271,7 @@ async fn create_and_get_supplier() {
 #[tokio::test]
 async fn list_suppliers_filters_by_search_and_category() {
     let app = common::spawn_app().await;
-    let token = user_token(&app.config);
+    let token = admin_token(&app.config);
 
     let unique = Uuid::new_v4().simple().to_string();
     let mut payload = sample_supplier_payload();
@@ -257,22 +279,24 @@ async fn list_suppliers_filters_by_search_and_category() {
     payload["suppliedCategories"] = json!([format!("UniqueTag{unique}")]);
     send_authed(&app.router, "POST", "/api/suppliers", Some(payload), &token).await;
 
-    let (status, body) = send(
+    let (status, body) = send_authed(
         &app.router,
         "GET",
         &format!("/api/suppliers?search=FindableSupplier{unique}"),
         None,
+        &token,
     )
     .await;
     assert_eq!(status, StatusCode::OK);
     let suppliers = body["data"]["suppliers"].as_array().unwrap();
     assert_eq!(suppliers.len(), 1, "{body}");
 
-    let (status, body) = send(
+    let (status, body) = send_authed(
         &app.router,
         "GET",
         &format!("/api/suppliers?category=UniqueTag{unique}"),
         None,
+        &token,
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -283,7 +307,7 @@ async fn list_suppliers_filters_by_search_and_category() {
 #[tokio::test]
 async fn put_replaces_supplier_clearing_omitted_optional_fields() {
     let app = common::spawn_app().await;
-    let token = user_token(&app.config);
+    let token = admin_token(&app.config);
     let (id, _key, _) = create_supplier(&app.router, &token).await;
 
     let replace_payload = json!({
@@ -312,7 +336,7 @@ async fn put_replaces_supplier_clearing_omitted_optional_fields() {
 #[tokio::test]
 async fn patch_partial_updates_supplier_leaving_other_fields_unchanged() {
     let app = common::spawn_app().await;
-    let token = user_token(&app.config);
+    let token = admin_token(&app.config);
     let (id, _key, original) = create_supplier(&app.router, &token).await;
 
     let (status, body) = send_authed(
@@ -332,7 +356,7 @@ async fn patch_partial_updates_supplier_leaving_other_fields_unchanged() {
 #[tokio::test]
 async fn delete_supplier_requires_auth_and_removes_it() {
     let app = common::spawn_app().await;
-    let token = user_token(&app.config);
+    let token = admin_token(&app.config);
     let (id, _key, _) = create_supplier(&app.router, &token).await;
 
     let (status, _) = send(&app.router, "DELETE", &format!("/api/suppliers/{id}"), None).await;
@@ -348,14 +372,21 @@ async fn delete_supplier_requires_auth_and_removes_it() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
-    let (status, _) = send(&app.router, "GET", &format!("/api/suppliers/{id}"), None).await;
+    let (status, _) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/suppliers/{id}"),
+        None,
+        &token,
+    )
+    .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
 async fn batch_delete_suppliers_skips_invalid_ids() {
     let app = common::spawn_app().await;
-    let token = user_token(&app.config);
+    let token = admin_token(&app.config);
     let (id_one, _, _) = create_supplier(&app.router, &token).await;
     let (id_two, _, _) = create_supplier(&app.router, &token).await;
 
@@ -374,14 +405,21 @@ async fn batch_delete_suppliers_skips_invalid_ids() {
 #[tokio::test]
 async fn supplier_categories_endpoint_returns_distinct_tags() {
     let app = common::spawn_app().await;
-    let token = user_token(&app.config);
+    let token = admin_token(&app.config);
 
     let unique = Uuid::new_v4().simple().to_string();
     let mut payload = sample_supplier_payload();
     payload["suppliedCategories"] = json!([format!("Tag{unique}")]);
     send_authed(&app.router, "POST", "/api/suppliers", Some(payload), &token).await;
 
-    let (status, body) = send(&app.router, "GET", "/api/suppliers/categories", None).await;
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        "/api/suppliers/categories",
+        None,
+        &token,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     let categories = body["data"]["categories"].as_array().unwrap();
     assert!(
@@ -399,7 +437,7 @@ async fn supplier_categories_endpoint_returns_distinct_tags() {
 #[tokio::test]
 async fn upsert_link_creates_then_updates_in_place() {
     let app = common::spawn_app().await;
-    let token = user_token(&app.config);
+    let token = admin_token(&app.config);
     let (_supplier_id, supplier_key, _) = create_supplier(&app.router, &token).await;
     let (_product_id, product_key) = create_product(&app.router, &app.db, 10).await;
 
@@ -435,11 +473,12 @@ async fn upsert_link_creates_then_updates_in_place() {
     assert_eq!(body["data"]["costPriceCents"], 6000);
     assert_eq!(body["data"]["notes"], "Updated");
 
-    let (status, body) = send(
+    let (status, body) = send_authed(
         &app.router,
         "GET",
         &format!("/api/supplier-products?supplierKey={supplier_key}"),
         None,
+        &token,
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -452,16 +491,37 @@ async fn upsert_link_creates_then_updates_in_place() {
 }
 
 #[tokio::test]
+async fn supplier_products_endpoints_require_admin_role() {
+    let app = common::spawn_app().await;
+
+    let (status, body) = send(&app.router, "GET", "/api/supplier-products", None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+
+    let non_admin = common::mint_token(&app.config, Some(Role::Staff), &[]);
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        "/api/supplier-products",
+        None,
+        &non_admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["code"], "ADMIN_REQUIRED");
+}
+
+#[tokio::test]
 async fn list_links_requires_supplier_or_product_key() {
     let app = common::spawn_app().await;
-    let (status, _) = send(&app.router, "GET", "/api/supplier-products", None).await;
+    let token = admin_token(&app.config);
+    let (status, _) = send_authed(&app.router, "GET", "/api/supplier-products", None, &token).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
 async fn unlink_removes_the_link() {
     let app = common::spawn_app().await;
-    let token = user_token(&app.config);
+    let token = admin_token(&app.config);
     let (_supplier_id, supplier_key, _) = create_supplier(&app.router, &token).await;
     let (_product_id, product_key) = create_product(&app.router, &app.db, 10).await;
 
@@ -485,7 +545,7 @@ async fn unlink_removes_the_link() {
 #[tokio::test]
 async fn bulk_replace_preserves_existing_link_metadata() {
     let app = common::spawn_app().await;
-    let token = user_token(&app.config);
+    let token = admin_token(&app.config);
     let (_supplier_id, supplier_key, _) = create_supplier(&app.router, &token).await;
     let (_product_one_id, product_one_key) = create_product(&app.router, &app.db, 10).await;
     let (_product_two_id, product_two_key) = create_product(&app.router, &app.db, 10).await;
@@ -523,11 +583,12 @@ async fn bulk_replace_preserves_existing_link_metadata() {
     assert_eq!(kept["costPriceCents"], 4000);
     assert_eq!(kept["notes"], "Keep me");
 
-    let (status, body) = send(
+    let (status, body) = send_authed(
         &app.router,
         "GET",
         &format!("/api/supplier-products?supplierKey={supplier_key}"),
         None,
+        &token,
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -547,7 +608,7 @@ async fn bulk_replace_preserves_existing_link_metadata() {
 #[tokio::test]
 async fn record_purchase_increments_stock_and_writes_movement() {
     let app = common::spawn_app().await;
-    let token = user_token(&app.config);
+    let token = admin_token(&app.config);
     let (_supplier_id, supplier_key, _) = create_supplier(&app.router, &token).await;
     let (product_id, product_key) = create_product(&app.router, &app.db, 10).await;
 
@@ -600,9 +661,22 @@ async fn record_purchase_increments_stock_and_writes_movement() {
 }
 
 #[tokio::test]
+async fn purchases_endpoints_require_admin_role() {
+    let app = common::spawn_app().await;
+
+    let (status, body) = send(&app.router, "GET", "/api/purchases", None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+
+    let non_admin = common::mint_token(&app.config, Some(Role::Staff), &[]);
+    let (status, body) = send_authed(&app.router, "GET", "/api/purchases", None, &non_admin).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["code"], "ADMIN_REQUIRED");
+}
+
+#[tokio::test]
 async fn record_purchase_requires_auth_and_validates_quantity() {
     let app = common::spawn_app().await;
-    let token = user_token(&app.config);
+    let token = admin_token(&app.config);
     let (_supplier_id, supplier_key, _) = create_supplier(&app.router, &token).await;
     let (_product_id, product_key) = create_product(&app.router, &app.db, 10).await;
 
@@ -627,7 +701,8 @@ async fn record_purchase_requires_auth_and_validates_quantity() {
 #[tokio::test]
 async fn list_purchases_requires_supplier_or_product_key() {
     let app = common::spawn_app().await;
-    let (status, _) = send(&app.router, "GET", "/api/purchases", None).await;
+    let token = admin_token(&app.config);
+    let (status, _) = send_authed(&app.router, "GET", "/api/purchases", None, &token).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
@@ -638,7 +713,7 @@ async fn list_purchases_requires_supplier_or_product_key() {
 #[tokio::test]
 async fn deleting_a_supplier_with_purchase_history_is_blocked() {
     let app = common::spawn_app().await;
-    let token = user_token(&app.config);
+    let token = admin_token(&app.config);
     let (supplier_id, supplier_key, _) = create_supplier(&app.router, &token).await;
     let (_product_id, product_key) = create_product(&app.router, &app.db, 10).await;
 

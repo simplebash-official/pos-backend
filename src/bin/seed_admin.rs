@@ -53,6 +53,18 @@ async fn main() {
         {
             println!("admin account already exists: {email} — no changes made");
         }
+        // This deployment supports only one Admin (see
+        // `users::service::create_user`) — re-running with a *different*
+        // email than the existing admin's hits this instead of the
+        // email-uniqueness case above.
+        Err(AppError::Custom { code, .. })
+            if code == jana2u_pos_backend::core::constants::codes::ADMIN_ALREADY_EXISTS =>
+        {
+            println!(
+                "an admin account already exists under a different email — no changes made \
+                 (this deployment supports only one Admin)"
+            );
+        }
         Err(err) => panic!("failed to seed admin account: {err}"),
     }
 }

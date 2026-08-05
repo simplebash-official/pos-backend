@@ -13,7 +13,7 @@ use mongodb::{
     options::ReturnDocument,
 };
 
-use crate::{core::error::AppResult, modules::users::model::UserDocument};
+use crate::{core::error::AppResult, domain::users::Role, modules::users::model::UserDocument};
 
 fn users(db: &Database) -> Collection<UserDocument> {
     db.collection("users")
@@ -77,4 +77,13 @@ pub(crate) async fn list_users(db: &Database, filter: Document) -> AppResult<Vec
         items.push(document);
     }
     Ok(items)
+}
+
+/// Backs the single-Admin invariant in `service::create_user` — this is a
+/// single-shop POS deployment, so there should never be more than one
+/// Admin account.
+pub(crate) async fn count_users_by_role(db: &Database, role: Role) -> AppResult<u64> {
+    Ok(users(db)
+        .count_documents(doc! { "role": role.as_str() })
+        .await?)
 }

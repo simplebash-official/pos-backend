@@ -52,6 +52,26 @@ impl CurrentUser {
             ))
         }
     }
+
+    /// Same as `require_permission`, but passes if the caller holds *any*
+    /// one of `permissions` — for routes reachable by more than one role
+    /// whose access differs only in scope (e.g. `modules::users`, where
+    /// `users:manage` and `users:manage:staff` both get past the gate, and
+    /// the caller's actual role then determines which accounts they may
+    /// touch).
+    pub fn require_any_permission(&self, permissions: &[&str]) -> AppResult<()> {
+        if permissions
+            .iter()
+            .any(|wanted| self.permissions.iter().any(|mine| mine == wanted))
+        {
+            Ok(())
+        } else {
+            Err(AppError::forbidden_with_code(
+                format!("Missing required permission: one of {permissions:?}"),
+                crate::core::constants::codes::PERMISSION_DENIED,
+            ))
+        }
+    }
 }
 
 impl FromRequestParts<AppState> for CurrentUser {

@@ -1,11 +1,15 @@
 // HTTP layer only: extractors, path/query parsing, and OpenAPI docs
-// (`#[utoipa::path]`). Every write route additionally calls
-// `user.require_permission(permissions::USERS_MANAGE)` as the first line of
-// the handler body — see `core::middleware::auth::CurrentUser` for why this
-// is a method call rather than a dedicated extractor type. Unlike most
-// other modules, there's no placeholder `GET /` status route here — the
-// collection root (`GET /`, nested at `/api/users`) is itself the real
-// "list users" endpoint from day one.
+// (`#[utoipa::path]`). Every route calls
+// `user.require_any_permission(&[USERS_MANAGE, USERS_MANAGE_STAFF])` as the
+// first line of the handler body — see `core::middleware::auth::CurrentUser`
+// for why this is a method call rather than a dedicated extractor type —
+// then passes the caller's role into `service::*`, which enforces the
+// actual Admin/Manager management hierarchy (an Admin manages Manager and
+// Staff accounts, a Manager manages Staff accounts only — see
+// `modules::users::service::manageable_roles`). Unlike most other modules,
+// there's no placeholder `GET /` status route here — the collection root
+// (`GET /`, nested at `/api/users`) is itself the real "list users"
+// endpoint from day one.
 
 use axum::{
     Json,
@@ -19,12 +23,14 @@ use crate::{
     app::AppState,
     core::{
         constants::{modules, permissions},
-        error::AppResult,
+        error::{AppError, AppResult},
         middleware::auth::CurrentUser,
         response::{ApiResponse, ErrorResponse},
         utils::parse_object_id as parse_mongo_id,
     },
-    domain::users::{CreateUserRequest, UpdateUserRequest, User, UserListQuery, UsersResponse},
+    domain::users::{
+        CreateUserRequest, Role, UpdateUserRequest, User, UserListQuery, UsersResponse,
+    },
     modules::users::service,
 };
 
@@ -50,6 +56,17 @@ fn parse_object_id(id: &str) -> AppResult<ObjectId> {
     parse_mongo_id(id, "User")
 }
 
+/// Every handler needs the caller's role to pass into `service::*`'s
+/// hierarchy checks — `require_any_permission` above it already guarantees
+/// `role` is `Some` in practice (only `Role::Admin`/`Role::Manager` are ever
+/// granted `USERS_MANAGE`/`USERS_MANAGE_STAFF`), but the claim is still
+/// typed `Option<Role>`, so this turns a missing role into a 403 rather
+/// than a panic.
+fn require_caller_role(user: &CurrentUser) -> AppResult<Role> {
+    user.role
+        .ok_or_else(|| AppError::forbidden("Token is missing a role claim"))
+}
+
 // ============================================================================
 // Users
 // ============================================================================
@@ -57,9 +74,9 @@ fn parse_object_id(id: &str) -> AppResult<ObjectId> {
 #[utoipa::path(get, path = "/", tag = modules::USERS, params(UserListQuery),
     security(("bearerAuth" = [])),
     responses(
-        (status = 200, description = "List users", body = ApiResponse<UsersResponse>),
+        (status = 200, description = "List users — scoped to the roles the caller may manage (Admin: Manager+Staff; Manager: Staff only)", body = ApiResponse<UsersResponse>),
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
-        (status = 403, description = "Missing users:manage permission", body = ErrorResponse),
+        (status = 403, description = "Missing users:manage / users:manage:staff permission", body = ErrorResponse),
     )
 )]
 async fn list_users(
@@ -67,8 +84,9 @@ async fn list_users(
     State(state): State<AppState>,
     Query(query): Query<UserListQuery>,
 ) -> AppResult<Json<ApiResponse<UsersResponse>>> {
-    user.require_permission(permissions::USERS_MANAGE)?;
-    let response = service::list_users(&state.db, query).await?;
+    user.require_any_permission(&[permissions::USERS_MANAGE, permissions::USERS_MANAGE_STAFF])?;
+    let caller_role = require_caller_role(&user)?;
+    let response = service::list_users(&state.db, query, caller_role).await?;
 
     Ok(Json(ApiResponse::success(
         response,
@@ -82,7 +100,8 @@ async fn list_users(
         (status = 201, description = "User created", body = ApiResponse<User>),
         (status = 400, description = "Validation error", body = ErrorResponse),
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
-        (status = 403, description = "Missing users:manage permission", body = ErrorResponse),
+        (status = 403, description = "Missing permission, or the target role is outside what the caller may create (e.g. a Manager creating a Manager/Admin)", body = ErrorResponse),
+        (status = 409, description = "Email already exists, or (creating an Admin) an Admin account already exists", body = ErrorResponse),
     )
 )]
 async fn create_user(
@@ -90,8 +109,9 @@ async fn create_user(
     State(state): State<AppState>,
     Json(body): Json<CreateUserRequest>,
 ) -> AppResult<(StatusCode, Json<ApiResponse<User>>)> {
-    user.require_permission(permissions::USERS_MANAGE)?;
-    let created = service::create_user(&state.db, body).await?;
+    user.require_any_permission(&[permissions::USERS_MANAGE, permissions::USERS_MANAGE_STAFF])?;
+    let caller_role = require_caller_role(&user)?;
+    let created = service::create_user_for_caller(&state.db, body, caller_role).await?;
 
     Ok((
         StatusCode::CREATED,
@@ -105,8 +125,8 @@ async fn create_user(
     responses(
         (status = 200, description = "Get a user", body = ApiResponse<User>),
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
-        (status = 403, description = "Missing users:manage permission", body = ErrorResponse),
-        (status = 404, description = "User not found", body = ErrorResponse),
+        (status = 403, description = "Missing users:manage / users:manage:staff permission", body = ErrorResponse),
+        (status = 404, description = "User not found, or outside what the caller may manage", body = ErrorResponse),
     )
 )]
 async fn get_user(
@@ -114,9 +134,10 @@ async fn get_user(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> AppResult<Json<ApiResponse<User>>> {
-    user.require_permission(permissions::USERS_MANAGE)?;
+    user.require_any_permission(&[permissions::USERS_MANAGE, permissions::USERS_MANAGE_STAFF])?;
+    let caller_role = require_caller_role(&user)?;
     let object_id = parse_object_id(&id)?;
-    let found = service::get_user(&state.db, object_id).await?;
+    let found = service::get_user_for_caller(&state.db, object_id, caller_role).await?;
 
     Ok(Json(ApiResponse::success(
         found,
@@ -132,8 +153,9 @@ async fn get_user(
         (status = 200, description = "User updated", body = ApiResponse<User>),
         (status = 400, description = "Validation error", body = ErrorResponse),
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
-        (status = 403, description = "Missing users:manage permission", body = ErrorResponse),
-        (status = 404, description = "User not found", body = ErrorResponse),
+        (status = 403, description = "Missing permission, or the requested role change is outside what the caller may set", body = ErrorResponse),
+        (status = 404, description = "User not found, or outside what the caller may manage", body = ErrorResponse),
+        (status = 409, description = "Email already exists", body = ErrorResponse),
     )
 )]
 async fn update_user(
@@ -142,9 +164,10 @@ async fn update_user(
     Path(id): Path<String>,
     Json(body): Json<UpdateUserRequest>,
 ) -> AppResult<Json<ApiResponse<User>>> {
-    user.require_permission(permissions::USERS_MANAGE)?;
+    user.require_any_permission(&[permissions::USERS_MANAGE, permissions::USERS_MANAGE_STAFF])?;
+    let caller_role = require_caller_role(&user)?;
     let object_id = parse_object_id(&id)?;
-    let updated = service::update_user(&state.db, object_id, body).await?;
+    let updated = service::update_user(&state.db, object_id, body, caller_role).await?;
 
     Ok(Json(ApiResponse::success(
         updated,
@@ -157,10 +180,9 @@ async fn update_user(
     security(("bearerAuth" = [])),
     responses(
         (status = 200, description = "User deleted", body = ApiResponse<User>),
-        (status = 400, description = "Cannot delete your own account", body = ErrorResponse),
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
-        (status = 403, description = "Missing users:manage permission", body = ErrorResponse),
-        (status = 404, description = "User not found", body = ErrorResponse),
+        (status = 403, description = "Missing users:manage / users:manage:staff permission", body = ErrorResponse),
+        (status = 404, description = "User not found, or outside what the caller may manage", body = ErrorResponse),
     )
 )]
 async fn delete_user(
@@ -168,9 +190,10 @@ async fn delete_user(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> AppResult<Json<ApiResponse<User>>> {
-    user.require_permission(permissions::USERS_MANAGE)?;
+    user.require_any_permission(&[permissions::USERS_MANAGE, permissions::USERS_MANAGE_STAFF])?;
+    let caller_role = require_caller_role(&user)?;
     let object_id = parse_object_id(&id)?;
-    let deleted = service::delete_user(&state.db, object_id, &user.user_id).await?;
+    let deleted = service::delete_user(&state.db, object_id, caller_role).await?;
 
     Ok(Json(ApiResponse::success(
         deleted,

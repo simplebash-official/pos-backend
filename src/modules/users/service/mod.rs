@@ -1,5 +1,6 @@
 // Business rules for user account CRUD/role management: password
-// hashing/verification, email uniqueness, and login-credential checking.
+// hashing/verification, email uniqueness, login-credential checking, and
+// the Admin/Manager management hierarchy (see `manageable_roles` below).
 // Delegates all Mongo access to `super::repository`.
 
 use argon2::{
@@ -18,9 +19,44 @@ use crate::{
         error::{AppError, AppResult},
         id::generate_id,
     },
-    domain::users::{CreateUserRequest, UpdateUserRequest, User, UserListQuery, UsersResponse},
+    domain::users::{
+        CreateUserRequest, Role, UpdateUserRequest, User, UserListQuery, UsersResponse,
+    },
     modules::users::{model::UserDocument, repository},
 };
+
+/// The roles a caller of `caller_role` may create/view/edit/delete through
+/// this module's endpoints: Admin manages Manager and Staff; Manager
+/// manages Staff only. An Admin account is never manageable through this
+/// API by anyone — not even by another Admin — since this is a
+/// single-shop POS deployment that only ever has one Admin, bootstrapped
+/// once via `src/bin/seed_admin.rs` (see `create_user`'s single-Admin
+/// guard below). Staff never reaches these functions at all (no
+/// `users:manage`/`users:manage:staff` permission to get past the route
+/// gate in the first place).
+fn manageable_roles(caller_role: Role) -> &'static [Role] {
+    match caller_role {
+        Role::Admin => &[Role::Manager, Role::Staff],
+        Role::Manager => &[Role::Staff],
+        Role::Staff => &[],
+    }
+}
+
+/// 404s (rather than 403s) when `target_role` is outside what `caller_role`
+/// may manage — the target simply doesn't exist from this caller's point of
+/// view, so its existence isn't confirmed/denied any differently than a
+/// truly-missing id would be (e.g. a Manager gets the same response
+/// whether a given id belongs to another Manager or to no one at all).
+fn ensure_manageable(caller_role: Role, target_role: Role) -> AppResult<()> {
+    if manageable_roles(caller_role).contains(&target_role) {
+        Ok(())
+    } else {
+        Err(AppError::not_found_with_code(
+            "User not found",
+            codes::USER_NOT_FOUND,
+        ))
+    }
+}
 
 /// A deliberately lightweight structural check (single `@`, non-empty local
 /// part, dotted domain) rather than a full RFC 5322 validator — matches the
@@ -74,8 +110,18 @@ fn verify_password(password: &str, hash: &str) -> AppResult<bool> {
 /// Builds the Mongo filter from query params (free-text search across
 /// name/email, plus an exact-role filter) — same construction style as
 /// `suppliers::service::list_suppliers`. Not paginated: a shop's staff
-/// roster is small enough to return in full.
-pub(crate) async fn list_users(db: &Database, query: UserListQuery) -> AppResult<UsersResponse> {
+/// roster is small enough to return in full. Always scoped to
+/// `manageable_roles(caller_role)` regardless of what `query.role` asks
+/// for — a Manager's list is always Staff-only, and an Admin's list never
+/// includes the (one) Admin account, matching `get`/`update`/`delete`'s
+/// same restriction. Asking for a role outside that scope (e.g. a Manager
+/// filtering `role=admin`) returns an empty list rather than an error, the
+/// same "just don't show it" spirit as `ensure_manageable`'s 404.
+pub(crate) async fn list_users(
+    db: &Database,
+    query: UserListQuery,
+    caller_role: Role,
+) -> AppResult<UsersResponse> {
     let mut and_clauses: Vec<Document> = Vec::new();
 
     if let Some(search) = query.search.filter(|s| !s.is_empty()) {
@@ -87,15 +133,20 @@ pub(crate) async fn list_users(db: &Database, query: UserListQuery) -> AppResult
             ]
         });
     }
-    if let Some(role) = query.role {
-        and_clauses.push(doc! { "role": role.as_str() });
+
+    let allowed = manageable_roles(caller_role);
+    match query.role {
+        Some(role) if allowed.contains(&role) => {
+            and_clauses.push(doc! { "role": role.as_str() });
+        }
+        Some(_) => and_clauses.push(doc! { "role": { "$in": Vec::<String>::new() } }),
+        None => {
+            let allowed_strs: Vec<&str> = allowed.iter().map(Role::as_str).collect();
+            and_clauses.push(doc! { "role": { "$in": allowed_strs } });
+        }
     }
 
-    let filter = if and_clauses.is_empty() {
-        Document::new()
-    } else {
-        doc! { "$and": and_clauses }
-    };
+    let filter = doc! { "$and": and_clauses };
 
     let documents = repository::list_users(db, filter).await?;
     let users = documents.into_iter().map(UserDocument::into_user).collect();
@@ -103,6 +154,12 @@ pub(crate) async fn list_users(db: &Database, query: UserListQuery) -> AppResult
     Ok(UsersResponse { users })
 }
 
+/// Unrestricted lookup by id — used cross-module by `auth::service::me`
+/// (a caller looking up *themselves*, regardless of role) and
+/// `auth::service::list_sessions` (resolving a `userId` filter for the
+/// audit log, a separate concern from user-management scope). The
+/// `users` module's own routes must never call this directly — see
+/// `get_user_for_caller` for the scoped equivalent they use instead.
 pub(crate) async fn get_user(db: &Database, id: ObjectId) -> AppResult<User> {
     let document = repository::find_user_by_id(db, id)
         .await?
@@ -111,16 +168,44 @@ pub(crate) async fn get_user(db: &Database, id: ObjectId) -> AppResult<User> {
     Ok(document.into_user())
 }
 
-/// Admin-provisioned account creation — there is no public self-registration
-/// endpoint. `pub`, not `pub(crate)`, so `src/bin/seed_admin.rs` (a separate
-/// binary crate) can create the bootstrap Admin through this exact
-/// validation/hashing path instead of duplicating Argon2 logic there.
+/// Scoped lookup for `GET /users/{id}` — 404s if `id` resolves to an
+/// account outside `manageable_roles(caller_role)` (see `ensure_manageable`).
+pub(crate) async fn get_user_for_caller(
+    db: &Database,
+    id: ObjectId,
+    caller_role: Role,
+) -> AppResult<User> {
+    let document = repository::find_user_by_id(db, id)
+        .await?
+        .ok_or_else(|| AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND))?;
+    ensure_manageable(caller_role, document.role)?;
+
+    Ok(document.into_user())
+}
+
+/// Unrestricted account creation. `pub`, not `pub(crate)`, so
+/// `src/bin/seed_admin.rs` (a separate binary crate) can create the
+/// bootstrap Admin through this exact validation/hashing path instead of
+/// duplicating Argon2 logic there — this is also the *only* path an Admin
+/// account can ever be created through, since `create_user_for_caller`
+/// (what the HTTP route actually calls) never allows `role: Admin` for any
+/// caller (see `manageable_roles`). Enforces the single-Admin invariant
+/// this deployment assumes: creating a second Admin is rejected outright,
+/// including on a `seed_admin` re-run with a different email.
 pub async fn create_user(db: &Database, body: CreateUserRequest) -> AppResult<User> {
     if body.name.trim().is_empty() {
         return Err(AppError::validation("Name is required"));
     }
     validate_email(&body.email)?;
     validate_password_strength(&body.password)?;
+
+    if body.role == Role::Admin && repository::count_users_by_role(db, Role::Admin).await? > 0 {
+        return Err(AppError::custom(
+            StatusCode::CONFLICT,
+            codes::ADMIN_ALREADY_EXISTS,
+            "An Admin account already exists; this deployment supports only one Admin",
+        ));
+    }
 
     let email = normalize_email(&body.email);
     if repository::find_user_by_email(db, &email).await?.is_some() {
@@ -149,21 +234,57 @@ pub async fn create_user(db: &Database, body: CreateUserRequest) -> AppResult<Us
     Ok(inserted.into_user())
 }
 
+/// Scoped creation for `POST /users` — 403s (not 404, since there's no
+/// existing resource to hide) if `body.role` is outside
+/// `manageable_roles(caller_role)`, e.g. a Manager trying to create another
+/// Manager, or anyone trying to create an Admin.
+pub(crate) async fn create_user_for_caller(
+    db: &Database,
+    body: CreateUserRequest,
+    caller_role: Role,
+) -> AppResult<User> {
+    if !manageable_roles(caller_role).contains(&body.role) {
+        return Err(AppError::forbidden_with_code(
+            format!(
+                "You are not allowed to create a {} account",
+                body.role.as_str()
+            ),
+            codes::PERMISSION_DENIED,
+        ));
+    }
+    create_user(db, body).await
+}
+
 /// Partial update for `PATCH /users/{id}` — every field in `body` is
 /// optional; required fields (name/email) fall back to the existing
 /// document's value before re-validation. `password` present means rehash
 /// to the new value; absent leaves the stored hash untouched. Email
 /// uniqueness is only re-checked when the email actually changed, so
 /// re-saving a user's existing email never trips the uniqueness guard
-/// against itself.
+/// against itself. `caller_role` gates two things: the *existing* account
+/// must be in `manageable_roles(caller_role)` (404 otherwise), and if
+/// `body.role` requests a role change, the *new* role must be too (403
+/// otherwise) — so a Manager can never promote a Staff account to Manager,
+/// and no one can ever promote anything to Admin through this endpoint.
 pub(crate) async fn update_user(
     db: &Database,
     id: ObjectId,
     body: UpdateUserRequest,
+    caller_role: Role,
 ) -> AppResult<User> {
     let existing = repository::find_user_by_id(db, id)
         .await?
         .ok_or_else(|| AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND))?;
+    ensure_manageable(caller_role, existing.role)?;
+
+    if let Some(new_role) = body.role
+        && !manageable_roles(caller_role).contains(&new_role)
+    {
+        return Err(AppError::forbidden_with_code(
+            format!("You are not allowed to set role to {}", new_role.as_str()),
+            codes::PERMISSION_DENIED,
+        ));
+    }
 
     let name = body.name.unwrap_or(existing.name);
     if name.trim().is_empty() {
@@ -213,28 +334,17 @@ pub(crate) async fn update_user(
     Ok(updated.into_user())
 }
 
-/// Refuses to delete a caller's own account (400 `CANNOT_DELETE_SELF`) —
-/// the common accidental-lockout guard. Does not guard against deleting the
-/// last remaining Admin: that check is inherently racy under concurrent
-/// requests and out of scope here.
-pub(crate) async fn delete_user(
-    db: &Database,
-    id: ObjectId,
-    caller_user_id: &str,
-) -> AppResult<User> {
+/// 404s if `id` resolves to an account outside `manageable_roles(caller_role)`
+/// (see `ensure_manageable`) — note this also means a caller can never
+/// delete their *own* account through this endpoint, since no role is ever
+/// in its own `manageable_roles` set (Admin doesn't manage Admin, Manager
+/// doesn't manage Manager); a dedicated self-delete guard is therefore
+/// unnecessary and was removed rather than kept as unreachable code.
+pub(crate) async fn delete_user(db: &Database, id: ObjectId, caller_role: Role) -> AppResult<User> {
     let existing = repository::find_user_by_id(db, id)
         .await?
         .ok_or_else(|| AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND))?;
-
-    if existing
-        .id
-        .is_some_and(|existing_id| existing_id.to_hex() == caller_user_id)
-    {
-        return Err(AppError::validation_with_code(
-            "You cannot delete your own account",
-            codes::CANNOT_DELETE_SELF,
-        ));
-    }
+    ensure_manageable(caller_role, existing.role)?;
 
     let deleted = repository::delete_user(db, id)
         .await?

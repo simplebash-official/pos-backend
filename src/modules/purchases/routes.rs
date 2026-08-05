@@ -5,7 +5,8 @@
 // beyond that pattern; the business logic they call into lives in
 // `service/` and is commented there. No placeholder status route here for
 // the same reason as `suppliers`/`supplier_products`: the collection root
-// is a real endpoint.
+// is a real endpoint. Every route — reads included — requires `AdminUser`,
+// matching `suppliers`/`supplier_products`.
 
 use axum::{
     Json,
@@ -19,7 +20,7 @@ use crate::{
     core::{
         constants::modules,
         error::AppResult,
-        middleware::auth::CurrentUser,
+        middleware::auth::AdminUser,
         response::{ApiResponse, ErrorResponse},
     },
     domain::purchases::{CreatePurchaseRequest, Purchase, PurchaseListQuery, PurchasesResponse},
@@ -39,12 +40,16 @@ pub fn router() -> OpenApiRouter<AppState> {
 // ============================================================================
 
 #[utoipa::path(get, path = "/", tag = modules::PURCHASES, params(PurchaseListQuery),
+    security(("bearerAuth" = [])),
     responses(
         (status = 200, description = "Purchase history for a supplier and/or product, newest first", body = ApiResponse<PurchasesResponse>),
         (status = 400, description = "Neither supplierKey nor productKey provided", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Admin access required", body = ErrorResponse),
     )
 )]
 async fn list_purchases(
+    _admin: AdminUser,
     State(state): State<AppState>,
     Query(query): Query<PurchaseListQuery>,
 ) -> AppResult<Json<ApiResponse<PurchasesResponse>>> {
@@ -62,11 +67,12 @@ async fn list_purchases(
         (status = 201, description = "Stock received and recorded", body = ApiResponse<Purchase>),
         (status = 400, description = "Validation error", body = ErrorResponse),
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Admin access required", body = ErrorResponse),
         (status = 404, description = "Supplier or product not found", body = ErrorResponse),
     )
 )]
 async fn record_purchase(
-    _user: CurrentUser,
+    _admin: AdminUser,
     State(state): State<AppState>,
     Json(body): Json<CreatePurchaseRequest>,
 ) -> AppResult<(StatusCode, Json<ApiResponse<Purchase>>)> {

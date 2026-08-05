@@ -13,8 +13,6 @@ const ADMIN_PERMISSIONS: &[&str] = &[
     perm::INVENTORY_READ,
     perm::INVENTORY_WRITE,
     perm::INVENTORY_ADMIN,
-    perm::SUPPLIERS_WRITE,
-    perm::PURCHASES_WRITE,
     perm::BILLING_WRITE,
     perm::REPAIRS_WRITE,
     perm::PRINT_JOBS_WRITE,
@@ -22,15 +20,16 @@ const ADMIN_PERMISSIONS: &[&str] = &[
     perm::CUSTOMERS_WRITE,
 ];
 
-// Everything an Admin has except account/role management — a Manager runs
-// day-to-day shop operations but doesn't provision staff accounts.
+// Everything an Admin has except full account management — a Manager runs
+// day-to-day shop operations and may provision Staff accounts specifically
+// (`USERS_MANAGE_STAFF`), but not Manager or Admin accounts (see
+// `modules::users::service`'s `manageable_roles`).
 const MANAGER_PERMISSIONS: &[&str] = &[
+    perm::USERS_MANAGE_STAFF,
     perm::SESSIONS_VIEW,
     perm::INVENTORY_READ,
     perm::INVENTORY_WRITE,
     perm::INVENTORY_ADMIN,
-    perm::SUPPLIERS_WRITE,
-    perm::PURCHASES_WRITE,
     perm::BILLING_WRITE,
     perm::REPAIRS_WRITE,
     perm::PRINT_JOBS_WRITE,
