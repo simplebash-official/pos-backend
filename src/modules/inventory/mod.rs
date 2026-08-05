@@ -6,4 +6,4 @@
 pub mod model;
 mod repository;
 pub mod routes;
-mod service;
+pub mod service;

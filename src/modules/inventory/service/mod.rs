@@ -3,7 +3,7 @@
 // into the right `AppError`. Calls into `super::repository` for all Mongo
 // access and returns domain types (never BSON/`ObjectId`) to `routes`.
 
-pub(crate) mod category;
-pub(crate) mod product;
-pub(crate) mod sku;
-pub(crate) mod stock;
+pub mod category;
+pub mod product;
+pub mod sku;
+pub mod stock;

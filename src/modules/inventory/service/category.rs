@@ -32,7 +32,7 @@ use crate::{
 /// `repository::category::list_categories`). Fetches every subcategory in
 /// one extra query and groups by `category_key` in memory, rather than one
 /// subcategory query per category.
-pub(crate) async fn list_categories(db: &Database) -> AppResult<CategoriesResponse> {
+pub async fn list_categories(db: &Database) -> AppResult<CategoriesResponse> {
     let category_documents = repository::category::list_categories(db).await?;
     let subcategory_documents = repository::subcategory::list_all_subcategories(db).await?;
 
@@ -58,7 +58,7 @@ pub(crate) async fn list_categories(db: &Database) -> AppResult<CategoriesRespon
 /// Validates required fields and name uniqueness, inserts the category, then
 /// inserts one `SubcategoryDocument` per name in `body.subcategories` so a
 /// category can be bootstrapped with its starter subcategories in one call.
-pub(crate) async fn create_category(
+pub async fn create_category(
     db: &Database,
     body: CreateCategoryRequest,
 ) -> AppResult<CategoryInfo> {
@@ -275,7 +275,7 @@ pub(crate) async fn get_category_subcategories(
 
 /// Adds a subcategory under a category, rejecting duplicate names within
 /// that same category (409 `SUBCATEGORY_ALREADY_EXISTS`).
-pub(crate) async fn add_subcategory(
+pub async fn add_subcategory(
     db: &Database,
     category_key: String,
     name: String,

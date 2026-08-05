@@ -124,7 +124,7 @@ async fn resolve_display_names(
 /// Then batch-resolves every distinct `category_key`/`subcategory_key`
 /// across the returned page in two extra queries (rather than one lookup
 /// per product) to build the response's display names.
-pub(crate) async fn list_products(
+pub async fn list_products(
     db: &Database,
     query: ProductListQuery,
 ) -> AppResult<ProductListResponse> {
@@ -242,7 +242,7 @@ pub(crate) async fn get_product(db: &Database, id: ObjectId) -> AppResult<Produc
 /// membership, then generates the product's SKU from its category/
 /// subcategory names (see `service::sku::generate_sku`) — validation runs
 /// first so an invalid category never consumes a sequence number.
-pub(crate) async fn create_product(
+pub async fn create_product(
     db: &Database,
     body: CreateProductRequest,
 ) -> AppResult<Product> {
