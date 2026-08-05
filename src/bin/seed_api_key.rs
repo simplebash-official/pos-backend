@@ -25,11 +25,13 @@ async fn main() {
         .collect();
     let model_key = generate_id(prefixes::API_KEY);
 
+    let now_iso = Utc::now().to_rfc3339();
     db.collection::<mongodb::bson::Document>("api_keys")
         .insert_one(doc! {
             "key": &model_key,
             "secret": &secret_key,
-            "created_at": Utc::now().to_rfc3339(),
+            "created_at": &now_iso,
+            "updated_at": &now_iso,
         })
         .await
         .expect("failed to insert api key");

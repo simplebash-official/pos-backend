@@ -28,6 +28,7 @@ pub struct Product {
     pub selling_price_cents: i64,
     pub stock_quantity: i64,
     pub min_stock_threshold: i64,
+    pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -201,6 +202,7 @@ pub struct StockMovement {
     pub reference_id: Option<String>,
     pub note: Option<String>,
     pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 /// Response for `GET /products/{id}/movements`.
@@ -221,6 +223,8 @@ pub struct CategoryInfo {
     pub icon: String,
     pub color: String,
     pub subcategories: Vec<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 /// Response for `GET /categories`.

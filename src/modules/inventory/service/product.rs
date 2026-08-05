@@ -35,6 +35,8 @@ fn sort_field_for(sort_by: Option<&str>) -> &'static str {
         Some("sellingPriceCents") => "selling_price_cents",
         Some("stockQuantity") => "stock_quantity",
         Some("minStockThreshold") => "min_stock_threshold",
+        Some("createdAt") => "created_at",
+        Some("updatedAt") => "updated_at",
         _ => "updated_at",
     }
 }
@@ -196,6 +198,7 @@ pub(crate) async fn create_product(
         ));
     }
 
+    let now = BsonDateTime::now();
     let document = ProductDocument {
         id: None,
         key: generate_id(prefixes::PRODUCT),
@@ -208,7 +211,8 @@ pub(crate) async fn create_product(
         selling_price_cents: body.selling_price_cents,
         stock_quantity: body.stock_quantity,
         min_stock_threshold: body.min_stock_threshold,
-        updated_at: BsonDateTime::now(),
+        created_at: now,
+        updated_at: now,
     };
 
     let inserted = repository::product::insert_product(db, document).await?;

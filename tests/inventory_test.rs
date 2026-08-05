@@ -92,6 +92,8 @@ fn admin_token(config: &Config) -> String {
     token_with_role(config, Some("admin"))
 }
 
+use mongodb::bson::DateTime as BsonDateTime;
+
 /// Inserts a category directly into the test database rather than through
 /// the admin API, so tests that don't care about category management
 /// itself (e.g. product CRUD) don't need an admin token just to set up
@@ -99,6 +101,7 @@ fn admin_token(config: &Config) -> String {
 /// each other or with real seeded data.
 async fn seed_category(db: &mongodb::Database, subcategories: &[&str]) -> String {
     let name = format!("Test Category {}", Uuid::new_v4());
+    let now = BsonDateTime::now();
     db.collection::<CategoryDocument>("categories")
         .insert_one(CategoryDocument {
             id: None,
@@ -107,6 +110,8 @@ async fn seed_category(db: &mongodb::Database, subcategories: &[&str]) -> String
             icon: "Box".to_string(),
             color: "gray".to_string(),
             subcategories: subcategories.iter().map(|s| s.to_string()).collect(),
+            created_at: now,
+            updated_at: now,
         })
         .await
         .expect("failed to seed category");

@@ -68,6 +68,7 @@ pub(crate) async fn adjust_stock(
             reference_id: None,
             note: body.reason,
             created_at: now,
+            updated_at: now,
         },
     )
     .await?;

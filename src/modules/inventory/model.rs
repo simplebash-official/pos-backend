@@ -26,6 +26,8 @@ pub struct ProductDocument {
     pub selling_price_cents: i64,
     pub stock_quantity: i64,
     pub min_stock_threshold: i64,
+    #[serde(default = "BsonDateTime::now")]
+    pub created_at: BsonDateTime,
     pub updated_at: BsonDateTime,
 }
 
@@ -51,6 +53,7 @@ impl ProductDocument {
             selling_price_cents: self.selling_price_cents,
             stock_quantity: self.stock_quantity,
             min_stock_threshold: self.min_stock_threshold,
+            created_at: self.created_at.to_chrono(),
             updated_at: self.updated_at.to_chrono(),
         }
     }
@@ -70,6 +73,8 @@ pub struct StockMovementDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
     pub created_at: BsonDateTime,
+    #[serde(default = "BsonDateTime::now")]
+    pub updated_at: BsonDateTime,
 }
 
 impl StockMovementDocument {
@@ -91,6 +96,7 @@ impl StockMovementDocument {
             reference_id: self.reference_id,
             note: self.note,
             created_at: self.created_at.to_chrono(),
+            updated_at: self.updated_at.to_chrono(),
         }
     }
 }
@@ -109,6 +115,10 @@ pub struct CategoryDocument {
     pub icon: String,
     pub color: String,
     pub subcategories: Vec<String>,
+    #[serde(default = "BsonDateTime::now")]
+    pub created_at: BsonDateTime,
+    #[serde(default = "BsonDateTime::now")]
+    pub updated_at: BsonDateTime,
 }
 
 impl CategoryDocument {
@@ -124,6 +134,8 @@ impl CategoryDocument {
             icon: self.icon,
             color: self.color,
             subcategories: self.subcategories,
+            created_at: self.created_at.to_chrono(),
+            updated_at: self.updated_at.to_chrono(),
         }
     }
 }

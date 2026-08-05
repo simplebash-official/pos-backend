@@ -3,7 +3,7 @@ use jana2u_pos_backend::{
     core::{config::Config, constants::prefixes, id::generate_id},
     modules::inventory::model::CategoryDocument,
 };
-use mongodb::bson::doc;
+use mongodb::bson::{DateTime as BsonDateTime, doc};
 
 /// Seeds the `categories` collection with the inventory module's default
 /// category/subcategory reference data. Upserts by name, so it's safe to
@@ -55,6 +55,7 @@ async fn main() {
             None => key,
         };
 
+        let now = BsonDateTime::now();
         collection
             .update_one(
                 doc! { "name": &name },
@@ -63,7 +64,11 @@ async fn main() {
                         "key": key_to_set,
                         "icon": icon,
                         "color": color,
-                        "subcategories": subcategories
+                        "subcategories": subcategories,
+                        "updated_at": now
+                    },
+                    "$setOnInsert": {
+                        "created_at": now
                     }
                 },
             )
@@ -79,6 +84,7 @@ async fn main() {
 /// than read from a config file since it changes rarely and only via a
 /// deliberate code change + re-run of this binary.
 fn default_categories() -> Vec<CategoryDocument> {
+    let now = BsonDateTime::now();
     vec![
         CategoryDocument {
             id: None,
@@ -93,6 +99,8 @@ fn default_categories() -> Vec<CategoryDocument> {
                 "Charging Ports".to_string(),
                 "Other internal repair parts".to_string(),
             ],
+            created_at: now,
+            updated_at: now,
         },
         CategoryDocument {
             id: None,
@@ -106,6 +114,8 @@ fn default_categories() -> Vec<CategoryDocument> {
                 "Sheets (for custom transfers)".to_string(),
                 "Sublimation Ink".to_string(),
             ],
+            created_at: now,
+            updated_at: now,
         },
         CategoryDocument {
             id: None,
@@ -117,6 +127,8 @@ fn default_categories() -> Vec<CategoryDocument> {
                 "Paper (documents, photocopies, handbills, and flyers)".to_string(),
                 "Printer Ink".to_string(),
             ],
+            created_at: now,
+            updated_at: now,
         },
     ]
 }

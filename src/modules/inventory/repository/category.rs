@@ -4,7 +4,11 @@
 // is no separate hardcoded category list anywhere else in the codebase.
 
 use futures_util::TryStreamExt;
-use mongodb::{Collection, Database, bson::Document, bson::doc, options::ReturnDocument};
+use mongodb::{
+    Collection, Database,
+    bson::{DateTime as BsonDateTime, Document, doc},
+    options::ReturnDocument,
+};
 
 use crate::{core::error::AppResult, modules::inventory::model::CategoryDocument};
 
@@ -71,7 +75,10 @@ pub(crate) async fn add_subcategory(
     Ok(categories(db)
         .find_one_and_update(
             doc! { "name": category },
-            doc! { "$push": { "subcategories": subcategory } },
+            doc! {
+                "$push": { "subcategories": subcategory },
+                "$set": { "updated_at": BsonDateTime::now() }
+            },
         )
         .return_document(ReturnDocument::After)
         .await?)
@@ -85,7 +92,10 @@ pub(crate) async fn remove_subcategory(
     Ok(categories(db)
         .find_one_and_update(
             doc! { "name": category },
-            doc! { "$pull": { "subcategories": subcategory } },
+            doc! {
+                "$pull": { "subcategories": subcategory },
+                "$set": { "updated_at": BsonDateTime::now() }
+            },
         )
         .return_document(ReturnDocument::After)
         .await?)

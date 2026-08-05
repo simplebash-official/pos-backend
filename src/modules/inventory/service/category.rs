@@ -6,7 +6,10 @@
 use std::collections::HashMap;
 
 use axum::http::StatusCode;
-use mongodb::{Database, bson::doc};
+use mongodb::{
+    Database,
+    bson::{DateTime as BsonDateTime, doc},
+};
 
 use crate::{
     core::{
@@ -59,6 +62,7 @@ pub(crate) async fn create_category(
         ));
     }
 
+    let now = BsonDateTime::now();
     let document = CategoryDocument {
         id: None,
         key: generate_id(prefixes::CATEGORY),
@@ -66,6 +70,8 @@ pub(crate) async fn create_category(
         icon: body.icon,
         color: body.color,
         subcategories: body.subcategories,
+        created_at: now,
+        updated_at: now,
     };
     repository::category::insert_category(db, &document).await?;
 
@@ -123,7 +129,7 @@ pub(crate) async fn update_category(
     let updated = repository::category::update_category_fields(
         db,
         &category,
-        doc! { "name": &new_name, "icon": icon, "color": color },
+        doc! { "name": &new_name, "icon": icon, "color": color, "updated_at": BsonDateTime::now() },
     )
     .await?
     .ok_or_else(|| {
