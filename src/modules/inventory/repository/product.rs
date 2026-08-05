@@ -152,10 +152,13 @@ pub(crate) async fn adjust_product_stock(
 
 /// Backs the "category still in use" 409 guard on category delete
 /// (`service::category::delete_category`) — a category can't be removed
-/// while products still reference it by name.
-pub(crate) async fn count_products_in_category(db: &Database, category: &str) -> AppResult<u64> {
+/// while products still reference it by `category_key`.
+pub(crate) async fn count_products_in_category(
+    db: &Database,
+    category_key: &str,
+) -> AppResult<u64> {
     Ok(products(db)
-        .count_documents(doc! { "category": category })
+        .count_documents(doc! { "category_key": category_key })
         .await?)
 }
 
@@ -163,28 +166,9 @@ pub(crate) async fn count_products_in_category(db: &Database, category: &str) ->
 /// subcategory — used before removing a subcategory from a category.
 pub(crate) async fn count_products_in_subcategory(
     db: &Database,
-    category: &str,
-    subcategory: &str,
+    subcategory_key: &str,
 ) -> AppResult<u64> {
     Ok(products(db)
-        .count_documents(doc! { "category": category, "subcategory": subcategory })
+        .count_documents(doc! { "subcategory_key": subcategory_key })
         .await?)
-}
-
-/// Cascades a category rename onto every product that referenced the old
-/// name. Products store `category` as a plain name (not a foreign key), so
-/// without this, a rename would silently orphan every product that used
-/// to point at the old name — see `service::category::update_category`.
-pub(crate) async fn rename_products_category(
-    db: &Database,
-    old_name: &str,
-    new_name: &str,
-) -> AppResult<u64> {
-    Ok(products(db)
-        .update_many(
-            doc! { "category": old_name },
-            doc! { "$set": { "category": new_name } },
-        )
-        .await?
-        .modified_count)
 }

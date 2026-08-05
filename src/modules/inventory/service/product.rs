@@ -1,6 +1,9 @@
 // Business rules for product CRUD/listing: price/stock invariants, SKU
-// uniqueness, and category/subcategory validation against the `categories`
-// collection. Delegates all Mongo access to `repository::product`.
+// uniqueness, and category/subcategory validation against the
+// `categories`/`subcategories` collections. Delegates all Mongo access to
+// `repository::product`/`repository::category`/`repository::subcategory`.
+
+use std::collections::HashMap;
 
 use axum::http::StatusCode;
 use mongodb::{
@@ -29,8 +32,8 @@ fn sort_field_for(sort_by: Option<&str>) -> &'static str {
     match sort_by {
         Some("name") => "name",
         Some("sku") => "sku",
-        Some("category") => "category",
-        Some("subcategory") => "subcategory",
+        Some("category") => "category_key",
+        Some("subcategory") => "subcategory_key",
         Some("costPriceCents") => "cost_price_cents",
         Some("sellingPriceCents") => "selling_price_cents",
         Some("stockQuantity") => "stock_quantity",
@@ -64,36 +67,74 @@ fn validate_product_numbers(
     Ok(())
 }
 
-/// Checks `subcategory` is one of the subcategories stored for `category` in
-/// the `categories` collection — the DB-backed single source of truth for
-/// both the category API and this validation.
-async fn ensure_valid_category(db: &Database, category: &str, subcategory: &str) -> AppResult<()> {
-    let exists = repository::category::category_has_subcategory(db, category, subcategory).await?;
+/// Checks `subcategory_key` names a subcategory that both exists and
+/// belongs to `category_key` — the DB-backed single source of truth for
+/// both the category API and this validation. Returns the resolved
+/// category/subcategory names (needed for SKU generation) so callers don't
+/// have to look them up a second time. Like the rest of this codebase,
+/// there's no transaction wrapping this check and the subsequent product
+/// write — a category/subcategory deleted in between is an accepted,
+/// pre-existing class of risk here, not one this validation newly guards
+/// against.
+async fn ensure_valid_category(
+    db: &Database,
+    category_key: &str,
+    subcategory_key: &str,
+) -> AppResult<(String, String)> {
+    let category = repository::category::find_category_by_key(db, category_key)
+        .await?
+        .ok_or_else(|| AppError::validation(format!("'{category_key}' is not a valid category")))?;
 
-    if !exists {
-        return Err(AppError::validation(format!(
-            "'{subcategory}' is not a valid subcategory of '{category}'"
-        )));
-    }
+    let subcategory = repository::subcategory::find_subcategory_by_key(db, subcategory_key)
+        .await?
+        .filter(|document| document.category_key == category_key)
+        .ok_or_else(|| {
+            AppError::validation(format!(
+                "'{subcategory_key}' is not a valid subcategory of '{category_key}'"
+            ))
+        })?;
 
-    Ok(())
+    Ok((category.name, subcategory.name))
+}
+
+/// Resolves display names for a single product's `category_key`/
+/// `subcategory_key` for a read-only response — unlike `ensure_valid_category`,
+/// this never fails; a key that no longer resolves (e.g. stale data) just
+/// falls back to displaying the key itself rather than 500ing a read.
+async fn resolve_display_names(
+    db: &Database,
+    category_key: &str,
+    subcategory_key: &str,
+) -> AppResult<(String, String)> {
+    let category_name = repository::category::find_category_by_key(db, category_key)
+        .await?
+        .map(|document| document.name)
+        .unwrap_or_else(|| category_key.to_string());
+    let subcategory_name = repository::subcategory::find_subcategory_by_key(db, subcategory_key)
+        .await?
+        .map(|document| document.name)
+        .unwrap_or_else(|| subcategory_key.to_string());
+
+    Ok((category_name, subcategory_name))
 }
 
 /// Builds the Mongo filter/sort from query params (category, subcategory,
-/// free-text search across name/sku/barcode/category/subcategory, and the
-/// low-stock flag) and delegates execution + pagination math to
-/// `repository::product::list_products`.
+/// free-text search across name/sku/barcode, and the low-stock flag) and
+/// delegates execution + pagination math to `repository::product::list_products`.
+/// Then batch-resolves every distinct `category_key`/`subcategory_key`
+/// across the returned page in two extra queries (rather than one lookup
+/// per product) to build the response's display names.
 pub(crate) async fn list_products(
     db: &Database,
     query: ProductListQuery,
 ) -> AppResult<ProductListResponse> {
     let mut and_clauses: Vec<Document> = Vec::new();
 
-    if let Some(category) = query.category.filter(|s| !s.is_empty()) {
-        and_clauses.push(doc! { "category": category });
+    if let Some(category_key) = query.category_key.filter(|s| !s.is_empty()) {
+        and_clauses.push(doc! { "category_key": category_key });
     }
-    if let Some(subcategory) = query.subcategory.filter(|s| !s.is_empty()) {
-        and_clauses.push(doc! { "subcategory": subcategory });
+    if let Some(subcategory_key) = query.subcategory_key.filter(|s| !s.is_empty()) {
+        and_clauses.push(doc! { "subcategory_key": subcategory_key });
     }
     if let Some(search) = query.search.filter(|s| !s.is_empty()) {
         let pattern = build_bson_regex(&search);
@@ -101,9 +142,7 @@ pub(crate) async fn list_products(
             "$or": [
                 { "name": { "$regex": pattern.clone() } },
                 { "sku": { "$regex": pattern.clone() } },
-                { "barcode": { "$regex": pattern.clone() } },
-                { "category": { "$regex": pattern.clone() } },
-                { "subcategory": { "$regex": pattern } },
+                { "barcode": { "$regex": pattern } },
             ]
         });
     }
@@ -137,9 +176,41 @@ pub(crate) async fn list_products(
     )
     .await?;
 
+    let category_keys: Vec<String> = documents
+        .iter()
+        .map(|document| document.category_key.clone())
+        .collect();
+    let subcategory_keys: Vec<String> = documents
+        .iter()
+        .map(|document| document.subcategory_key.clone())
+        .collect();
+
+    let category_names: HashMap<String, String> =
+        repository::category::find_categories_by_keys(db, &category_keys)
+            .await?
+            .into_iter()
+            .map(|document| (document.key, document.name))
+            .collect();
+    let subcategory_names: HashMap<String, String> =
+        repository::subcategory::find_subcategories_by_keys(db, &subcategory_keys)
+            .await?
+            .into_iter()
+            .map(|document| (document.key, document.name))
+            .collect();
+
     let items = documents
         .into_iter()
-        .map(ProductDocument::into_product)
+        .map(|document| {
+            let category_name = category_names
+                .get(&document.category_key)
+                .cloned()
+                .unwrap_or_else(|| document.category_key.clone());
+            let subcategory_name = subcategory_names
+                .get(&document.subcategory_key)
+                .cloned()
+                .unwrap_or_else(|| document.subcategory_key.clone());
+            document.into_product(category_name, subcategory_name)
+        })
         .collect();
 
     let pagination = PaginationMeta {
@@ -161,13 +232,16 @@ pub(crate) async fn get_product(db: &Database, id: ObjectId) -> AppResult<Produc
             AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
         })?;
 
-    Ok(document.into_product())
+    let (category_name, subcategory_name) =
+        resolve_display_names(db, &document.category_key, &document.subcategory_key).await?;
+
+    Ok(document.into_product(category_name, subcategory_name))
 }
 
 /// Validates required fields, price/stock invariants, and category
 /// membership, then generates the product's SKU from its category/
-/// subcategory (see `service::sku::generate_sku`) — validation runs first
-/// so an invalid category never consumes a sequence number.
+/// subcategory names (see `service::sku::generate_sku`) — validation runs
+/// first so an invalid category never consumes a sequence number.
 pub(crate) async fn create_product(
     db: &Database,
     body: CreateProductRequest,
@@ -181,9 +255,10 @@ pub(crate) async fn create_product(
         body.stock_quantity,
         body.min_stock_threshold,
     )?;
-    ensure_valid_category(db, &body.category, &body.subcategory).await?;
+    let (category_name, subcategory_name) =
+        ensure_valid_category(db, &body.category_key, &body.subcategory_key).await?;
 
-    let sku = super::sku::generate_sku(db, &body.category, &body.subcategory).await?;
+    let sku = super::sku::generate_sku(db, &category_name, &subcategory_name).await?;
 
     // Defensive fallback only — `generate_sku`'s atomic per-prefix counter
     // already guarantees uniqueness, so this should never actually fire.
@@ -205,8 +280,8 @@ pub(crate) async fn create_product(
         sku,
         barcode: body.barcode,
         name: body.name,
-        category: body.category,
-        subcategory: body.subcategory,
+        category_key: body.category_key,
+        subcategory_key: body.subcategory_key,
         cost_price_cents: body.cost_price_cents,
         selling_price_cents: body.selling_price_cents,
         stock_quantity: body.stock_quantity,
@@ -216,7 +291,7 @@ pub(crate) async fn create_product(
     };
 
     let inserted = repository::product::insert_product(db, document).await?;
-    Ok(inserted.into_product())
+    Ok(inserted.into_product(category_name, subcategory_name))
 }
 
 /// Partial update — every field in `body` is optional, so each one falls
@@ -239,8 +314,8 @@ pub(crate) async fn update_product(
         return Err(AppError::validation("Product name cannot be empty"));
     }
 
-    let category = body.category.unwrap_or(existing.category);
-    let subcategory = body.subcategory.unwrap_or(existing.subcategory);
+    let category_key = body.category_key.unwrap_or(existing.category_key);
+    let subcategory_key = body.subcategory_key.unwrap_or(existing.subcategory_key);
     let selling_price_cents = body
         .selling_price_cents
         .unwrap_or(existing.selling_price_cents);
@@ -256,11 +331,12 @@ pub(crate) async fn update_product(
         stock_quantity,
         min_stock_threshold,
     )?;
-    ensure_valid_category(db, &category, &subcategory).await?;
+    let (category_name, subcategory_name) =
+        ensure_valid_category(db, &category_key, &subcategory_key).await?;
 
     let mut set_doc = doc! {
-        "category": &category,
-        "subcategory": &subcategory,
+        "category_key": &category_key,
+        "subcategory_key": &subcategory_key,
         "selling_price_cents": selling_price_cents,
         "cost_price_cents": cost_price_cents,
         "stock_quantity": stock_quantity,
@@ -280,7 +356,7 @@ pub(crate) async fn update_product(
             AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
         })?;
 
-    Ok(updated.into_product())
+    Ok(updated.into_product(category_name, subcategory_name))
 }
 
 /// Deletes and returns the deleted document (so the handler can echo back
@@ -292,7 +368,10 @@ pub(crate) async fn delete_product(db: &Database, id: ObjectId) -> AppResult<Pro
             AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
         })?;
 
-    Ok(deleted.into_product())
+    let (category_name, subcategory_name) =
+        resolve_display_names(db, &deleted.category_key, &deleted.subcategory_key).await?;
+
+    Ok(deleted.into_product(category_name, subcategory_name))
 }
 
 /// Batch delete. Ids that aren't valid `ObjectId`s are silently dropped

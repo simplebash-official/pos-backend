@@ -3,8 +3,6 @@
 // `modules::inventory::model` and convert into these before a handler wraps
 // them in `core::response::ApiResponse<T>`.
 
-use std::collections::HashMap;
-
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
@@ -12,7 +10,12 @@ use utoipa::{IntoParams, ToSchema};
 /// A product as returned to API clients. `id` (the Mongo `ObjectId` as a
 /// hex string) is the stable route/lookup key; `key` is the human-shareable
 /// prefixed id (see `core::id::generate_id`) — both are exposed since
-/// different callers reference a product differently.
+/// different callers reference a product differently. `category`/
+/// `category_key` (and their subcategory counterparts) are both present:
+/// the `*_key` fields are the actual foreign keys stored on the product
+/// (see `modules::inventory::model::ProductDocument`), while the bare
+/// `category`/`subcategory` names are resolved at read time purely for
+/// display so callers don't have to cross-reference `GET /categories`.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Product {
@@ -22,7 +25,9 @@ pub struct Product {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub barcode: Option<String>,
     pub name: String,
+    pub category_key: String,
     pub category: String,
+    pub subcategory_key: String,
     pub subcategory: String,
     pub cost_price_cents: i64,
     pub selling_price_cents: i64,
@@ -33,19 +38,22 @@ pub struct Product {
 }
 
 /// Body for `POST /products`. `sku` is deliberately absent — it's
-/// generated server-side from `category`/`subcategory` (see
-/// `service::sku::generate_sku`), not client-supplied. Prices are integer
-/// cents (never float) to avoid rounding drift; `stock_quantity`/
-/// `min_stock_threshold` default to `0` via `#[serde(default)]` so a
-/// minimal request still deserializes.
+/// generated server-side from the category/subcategory names resolved from
+/// `category_key`/`subcategory_key` (see `service::sku::generate_sku`), not
+/// client-supplied. `category_key`/`subcategory_key` must be the system-
+/// generated `key` of an existing category/subcategory (see `GET
+/// /categories` or `GET /categories/valid`) — never the display name.
+/// Prices are integer cents (never float) to avoid rounding drift;
+/// `stock_quantity`/`min_stock_threshold` default to `0` via
+/// `#[serde(default)]` so a minimal request still deserializes.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateProductRequest {
     #[serde(default)]
     pub barcode: Option<String>,
     pub name: String,
-    pub category: String,
-    pub subcategory: String,
+    pub category_key: String,
+    pub subcategory_key: String,
     pub cost_price_cents: i64,
     pub selling_price_cents: i64,
     #[serde(default)]
@@ -57,13 +65,14 @@ pub struct CreateProductRequest {
 /// Body for `PUT /products/{id}`. Every field is optional so a client can
 /// send only what changed — `service::product::update_product` fills in
 /// omitted fields from the existing document rather than clearing them.
+/// `category_key`/`subcategory_key`, like on create, must be keys, not names.
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateProductRequest {
     pub barcode: Option<String>,
     pub name: Option<String>,
-    pub category: Option<String>,
-    pub subcategory: Option<String>,
+    pub category_key: Option<String>,
+    pub subcategory_key: Option<String>,
     pub cost_price_cents: Option<i64>,
     pub selling_price_cents: Option<i64>,
     pub stock_quantity: Option<i64>,
@@ -78,8 +87,8 @@ pub struct UpdateProductRequest {
 #[into_params(parameter_in = Query)]
 pub struct ProductListQuery {
     pub search: Option<String>,
-    pub category: Option<String>,
-    pub subcategory: Option<String>,
+    pub category_key: Option<String>,
+    pub subcategory_key: Option<String>,
     pub low_stock: Option<bool>,
     pub page: Option<u64>,
     pub limit: Option<u64>,
@@ -211,9 +220,23 @@ pub struct StockMovementsResponse {
     pub movements: Vec<StockMovement>,
 }
 
-/// A main category and its allowed subcategories, as returned to API
-/// clients. `subcategories` is the authoritative allow-list — a product's
-/// `subcategory` field is validated against it on create/update (see
+/// A subcategory as returned to API clients, persisted in its own
+/// `subcategories` collection (see `modules::inventory::model::SubcategoryDocument`).
+/// `category_key` is the FK back to its parent `CategoryInfo.key` — a
+/// subcategory always belongs to exactly one category.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SubcategoryInfo {
+    pub key: String,
+    pub category_key: String,
+    pub name: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// A main category and its subcategories, as returned to API clients.
+/// `subcategories` is the authoritative allow-list — a product's
+/// `subcategory_key` field is validated against it on create/update (see
 /// `service::product::ensure_valid_category`).
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -222,7 +245,7 @@ pub struct CategoryInfo {
     pub name: String,
     pub icon: String,
     pub color: String,
-    pub subcategories: Vec<String>,
+    pub subcategories: Vec<SubcategoryInfo>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -233,26 +256,48 @@ pub struct CategoriesResponse {
     pub categories: Vec<CategoryInfo>,
 }
 
-/// Response for `GET /categories/{category}/subcategories`.
+/// Response for `GET /categories/{categoryKey}/subcategories`.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SubcategoriesResponse {
-    pub category: String,
-    pub subcategories: Vec<String>,
+    pub category_key: String,
+    pub subcategories: Vec<SubcategoryInfo>,
+}
+
+/// One category option within `ValidCategoriesResponse` — key + display
+/// name plus its own nested subcategory options, so a client (e.g. a
+/// product-creation form) can render names while submitting keys.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidCategoryOption {
+    pub key: String,
+    pub name: String,
+    pub subcategories: Vec<ValidSubcategoryOption>,
+}
+
+/// One subcategory option nested under `ValidCategoryOption`.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidSubcategoryOption {
+    pub key: String,
+    pub name: String,
 }
 
 /// Response for `GET /categories/valid` — the same category/subcategory
-/// data as `CategoriesResponse`, reshaped into a flat name list plus a
-/// name-to-subcategories map for callers (like a product form) that want
-/// direct lookup instead of scanning a `Vec<CategoryInfo>`.
+/// data as `CategoriesResponse`, reshaped as key+name pairs for callers
+/// (like a product form) that need to submit `categoryKey`/`subcategoryKey`
+/// while displaying the human-readable name.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ValidCategoriesResponse {
-    pub valid_categories: Vec<String>,
-    pub category_subcategory_map: HashMap<String, Vec<String>>,
+    pub categories: Vec<ValidCategoryOption>,
 }
 
 /// Body for `POST /categories` (admin-only — see `core::middleware::auth::AdminUser`).
+/// `subcategories` is a bulk list of subcategory *names* — each becomes its
+/// own `SubcategoryDocument` (with its own generated key) referencing the
+/// newly created category, so a category can be bootstrapped with its
+/// starter subcategories in one call.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct CreateCategoryRequest {
     pub name: String,
@@ -262,10 +307,11 @@ pub struct CreateCategoryRequest {
     pub subcategories: Vec<String>,
 }
 
-/// Body for `PUT /categories/{category}` (admin-only). All fields optional,
-/// same partial-update convention as `UpdateProductRequest`. Renaming
-/// (`name` set to a new value) cascades to every product referencing the
-/// old category name — see `service::category::update_category`.
+/// Body for `PUT /categories/{categoryKey}` (admin-only). All fields
+/// optional, same partial-update convention as `UpdateProductRequest`.
+/// Renaming (`name` set to a new value) is a pure display-label change —
+/// products reference a category by its immutable `key`, so no cascade is
+/// needed (see `service::category::update_category`).
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 pub struct UpdateCategoryRequest {
     pub name: Option<String>,
@@ -273,8 +319,8 @@ pub struct UpdateCategoryRequest {
     pub color: Option<String>,
 }
 
-/// Body for `POST /categories/{category}/subcategories` (admin-only).
+/// Body for `POST /categories/{categoryKey}/subcategories` (admin-only).
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct AddSubcategoryRequest {
-    pub subcategory: String,
+    pub name: String,
 }

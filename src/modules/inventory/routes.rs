@@ -315,8 +315,8 @@ async fn create_category(
     ))
 }
 
-#[utoipa::path(put, path = "/categories/{category}", tag = modules::INVENTORY,
-    params(("category" = String, Path, description = "Main category name")),
+#[utoipa::path(put, path = "/categories/{categoryKey}", tag = modules::INVENTORY,
+    params(("categoryKey" = String, Path, description = "Category key")),
     request_body = UpdateCategoryRequest,
     security(("bearerAuth" = [])),
     responses(
@@ -330,28 +330,19 @@ async fn create_category(
 async fn update_category(
     _admin: AdminUser,
     State(state): State<AppState>,
-    Path(category): Path<String>,
+    Path(category_key): Path<String>,
     Json(body): Json<UpdateCategoryRequest>,
 ) -> AppResult<Json<ApiResponse<CategoryInfo>>> {
-    let (updated, renamed_product_count) =
-        service::category::update_category(&state.db, category, body).await?;
+    let updated = service::category::update_category(&state.db, category_key, body).await?;
 
-    // The only handler that builds its success message from data rather
-    // than a fixed string — mentions the cascade so a caller who renamed a
-    // category can tell how many products were updated along with it.
-    let message = if renamed_product_count > 0 {
-        format!(
-            "Category updated successfully ({renamed_product_count} product(s) renamed to match)"
-        )
-    } else {
-        "Category updated successfully".to_string()
-    };
-
-    Ok(Json(ApiResponse::success(updated, message)))
+    Ok(Json(ApiResponse::success(
+        updated,
+        "Category updated successfully",
+    )))
 }
 
-#[utoipa::path(delete, path = "/categories/{category}", tag = modules::INVENTORY,
-    params(("category" = String, Path, description = "Main category name")),
+#[utoipa::path(delete, path = "/categories/{categoryKey}", tag = modules::INVENTORY,
+    params(("categoryKey" = String, Path, description = "Category key")),
     security(("bearerAuth" = [])),
     responses(
         (status = 200, description = "Category deleted", body = ApiResponse<CategoryInfo>),
@@ -363,9 +354,9 @@ async fn update_category(
 async fn delete_category(
     _admin: AdminUser,
     State(state): State<AppState>,
-    Path(category): Path<String>,
+    Path(category_key): Path<String>,
 ) -> AppResult<Json<ApiResponse<CategoryInfo>>> {
-    let deleted = service::category::delete_category(&state.db, category).await?;
+    let deleted = service::category::delete_category(&state.db, category_key).await?;
 
     Ok(Json(ApiResponse::success(
         deleted,
@@ -393,8 +384,8 @@ async fn get_valid_categories(
 // Subcategories
 // ============================================================================
 
-#[utoipa::path(get, path = "/categories/{category}/subcategories", tag = modules::INVENTORY,
-    params(("category" = String, Path, description = "Main category name")),
+#[utoipa::path(get, path = "/categories/{categoryKey}/subcategories", tag = modules::INVENTORY,
+    params(("categoryKey" = String, Path, description = "Category key")),
     responses(
         (status = 200, description = "Subcategories for a category", body = ApiResponse<SubcategoriesResponse>),
         (status = 404, description = "Category not found", body = ErrorResponse),
@@ -402,9 +393,9 @@ async fn get_valid_categories(
 )]
 async fn get_category_subcategories(
     State(state): State<AppState>,
-    Path(category): Path<String>,
+    Path(category_key): Path<String>,
 ) -> AppResult<Json<ApiResponse<SubcategoriesResponse>>> {
-    let response = service::category::get_category_subcategories(&state.db, category).await?;
+    let response = service::category::get_category_subcategories(&state.db, category_key).await?;
 
     Ok(Json(ApiResponse::success(
         response,
@@ -412,8 +403,8 @@ async fn get_category_subcategories(
     )))
 }
 
-#[utoipa::path(post, path = "/categories/{category}/subcategories", tag = modules::INVENTORY,
-    params(("category" = String, Path, description = "Main category name")),
+#[utoipa::path(post, path = "/categories/{categoryKey}/subcategories", tag = modules::INVENTORY,
+    params(("categoryKey" = String, Path, description = "Category key")),
     request_body = AddSubcategoryRequest,
     security(("bearerAuth" = [])),
     responses(
@@ -427,10 +418,10 @@ async fn get_category_subcategories(
 async fn add_subcategory(
     _admin: AdminUser,
     State(state): State<AppState>,
-    Path(category): Path<String>,
+    Path(category_key): Path<String>,
     Json(body): Json<AddSubcategoryRequest>,
 ) -> AppResult<(StatusCode, Json<ApiResponse<CategoryInfo>>)> {
-    let updated = service::category::add_subcategory(&state.db, category, body.subcategory).await?;
+    let updated = service::category::add_subcategory(&state.db, category_key, body.name).await?;
 
     Ok((
         StatusCode::CREATED,
@@ -441,10 +432,10 @@ async fn add_subcategory(
     ))
 }
 
-#[utoipa::path(delete, path = "/categories/{category}/subcategories/{subcategory}", tag = modules::INVENTORY,
+#[utoipa::path(delete, path = "/categories/{categoryKey}/subcategories/{subcategoryKey}", tag = modules::INVENTORY,
     params(
-        ("category" = String, Path, description = "Main category name"),
-        ("subcategory" = String, Path, description = "Subcategory name"),
+        ("categoryKey" = String, Path, description = "Category key"),
+        ("subcategoryKey" = String, Path, description = "Subcategory key"),
     ),
     security(("bearerAuth" = [])),
     responses(
@@ -457,9 +448,10 @@ async fn add_subcategory(
 async fn remove_subcategory(
     _admin: AdminUser,
     State(state): State<AppState>,
-    Path((category, subcategory)): Path<(String, String)>,
+    Path((category_key, subcategory_key)): Path<(String, String)>,
 ) -> AppResult<Json<ApiResponse<CategoryInfo>>> {
-    let updated = service::category::remove_subcategory(&state.db, category, subcategory).await?;
+    let updated =
+        service::category::remove_subcategory(&state.db, category_key, subcategory_key).await?;
 
     Ok(Json(ApiResponse::success(
         updated,

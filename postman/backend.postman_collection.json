@@ -25,16 +25,16 @@
       "description": "Sample product ObjectId \u2014 replace with a real id from List Products."
     },
     {
-      "key": "categoryName",
-      "value": "Phone Repairs",
+      "key": "categoryKey",
+      "value": "cat_xxxxxxxxxxxxxxxx",
       "type": "string",
-      "description": "Sample category name (seeded via `cargo run --bin seed_providers`)."
+      "description": "A category's system-generated `key` (seeded via `cargo run --bin seed_providers`) — grab a real value from the List Categories / Create Category / Valid Categories response, never the display name."
     },
     {
-      "key": "subcategoryName",
-      "value": "Screens",
+      "key": "subcategoryKey",
+      "value": "subcat_xxxxxxxxxxxxxxxx",
       "type": "string",
-      "description": "Sample subcategory name, valid under categoryName."
+      "description": "A subcategory's system-generated `key`, valid under categoryKey — grab a real value from the same responses as categoryKey, never the display name."
     }
   ],
   "item": [
@@ -170,7 +170,7 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{baseUrl}}/api/inventory/products?search=screen&category=Phone%20Repairs&subcategory=Screens&lowStock=true&page=1&limit=20&sortBy=updatedAt&sortOrder=desc",
+                  "raw": "{{baseUrl}}/api/inventory/products?search=screen&categoryKey={{categoryKey}}&subcategoryKey={{subcategoryKey}}&lowStock=true&page=1&limit=20&sortBy=updatedAt&sortOrder=desc",
                   "host": [
                     "{{baseUrl}}"
                   ],
@@ -187,15 +187,15 @@
                       "disabled": true
                     },
                     {
-                      "key": "category",
-                      "value": "Phone Repairs",
-                      "description": "Filter by exact category name",
+                      "key": "categoryKey",
+                      "value": "{{categoryKey}}",
+                      "description": "Filter by exact category key",
                       "disabled": true
                     },
                     {
-                      "key": "subcategory",
-                      "value": "Screens",
-                      "description": "Filter by exact subcategory name",
+                      "key": "subcategoryKey",
+                      "value": "{{subcategoryKey}}",
+                      "description": "Filter by exact subcategory key",
                       "disabled": true
                     },
                     {
@@ -274,10 +274,10 @@
                     "products"
                   ]
                 },
-                "description": "Create a new product. `category`/`subcategory` must be a valid pair (see GET /categories/valid). Prices are integer cents. `sku` is NOT sent \u2014 it's auto-generated server-side from category/subcategory (e.g. \"PHO-SCR-0001\"); the request body has no field for it.",
+                "description": "Create a new product. `categoryKey`/`subcategoryKey` must be a valid pair \u2014 the system-generated keys of an existing category/subcategory (see GET /categories/valid), never their display names. Prices are integer cents. `sku` is NOT sent \u2014 it's auto-generated server-side from the resolved category/subcategory names (e.g. \"PHO-SCR-0001\"); the request body has no field for it.",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"barcode\": \"8901234567890\",\n  \"name\": \"iPhone 13 Screen Replacement\",\n  \"category\": \"Phone Repairs\",\n  \"subcategory\": \"Screens\",\n  \"costPriceCents\": 450000,\n  \"sellingPriceCents\": 650000,\n  \"stockQuantity\": 10,\n  \"minStockThreshold\": 3\n}",
+                  "raw": "{\n  \"barcode\": \"8901234567890\",\n  \"name\": \"iPhone 13 Screen Replacement\",\n  \"categoryKey\": \"{{categoryKey}}\",\n  \"subcategoryKey\": \"{{subcategoryKey}}\",\n  \"costPriceCents\": 450000,\n  \"sellingPriceCents\": 650000,\n  \"stockQuantity\": 10,\n  \"minStockThreshold\": 3\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -507,7 +507,7 @@
                     "categories"
                   ]
                 },
-                "description": "Create a new top-level category with its subcategories.\n\n**Requires admin JWT** (`role: admin` claim) \u2014 inherited Bearer token must be an admin token or the API returns 403 `ADMIN_REQUIRED`.",
+                "description": "Create a new top-level category with its starter subcategories (by name \u2014 each becomes its own subcategory document with a generated key). The response's `key`/`subcategories[].key` are what other requests (Create Product, Update/Delete Category, Add/Remove Subcategory) must use \u2014 copy them into the `categoryKey`/`subcategoryKey` collection variables.\n\n**Requires admin JWT** (`role: admin` claim) \u2014 inherited Bearer token must be an admin token or the API returns 403 `ADMIN_REQUIRED`.",
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"name\": \"Laptop Repairs\",\n  \"icon\": \"Laptop\",\n  \"color\": \"indigo\",\n  \"subcategories\": [\n    \"Screens\",\n    \"Keyboards\",\n    \"Batteries\"\n  ]\n}",
@@ -531,7 +531,7 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{baseUrl}}/api/inventory/categories/{{categoryName}}",
+                  "raw": "{{baseUrl}}/api/inventory/categories/{{categoryKey}}",
                   "host": [
                     "{{baseUrl}}"
                   ],
@@ -539,10 +539,10 @@
                     "api",
                     "inventory",
                     "categories",
-                    "{{categoryName}}"
+                    "{{categoryKey}}"
                   ]
                 },
-                "description": "Partially update a category. Renaming `name` cascades onto every product referencing the old name.\n\n**Requires admin JWT** (`role: admin` claim) \u2014 inherited Bearer token must be an admin token or the API returns 403 `ADMIN_REQUIRED`.",
+                "description": "Partially update a category, looked up by its key. Renaming `name` is a pure display-label change \u2014 products reference this category by its immutable key, so nothing else needs to change.\n\n**Requires admin JWT** (`role: admin` claim) \u2014 inherited Bearer token must be an admin token or the API returns 403 `ADMIN_REQUIRED`.",
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"color\": \"cyan\"\n}",
@@ -561,7 +561,7 @@
                 "method": "DELETE",
                 "header": [],
                 "url": {
-                  "raw": "{{baseUrl}}/api/inventory/categories/{{categoryName}}",
+                  "raw": "{{baseUrl}}/api/inventory/categories/{{categoryKey}}",
                   "host": [
                     "{{baseUrl}}"
                   ],
@@ -569,10 +569,10 @@
                     "api",
                     "inventory",
                     "categories",
-                    "{{categoryName}}"
+                    "{{categoryKey}}"
                   ]
                 },
-                "description": "Delete a category. Blocked with 409 while any product still references it.\n\n**Requires admin JWT** (`role: admin` claim) \u2014 inherited Bearer token must be an admin token or the API returns 403 `ADMIN_REQUIRED`."
+                "description": "Delete a category, looked up by its key. Blocked with 409 while any product still references it; on success also deletes every subcategory under it.\n\n**Requires admin JWT** (`role: admin` claim) \u2014 inherited Bearer token must be an admin token or the API returns 403 `ADMIN_REQUIRED`."
               },
               "response": []
             },
@@ -593,7 +593,7 @@
                     "valid"
                   ]
                 },
-                "description": "Flat category list plus a category-to-subcategories map, for client-side form validation."
+                "description": "Category/subcategory key+name pairs (nested), for a client-side form that needs to display names while submitting `categoryKey`/`subcategoryKey` on product create/update."
               },
               "response": []
             }
@@ -608,7 +608,7 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{baseUrl}}/api/inventory/categories/{{categoryName}}/subcategories",
+                  "raw": "{{baseUrl}}/api/inventory/categories/{{categoryKey}}/subcategories",
                   "host": [
                     "{{baseUrl}}"
                   ],
@@ -616,11 +616,11 @@
                     "api",
                     "inventory",
                     "categories",
-                    "{{categoryName}}",
+                    "{{categoryKey}}",
                     "subcategories"
                   ]
                 },
-                "description": "List the subcategories of a single category."
+                "description": "List the subcategories of a single category, looked up by its key."
               },
               "response": []
             },
@@ -635,7 +635,7 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{baseUrl}}/api/inventory/categories/{{categoryName}}/subcategories",
+                  "raw": "{{baseUrl}}/api/inventory/categories/{{categoryKey}}/subcategories",
                   "host": [
                     "{{baseUrl}}"
                   ],
@@ -643,14 +643,14 @@
                     "api",
                     "inventory",
                     "categories",
-                    "{{categoryName}}",
+                    "{{categoryKey}}",
                     "subcategories"
                   ]
                 },
-                "description": "Add a new subcategory to a category.\n\n**Requires admin JWT** (`role: admin` claim) \u2014 inherited Bearer token must be an admin token or the API returns 403 `ADMIN_REQUIRED`.",
+                "description": "Add a new subcategory to a category (looked up by its key). The response includes the new subcategory's generated `key`.\n\n**Requires admin JWT** (`role: admin` claim) \u2014 inherited Bearer token must be an admin token or the API returns 403 `ADMIN_REQUIRED`.",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"subcategory\": \"Cameras\"\n}",
+                  "raw": "{\n  \"name\": \"Cameras\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -666,7 +666,7 @@
                 "method": "DELETE",
                 "header": [],
                 "url": {
-                  "raw": "{{baseUrl}}/api/inventory/categories/{{categoryName}}/subcategories/{{subcategoryName}}",
+                  "raw": "{{baseUrl}}/api/inventory/categories/{{categoryKey}}/subcategories/{{subcategoryKey}}",
                   "host": [
                     "{{baseUrl}}"
                   ],
@@ -674,12 +674,12 @@
                     "api",
                     "inventory",
                     "categories",
-                    "{{categoryName}}",
+                    "{{categoryKey}}",
                     "subcategories",
-                    "{{subcategoryName}}"
+                    "{{subcategoryKey}}"
                   ]
                 },
-                "description": "Remove a subcategory. Blocked with 409 while any product still references it.\n\n**Requires admin JWT** (`role: admin` claim) \u2014 inherited Bearer token must be an admin token or the API returns 403 `ADMIN_REQUIRED`."
+                "description": "Remove a subcategory (looked up by its key). Blocked with 409 while any product still references it.\n\n**Requires admin JWT** (`role: admin` claim) \u2014 inherited Bearer token must be an admin token or the API returns 403 `ADMIN_REQUIRED`."
               },
               "response": []
             }

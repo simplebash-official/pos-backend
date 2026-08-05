@@ -9,7 +9,7 @@ use axum::{
 };
 use jana2u_pos_backend::{
     core::{config::Config, id::generate_id, middleware::auth::Claims},
-    modules::inventory::model::CategoryDocument,
+    modules::inventory::model::{CategoryDocument, SubcategoryDocument},
 };
 use jsonwebtoken::{EncodingKey, Header, encode};
 use serde_json::{Value, json};
@@ -98,30 +98,61 @@ use mongodb::bson::DateTime as BsonDateTime;
 /// the admin API, so tests that don't care about category management
 /// itself (e.g. product CRUD) don't need an admin token just to set up
 /// fixture data. Uses a random name so parallel tests never collide with
-/// each other or with real seeded data.
-async fn seed_category(db: &mongodb::Database, subcategories: &[&str]) -> String {
+/// each other or with real seeded data. Returns the category's key.
+async fn seed_category(db: &mongodb::Database) -> String {
     let name = format!("Test Category {}", Uuid::new_v4());
+    let key = generate_id("cat");
     let now = BsonDateTime::now();
     db.collection::<CategoryDocument>("categories")
         .insert_one(CategoryDocument {
             id: None,
-            key: generate_id("cat"),
-            name: name.clone(),
+            key: key.clone(),
+            name,
             icon: "Box".to_string(),
             color: "gray".to_string(),
-            subcategories: subcategories.iter().map(|s| s.to_string()).collect(),
             created_at: now,
             updated_at: now,
         })
         .await
         .expect("failed to seed category");
-    name
+    key
+}
+
+/// Inserts a subcategory directly into the test database under
+/// `category_key`. Returns the subcategory's key.
+async fn seed_subcategory(db: &mongodb::Database, category_key: &str, name: &str) -> String {
+    let key = generate_id("subcat");
+    let now = BsonDateTime::now();
+    db.collection::<SubcategoryDocument>("subcategories")
+        .insert_one(SubcategoryDocument {
+            id: None,
+            key: key.clone(),
+            category_key: category_key.to_string(),
+            name: name.to_string(),
+            created_at: now,
+            updated_at: now,
+        })
+        .await
+        .expect("failed to seed subcategory");
+    key
+}
+
+/// Convenience wrapper: seeds a category plus one subcategory under it,
+/// returning `(category_key, subcategory_key)` — the shape most product
+/// tests need.
+async fn seed_category_with_subcategory(
+    db: &mongodb::Database,
+    subcategory_name: &str,
+) -> (String, String) {
+    let category_key = seed_category(db).await;
+    let subcategory_key = seed_subcategory(db, &category_key, subcategory_name).await;
+    (category_key, subcategory_key)
 }
 
 #[tokio::test]
 async fn product_lifecycle_create_get_update_stock_and_delete() {
     let app = common::spawn_app().await;
-    let category = seed_category(&app.db, &["Widgets"]).await;
+    let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Widgets").await;
 
     let (status, created) = send(
         &app.router,
@@ -129,8 +160,8 @@ async fn product_lifecycle_create_get_update_stock_and_delete() {
         "/api/inventory/products",
         Some(json!({
             "name": "Test Widget",
-            "category": category,
-            "subcategory": "Widgets",
+            "categoryKey": category_key,
+            "subcategoryKey": subcategory_key,
             "costPriceCents": 1000,
             "sellingPriceCents": 2000,
             "stockQuantity": 10,
@@ -142,6 +173,8 @@ async fn product_lifecycle_create_get_update_stock_and_delete() {
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(created["success"], true);
     let id = created["data"]["id"].as_str().unwrap().to_string();
+    assert_eq!(created["data"]["categoryKey"], category_key);
+    assert_eq!(created["data"]["subcategoryKey"], subcategory_key);
     // `category` is seeded as "Test Category <uuid>" -> derived code "TES";
     // "Widgets" -> "WID" (see service::sku::derive_code).
     let sku = created["data"]["sku"].as_str().unwrap().to_string();
@@ -229,7 +262,7 @@ async fn product_lifecycle_create_get_update_stock_and_delete() {
 #[tokio::test]
 async fn create_product_validates_category_and_pricing_and_auto_generates_sequential_skus() {
     let app = common::spawn_app().await;
-    let category = seed_category(&app.db, &["Widgets"]).await;
+    let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Widgets").await;
 
     let (status, invalid_category) = send(
         &app.router,
@@ -237,8 +270,8 @@ async fn create_product_validates_category_and_pricing_and_auto_generates_sequen
         "/api/inventory/products",
         Some(json!({
             "name": "Bad Category Widget",
-            "category": category,
-            "subcategory": "Not A Real Subcategory",
+            "categoryKey": category_key,
+            "subcategoryKey": "subcat_does_not_exist",
             "costPriceCents": 1000,
             "sellingPriceCents": 2000,
             "stockQuantity": 1,
@@ -249,14 +282,38 @@ async fn create_product_validates_category_and_pricing_and_auto_generates_sequen
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(invalid_category["code"], "VALIDATION_ERROR");
 
+    // A subcategory that exists but belongs to a *different* category must
+    // also be rejected — proves the category_key/subcategory_key pairing is
+    // actually enforced, not just "does this subcategory key exist anywhere".
+    let (other_category_key, other_subcategory_key) =
+        seed_category_with_subcategory(&app.db, "Gadgets").await;
+    let (status, mismatched_category) = send(
+        &app.router,
+        "POST",
+        "/api/inventory/products",
+        Some(json!({
+            "name": "Mismatched Widget",
+            "categoryKey": category_key,
+            "subcategoryKey": other_subcategory_key,
+            "costPriceCents": 1000,
+            "sellingPriceCents": 2000,
+            "stockQuantity": 1,
+            "minStockThreshold": 1,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(mismatched_category["code"], "VALIDATION_ERROR");
+    let _ = other_category_key;
+
     let (status, _bad_price) = send(
         &app.router,
         "POST",
         "/api/inventory/products",
         Some(json!({
             "name": "Free Widget",
-            "category": category,
-            "subcategory": "Widgets",
+            "categoryKey": category_key,
+            "subcategoryKey": subcategory_key,
             "costPriceCents": 1000,
             "sellingPriceCents": 0,
             "stockQuantity": 1,
@@ -271,8 +328,8 @@ async fn create_product_validates_category_and_pricing_and_auto_generates_sequen
     // — proving the atomic per-prefix counter, not client input, drives them.
     let body = json!({
         "name": "Sequential Widget",
-        "category": category,
-        "subcategory": "Widgets",
+        "categoryKey": category_key,
+        "subcategoryKey": subcategory_key,
         "costPriceCents": 1000,
         "sellingPriceCents": 2000,
         "stockQuantity": 1,
@@ -300,7 +357,7 @@ async fn create_product_validates_category_and_pricing_and_auto_generates_sequen
 #[tokio::test]
 async fn list_products_filters_by_category_and_search() {
     let app = common::spawn_app().await;
-    let category = seed_category(&app.db, &["Widgets"]).await;
+    let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Widgets").await;
 
     send(
         &app.router,
@@ -308,8 +365,8 @@ async fn list_products_filters_by_category_and_search() {
         "/api/inventory/products",
         Some(json!({
             "name": "Findable Gadget",
-            "category": category,
-            "subcategory": "Widgets",
+            "categoryKey": category_key,
+            "subcategoryKey": subcategory_key,
             "costPriceCents": 500,
             "sellingPriceCents": 1200,
             "stockQuantity": 5,
@@ -324,8 +381,8 @@ async fn list_products_filters_by_category_and_search() {
         "/api/inventory/products",
         Some(json!({
             "name": "Unrelated Item",
-            "category": category,
-            "subcategory": "Widgets",
+            "categoryKey": category_key,
+            "subcategoryKey": subcategory_key,
             "costPriceCents": 500,
             "sellingPriceCents": 1200,
             "stockQuantity": 5,
@@ -337,10 +394,7 @@ async fn list_products_filters_by_category_and_search() {
     let (status, listed) = send(
         &app.router,
         "GET",
-        &format!(
-            "/api/inventory/products?category={}&search=Findable",
-            urlencoding_encode(&category)
-        ),
+        &format!("/api/inventory/products?categoryKey={category_key}&search=Findable"),
         None,
     )
     .await;
@@ -354,7 +408,7 @@ async fn list_products_filters_by_category_and_search() {
 #[tokio::test]
 async fn delete_products_batch_removes_multiple() {
     let app = common::spawn_app().await;
-    let category = seed_category(&app.db, &["Widgets"]).await;
+    let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Widgets").await;
 
     let mut ids = Vec::new();
     for _ in 0..2 {
@@ -364,8 +418,8 @@ async fn delete_products_batch_removes_multiple() {
             "/api/inventory/products",
             Some(json!({
                 "name": "Batch Widget",
-                "category": category,
-                "subcategory": "Widgets",
+                "categoryKey": category_key,
+                "subcategoryKey": subcategory_key,
                 "costPriceCents": 500,
                 "sellingPriceCents": 1200,
                 "stockQuantity": 5,
@@ -401,7 +455,7 @@ async fn delete_products_batch_removes_multiple() {
 #[tokio::test]
 async fn low_stock_lists_products_at_or_below_threshold() {
     let app = common::spawn_app().await;
-    let category = seed_category(&app.db, &["Widgets"]).await;
+    let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Widgets").await;
 
     let (_, created) = send(
         &app.router,
@@ -409,8 +463,8 @@ async fn low_stock_lists_products_at_or_below_threshold() {
         "/api/inventory/products",
         Some(json!({
             "name": "Low Stock Widget",
-            "category": category,
-            "subcategory": "Widgets",
+            "categoryKey": category_key,
+            "subcategoryKey": subcategory_key,
             "costPriceCents": 500,
             "sellingPriceCents": 1200,
             "stockQuantity": 2,
@@ -435,7 +489,9 @@ async fn low_stock_lists_products_at_or_below_threshold() {
 #[tokio::test]
 async fn category_endpoints_read_seeded_categories() {
     let app = common::spawn_app().await;
-    let category = seed_category(&app.db, &["Alpha", "Beta"]).await;
+    let category_key = seed_category(&app.db).await;
+    seed_subcategory(&app.db, &category_key, "Alpha").await;
+    seed_subcategory(&app.db, &category_key, "Beta").await;
 
     let (status, all) = send(&app.router, "GET", "/api/inventory/categories", None).await;
     assert_eq!(status, StatusCode::OK);
@@ -443,26 +499,30 @@ async fn category_endpoints_read_seeded_categories() {
     assert!(
         categories
             .iter()
-            .any(|entry| entry["name"] == category && entry["subcategories"][0] == "Alpha")
+            .any(|entry| entry["key"] == category_key
+                && entry["subcategories"][0]["name"] == "Alpha")
     );
 
     let (status, subs) = send(
         &app.router,
         "GET",
-        &format!(
-            "/api/inventory/categories/{}/subcategories",
-            urlencoding_encode(&category)
-        ),
+        &format!("/api/inventory/categories/{category_key}/subcategories"),
         None,
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(subs["data"]["subcategories"], json!(["Alpha", "Beta"]));
+    let subcategory_names: Vec<&str> = subs["data"]["subcategories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(subcategory_names, vec!["Alpha", "Beta"]);
 
     let (status, missing) = send(
         &app.router,
         "GET",
-        "/api/inventory/categories/Nonexistent%20Category/subcategories",
+        "/api/inventory/categories/cat_does_not_exist/subcategories",
         None,
     )
     .await;
@@ -471,10 +531,18 @@ async fn category_endpoints_read_seeded_categories() {
 
     let (status, valid) = send(&app.router, "GET", "/api/inventory/categories/valid", None).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(
-        valid["data"]["categorySubcategoryMap"][&category],
-        json!(["Alpha", "Beta"])
-    );
+    let valid_categories = valid["data"]["categories"].as_array().unwrap();
+    let entry = valid_categories
+        .iter()
+        .find(|entry| entry["key"] == category_key)
+        .expect("seeded category present in valid categories response");
+    let valid_subcategory_names: Vec<&str> = entry["subcategories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(valid_subcategory_names, vec!["Alpha", "Beta"]);
 }
 
 #[tokio::test]
@@ -530,7 +598,12 @@ async fn category_admin_crud_lifecycle_and_in_use_guards() {
     .await;
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(created["data"]["name"], name);
-    assert_eq!(created["data"]["subcategories"], json!(["Alpha"]));
+    let category_key = created["data"]["key"].as_str().unwrap().to_string();
+    assert_eq!(created["data"]["subcategories"][0]["name"], "Alpha");
+    let alpha_key = created["data"]["subcategories"][0]["key"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let (status, duplicate) = send_authed(
         &app.router,
@@ -543,15 +616,14 @@ async fn category_admin_crud_lifecycle_and_in_use_guards() {
     assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(duplicate["code"], "CATEGORY_ALREADY_EXISTS");
 
-    // Renaming should cascade onto any product already using the old name.
     let (_, product) = send(
         &app.router,
         "POST",
         "/api/inventory/products",
         Some(json!({
             "name": "Cascade Widget",
-            "category": name,
-            "subcategory": "Alpha",
+            "categoryKey": category_key,
+            "subcategoryKey": alpha_key,
             "costPriceCents": 500,
             "sellingPriceCents": 1000,
             "stockQuantity": 1,
@@ -561,23 +633,20 @@ async fn category_admin_crud_lifecycle_and_in_use_guards() {
     .await;
     let product_id = product["data"]["id"].as_str().unwrap().to_string();
 
+    // Renaming the category is now a pure display-label change — the
+    // product's categoryKey (the actual FK) must stay exactly the same.
     let renamed = format!("{name} Renamed");
     let (status, updated) = send_authed(
         &app.router,
         "PUT",
-        &format!("/api/inventory/categories/{}", urlencoding_encode(&name)),
+        &format!("/api/inventory/categories/{category_key}"),
         Some(json!({ "name": renamed })),
         &admin,
     )
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(updated["data"]["name"], renamed);
-    assert!(
-        updated["message"]
-            .as_str()
-            .unwrap()
-            .contains("1 product(s) renamed")
-    );
+    assert_eq!(updated["data"]["key"], category_key);
 
     let (_, fetched_product) = send(
         &app.router,
@@ -586,13 +655,14 @@ async fn category_admin_crud_lifecycle_and_in_use_guards() {
         None,
     )
     .await;
+    assert_eq!(fetched_product["data"]["categoryKey"], category_key);
     assert_eq!(fetched_product["data"]["category"], renamed);
 
     // Category still has a product on it, and the subcategory does too.
     let (status, category_in_use) = send_authed(
         &app.router,
         "DELETE",
-        &format!("/api/inventory/categories/{}", urlencoding_encode(&renamed)),
+        &format!("/api/inventory/categories/{category_key}"),
         None,
         &admin,
     )
@@ -603,10 +673,7 @@ async fn category_admin_crud_lifecycle_and_in_use_guards() {
     let (status, subcategory_in_use) = send_authed(
         &app.router,
         "DELETE",
-        &format!(
-            "/api/inventory/categories/{}/subcategories/Alpha",
-            urlencoding_encode(&renamed)
-        ),
+        &format!("/api/inventory/categories/{category_key}/subcategories/{alpha_key}"),
         None,
         &admin,
     )
@@ -619,25 +686,25 @@ async fn category_admin_crud_lifecycle_and_in_use_guards() {
     let (status, with_beta) = send_authed(
         &app.router,
         "POST",
-        &format!(
-            "/api/inventory/categories/{}/subcategories",
-            urlencoding_encode(&renamed)
-        ),
-        Some(json!({ "subcategory": "Beta" })),
+        &format!("/api/inventory/categories/{category_key}/subcategories"),
+        Some(json!({ "name": "Beta" })),
         &admin,
     )
     .await;
     assert_eq!(status, StatusCode::CREATED);
-    assert_eq!(with_beta["data"]["subcategories"], json!(["Alpha", "Beta"]));
+    let subcategory_names: Vec<&str> = with_beta["data"]["subcategories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(subcategory_names, vec!["Alpha", "Beta"]);
 
     let (status, duplicate_sub) = send_authed(
         &app.router,
         "POST",
-        &format!(
-            "/api/inventory/categories/{}/subcategories",
-            urlencoding_encode(&renamed)
-        ),
-        Some(json!({ "subcategory": "Beta" })),
+        &format!("/api/inventory/categories/{category_key}/subcategories"),
+        Some(json!({ "name": "Beta" })),
         &admin,
     )
     .await;
@@ -655,24 +722,24 @@ async fn category_admin_crud_lifecycle_and_in_use_guards() {
     let (status, subcategory_removed) = send_authed(
         &app.router,
         "DELETE",
-        &format!(
-            "/api/inventory/categories/{}/subcategories/Alpha",
-            urlencoding_encode(&renamed)
-        ),
+        &format!("/api/inventory/categories/{category_key}/subcategories/{alpha_key}"),
         None,
         &admin,
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(
-        subcategory_removed["data"]["subcategories"],
-        json!(["Beta"])
-    );
+    let remaining_names: Vec<&str> = subcategory_removed["data"]["subcategories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(remaining_names, vec!["Beta"]);
 
     let (status, deleted) = send_authed(
         &app.router,
         "DELETE",
-        &format!("/api/inventory/categories/{}", urlencoding_encode(&renamed)),
+        &format!("/api/inventory/categories/{category_key}"),
         None,
         &admin,
     )
@@ -683,28 +750,10 @@ async fn category_admin_crud_lifecycle_and_in_use_guards() {
     let (status, missing) = send(
         &app.router,
         "GET",
-        &format!(
-            "/api/inventory/categories/{}/subcategories",
-            urlencoding_encode(&renamed)
-        ),
+        &format!("/api/inventory/categories/{category_key}/subcategories"),
         None,
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(missing["code"], "CATEGORY_NOT_FOUND");
-}
-
-/// Minimal percent-encoding for path segments built from test category
-/// names (which may contain spaces) — avoids pulling in a URL-encoding
-/// crate just for tests.
-fn urlencoding_encode(input: &str) -> String {
-    input
-        .bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                (b as char).to_string()
-            }
-            _ => format!("%{b:02X}"),
-        })
-        .collect()
 }
