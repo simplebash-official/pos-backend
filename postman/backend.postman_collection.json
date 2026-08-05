@@ -1,0 +1,764 @@
+{
+  "info": {
+    "_postman_id": "32f8d03c-bdaf-46ba-8fd5-f0be13ee0083",
+    "name": "jana2u-pos backend",
+    "description": "Rust/Axum API backend for jana2u-pos, a point-of-sale system for a repair/retail shop.\n\nAll requests inherit the collection-level Bearer auth (`{{accessToken}}`) \u2014 set it once per environment (Developement/Production) after obtaining a JWT. Admin-gated endpoints (inventory category/subcategory writes) additionally require the token's `role` claim to be `admin`.\n\nBase URL, and the access token, are environment variables \u2014 switch the active Postman environment to point requests at dev vs prod.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "46626151"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [],
+  "variable": [
+    {
+      "key": "productId",
+      "value": "65f1a2b3c4d5e6f7a8b9c0d1",
+      "type": "string",
+      "description": "Sample product ObjectId \u2014 replace with a real id from List Products."
+    },
+    {
+      "key": "categoryName",
+      "value": "Phone Repairs",
+      "type": "string",
+      "description": "Sample category name (seeded via `cargo run --bin seed_providers`)."
+    },
+    {
+      "key": "subcategoryName",
+      "value": "Screens",
+      "type": "string",
+      "description": "Sample subcategory name, valid under categoryName."
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "health"
+              ]
+            },
+            "description": "Liveness check \u2014 always returns 200 if the process is up. Doesn't touch MongoDB."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Auth Module Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth"
+              ]
+            },
+            "description": "Placeholder status route for the auth module. Real endpoints are not implemented yet."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Billing",
+      "item": [
+        {
+          "name": "Billing Module Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/billing",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "billing"
+              ]
+            },
+            "description": "Placeholder status route for the billing module. Real endpoints are not implemented yet."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Customers",
+      "item": [
+        {
+          "name": "Customers Module Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/customers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "customers"
+              ]
+            },
+            "description": "Placeholder status route for the customers module. Real endpoints are not implemented yet."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Inventory",
+      "item": [
+        {
+          "name": "Module",
+          "item": [
+            {
+              "name": "Inventory Module Status",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/inventory",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory"
+                  ]
+                },
+                "description": "Inventory module status/health check."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Products",
+          "item": [
+            {
+              "name": "List Products",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/inventory/products?search=screen&category=Phone%20Repairs&subcategory=Screens&lowStock=true&page=1&limit=20&sortBy=updatedAt&sortOrder=desc",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory",
+                    "products"
+                  ],
+                  "query": [
+                    {
+                      "key": "search",
+                      "value": "screen",
+                      "description": "Free-text search across name/sku/barcode",
+                      "disabled": true
+                    },
+                    {
+                      "key": "category",
+                      "value": "Phone Repairs",
+                      "description": "Filter by exact category name",
+                      "disabled": true
+                    },
+                    {
+                      "key": "subcategory",
+                      "value": "Screens",
+                      "description": "Filter by exact subcategory name",
+                      "disabled": true
+                    },
+                    {
+                      "key": "lowStock",
+                      "value": "true",
+                      "description": "Only products at/below their min stock threshold",
+                      "disabled": true
+                    },
+                    {
+                      "key": "page",
+                      "value": "1",
+                      "description": "1-based page number"
+                    },
+                    {
+                      "key": "limit",
+                      "value": "20",
+                      "description": "Page size"
+                    },
+                    {
+                      "key": "sortBy",
+                      "value": "updatedAt",
+                      "description": "Whitelisted sort field",
+                      "disabled": true
+                    },
+                    {
+                      "key": "sortOrder",
+                      "value": "desc",
+                      "description": "asc | desc",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "List products with search, filters, pagination and sorting."
+              },
+              "response": []
+            },
+            {
+              "name": "Get Product",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/inventory/products/{{productId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory",
+                    "products",
+                    "{{productId}}"
+                  ]
+                },
+                "description": "Fetch a single product by its Mongo ObjectId."
+              },
+              "response": []
+            },
+            {
+              "name": "Create Product",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/inventory/products",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory",
+                    "products"
+                  ]
+                },
+                "description": "Create a new product. `category`/`subcategory` must be a valid pair (see GET /categories/valid). Prices are integer cents.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"sku\": \"PHN-SCR-001\",\n  \"barcode\": \"8901234567890\",\n  \"name\": \"iPhone 13 Screen Replacement\",\n  \"category\": \"Phone Repairs\",\n  \"subcategory\": \"Screens\",\n  \"costPriceCents\": 450000,\n  \"sellingPriceCents\": 650000,\n  \"stockQuantity\": 10,\n  \"minStockThreshold\": 3\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Update Product",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/inventory/products/{{productId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory",
+                    "products",
+                    "{{productId}}"
+                  ]
+                },
+                "description": "Partially update a product \u2014 omit any field to leave it unchanged.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"iPhone 13 Screen Replacement (OEM)\",\n  \"sellingPriceCents\": 680000,\n  \"minStockThreshold\": 5\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Delete Product",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/inventory/products/{{productId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory",
+                    "products",
+                    "{{productId}}"
+                  ]
+                },
+                "description": "Delete a single product by id."
+              },
+              "response": []
+            },
+            {
+              "name": "Batch Delete Products",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/inventory/products",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory",
+                    "products"
+                  ]
+                },
+                "description": "Delete multiple products at once. Ids that fail to parse as ObjectId are silently skipped.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"productIds\": [\n    \"65f1a2b3c4d5e6f7a8b9c0d1\",\n    \"65f1a2b3c4d5e6f7a8b9c0d2\"\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Stock",
+          "item": [
+            {
+              "name": "Adjust Stock",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/inventory/products/{{productId}}/stock",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory",
+                    "products",
+                    "{{productId}}",
+                    "stock"
+                  ]
+                },
+                "description": "Adjust a product's stock by a signed delta (positive = receipt, negative = consumption/sale).",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"delta\": -1,\n  \"reason\": \"Sold to walk-in customer\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Low Stock Products",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/inventory/products/low-stock",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory",
+                    "products",
+                    "low-stock"
+                  ]
+                },
+                "description": "List products at or below their minimum stock threshold."
+              },
+              "response": []
+            },
+            {
+              "name": "Product Stock Movements",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/inventory/products/{{productId}}/movements",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory",
+                    "products",
+                    "{{productId}}",
+                    "movements"
+                  ]
+                },
+                "description": "Stock movement (audit trail) history for a single product."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Categories",
+          "item": [
+            {
+              "name": "List Categories",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/inventory/categories",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory",
+                    "categories"
+                  ]
+                },
+                "description": "List all categories with their subcategories."
+              },
+              "response": []
+            },
+            {
+              "name": "Create Category",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/inventory/categories",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory",
+                    "categories"
+                  ]
+                },
+                "description": "Create a new top-level category with its subcategories.\n\n**Requires admin JWT** (`role: admin` claim) \u2014 inherited Bearer token must be an admin token or the API returns 403 `ADMIN_REQUIRED`.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Laptop Repairs\",\n  \"icon\": \"Laptop\",\n  \"color\": \"indigo\",\n  \"subcategories\": [\n    \"Screens\",\n    \"Keyboards\",\n    \"Batteries\"\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Update Category",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/inventory/categories/{{categoryName}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory",
+                    "categories",
+                    "{{categoryName}}"
+                  ]
+                },
+                "description": "Partially update a category. Renaming `name` cascades onto every product referencing the old name.\n\n**Requires admin JWT** (`role: admin` claim) \u2014 inherited Bearer token must be an admin token or the API returns 403 `ADMIN_REQUIRED`.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"color\": \"cyan\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Delete Category",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/inventory/categories/{{categoryName}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory",
+                    "categories",
+                    "{{categoryName}}"
+                  ]
+                },
+                "description": "Delete a category. Blocked with 409 while any product still references it.\n\n**Requires admin JWT** (`role: admin` claim) \u2014 inherited Bearer token must be an admin token or the API returns 403 `ADMIN_REQUIRED`."
+              },
+              "response": []
+            },
+            {
+              "name": "Valid Categories",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/inventory/categories/valid",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory",
+                    "categories",
+                    "valid"
+                  ]
+                },
+                "description": "Flat category list plus a category-to-subcategories map, for client-side form validation."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Subcategories",
+          "item": [
+            {
+              "name": "Get Category Subcategories",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/inventory/categories/{{categoryName}}/subcategories",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory",
+                    "categories",
+                    "{{categoryName}}",
+                    "subcategories"
+                  ]
+                },
+                "description": "List the subcategories of a single category."
+              },
+              "response": []
+            },
+            {
+              "name": "Add Subcategory",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/inventory/categories/{{categoryName}}/subcategories",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory",
+                    "categories",
+                    "{{categoryName}}",
+                    "subcategories"
+                  ]
+                },
+                "description": "Add a new subcategory to a category.\n\n**Requires admin JWT** (`role: admin` claim) \u2014 inherited Bearer token must be an admin token or the API returns 403 `ADMIN_REQUIRED`.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"subcategory\": \"Cameras\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Remove Subcategory",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/inventory/categories/{{categoryName}}/subcategories/{{subcategoryName}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory",
+                    "categories",
+                    "{{categoryName}}",
+                    "subcategories",
+                    "{{subcategoryName}}"
+                  ]
+                },
+                "description": "Remove a subcategory. Blocked with 409 while any product still references it.\n\n**Requires admin JWT** (`role: admin` claim) \u2014 inherited Bearer token must be an admin token or the API returns 403 `ADMIN_REQUIRED`."
+              },
+              "response": []
+            }
+          ]
+        }
+      ],
+      "description": "Reference module \u2014 full product CRUD, stock adjustment/movements, and category/subcategory management."
+    },
+    {
+      "name": "Print Jobs",
+      "item": [
+        {
+          "name": "Print Jobs Module Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/print-jobs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "print-jobs"
+              ]
+            },
+            "description": "Placeholder status route for the print jobs module. Real endpoints are not implemented yet."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Repairs",
+      "item": [
+        {
+          "name": "Repairs Module Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/repairs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "repairs"
+              ]
+            },
+            "description": "Placeholder status route for the repairs module. Real endpoints are not implemented yet."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Reports",
+      "item": [
+        {
+          "name": "Reports Module Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/reports",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports"
+              ]
+            },
+            "description": "Placeholder status route for the reports module. Real endpoints are not implemented yet."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
