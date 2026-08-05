@@ -274,7 +274,9 @@ pub(crate) async fn remove_subcategory(
 
     let updated = repository::category::remove_subcategory(db, &category, &subcategory)
         .await?
-        .ok_or_else(|| AppError::not_found_with_code("Category not found", codes::CATEGORY_NOT_FOUND))?;
+        .ok_or_else(|| {
+            AppError::not_found_with_code("Category not found", codes::CATEGORY_NOT_FOUND)
+        })?;
 
     Ok(updated.into_category_info())
 }

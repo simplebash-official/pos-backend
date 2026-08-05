@@ -113,22 +113,16 @@ async fn seed_category(db: &mongodb::Database, subcategories: &[&str]) -> String
     name
 }
 
-fn unique_sku() -> String {
-    format!("TEST-{}", Uuid::new_v4())
-}
-
 #[tokio::test]
 async fn product_lifecycle_create_get_update_stock_and_delete() {
     let app = common::spawn_app().await;
     let category = seed_category(&app.db, &["Widgets"]).await;
-    let sku = unique_sku();
 
     let (status, created) = send(
         &app.router,
         "POST",
         "/api/inventory/products",
         Some(json!({
-            "sku": sku,
             "name": "Test Widget",
             "category": category,
             "subcategory": "Widgets",
@@ -143,7 +137,10 @@ async fn product_lifecycle_create_get_update_stock_and_delete() {
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(created["success"], true);
     let id = created["data"]["id"].as_str().unwrap().to_string();
-    assert_eq!(created["data"]["sku"], sku);
+    // `category` is seeded as "Test Category <uuid>" -> derived code "TES";
+    // "Widgets" -> "WID" (see service::sku::derive_code).
+    let sku = created["data"]["sku"].as_str().unwrap().to_string();
+    assert!(sku.starts_with("TES-WID-"), "unexpected sku: {sku}");
     assert_eq!(created["data"]["stockQuantity"], 10);
 
     let (status, fetched) = send(
@@ -225,7 +222,7 @@ async fn product_lifecycle_create_get_update_stock_and_delete() {
 }
 
 #[tokio::test]
-async fn create_product_validates_category_and_pricing_and_sku_uniqueness() {
+async fn create_product_validates_category_and_pricing_and_auto_generates_sequential_skus() {
     let app = common::spawn_app().await;
     let category = seed_category(&app.db, &["Widgets"]).await;
 
@@ -234,7 +231,6 @@ async fn create_product_validates_category_and_pricing_and_sku_uniqueness() {
         "POST",
         "/api/inventory/products",
         Some(json!({
-            "sku": unique_sku(),
             "name": "Bad Category Widget",
             "category": category,
             "subcategory": "Not A Real Subcategory",
@@ -253,7 +249,6 @@ async fn create_product_validates_category_and_pricing_and_sku_uniqueness() {
         "POST",
         "/api/inventory/products",
         Some(json!({
-            "sku": unique_sku(),
             "name": "Free Widget",
             "category": category,
             "subcategory": "Widgets",
@@ -266,10 +261,11 @@ async fn create_product_validates_category_and_pricing_and_sku_uniqueness() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 
-    let sku = unique_sku();
+    // Two products created back-to-back under the same category/subcategory
+    // should get SKUs sharing a prefix but with sequential, distinct suffixes
+    // — proving the atomic per-prefix counter, not client input, drives them.
     let body = json!({
-        "sku": sku,
-        "name": "Duplicate Widget",
+        "name": "Sequential Widget",
         "category": category,
         "subcategory": "Widgets",
         "costPriceCents": 1000,
@@ -277,7 +273,7 @@ async fn create_product_validates_category_and_pricing_and_sku_uniqueness() {
         "stockQuantity": 1,
         "minStockThreshold": 1,
     });
-    let (status, _) = send(
+    let (status, first) = send(
         &app.router,
         "POST",
         "/api/inventory/products",
@@ -285,11 +281,15 @@ async fn create_product_validates_category_and_pricing_and_sku_uniqueness() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED);
+    let first_sku = first["data"]["sku"].as_str().unwrap().to_string();
 
-    let (status, duplicate) =
-        send(&app.router, "POST", "/api/inventory/products", Some(body)).await;
-    assert_eq!(status, StatusCode::CONFLICT);
-    assert_eq!(duplicate["code"], "SKU_ALREADY_EXISTS");
+    let (status, second) = send(&app.router, "POST", "/api/inventory/products", Some(body)).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let second_sku = second["data"]["sku"].as_str().unwrap().to_string();
+
+    assert_ne!(first_sku, second_sku);
+    let prefix = first_sku.rsplit_once('-').unwrap().0;
+    assert!(second_sku.starts_with(&format!("{prefix}-")));
 }
 
 #[tokio::test]
@@ -297,13 +297,11 @@ async fn list_products_filters_by_category_and_search() {
     let app = common::spawn_app().await;
     let category = seed_category(&app.db, &["Widgets"]).await;
 
-    let matching_sku = unique_sku();
     send(
         &app.router,
         "POST",
         "/api/inventory/products",
         Some(json!({
-            "sku": matching_sku,
             "name": "Findable Gadget",
             "category": category,
             "subcategory": "Widgets",
@@ -320,7 +318,6 @@ async fn list_products_filters_by_category_and_search() {
         "POST",
         "/api/inventory/products",
         Some(json!({
-            "sku": unique_sku(),
             "name": "Unrelated Item",
             "category": category,
             "subcategory": "Widgets",
@@ -345,7 +342,7 @@ async fn list_products_filters_by_category_and_search() {
     assert_eq!(status, StatusCode::OK);
     let items = listed["data"]["items"].as_array().unwrap();
     assert_eq!(items.len(), 1);
-    assert_eq!(items[0]["sku"], matching_sku);
+    assert_eq!(items[0]["name"], "Findable Gadget");
     assert_eq!(listed["data"]["pagination"]["total"], 1);
 }
 
@@ -361,7 +358,6 @@ async fn delete_products_batch_removes_multiple() {
             "POST",
             "/api/inventory/products",
             Some(json!({
-                "sku": unique_sku(),
                 "name": "Batch Widget",
                 "category": category,
                 "subcategory": "Widgets",
@@ -407,7 +403,6 @@ async fn low_stock_lists_products_at_or_below_threshold() {
         "POST",
         "/api/inventory/products",
         Some(json!({
-            "sku": unique_sku(),
             "name": "Low Stock Widget",
             "category": category,
             "subcategory": "Widgets",
@@ -544,13 +539,11 @@ async fn category_admin_crud_lifecycle_and_in_use_guards() {
     assert_eq!(duplicate["code"], "CATEGORY_ALREADY_EXISTS");
 
     // Renaming should cascade onto any product already using the old name.
-    let sku = unique_sku();
     let (_, product) = send(
         &app.router,
         "POST",
         "/api/inventory/products",
         Some(json!({
-            "sku": sku,
             "name": "Cascade Widget",
             "category": name,
             "subcategory": "Alpha",

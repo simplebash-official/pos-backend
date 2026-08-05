@@ -5,4 +5,5 @@
 
 pub(crate) mod category;
 pub(crate) mod product;
+pub(crate) mod sku;
 pub(crate) mod stock;

@@ -155,22 +155,21 @@ pub(crate) async fn list_products(
 pub(crate) async fn get_product(db: &Database, id: ObjectId) -> AppResult<Product> {
     let document = repository::product::find_product_by_id(db, id)
         .await?
-        .ok_or_else(|| AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND))?;
+        .ok_or_else(|| {
+            AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
+        })?;
 
     Ok(document.into_product())
 }
 
 /// Validates required fields, price/stock invariants, and category
-/// membership, then enforces SKU uniqueness before inserting — in that
-/// order, so a request with both a bad price and a duplicate SKU reports
-/// the validation error first rather than a confusing conflict.
+/// membership, then generates the product's SKU from its category/
+/// subcategory (see `service::sku::generate_sku`) — validation runs first
+/// so an invalid category never consumes a sequence number.
 pub(crate) async fn create_product(
     db: &Database,
     body: CreateProductRequest,
 ) -> AppResult<Product> {
-    if body.sku.trim().is_empty() {
-        return Err(AppError::validation("SKU is required"));
-    }
     if body.name.trim().is_empty() {
         return Err(AppError::validation("Product name is required"));
     }
@@ -182,21 +181,25 @@ pub(crate) async fn create_product(
     )?;
     ensure_valid_category(db, &body.category, &body.subcategory).await?;
 
-    if repository::product::find_product_by_sku(db, &body.sku)
+    let sku = super::sku::generate_sku(db, &body.category, &body.subcategory).await?;
+
+    // Defensive fallback only — `generate_sku`'s atomic per-prefix counter
+    // already guarantees uniqueness, so this should never actually fire.
+    if repository::product::find_product_by_sku(db, &sku)
         .await?
         .is_some()
     {
         return Err(AppError::custom(
             StatusCode::CONFLICT,
             codes::SKU_ALREADY_EXISTS,
-            format!("A product with SKU '{}' already exists", body.sku),
+            format!("A product with SKU '{sku}' already exists"),
         ));
     }
 
     let document = ProductDocument {
         id: None,
         key: generate_id(prefixes::PRODUCT),
-        sku: body.sku,
+        sku,
         barcode: body.barcode,
         name: body.name,
         category: body.category,
@@ -222,7 +225,9 @@ pub(crate) async fn update_product(
 ) -> AppResult<Product> {
     let existing = repository::product::find_product_by_id(db, id)
         .await?
-        .ok_or_else(|| AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND))?;
+        .ok_or_else(|| {
+            AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
+        })?;
 
     if let Some(name) = &body.name
         && name.trim().is_empty()
@@ -267,7 +272,9 @@ pub(crate) async fn update_product(
 
     let updated = repository::product::update_product(db, id, set_doc)
         .await?
-        .ok_or_else(|| AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND))?;
+        .ok_or_else(|| {
+            AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
+        })?;
 
     Ok(updated.into_product())
 }
@@ -277,7 +284,9 @@ pub(crate) async fn update_product(
 pub(crate) async fn delete_product(db: &Database, id: ObjectId) -> AppResult<Product> {
     let deleted = repository::product::delete_product(db, id)
         .await?
-        .ok_or_else(|| AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND))?;
+        .ok_or_else(|| {
+            AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
+        })?;
 
     Ok(deleted.into_product())
 }

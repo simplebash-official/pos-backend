@@ -274,10 +274,10 @@
                     "products"
                   ]
                 },
-                "description": "Create a new product. `category`/`subcategory` must be a valid pair (see GET /categories/valid). Prices are integer cents.",
+                "description": "Create a new product. `category`/`subcategory` must be a valid pair (see GET /categories/valid). Prices are integer cents. `sku` is NOT sent \u2014 it's auto-generated server-side from category/subcategory (e.g. \"PHO-SCR-0001\"); the request body has no field for it.",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"sku\": \"PHN-SCR-001\",\n  \"barcode\": \"8901234567890\",\n  \"name\": \"iPhone 13 Screen Replacement\",\n  \"category\": \"Phone Repairs\",\n  \"subcategory\": \"Screens\",\n  \"costPriceCents\": 450000,\n  \"sellingPriceCents\": 650000,\n  \"stockQuantity\": 10,\n  \"minStockThreshold\": 3\n}",
+                  "raw": "{\n  \"barcode\": \"8901234567890\",\n  \"name\": \"iPhone 13 Screen Replacement\",\n  \"category\": \"Phone Repairs\",\n  \"subcategory\": \"Screens\",\n  \"costPriceCents\": 450000,\n  \"sellingPriceCents\": 650000,\n  \"stockQuantity\": 10,\n  \"minStockThreshold\": 3\n}",
                   "options": {
                     "raw": {
                       "language": "json"

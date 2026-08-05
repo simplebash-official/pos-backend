@@ -33,7 +33,9 @@ pub(crate) async fn adjust_stock(
 ) -> AppResult<StockAdjustmentResponse> {
     let existing = repository::product::find_product_by_id(db, id)
         .await?
-        .ok_or_else(|| AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND))?;
+        .ok_or_else(|| {
+            AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
+        })?;
 
     let previous_stock_quantity = existing.stock_quantity;
     let new_quantity = previous_stock_quantity + body.delta;
@@ -51,7 +53,9 @@ pub(crate) async fn adjust_stock(
     let now = BsonDateTime::now();
     let updated = repository::product::adjust_product_stock(db, id, new_quantity, now)
         .await?
-        .ok_or_else(|| AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND))?;
+        .ok_or_else(|| {
+            AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
+        })?;
 
     repository::stock::insert_stock_movement(
         db,

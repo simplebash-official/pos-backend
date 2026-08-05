@@ -31,13 +31,15 @@ pub struct Product {
     pub updated_at: DateTime<Utc>,
 }
 
-/// Body for `POST /products`. Prices are integer cents (never float) to
-/// avoid rounding drift; `stock_quantity`/`min_stock_threshold` default to
-/// `0` via `#[serde(default)]` so a minimal request still deserializes.
+/// Body for `POST /products`. `sku` is deliberately absent — it's
+/// generated server-side from `category`/`subcategory` (see
+/// `service::sku::generate_sku`), not client-supplied. Prices are integer
+/// cents (never float) to avoid rounding drift; `stock_quantity`/
+/// `min_stock_threshold` default to `0` via `#[serde(default)]` so a
+/// minimal request still deserializes.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateProductRequest {
-    pub sku: String,
     #[serde(default)]
     pub barcode: Option<String>,
     pub name: String,
