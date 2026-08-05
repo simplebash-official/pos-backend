@@ -12,6 +12,7 @@ pub const INTERNAL_SERVER_ERROR: &str = "INTERNAL_SERVER_ERROR";
 pub const PRODUCT_NOT_FOUND: &str = "PRODUCT_NOT_FOUND";
 pub const SKU_ALREADY_EXISTS: &str = "SKU_ALREADY_EXISTS";
 pub const BARCODE_ALREADY_EXISTS: &str = "BARCODE_ALREADY_EXISTS";
+pub const INSUFFICIENT_STOCK: &str = "INSUFFICIENT_STOCK";
 
 // Categories & Subcategories Status Codes
 pub const CATEGORY_NOT_FOUND: &str = "CATEGORY_NOT_FOUND";

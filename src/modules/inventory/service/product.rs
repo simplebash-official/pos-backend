@@ -155,7 +155,7 @@ pub(crate) async fn list_products(
 pub(crate) async fn get_product(db: &Database, id: ObjectId) -> AppResult<Product> {
     let document = repository::product::find_product_by_id(db, id)
         .await?
-        .ok_or_else(|| AppError::not_found_with_code("Product not found", "PRODUCT_NOT_FOUND"))?;
+        .ok_or_else(|| AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND))?;
 
     Ok(document.into_product())
 }
@@ -222,7 +222,7 @@ pub(crate) async fn update_product(
 ) -> AppResult<Product> {
     let existing = repository::product::find_product_by_id(db, id)
         .await?
-        .ok_or_else(|| AppError::not_found_with_code("Product not found", "PRODUCT_NOT_FOUND"))?;
+        .ok_or_else(|| AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND))?;
 
     if let Some(name) = &body.name
         && name.trim().is_empty()
@@ -267,7 +267,7 @@ pub(crate) async fn update_product(
 
     let updated = repository::product::update_product(db, id, set_doc)
         .await?
-        .ok_or_else(|| AppError::not_found_with_code("Product not found", "PRODUCT_NOT_FOUND"))?;
+        .ok_or_else(|| AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND))?;
 
     Ok(updated.into_product())
 }
@@ -277,7 +277,7 @@ pub(crate) async fn update_product(
 pub(crate) async fn delete_product(db: &Database, id: ObjectId) -> AppResult<Product> {
     let deleted = repository::product::delete_product(db, id)
         .await?
-        .ok_or_else(|| AppError::not_found_with_code("Product not found", "PRODUCT_NOT_FOUND"))?;
+        .ok_or_else(|| AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND))?;
 
     Ok(deleted.into_product())
 }
