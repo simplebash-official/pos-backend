@@ -22,6 +22,10 @@ use utoipa::{
         (name = "print_jobs", description = "Print jobs"),
         (name = "repairs", description = "Repairs"),
         (name = "reports", description = "Reports"),
+        (name = "suppliers", description = "Suppliers"),
+        (name = "supplier_products", description = "Supplier-product links"),
+        (name = "purchases", description = "Supplier purchase/stock-intake history"),
+        (name = "users", description = "User accounts & role management"),
     )
 )]
 pub struct ApiDoc;

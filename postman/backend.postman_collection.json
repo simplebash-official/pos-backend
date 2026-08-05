@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "32f8d03c-bdaf-46ba-8fd5-f0be13ee0083",
     "name": "jana2u-pos backend",
-    "description": "Rust/Axum API backend for jana2u-pos, a point-of-sale system for a repair/retail shop.\n\nAll requests inherit the collection-level Bearer auth (`{{accessToken}}`) \u2014 set it once per environment (Developement/Production) after obtaining a JWT. Admin-gated endpoints (inventory category/subcategory writes) additionally require the token's `role` claim to be `admin`.\n\nBase URL, and the access token, are environment variables \u2014 switch the active Postman environment to point requests at dev vs prod.",
+    "description": "Rust/Axum API backend for jana2u-pos, a point-of-sale system for a repair/retail shop.\n\nAll requests inherit the collection-level Bearer auth (`{{accessToken}}`) \u2014 set it once per environment (Developement/Production) after obtaining a JWT via Auth > Login (its Tests script auto-populates `{{accessToken}}` for you on success, so nothing to copy/paste). Admin-gated endpoints (inventory category/subcategory writes) additionally require the token's `role` claim to be `admin`. Permission-gated endpoints (Users CRUD, Auth > List Login Sessions) require the token's `permissions` claim to include a specific permission (e.g. `users:manage`, `sessions:view`) \u2014 see CLAUDE.md's \"Auth, users & permissions\" section for the full role\u2192permission table; the seeded Admin (`cargo run --bin seed_admin`) has every permission.\n\nBase URL, and the access token, are environment variables \u2014 switch the active Postman environment to point requests at dev vs prod.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "_exporter_id": "46626151"
   },
@@ -35,6 +35,30 @@
       "value": "subcat_xxxxxxxxxxxxxxxx",
       "type": "string",
       "description": "A subcategory's system-generated `key`, valid under categoryKey — grab a real value from the same responses as categoryKey, never the display name."
+    },
+    {
+      "key": "productKey",
+      "value": "prod_xxxxxxxxxxxxxxxx",
+      "type": "string",
+      "description": "A product's system-generated `key` (from List/Get/Create Product) — used by Supplier Products/Purchases requests, never the raw productId."
+    },
+    {
+      "key": "supplierId",
+      "value": "65f1a2b3c4d5e6f7a8b9c0d1",
+      "type": "string",
+      "description": "Sample supplier ObjectId — replace with a real id from List Suppliers / Create Supplier."
+    },
+    {
+      "key": "supplierKey",
+      "value": "sup_xxxxxxxxxxxxxxxx",
+      "type": "string",
+      "description": "A supplier's system-generated `key` (from List/Get/Create Supplier) — used by Supplier Products/Purchases requests, never the raw supplierId."
+    },
+    {
+      "key": "userId",
+      "value": "65f1a2b3c4d5e6f7a8b9c0d1",
+      "type": "string",
+      "description": "A user account's Mongo ObjectId (from Login's response, or List/Create User) — used by Get/Update/Delete User and to filter List Login Sessions."
     }
   ],
   "item": [
@@ -66,25 +90,118 @@
       "name": "Auth",
       "item": [
         {
-          "name": "Auth Module Status",
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const data = pm.response.json().data;",
+                  "    pm.environment.set(\"accessToken\", data.token);",
+                  "    pm.environment.set(\"userId\", data.user.id);",
+                  "    console.log(`accessToken set for ${data.user.email} (${data.user.role})`);",
+                  "}"
+                ]
+              }
+            }
+          ],
           "request": {
-            "method": "GET",
-            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
-              "raw": "{{baseUrl}}/api/auth",
+              "raw": "{{baseUrl}}/api/auth/login",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
-                "auth"
+                "auth",
+                "login"
               ]
             },
-            "description": "Placeholder status route for the auth module. Real endpoints are not implemented yet."
+            "description": "Exchanges email/password for a JWT carrying the account's role and its role's default permission set. No auth required. On success, this request's Tests script auto-populates the `{{accessToken}}`/`{{userId}}` environment variables, so every other request's inherited Bearer auth picks it up immediately.\n\nUse `cargo run --bin seed_admin` to bootstrap the very first Admin account (registration is admin-provisioned only — there is no public register endpoint).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@jana2u.local\",\n  \"password\": \"ChangeMe123!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Current User (Me)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "me"
+              ]
+            },
+            "description": "Returns the account the inherited Bearer token belongs to. Re-reads from MongoDB on every call (rather than only decoding the token), so a deactivated account is caught immediately even with a still-valid token.\n\n**Requires a valid JWT** or the API returns 401."
+          },
+          "response": []
+        },
+        {
+          "name": "List Login Sessions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/sessions?userId={{userId}}&page=1&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "sessions"
+              ],
+              "query": [
+                {
+                  "key": "userId",
+                  "value": "{{userId}}",
+                  "description": "Restrict to one account's login history",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "1-based page number"
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Page size"
+                }
+              ]
+            },
+            "description": "Login history audit log — newest first. Each entry snapshots the account's name/email/role at the moment of that login, so it keeps reading the same way even if the account is later renamed. Not paginated the way Suppliers/Products are — this is an append-only log that grows without bound.\n\n**Requires the token's `permissions` claim to include `sessions:view`** (granted to Admin/Manager by default) or the API returns 403 `PERMISSION_DENIED`."
           },
           "response": []
         }
-      ]
+      ],
+      "description": "Login, \"who am I\", and login-session (audit) history. `users` (below) owns account CRUD/role management — see CLAUDE.md's \"Auth, users & permissions\" section."
     },
     {
       "name": "Billing",
@@ -759,6 +876,584 @@
           "response": []
         }
       ]
+    },
+    {
+      "name": "Suppliers",
+      "item": [
+        {
+          "name": "List Suppliers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/suppliers?search=mobile&category=Phone Parts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "suppliers"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "mobile",
+                  "description": "Free-text search across name/contactPerson/primaryPhone/address",
+                  "disabled": true
+                },
+                {
+                  "key": "category",
+                  "value": "Phone Parts",
+                  "description": "Filter by one exact suppliedCategories tag",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "List all suppliers (not paginated). No auth required."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Supplier",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/suppliers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "suppliers"
+              ]
+            },
+            "description": "Create a new supplier. `key` is server-generated, never client-supplied. The response's `key` is what Supplier Products/Purchases requests reference — copy it into the `supplierKey` collection variable (and the `id` into `supplierId`).\n\n**Requires a valid JWT** (any authenticated user — not admin-gated) or the API returns 401.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Colombo Mobile Parts\",\n  \"contactPerson\": \"Ranjith Silva\",\n  \"primaryPhone\": \"077 123 4567\",\n  \"secondaryPhone\": \"011 234 5678\",\n  \"address\": \"No. 45, First Cross Street, Pettah, Colombo 11\",\n  \"suppliedCategories\": [\n    \"Phone Parts\",\n    \"Display Assemblies\",\n    \"Batteries\",\n    \"Repair Tools\"\n  ],\n  \"email\": \"sales@colombomobileparts.lk\",\n  \"notes\": \"Preferred supplier for iPhone and Samsung original displays.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Supplier",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/suppliers/{{supplierId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "suppliers",
+                "{{supplierId}}"
+              ]
+            },
+            "description": "Fetch a single supplier by its Mongo ObjectId. No auth required."
+          },
+          "response": []
+        },
+        {
+          "name": "Replace Supplier",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/suppliers/{{supplierId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "suppliers",
+                "{{supplierId}}"
+              ]
+            },
+            "description": "Full replace — same shape as Create Supplier. Any optional field (secondaryPhone/email/notes) omitted from the body is cleared, unlike Update Supplier (PATCH) which leaves omitted fields untouched.\n\n**Requires a valid JWT** (any authenticated user) or the API returns 401.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Colombo Mobile Parts\",\n  \"contactPerson\": \"Ranjith Silva\",\n  \"primaryPhone\": \"077 999 8888\",\n  \"address\": \"No. 45, First Cross Street, Pettah, Colombo 11\",\n  \"suppliedCategories\": [\n    \"Phone Parts\",\n    \"Display Assemblies\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Supplier",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/suppliers/{{supplierId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "suppliers",
+                "{{supplierId}}"
+              ]
+            },
+            "description": "Partial update — omit any field to leave it unchanged.\n\n**Requires a valid JWT** (any authenticated user) or the API returns 401.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"primaryPhone\": \"077 999 8888\",\n  \"notes\": \"Updated delivery schedule\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Supplier",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/suppliers/{{supplierId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "suppliers",
+                "{{supplierId}}"
+              ]
+            },
+            "description": "Delete a single supplier by id. Cascades to remove its Supplier Product links. Blocked with 409 `SUPPLIER_HAS_PURCHASES` while any purchase still references it.\n\n**Requires a valid JWT** (any authenticated user) or the API returns 401."
+          },
+          "response": []
+        },
+        {
+          "name": "Batch Delete Suppliers",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/suppliers/batch",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "suppliers",
+                "batch"
+              ]
+            },
+            "description": "Delete multiple suppliers at once. Ids that fail to parse as ObjectId, don't resolve, or are blocked by the purchase-history guard are silently skipped — the response count reflects only what was actually deleted.\n\n**Requires a valid JWT** (any authenticated user) or the API returns 401.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ids\": [\n    \"65f1a2b3c4d5e6f7a8b9c0d1\",\n    \"65f1a2b3c4d5e6f7a8b9c0d2\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Supplier Categories",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/suppliers/categories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "suppliers",
+                "categories"
+              ]
+            },
+            "description": "Every distinct `suppliedCategories` tag currently in use across all suppliers, for autocomplete. No auth required."
+          },
+          "response": []
+        }
+      ],
+      "description": "Supplier CRUD: contact/business info plus the free-text category tags a supplier deals in."
+    },
+    {
+      "name": "Supplier Products",
+      "item": [
+        {
+          "name": "List Links",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/supplier-products?supplierKey={{supplierKey}}&productKey={{productKey}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "supplier-products"
+              ],
+              "query": [
+                {
+                  "key": "supplierKey",
+                  "value": "{{supplierKey}}",
+                  "description": "Links for one supplier"
+                },
+                {
+                  "key": "productKey",
+                  "value": "{{productKey}}",
+                  "description": "Links for one product",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Lists links scoped to a supplier, a product, or their intersection. At least one of supplierKey/productKey is required (400 otherwise). No auth required."
+          },
+          "response": []
+        },
+        {
+          "name": "Upsert Link",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/supplier-products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "supplier-products"
+              ]
+            },
+            "description": "Links a supplier to a product. If the (supplierKey, productKey) pair already has a link, updates its costPriceCents/notes in place instead of creating a duplicate. Both keys must reference existing documents (404 otherwise).\n\n**Requires a valid JWT** (any authenticated user) or the API returns 401.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"supplierKey\": \"{{supplierKey}}\",\n  \"productKey\": \"{{productKey}}\",\n  \"costPriceCents\": 75000,\n  \"notes\": \"Bulk discount on 100+ units\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Unlink",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/supplier-products/{{supplierKey}}/{{productKey}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "supplier-products",
+                "{{supplierKey}}",
+                "{{productKey}}"
+              ]
+            },
+            "description": "Removes a supplier-product link. 404 `SUPPLIER_PRODUCT_LINK_NOT_FOUND` if no such link exists.\n\n**Requires a valid JWT** (any authenticated user) or the API returns 401."
+          },
+          "response": []
+        },
+        {
+          "name": "Bulk Replace Links",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/supplier-products/bulk/{{supplierKey}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "supplier-products",
+                "bulk",
+                "{{supplierKey}}"
+              ]
+            },
+            "description": "Replaces every product link for a supplier with the given set of productKeys. Links for product keys that already existed keep their costPriceCents/notes; ones no longer listed are removed.\n\n**Requires a valid JWT** (any authenticated user) or the API returns 401.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productKeys\": [\n    \"{{productKey}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "The many-to-many join between suppliers and inventory products."
+    },
+    {
+      "name": "Purchases",
+      "item": [
+        {
+          "name": "List Purchases",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/purchases?supplierKey={{supplierKey}}&productKey={{productKey}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "purchases"
+              ],
+              "query": [
+                {
+                  "key": "supplierKey",
+                  "value": "{{supplierKey}}",
+                  "description": "Purchase history for one supplier, newest first"
+                },
+                {
+                  "key": "productKey",
+                  "value": "{{productKey}}",
+                  "description": "Purchase history for one product, newest first",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Purchase history scoped to a supplier, a product, or their intersection — enriched with supplier/product display data. At least one of supplierKey/productKey is required (400 otherwise). No auth required."
+          },
+          "response": []
+        },
+        {
+          "name": "Record Purchase",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/purchases",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "purchases"
+              ]
+            },
+            "description": "Records a stock intake from a supplier. Also increments the product's stockQuantity and writes a PurchaseReceipt stock movement (see Inventory > Stock > Product Stock Movements). Both keys must reference existing documents (404 otherwise).\n\n**Requires a valid JWT** (any authenticated user) or the API returns 401.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"supplierKey\": \"{{supplierKey}}\",\n  \"productKey\": \"{{productKey}}\",\n  \"quantity\": 50,\n  \"unitCostCents\": 150000,\n  \"date\": \"2026-07-30T10:00:00Z\",\n  \"referenceNo\": \"INV-1001\",\n  \"notes\": \"Monthly restock\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Supplier purchase / stock-intake history — recording a stock receipt also bumps the referenced product's stock in Inventory."
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "List Users",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users?search=jane&role=staff",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "jane",
+                  "description": "Free-text search across name/email",
+                  "disabled": true
+                },
+                {
+                  "key": "role",
+                  "value": "staff",
+                  "description": "admin | manager | staff",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "List all user accounts (not paginated — a shop's staff roster is small).\n\n**Requires the token's `permissions` claim to include `users:manage`** (granted to Admin by default) or the API returns 403 `PERMISSION_DENIED`."
+          },
+          "response": []
+        },
+        {
+          "name": "Create User",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users"
+              ]
+            },
+            "description": "Creates a new user account — admin-provisioned only, there is no public self-registration endpoint. `role` must be one of `admin`/`manager`/`staff`; its default permission set is computed fresh at that user's next login, never stored on the account.\n\n**Requires the token's `permissions` claim to include `users:manage`** (granted to Admin by default) or the API returns 403 `PERMISSION_DENIED`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Jane Fernando\",\n  \"email\": \"jane.fernando@example.com\",\n  \"password\": \"Password123!\",\n  \"role\": \"staff\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get User",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "{{userId}}"
+              ]
+            },
+            "description": "Fetch a single user account by its Mongo ObjectId.\n\n**Requires the token's `permissions` claim to include `users:manage`** or the API returns 403 `PERMISSION_DENIED`."
+          },
+          "response": []
+        },
+        {
+          "name": "Update User",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "{{userId}}"
+              ]
+            },
+            "description": "Partial update — omit any field to leave it unchanged. `password` present means rehash to the new value (takes effect on that user's next login); `isActive: false` deactivates the account, blocking both future logins and its already-issued tokens' next `GET /auth/me` call.\n\n**Requires the token's `permissions` claim to include `users:manage`** or the API returns 403 `PERMISSION_DENIED`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"manager\",\n  \"isActive\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete User",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "{{userId}}"
+              ]
+            },
+            "description": "Delete a user account. Blocked with a validation error `CANNOT_DELETE_SELF` if `{{userId}}` is the caller's own account.\n\n**Requires the token's `permissions` claim to include `users:manage`** or the API returns 403 `PERMISSION_DENIED`."
+          },
+          "response": []
+        }
+      ],
+      "description": "Admin-provisioned user account CRUD and role management. `auth` (above) owns login/token issuance and login-session history — see CLAUDE.md's \"Auth, users & permissions\" section."
     }
   ]
 }

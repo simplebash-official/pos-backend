@@ -8,10 +8,10 @@ use axum::{
     },
 };
 use jana2u_pos_backend::{
-    core::{config::Config, id::generate_id, middleware::auth::Claims},
+    core::{config::Config, id::generate_id},
+    domain::users::Role,
     modules::inventory::model::{CategoryDocument, SubcategoryDocument},
 };
-use jsonwebtoken::{EncodingKey, Header, encode};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -70,26 +70,14 @@ async fn send_authed(
     execute(router, request).await
 }
 
-/// Mints a JWT signed with the test app's own `jwt_secret`, with the given
-/// role claim (or none) — there's no login endpoint yet to get a real one
-/// from, so tests build one directly the same way `core::middleware::auth`
-/// would decode it.
-fn token_with_role(config: &Config, role: Option<&str>) -> String {
-    let claims = Claims {
-        sub: "test-user".to_string(),
-        exp: 9_999_999_999,
-        role: role.map(|r| r.to_string()),
-    };
-    encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(config.jwt_secret.as_bytes()),
-    )
-    .unwrap()
+/// Mints a JWT with the given role claim (or none) and no permissions —
+/// `AdminUser` only checks `role`, never `permissions`.
+fn token_with_role(config: &Config, role: Option<Role>) -> String {
+    common::mint_token(config, role, &[])
 }
 
 fn admin_token(config: &Config) -> String {
-    token_with_role(config, Some("admin"))
+    token_with_role(config, Some(Role::Admin))
 }
 
 use mongodb::bson::DateTime as BsonDateTime;
@@ -564,7 +552,7 @@ async fn category_admin_endpoints_require_admin_role() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert_eq!(no_auth["code"], "UNAUTHORIZED");
 
-    let non_admin = token_with_role(&app.config, Some("staff"));
+    let non_admin = token_with_role(&app.config, Some(Role::Staff));
     let (status, forbidden) = send_authed(
         &app.router,
         "POST",

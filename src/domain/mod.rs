@@ -1,7 +1,12 @@
 // Pure business types shared across modules — no I/O, no framework types.
 // Populated as domain modules (billing, repairs, inventory, ...) grow.
 
+pub mod auth;
 pub mod inventory;
+pub mod purchases;
+pub mod supplier_products;
+pub mod suppliers;
+pub mod users;
 
 use serde::Serialize;
 use utoipa::ToSchema;

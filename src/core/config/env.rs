@@ -9,6 +9,7 @@ pub struct Config {
     pub mongodb_db_name: String,
     pub jwt_secret: String,
     pub port: u16,
+    pub jwt_expiry_hours: i64,
 }
 
 /// Why startup configuration failed to load. `main.rs` logs this and exits
@@ -34,11 +35,20 @@ impl Config {
             .parse::<u16>()
             .map_err(|_| ConfigError::Invalid("PORT"))?;
 
+        // How long a login's JWT stays valid (there is no refresh-token or
+        // revocation flow; a caller just re-authenticates via login once
+        // this expires) — required, not defaulted, so an operator makes an
+        // explicit choice rather than silently inheriting a hardcoded value.
+        let jwt_expiry_hours = required("JWT_EXPIRY_HOURS")?
+            .parse::<i64>()
+            .map_err(|_| ConfigError::Invalid("JWT_EXPIRY_HOURS"))?;
+
         Ok(Self {
             mongodb_uri,
             mongodb_db_name,
             jwt_secret,
             port,
+            jwt_expiry_hours,
         })
     }
 }

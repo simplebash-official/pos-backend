@@ -31,6 +31,51 @@ pub(crate) async fn find_product_by_sku(
     Ok(products(db).find_one(doc! { "sku": sku }).await?)
 }
 
+/// Looked up by `key` rather than `_id` — the entry point for other modules
+/// (e.g. `supplier_products`/`purchases`) that only hold a product's
+/// immutable `key`, never its `ObjectId`.
+pub(crate) async fn find_product_by_key(
+    db: &Database,
+    key: &str,
+) -> AppResult<Option<ProductDocument>> {
+    Ok(products(db).find_one(doc! { "key": key }).await?)
+}
+
+/// Fetches every product matching one of `keys` in a single query — used to
+/// batch-resolve product display data instead of one lookup per row (see
+/// `service::product::list_products`'s category/subcategory equivalent).
+pub(crate) async fn find_products_by_keys(
+    db: &Database,
+    keys: &[String],
+) -> AppResult<Vec<ProductDocument>> {
+    let mut cursor = products(db).find(doc! { "key": { "$in": keys } }).await?;
+
+    let mut items = Vec::new();
+    while let Some(document) = cursor.try_next().await? {
+        items.push(document);
+    }
+    Ok(items)
+}
+
+/// Fetches every product matching one of `ids` in a single query — used by
+/// `service::product::delete_products` to read each product's `key` (for
+/// the `supplier_products` cascade) before the documents are deleted.
+pub(crate) async fn find_products_by_ids(
+    db: &Database,
+    ids: &[ObjectId],
+) -> AppResult<Vec<ProductDocument>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut cursor = products(db).find(doc! { "_id": { "$in": ids } }).await?;
+
+    let mut items = Vec::new();
+    while let Some(document) = cursor.try_next().await? {
+        items.push(document);
+    }
+    Ok(items)
+}
+
 /// Inserts `document` and backfills its `id` from the driver-generated
 /// `_id`, since the caller builds the document with `id: None` (Mongo
 /// assigns the `ObjectId` on insert, not before).

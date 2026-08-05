@@ -1,7 +1,11 @@
 use std::sync::Arc;
 
 use axum::Router;
-use jana2u_pos_backend::{app, app::AppState, clients, core::config::Config};
+use jana2u_pos_backend::{
+    app, app::AppState, clients, core::config::Config, core::middleware::auth::Claims,
+    domain::users::Role,
+};
+use jsonwebtoken::{EncodingKey, Header, encode};
 use mongodb::Database;
 
 pub struct TestApp {
@@ -41,4 +45,25 @@ pub async fn spawn_app() -> TestApp {
         db,
         config,
     }
+}
+
+/// Mints a JWT signed with the test app's own `jwt_secret`, carrying the
+/// given role and permission set — shared across every test file that gates
+/// a request behind `CurrentUser`/`AdminUser`/a specific permission without
+/// exercising the real login flow (login itself is only hand-tested
+/// end-to-end in `tests/auth_test.rs`).
+#[allow(dead_code)]
+pub fn mint_token(config: &Config, role: Option<Role>, permissions: &[&str]) -> String {
+    let claims = Claims {
+        sub: "test-user".to_string(),
+        exp: 9_999_999_999,
+        role,
+        permissions: permissions.iter().map(|p| p.to_string()).collect(),
+    };
+    encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(config.jwt_secret.as_bytes()),
+    )
+    .unwrap()
 }

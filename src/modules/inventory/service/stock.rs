@@ -18,19 +18,29 @@ use crate::{
         LowStockItem, LowStockResponse, StockAdjustmentRequest, StockAdjustmentResponse,
         StockMovementType, StockMovementsResponse,
     },
-    modules::inventory::{model::StockMovementDocument, repository},
+    modules::inventory::{model::ProductDocument, model::StockMovementDocument, repository},
 };
 
 /// Applies a signed `delta` to a product's stock and records the change as
-/// a `StockMovement`. Rejects with `INSUFFICIENT_STOCK` rather than
-/// clamping to zero, since a caller requesting a delta larger than
-/// available stock is almost always a bug (e.g. double-submitted sale)
-/// that should surface as an error, not silently produce a wrong quantity.
-pub(crate) async fn adjust_stock(
+/// a `StockMovement` in the same write — the two collections are always
+/// written together, never independently (see the module banner). Rejects
+/// with `INSUFFICIENT_STOCK` rather than clamping to zero, since a caller
+/// requesting a delta larger than available stock is almost always a bug
+/// (e.g. double-submitted sale) that should surface as an error, not
+/// silently produce a wrong quantity. Shared by `adjust_stock` (manual,
+/// tagged `ManualAdjustment`) and, cross-module, by
+/// `purchases::service::purchase::record_purchase` (tagged
+/// `PurchaseReceipt`, `reference_id` = the purchase's key) — the one place
+/// stock is ever mutated, so every caller gets the same guard and audit
+/// trail for free.
+pub(crate) async fn apply_stock_delta(
     db: &Database,
     id: ObjectId,
-    body: StockAdjustmentRequest,
-) -> AppResult<StockAdjustmentResponse> {
+    delta: i64,
+    movement_type: StockMovementType,
+    reference_id: Option<String>,
+    note: Option<String>,
+) -> AppResult<(i64, ProductDocument)> {
     let existing = repository::product::find_product_by_id(db, id)
         .await?
         .ok_or_else(|| {
@@ -38,13 +48,12 @@ pub(crate) async fn adjust_stock(
         })?;
 
     let previous_stock_quantity = existing.stock_quantity;
-    let new_quantity = previous_stock_quantity + body.delta;
+    let new_quantity = previous_stock_quantity + delta;
 
     if new_quantity < 0 {
         return Err(AppError::validation_with_code(
             format!(
-                "Requested delta {} would result in negative stock (current stock: {previous_stock_quantity})",
-                body.delta
+                "Requested delta {delta} would result in negative stock (current stock: {previous_stock_quantity})"
             ),
             codes::INSUFFICIENT_STOCK,
         ));
@@ -63,13 +72,36 @@ pub(crate) async fn adjust_stock(
             id: None,
             key: generate_id(prefixes::STOCK_MOVEMENT),
             product_id: id,
-            quantity_delta: body.delta,
-            movement_type: StockMovementType::ManualAdjustment,
-            reference_id: None,
-            note: body.reason,
+            quantity_delta: delta,
+            movement_type,
+            reference_id,
+            note,
             created_at: now,
             updated_at: now,
         },
+    )
+    .await?;
+
+    Ok((previous_stock_quantity, updated))
+}
+
+/// Manual stock adjustment via `PATCH /products/{id}/stock` — thin wrapper
+/// around `apply_stock_delta` tagging the movement `ManualAdjustment`, then
+/// reshaping the result into the API response (which also echoes back the
+/// pre-adjustment quantity so a client can display the change without a
+/// second request).
+pub(crate) async fn adjust_stock(
+    db: &Database,
+    id: ObjectId,
+    body: StockAdjustmentRequest,
+) -> AppResult<StockAdjustmentResponse> {
+    let (previous_stock_quantity, updated) = apply_stock_delta(
+        db,
+        id,
+        body.delta,
+        StockMovementType::ManualAdjustment,
+        None,
+        body.reason,
     )
     .await?;
 

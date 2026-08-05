@@ -4,4 +4,6 @@
 pub mod codes;
 pub mod http_status;
 pub mod modules;
+pub mod permissions;
 pub mod prefixes;
+pub mod roles;

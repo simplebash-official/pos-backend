@@ -1,0 +1,190 @@
+// Business rules for recording and listing supplier purchases: the
+// quantity/cost invariants, resolving both sides of a purchase (supplier,
+// product) before it's ever written, and the fact that recording a
+// purchase always also bumps the product's stock and writes a
+// `PurchaseReceipt` movement — those two writes never happen independently
+// (see `inventory::service::stock::apply_stock_delta`, which this reuses).
+
+use std::collections::HashMap;
+
+use mongodb::{
+    Database,
+    bson::{DateTime as BsonDateTime, oid::ObjectId},
+};
+
+use crate::{
+    core::{
+        constants::prefixes,
+        error::{AppError, AppResult},
+        id::generate_id,
+    },
+    domain::{
+        inventory::StockMovementType,
+        purchases::{
+            CreatePurchaseRequest, ProductSummary, Purchase, PurchaseListQuery, PurchasesResponse,
+            SupplierSummary,
+        },
+    },
+    modules::{
+        inventory::service::{product as inventory_product, stock as inventory_stock},
+        purchases::{model::PurchaseDocument, repository},
+        suppliers::service as supplier_service,
+    },
+};
+
+/// Validates the purchase, resolves the supplier/product it references,
+/// records it, then applies the stock increment + `PurchaseReceipt`
+/// movement in the same call inventory's own manual adjustment uses —
+/// reusing the one place stock is ever mutated rather than duplicating that
+/// invariant here.
+pub async fn record_purchase(db: &Database, body: CreatePurchaseRequest) -> AppResult<Purchase> {
+    if body.quantity < 1 {
+        return Err(AppError::validation("Quantity must be at least 1"));
+    }
+    if body.unit_cost_cents < 0 {
+        return Err(AppError::validation("Unit cost cannot be negative"));
+    }
+
+    let supplier = supplier_service::get_supplier_by_key(db, &body.supplier_key).await?;
+    let product = inventory_product::get_product_by_key(db, &body.product_key).await?;
+
+    let now = BsonDateTime::now();
+    let key = generate_id(prefixes::PURCHASE);
+    let document = PurchaseDocument {
+        id: None,
+        key: key.clone(),
+        supplier_key: body.supplier_key,
+        product_key: body.product_key,
+        quantity: body.quantity,
+        unit_cost_cents: body.unit_cost_cents,
+        date: BsonDateTime::from_chrono(body.date),
+        reference_no: body.reference_no.clone(),
+        notes: body.notes,
+        created_at: now,
+        updated_at: now,
+    };
+
+    let inserted = repository::insert_purchase(db, document).await?;
+
+    let product_object_id = ObjectId::parse_str(&product.id).expect(
+        "Product.id returned from get_product_by_key is always a valid ObjectId hex string",
+    );
+    inventory_stock::apply_stock_delta(
+        db,
+        product_object_id,
+        body.quantity,
+        StockMovementType::PurchaseReceipt,
+        Some(key),
+        body.reference_no,
+    )
+    .await?;
+
+    let supplier_summary = SupplierSummary {
+        id: supplier.id,
+        key: supplier.key,
+        name: supplier.name,
+        contact_person: supplier.contact_person,
+        primary_phone: supplier.primary_phone,
+    };
+    let product_summary = ProductSummary {
+        id: product.id,
+        key: product.key,
+        sku: product.sku,
+        name: product.name,
+        category: product.category,
+        subcategory: product.subcategory,
+    };
+
+    Ok(inserted.into_purchase(Some(supplier_summary), Some(product_summary)))
+}
+
+/// Lists purchases scoped to a supplier, a product, or their intersection
+/// (400 if neither is given — same rule as `supplier_products::service::link::list_links`),
+/// sorted newest-first, batch-enriched with supplier/product display data
+/// rather than one lookup per row.
+pub async fn list_purchases(
+    db: &Database,
+    query: PurchaseListQuery,
+) -> AppResult<PurchasesResponse> {
+    let documents = match (&query.supplier_key, &query.product_key) {
+        (Some(supplier_key), None) => {
+            repository::list_purchases_by_supplier(db, supplier_key).await?
+        }
+        (None, Some(product_key)) => repository::list_purchases_by_product(db, product_key).await?,
+        (Some(supplier_key), Some(product_key)) => {
+            let mut items = repository::list_purchases_by_supplier(db, supplier_key).await?;
+            items.retain(|purchase| &purchase.product_key == product_key);
+            items
+        }
+        (None, None) => {
+            return Err(AppError::validation(
+                "Either supplierKey or productKey must be provided",
+            ));
+        }
+    };
+
+    let supplier_keys: Vec<String> = documents
+        .iter()
+        .map(|document| document.supplier_key.clone())
+        .collect();
+    let product_keys: Vec<String> = documents
+        .iter()
+        .map(|document| document.product_key.clone())
+        .collect();
+
+    let suppliers_by_key: HashMap<String, SupplierSummary> =
+        supplier_service::get_suppliers_by_keys(db, &supplier_keys)
+            .await?
+            .into_iter()
+            .map(|supplier| {
+                (
+                    supplier.key.clone(),
+                    SupplierSummary {
+                        id: supplier.id,
+                        key: supplier.key,
+                        name: supplier.name,
+                        contact_person: supplier.contact_person,
+                        primary_phone: supplier.primary_phone,
+                    },
+                )
+            })
+            .collect();
+    let products_by_key: HashMap<String, ProductSummary> =
+        inventory_product::get_products_by_keys(db, &product_keys)
+            .await?
+            .into_iter()
+            .map(|product| {
+                (
+                    product.key.clone(),
+                    ProductSummary {
+                        id: product.id,
+                        key: product.key,
+                        sku: product.sku,
+                        name: product.name,
+                        category: product.category,
+                        subcategory: product.subcategory,
+                    },
+                )
+            })
+            .collect();
+
+    let purchases = documents
+        .into_iter()
+        .map(|document| {
+            let supplier = suppliers_by_key.get(&document.supplier_key).cloned();
+            let product = products_by_key.get(&document.product_key).cloned();
+            document.into_purchase(supplier, product)
+        })
+        .collect();
+
+    Ok(PurchasesResponse { purchases })
+}
+
+/// Used by `suppliers::service::delete_supplier`'s `SUPPLIER_HAS_PURCHASES`
+/// guard.
+pub(crate) async fn count_purchases_for_supplier(
+    db: &Database,
+    supplier_key: &str,
+) -> AppResult<u64> {
+    repository::count_purchases_for_supplier(db, supplier_key).await
+}

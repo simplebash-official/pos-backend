@@ -54,13 +54,19 @@ async fn openapi_json_lists_all_module_paths() {
 
     for expected in [
         "/api/health",
-        "/api/auth",
+        "/api/auth/login",
+        "/api/auth/me",
+        "/api/auth/sessions",
         "/api/billing",
         "/api/customers",
         "/api/inventory",
         "/api/print-jobs",
         "/api/repairs",
         "/api/reports",
+        "/api/suppliers",
+        "/api/supplier-products",
+        "/api/purchases",
+        "/api/users",
     ] {
         assert!(paths.contains_key(expected), "missing path: {expected}");
     }

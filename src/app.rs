@@ -93,6 +93,25 @@ pub fn build_router(state: AppState) -> Router {
         .nest(
             &format!("/{}", mod_names::REPORTS),
             modules::reports::routes::router(),
+        )
+        .nest(
+            &format!("/{}", mod_names::SUPPLIERS),
+            modules::suppliers::routes::router(),
+        )
+        // `SUPPLIER_PRODUCTS` is `"supplier_products"` internally but the URL
+        // should read `/supplier-products` — same underscore-to-hyphen swap
+        // as `PRINT_JOBS` above, only at mount time.
+        .nest(
+            &format!("/{}", mod_names::SUPPLIER_PRODUCTS.replace('_', "-")),
+            modules::supplier_products::routes::router(),
+        )
+        .nest(
+            &format!("/{}", mod_names::PURCHASES),
+            modules::purchases::routes::router(),
+        )
+        .nest(
+            &format!("/{}", mod_names::USERS),
+            modules::users::routes::router(),
         );
 
     let (router, openapi) = OpenApiRouter::<AppState>::with_openapi(ApiDoc::openapi())

@@ -118,6 +118,65 @@ async fn resolve_display_names(
     Ok((category_name, subcategory_name))
 }
 
+/// Batch-resolves every distinct `category_key`/`subcategory_key` across
+/// `documents` in two extra queries (rather than one lookup per product) to
+/// build each one's display names. Shared by `list_products` and
+/// `get_products_by_keys` (the cross-module batch lookup `purchases` uses
+/// to enrich a page of purchase history with product display data).
+async fn resolve_products(
+    db: &Database,
+    documents: Vec<ProductDocument>,
+) -> AppResult<Vec<Product>> {
+    let category_keys: Vec<String> = documents
+        .iter()
+        .map(|document| document.category_key.clone())
+        .collect();
+    let subcategory_keys: Vec<String> = documents
+        .iter()
+        .map(|document| document.subcategory_key.clone())
+        .collect();
+
+    let category_names: HashMap<String, String> =
+        repository::category::find_categories_by_keys(db, &category_keys)
+            .await?
+            .into_iter()
+            .map(|document| (document.key, document.name))
+            .collect();
+    let subcategory_names: HashMap<String, String> =
+        repository::subcategory::find_subcategories_by_keys(db, &subcategory_keys)
+            .await?
+            .into_iter()
+            .map(|document| (document.key, document.name))
+            .collect();
+
+    Ok(documents
+        .into_iter()
+        .map(|document| {
+            let category_name = category_names
+                .get(&document.category_key)
+                .cloned()
+                .unwrap_or_else(|| document.category_key.clone());
+            let subcategory_name = subcategory_names
+                .get(&document.subcategory_key)
+                .cloned()
+                .unwrap_or_else(|| document.subcategory_key.clone());
+            document.into_product(category_name, subcategory_name)
+        })
+        .collect())
+}
+
+/// Cross-module batch lookup — `purchases::service::purchase::list_purchases`
+/// calls this (never `inventory::repository` directly, which is private to
+/// this module) to enrich a page of purchase history with product display
+/// data in one query instead of one `get_product_by_key` call per row.
+pub(crate) async fn get_products_by_keys(
+    db: &Database,
+    keys: &[String],
+) -> AppResult<Vec<Product>> {
+    let documents = repository::product::find_products_by_keys(db, keys).await?;
+    resolve_products(db, documents).await
+}
+
 /// Builds the Mongo filter/sort from query params (category, subcategory,
 /// free-text search across name/sku/barcode, and the low-stock flag) and
 /// delegates execution + pagination math to `repository::product::list_products`.
@@ -176,42 +235,7 @@ pub async fn list_products(
     )
     .await?;
 
-    let category_keys: Vec<String> = documents
-        .iter()
-        .map(|document| document.category_key.clone())
-        .collect();
-    let subcategory_keys: Vec<String> = documents
-        .iter()
-        .map(|document| document.subcategory_key.clone())
-        .collect();
-
-    let category_names: HashMap<String, String> =
-        repository::category::find_categories_by_keys(db, &category_keys)
-            .await?
-            .into_iter()
-            .map(|document| (document.key, document.name))
-            .collect();
-    let subcategory_names: HashMap<String, String> =
-        repository::subcategory::find_subcategories_by_keys(db, &subcategory_keys)
-            .await?
-            .into_iter()
-            .map(|document| (document.key, document.name))
-            .collect();
-
-    let items = documents
-        .into_iter()
-        .map(|document| {
-            let category_name = category_names
-                .get(&document.category_key)
-                .cloned()
-                .unwrap_or_else(|| document.category_key.clone());
-            let subcategory_name = subcategory_names
-                .get(&document.subcategory_key)
-                .cloned()
-                .unwrap_or_else(|| document.subcategory_key.clone());
-            document.into_product(category_name, subcategory_name)
-        })
-        .collect();
+    let items = resolve_products(db, documents).await?;
 
     let pagination = PaginationMeta {
         page,
@@ -238,14 +262,29 @@ pub(crate) async fn get_product(db: &Database, id: ObjectId) -> AppResult<Produc
     Ok(document.into_product(category_name, subcategory_name))
 }
 
+/// Same as `get_product`, looked up by `key` instead of `ObjectId` — the
+/// cross-module entry point `supplier_products`/`purchases` call to validate
+/// a `productKey` and to enrich their own responses with product display
+/// data, since those modules can't reach `inventory::repository` directly
+/// (only `inventory::service` is `pub`).
+pub(crate) async fn get_product_by_key(db: &Database, key: &str) -> AppResult<Product> {
+    let document = repository::product::find_product_by_key(db, key)
+        .await?
+        .ok_or_else(|| {
+            AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
+        })?;
+
+    let (category_name, subcategory_name) =
+        resolve_display_names(db, &document.category_key, &document.subcategory_key).await?;
+
+    Ok(document.into_product(category_name, subcategory_name))
+}
+
 /// Validates required fields, price/stock invariants, and category
 /// membership, then generates the product's SKU from its category/
 /// subcategory names (see `service::sku::generate_sku`) — validation runs
 /// first so an invalid category never consumes a sequence number.
-pub async fn create_product(
-    db: &Database,
-    body: CreateProductRequest,
-) -> AppResult<Product> {
+pub async fn create_product(db: &Database, body: CreateProductRequest) -> AppResult<Product> {
     if body.name.trim().is_empty() {
         return Err(AppError::validation("Product name is required"));
     }
@@ -360,13 +399,19 @@ pub(crate) async fn update_product(
 }
 
 /// Deletes and returns the deleted document (so the handler can echo back
-/// what was removed), 404ing if it never existed.
+/// what was removed), 404ing if it never existed. Also cascades the delete
+/// onto any `supplier_products` links pointing at this product's `key` —
+/// mirrors the category/subcategory cascade in `service::category`, just
+/// across a module boundary rather than within one.
 pub(crate) async fn delete_product(db: &Database, id: ObjectId) -> AppResult<Product> {
     let deleted = repository::product::delete_product(db, id)
         .await?
         .ok_or_else(|| {
             AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
         })?;
+
+    crate::modules::supplier_products::service::link::delete_links_for_product(db, &deleted.key)
+        .await?;
 
     let (category_name, subcategory_name) =
         resolve_display_names(db, &deleted.category_key, &deleted.subcategory_key).await?;
@@ -377,12 +422,29 @@ pub(crate) async fn delete_product(db: &Database, id: ObjectId) -> AppResult<Pro
 /// Batch delete. Ids that aren't valid `ObjectId`s are silently dropped
 /// rather than failing the whole request — a client sending a mixed batch
 /// (some stale/malformed ids alongside valid ones) still gets the valid
-/// ones deleted instead of an all-or-nothing rejection.
+/// ones deleted instead of an all-or-nothing rejection. Cascades
+/// `supplier_products` link cleanup for every product actually deleted,
+/// same as the single-delete path.
 pub(crate) async fn delete_products(db: &Database, product_ids: Vec<String>) -> AppResult<u64> {
     let object_ids: Vec<ObjectId> = product_ids
         .iter()
         .filter_map(|id| ObjectId::parse_str(id).ok())
         .collect();
 
-    repository::product::delete_products(db, object_ids).await
+    // Keys are needed for the `supplier_products` cascade below, so they
+    // must be read before the delete removes the documents they came from.
+    let keys: Vec<String> = repository::product::find_products_by_ids(db, &object_ids)
+        .await?
+        .into_iter()
+        .map(|document| document.key)
+        .collect();
+
+    let deleted_count = repository::product::delete_products(db, object_ids).await?;
+
+    for key in keys {
+        crate::modules::supplier_products::service::link::delete_links_for_product(db, &key)
+            .await?;
+    }
+
+    Ok(deleted_count)
 }
