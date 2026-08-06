@@ -97,7 +97,7 @@ async fn seed_category(db: &mongodb::Database) -> String {
             key: key.clone(),
             name,
             icon: "Box".to_string(),
-            color: "gray".to_string(),
+            color: "blue".to_string(),
             created_at: now,
             updated_at: now,
         })
@@ -539,7 +539,7 @@ async fn category_admin_endpoints_require_admin_role() {
     let body = Some(json!({
         "name": format!("Unauthorized Category {}", Uuid::new_v4()),
         "icon": "Box",
-        "color": "gray",
+        "color": "blue",
     }));
 
     let (status, no_auth) = send(
@@ -578,7 +578,7 @@ async fn category_admin_crud_lifecycle_and_in_use_guards() {
         Some(json!({
             "name": name,
             "icon": "Box",
-            "color": "gray",
+            "color": "blue",
             "subcategories": ["Alpha"],
         })),
         &admin,
@@ -597,7 +597,7 @@ async fn category_admin_crud_lifecycle_and_in_use_guards() {
         &app.router,
         "POST",
         "/api/inventory/categories",
-        Some(json!({ "name": name, "icon": "Box", "color": "gray" })),
+        Some(json!({ "name": name, "icon": "Box", "color": "blue" })),
         &admin,
     )
     .await;
@@ -744,4 +744,95 @@ async fn category_admin_crud_lifecycle_and_in_use_guards() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(missing["code"], "CATEGORY_NOT_FOUND");
+}
+
+#[tokio::test]
+async fn category_field_validation() {
+    let app = common::spawn_app().await;
+    let admin = admin_token(&app.config);
+
+    // 1. POST with empty icon -> 400 VALIDATION_ERROR
+    let (status, err) = send_authed(
+        &app.router,
+        "POST",
+        "/api/inventory/categories",
+        Some(json!({
+            "name": format!("Empty Icon Cat {}", Uuid::new_v4()),
+            "icon": "   ",
+            "color": "blue",
+        })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(err["code"], "VALIDATION_ERROR");
+
+    // 2. POST with empty color -> 400 VALIDATION_ERROR
+    let (status, err) = send_authed(
+        &app.router,
+        "POST",
+        "/api/inventory/categories",
+        Some(json!({
+            "name": format!("Empty Color Cat {}", Uuid::new_v4()),
+            "icon": "DeviceLaptop",
+            "color": "   ",
+        })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(err["code"], "VALIDATION_ERROR");
+
+    // 3. POST with valid icon & color -> 201 CREATED
+    let (status, created) = send_authed(
+        &app.router,
+        "POST",
+        "/api/inventory/categories",
+        Some(json!({
+            "name": format!("Valid Category {}", Uuid::new_v4()),
+            "icon": "DeviceLaptop",
+            "color": "indigo",
+        })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let category_key = created["data"]["key"].as_str().unwrap().to_string();
+
+    // 4. PUT with empty icon -> 400 VALIDATION_ERROR
+    let (status, err) = send_authed(
+        &app.router,
+        "PUT",
+        &format!("/api/inventory/categories/{category_key}"),
+        Some(json!({ "icon": "" })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(err["code"], "VALIDATION_ERROR");
+
+    // 5. PUT with empty color -> 400 VALIDATION_ERROR
+    let (status, err) = send_authed(
+        &app.router,
+        "PUT",
+        &format!("/api/inventory/categories/{category_key}"),
+        Some(json!({ "color": "   " })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(err["code"], "VALIDATION_ERROR");
+
+    // 6. PUT with valid custom icon & color -> 200 OK
+    let (status, updated) = send_authed(
+        &app.router,
+        "PUT",
+        &format!("/api/inventory/categories/{category_key}"),
+        Some(json!({ "icon": "BrandGithub", "color": "custom-theme-color" })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(updated["data"]["icon"], "BrandGithub");
+    assert_eq!(updated["data"]["color"], "custom-theme-color");
 }

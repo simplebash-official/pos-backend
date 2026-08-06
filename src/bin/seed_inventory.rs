@@ -1,7 +1,9 @@
 use jana2u_pos_backend::{
     clients,
     core::config::Config,
-    domain::inventory::{CreateCategoryRequest, CreateProductRequest, ProductListQuery},
+    domain::inventory::{
+        CreateCategoryRequest, CreateProductRequest, ProductListQuery, UpdateCategoryRequest,
+    },
     modules::inventory::service::{category, product},
 };
 
@@ -61,11 +63,29 @@ async fn main() {
             .find(|c| c.name == cat.name)
         {
             Some(existing) => {
-                println!(
-                    "📦 Category '{}' already exists (key: {})",
-                    existing.name, existing.key
-                );
-                existing
+                if existing.icon != cat.icon || existing.color != cat.color {
+                    println!(
+                        "🔄 Updating Category '{}' icon/color: {} -> {}, {} -> {}",
+                        existing.name, existing.icon, cat.icon, existing.color, cat.color
+                    );
+                    category::update_category(
+                        &db,
+                        existing.key.clone(),
+                        UpdateCategoryRequest {
+                            name: None,
+                            icon: Some(cat.icon.to_string()),
+                            color: Some(cat.color.to_string()),
+                        },
+                    )
+                    .await
+                    .expect("failed to update category icon/color via service")
+                } else {
+                    println!(
+                        "📦 Category '{}' already exists (key: {})",
+                        existing.name, existing.key
+                    );
+                    existing
+                }
             }
             None => {
                 let req = CreateCategoryRequest {
@@ -85,6 +105,7 @@ async fn main() {
                 created
             }
         };
+
 
         // Map subcategory names to keys, creating missing ones if necessary via category service
         for subcat in cat.subcategories {
@@ -331,7 +352,7 @@ fn get_seed_data() -> Vec<SeedCategory> {
         // 2. Computer & Laptop Parts
         SeedCategory {
             name: "Computer & Laptop Parts",
-            icon: "Laptop",
+            icon: "DeviceLaptop",
             color: "indigo",
             subcategories: vec![
                 SeedSubcategory {

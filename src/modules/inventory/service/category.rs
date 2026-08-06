@@ -120,7 +120,7 @@ pub async fn create_category(
 /// `key`. Renaming (`name`) is now a pure display-label change — since
 /// products/subcategories reference this category by `key`, nothing else
 /// needs to be touched.
-pub(crate) async fn update_category(
+pub async fn update_category(
     db: &Database,
     category_key: String,
     body: UpdateCategoryRequest,
@@ -140,6 +140,7 @@ pub(crate) async fn update_category(
     {
         return Err(AppError::validation("Color cannot be empty"));
     }
+
 
     let existing = repository::category::find_category_by_key(db, &category_key)
         .await?
