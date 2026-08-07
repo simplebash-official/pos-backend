@@ -48,40 +48,6 @@ pub(crate) async fn list_subcategories_by_category(
     Ok(items)
 }
 
-/// Fetches every subcategory across all categories in one query — used by
-/// `service::category::list_categories`/`get_valid_categories` to group by
-/// `category_key` in memory rather than issuing one query per category.
-pub(crate) async fn list_all_subcategories(db: &Database) -> AppResult<Vec<SubcategoryDocument>> {
-    let mut cursor = subcategories(db)
-        .find(doc! {})
-        .sort(doc! { "name": 1 })
-        .await?;
-
-    let mut items = Vec::new();
-    while let Some(document) = cursor.try_next().await? {
-        items.push(document);
-    }
-    Ok(items)
-}
-
-/// Fetches every subcategory matching one of `keys` in a single query —
-/// used by `service::product::list_products` to batch-resolve display names
-/// for a page of products instead of one lookup per product.
-pub(crate) async fn find_subcategories_by_keys(
-    db: &Database,
-    keys: &[String],
-) -> AppResult<Vec<SubcategoryDocument>> {
-    let mut cursor = subcategories(db)
-        .find(doc! { "key": { "$in": keys } })
-        .await?;
-
-    let mut items = Vec::new();
-    while let Some(document) = cursor.try_next().await? {
-        items.push(document);
-    }
-    Ok(items)
-}
-
 pub(crate) async fn insert_subcategory(
     db: &Database,
     document: &SubcategoryDocument,
@@ -114,4 +80,18 @@ pub(crate) async fn delete_subcategories_by_category(
         .delete_many(doc! { "category_key": category_key })
         .await?
         .deleted_count)
+}
+
+pub(crate) async fn find_subcategory_keys_by_name_pattern(
+    db: &Database,
+    pattern: &mongodb::bson::Regex,
+) -> AppResult<Vec<String>> {
+    let mut cursor = subcategories(db)
+        .find(doc! { "name": { "$regex": pattern } })
+        .await?;
+    let mut keys = Vec::new();
+    while let Some(doc) = cursor.try_next().await? {
+        keys.push(doc.key);
+    }
+    Ok(keys)
 }

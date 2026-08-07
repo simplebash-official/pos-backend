@@ -106,7 +106,6 @@ async fn main() {
             }
         };
 
-
         // Map subcategory names to keys, creating missing ones if necessary via category service
         for subcat in cat.subcategories {
             let existing_sub = category_info

@@ -3,8 +3,6 @@
 // `categories`/`subcategories` collections. Delegates all Mongo access to
 // `repository::product`/`repository::category`/`repository::subcategory`.
 
-use std::collections::HashMap;
-
 use axum::http::StatusCode;
 use mongodb::{
     Database,
@@ -28,7 +26,7 @@ use crate::{
 /// Maps a client-supplied `sortBy` value to the corresponding document field.
 /// Whitelisted rather than passed straight through, since sort keys end up
 /// directly in a Mongo `sort` document.
-fn sort_field_for(sort_by: Option<&str>) -> &'static str {
+pub(crate) fn sort_field_for(sort_by: Option<&str>) -> &'static str {
     match sort_by {
         Some("name") => "name",
         Some("sku") => "sku",
@@ -118,53 +116,6 @@ async fn resolve_display_names(
     Ok((category_name, subcategory_name))
 }
 
-/// Batch-resolves every distinct `category_key`/`subcategory_key` across
-/// `documents` in two extra queries (rather than one lookup per product) to
-/// build each one's display names. Shared by `list_products` and
-/// `get_products_by_keys` (the cross-module batch lookup `purchases` uses
-/// to enrich a page of purchase history with product display data).
-async fn resolve_products(
-    db: &Database,
-    documents: Vec<ProductDocument>,
-) -> AppResult<Vec<Product>> {
-    let category_keys: Vec<String> = documents
-        .iter()
-        .map(|document| document.category_key.clone())
-        .collect();
-    let subcategory_keys: Vec<String> = documents
-        .iter()
-        .map(|document| document.subcategory_key.clone())
-        .collect();
-
-    let category_names: HashMap<String, String> =
-        repository::category::find_categories_by_keys(db, &category_keys)
-            .await?
-            .into_iter()
-            .map(|document| (document.key, document.name))
-            .collect();
-    let subcategory_names: HashMap<String, String> =
-        repository::subcategory::find_subcategories_by_keys(db, &subcategory_keys)
-            .await?
-            .into_iter()
-            .map(|document| (document.key, document.name))
-            .collect();
-
-    Ok(documents
-        .into_iter()
-        .map(|document| {
-            let category_name = category_names
-                .get(&document.category_key)
-                .cloned()
-                .unwrap_or_else(|| document.category_key.clone());
-            let subcategory_name = subcategory_names
-                .get(&document.subcategory_key)
-                .cloned()
-                .unwrap_or_else(|| document.subcategory_key.clone());
-            document.into_product(category_name, subcategory_name)
-        })
-        .collect())
-}
-
 /// Cross-module batch lookup — `purchases::service::purchase::list_purchases`
 /// calls this (never `inventory::repository` directly, which is private to
 /// this module) to enrich a page of purchase history with product display
@@ -173,16 +124,25 @@ pub(crate) async fn get_products_by_keys(
     db: &Database,
     keys: &[String],
 ) -> AppResult<Vec<Product>> {
-    let documents = repository::product::find_products_by_keys(db, keys).await?;
-    resolve_products(db, documents).await
+    if keys.is_empty() {
+        return Ok(Vec::new());
+    }
+    let filter = doc! { "key": { "$in": keys } };
+    let (items, _total) = repository::product::list_products_with_display_names(
+        db,
+        filter,
+        doc! {},
+        0,
+        keys.len() as i64,
+    )
+    .await?;
+    Ok(items)
 }
 
 /// Builds the Mongo filter/sort from query params (category, subcategory,
-/// free-text search across name/sku/barcode, and the low-stock flag) and
-/// delegates execution + pagination math to `repository::product::list_products`.
-/// Then batch-resolves every distinct `category_key`/`subcategory_key`
-/// across the returned page in two extra queries (rather than one lookup
-/// per product) to build the response's display names.
+/// free-text search across name/sku/barcode/category/subcategory, and the low-stock flag) and
+/// delegates execution + pagination math to `repository::product::list_products_with_display_names`.
+/// Joining categories and subcategories happens inside MongoDB via `$lookup` in a single query.
 pub async fn list_products(
     db: &Database,
     query: ProductListQuery,
@@ -197,13 +157,23 @@ pub async fn list_products(
     }
     if let Some(search) = query.search.filter(|s| !s.is_empty()) {
         let pattern = build_bson_regex(&search);
-        and_clauses.push(doc! {
-            "$or": [
-                { "name": { "$regex": pattern.clone() } },
-                { "sku": { "$regex": pattern.clone() } },
-                { "barcode": { "$regex": pattern } },
-            ]
-        });
+        let matched_cat_keys =
+            repository::category::find_category_keys_by_name_pattern(db, &pattern).await?;
+        let matched_subcat_keys =
+            repository::subcategory::find_subcategory_keys_by_name_pattern(db, &pattern).await?;
+
+        let mut or_clauses = vec![
+            doc! { "name": { "$regex": pattern.clone() } },
+            doc! { "sku": { "$regex": pattern.clone() } },
+            doc! { "barcode": { "$regex": pattern } },
+        ];
+        if !matched_cat_keys.is_empty() {
+            or_clauses.push(doc! { "category_key": { "$in": matched_cat_keys } });
+        }
+        if !matched_subcat_keys.is_empty() {
+            or_clauses.push(doc! { "subcategory_key": { "$in": matched_subcat_keys } });
+        }
+        and_clauses.push(doc! { "$or": or_clauses });
     }
     if query.low_stock == Some(true) {
         and_clauses.push(doc! {
@@ -226,7 +196,7 @@ pub async fn list_products(
         -1
     };
 
-    let (documents, total) = repository::product::list_products(
+    let (items, total) = repository::product::list_products_with_display_names(
         db,
         filter,
         doc! { sort_field: sort_order },
@@ -234,8 +204,6 @@ pub async fn list_products(
         limit as i64,
     )
     .await?;
-
-    let items = resolve_products(db, documents).await?;
 
     let pagination = PaginationMeta {
         page,

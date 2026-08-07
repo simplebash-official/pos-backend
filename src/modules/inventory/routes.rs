@@ -26,10 +26,11 @@ use crate::{
         ModuleStatusResponse,
         inventory::{
             AddSubcategoryRequest, CategoriesResponse, CategoryInfo, CreateCategoryRequest,
-            CreateProductRequest, DeleteProductsRequest, DeleteProductsResponse, LowStockResponse,
-            Product, ProductListQuery, ProductListResponse, StockAdjustmentRequest,
-            StockAdjustmentResponse, StockMovementsResponse, SubcategoriesResponse,
-            UpdateCategoryRequest, UpdateProductRequest, ValidCategoriesResponse,
+            CreateProductRequest, DeleteProductsRequest, DeleteProductsResponse,
+            InventoryOverviewQuery, InventoryOverviewResponse, LowStockResponse, Product,
+            ProductListQuery, ProductListResponse, StockAdjustmentRequest, StockAdjustmentResponse,
+            StockMovementsResponse, SubcategoriesResponse, UpdateCategoryRequest,
+            UpdateProductRequest, ValidCategoriesResponse,
         },
     },
     modules::inventory::service,
@@ -48,6 +49,8 @@ pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         // Module
         .routes(routes!(status))
+        // Overview
+        .routes(routes!(inventory_overview))
         // Products
         .routes(routes!(list_products, create_product, delete_products))
         .routes(routes!(get_product, update_product, delete_product))
@@ -84,6 +87,25 @@ fn parse_object_id(id: &str) -> AppResult<ObjectId> {
 ))]
 async fn status() -> Json<ApiResponse<ModuleStatusResponse>> {
     module_status_response(modules::INVENTORY)
+}
+
+// ============================================================================
+// Overview
+// ============================================================================
+
+#[utoipa::path(get, path = "/overview", tag = modules::INVENTORY, params(InventoryOverviewQuery), responses(
+    (status = 200, description = "Get inventory overview with metrics, category hierarchy, subcategory data tables, search, and filtration", body = ApiResponse<InventoryOverviewResponse>)
+))]
+async fn inventory_overview(
+    State(state): State<AppState>,
+    Query(query): Query<InventoryOverviewQuery>,
+) -> AppResult<Json<ApiResponse<InventoryOverviewResponse>>> {
+    let response = service::overview::get_inventory_overview(&state.db, query).await?;
+
+    Ok(Json(ApiResponse::success(
+        response,
+        "Inventory overview retrieved successfully",
+    )))
 }
 
 // ============================================================================

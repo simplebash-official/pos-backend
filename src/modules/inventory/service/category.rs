@@ -9,7 +9,6 @@ use mongodb::{
     Database,
     bson::{DateTime as BsonDateTime, doc},
 };
-use std::collections::HashMap;
 
 use crate::{
     core::{
@@ -19,7 +18,7 @@ use crate::{
     },
     domain::inventory::{
         CategoriesResponse, CategoryInfo, CreateCategoryRequest, SubcategoriesResponse,
-        SubcategoryInfo, UpdateCategoryRequest, ValidCategoriesResponse, ValidCategoryOption,
+        UpdateCategoryRequest, ValidCategoriesResponse, ValidCategoryOption,
         ValidSubcategoryOption,
     },
     modules::inventory::{
@@ -28,27 +27,20 @@ use crate::{
     },
 };
 
-/// All categories with their subcategories, alphabetically sorted (see
-/// `repository::category::list_categories`). Fetches every subcategory in
-/// one extra query and groups by `category_key` in memory, rather than one
-/// subcategory query per category.
+/// All categories with their subcategories, alphabetically sorted — a single
+/// `$lookup` aggregation round trip (see
+/// `repository::category::list_categories_with_subcategories`) rather than a
+/// separate subcategory query grouped by `category_key` in memory.
 pub async fn list_categories(db: &Database) -> AppResult<CategoriesResponse> {
-    let category_documents = repository::category::list_categories(db).await?;
-    let subcategory_documents = repository::subcategory::list_all_subcategories(db).await?;
-
-    let mut grouped: HashMap<String, Vec<SubcategoryInfo>> = HashMap::new();
-    for document in subcategory_documents {
-        grouped
-            .entry(document.category_key.clone())
-            .or_default()
-            .push(document.into_subcategory_info());
-    }
-
-    let categories = category_documents
+    let categories = repository::category::list_categories_with_subcategories(db)
+        .await?
         .into_iter()
-        .map(|document| {
-            let subcategories = grouped.remove(&document.key).unwrap_or_default();
-            document.into_category_info(subcategories)
+        .map(|(category, subcategories)| {
+            let subcategories = subcategories
+                .into_iter()
+                .map(SubcategoryDocument::into_subcategory_info)
+                .collect();
+            category.into_category_info(subcategories)
         })
         .collect();
 
@@ -141,7 +133,6 @@ pub async fn update_category(
         return Err(AppError::validation("Color cannot be empty"));
     }
 
-
     let existing = repository::category::find_category_by_key(db, &category_key)
         .await?
         .ok_or_else(|| {
@@ -223,26 +214,19 @@ pub(crate) async fn delete_category(
 /// a client (e.g. a product-creation form) can display names while
 /// submitting `categoryKey`/`subcategoryKey`.
 pub(crate) async fn get_valid_categories(db: &Database) -> AppResult<ValidCategoriesResponse> {
-    let category_documents = repository::category::list_categories(db).await?;
-    let subcategory_documents = repository::subcategory::list_all_subcategories(db).await?;
-
-    let mut grouped: HashMap<String, Vec<ValidSubcategoryOption>> = HashMap::new();
-    for document in subcategory_documents {
-        grouped
-            .entry(document.category_key.clone())
-            .or_default()
-            .push(ValidSubcategoryOption {
-                key: document.key,
-                name: document.name,
-            });
-    }
-
-    let categories = category_documents
+    let categories = repository::category::list_categories_with_subcategories(db)
+        .await?
         .into_iter()
-        .map(|document| ValidCategoryOption {
-            subcategories: grouped.remove(&document.key).unwrap_or_default(),
-            key: document.key,
-            name: document.name,
+        .map(|(category, subcategories)| ValidCategoryOption {
+            subcategories: subcategories
+                .into_iter()
+                .map(|document| ValidSubcategoryOption {
+                    key: document.key,
+                    name: document.name,
+                })
+                .collect(),
+            key: category.key,
+            name: category.name,
         })
         .collect();
 

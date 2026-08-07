@@ -26,7 +26,6 @@ pub const SUBCATEGORY_IN_USE: &str = "SUBCATEGORY_IN_USE";
 pub const INVALID_ICON: &str = "INVALID_ICON";
 pub const INVALID_COLOR: &str = "INVALID_COLOR";
 
-
 // Suppliers Status Codes
 pub const SUPPLIER_NOT_FOUND: &str = "SUPPLIER_NOT_FOUND";
 pub const SUPPLIER_HAS_PURCHASES: &str = "SUPPLIER_HAS_PURCHASES";

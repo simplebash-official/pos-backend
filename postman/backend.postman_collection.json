@@ -279,6 +279,79 @@
           ]
         },
         {
+          "name": "Overview",
+          "item": [
+            {
+              "name": "Get Inventory Overview",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/inventory/overview?search=screen&categoryKey={{categoryKey}}&subcategoryKey={{subcategoryKey}}&lowStock=true&page=1&limit=10&sortBy=updatedAt&sortOrder=desc",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory",
+                    "overview"
+                  ],
+                  "query": [
+                    {
+                      "key": "search",
+                      "value": "screen",
+                      "description": "Free-text search across product name/sku/barcode and category/subcategory names",
+                      "disabled": true
+                    },
+                    {
+                      "key": "categoryKey",
+                      "value": "{{categoryKey}}",
+                      "description": "Filter by exact category key",
+                      "disabled": true
+                    },
+                    {
+                      "key": "subcategoryKey",
+                      "value": "{{subcategoryKey}}",
+                      "description": "Filter by exact subcategory key",
+                      "disabled": true
+                    },
+                    {
+                      "key": "lowStock",
+                      "value": "true",
+                      "description": "Only products at/below their min stock threshold",
+                      "disabled": true
+                    },
+                    {
+                      "key": "page",
+                      "value": "1",
+                      "description": "1-based page number applied to every subcategory's product table"
+                    },
+                    {
+                      "key": "limit",
+                      "value": "10",
+                      "description": "Page size per subcategory table (frontend default/max is 10)"
+                    },
+                    {
+                      "key": "sortBy",
+                      "value": "updatedAt",
+                      "description": "Whitelisted sort field",
+                      "disabled": true
+                    },
+                    {
+                      "key": "sortOrder",
+                      "value": "desc",
+                      "description": "asc | desc",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "Hierarchical Inventory & Stock overview for the frontend accordion page: dashboard metrics (total items, category/subcategory counts, low-stock alerts), every category paired with its subcategories, and \u2014 per subcategory \u2014 a paginated (max 10/page) product data table. Backed by a single MongoDB `$facet` aggregation pipeline over `products` (see CLAUDE.md's \"MongoDB Aggregation Pipelines\" section) rather than one query per subcategory, so `page`/`limit` here apply uniformly to every subcategory table in the response."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
           "name": "Products",
           "item": [
             {

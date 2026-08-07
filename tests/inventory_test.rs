@@ -836,3 +836,146 @@ async fn category_field_validation() {
     assert_eq!(updated["data"]["icon"], "BrandGithub");
     assert_eq!(updated["data"]["color"], "custom-theme-color");
 }
+
+#[tokio::test]
+async fn inventory_overview_endpoint_returns_metrics_hierarchical_data_and_filters() {
+    let app = common::spawn_app().await;
+
+    // 1. Seed test categories and subcategories
+    let (cat1_key, subcat1_key) = seed_category_with_subcategory(&app.db, "LED Strips").await;
+    let subcat2_key = seed_subcategory(&app.db, &cat1_key, "Smart Watches").await;
+
+    // 2. Seed products with different stock levels
+    // Normal stock product under LED Strips
+    let (status, _p1) = send(
+        &app.router,
+        "POST",
+        "/api/inventory/products",
+        Some(json!({
+            "name": "RGB LED Strip Light",
+            "categoryKey": cat1_key,
+            "subcategoryKey": subcat1_key,
+            "costPriceCents": 1000,
+            "sellingPriceCents": 1800,
+            "stockQuantity": 50,
+            "minStockThreshold": 10
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // Low stock product under LED Strips (stock 5 <= threshold 10)
+    let (status, _p2) = send(
+        &app.router,
+        "POST",
+        "/api/inventory/products",
+        Some(json!({
+            "name": "Smart RGB Corner Floor Lamp",
+            "categoryKey": cat1_key,
+            "subcategoryKey": subcat1_key,
+            "costPriceCents": 3000,
+            "sellingPriceCents": 6000,
+            "stockQuantity": 5,
+            "minStockThreshold": 10
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // Normal stock product under Smart Watches
+    let (status, _p3) = send(
+        &app.router,
+        "POST",
+        "/api/inventory/products",
+        Some(json!({
+            "name": "Ultra Smartwatch Screen Protector",
+            "categoryKey": cat1_key,
+            "subcategoryKey": subcat2_key,
+            "costPriceCents": 200,
+            "sellingPriceCents": 500,
+            "stockQuantity": 20,
+            "minStockThreshold": 5
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // 3. Test GET /api/inventory/overview without filters
+    let (status, overview) = send(&app.router, "GET", "/api/inventory/overview", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(overview["success"], true);
+
+    let metrics = &overview["data"]["metrics"];
+    assert!(metrics["totalItems"].as_u64().unwrap() >= 3);
+    assert!(metrics["totalCategories"].as_u64().unwrap() >= 1);
+    assert!(metrics["totalSubcategories"].as_u64().unwrap() >= 2);
+    assert!(metrics["lowStockAlerts"].as_u64().unwrap() >= 1);
+
+    let categories = overview["data"]["categories"].as_array().unwrap();
+    let cat1 = categories
+        .iter()
+        .find(|c| c["key"] == cat1_key)
+        .expect("category 1 should be in overview");
+    assert!(cat1["totalItems"].as_u64().unwrap() >= 3);
+    assert!(cat1["subcategoriesCount"].as_u64().unwrap() >= 2);
+
+    let subcats = cat1["subcategories"].as_array().unwrap();
+    let subcat1 = subcats
+        .iter()
+        .find(|s| s["key"] == subcat1_key)
+        .expect("subcat 1 should be present");
+    assert_eq!(subcat1["totalItems"], 2);
+    let products_list = subcat1["products"].as_array().unwrap();
+    assert_eq!(products_list.len(), 2);
+    assert_eq!(subcat1["pagination"]["limit"], 10);
+
+    // 4. Test GET /api/inventory/overview?lowStock=true
+    let (status, low_stock_overview) = send(
+        &app.router,
+        "GET",
+        "/api/inventory/overview?lowStock=true",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let low_stock_cat1 = low_stock_overview["data"]["categories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["key"] == cat1_key)
+        .unwrap();
+    let low_stock_subcat1 = low_stock_cat1["subcategories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["key"] == subcat1_key)
+        .unwrap();
+    assert_eq!(low_stock_subcat1["totalItems"], 1);
+    assert_eq!(
+        low_stock_subcat1["products"][0]["name"],
+        "Smart RGB Corner Floor Lamp"
+    );
+
+    // 5. Test GET /api/inventory/overview?search=LED
+    let (status, search_overview) = send(
+        &app.router,
+        "GET",
+        "/api/inventory/overview?search=LED",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let search_cat1 = search_overview["data"]["categories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["key"] == cat1_key)
+        .unwrap();
+    let search_subcat1 = search_cat1["subcategories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["key"] == subcat1_key)
+        .unwrap();
+    assert_eq!(search_subcat1["totalItems"], 2);
+}

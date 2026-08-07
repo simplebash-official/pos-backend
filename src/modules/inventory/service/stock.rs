@@ -41,30 +41,25 @@ pub(crate) async fn apply_stock_delta(
     reference_id: Option<String>,
     note: Option<String>,
 ) -> AppResult<(i64, ProductDocument)> {
-    let existing = repository::product::find_product_by_id(db, id)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
-        })?;
-
-    let previous_stock_quantity = existing.stock_quantity;
-    let new_quantity = previous_stock_quantity + delta;
-
-    if new_quantity < 0 {
-        return Err(AppError::validation_with_code(
-            format!(
-                "Requested delta {delta} would result in negative stock (current stock: {previous_stock_quantity})"
-            ),
-            codes::INSUFFICIENT_STOCK,
-        ));
-    }
-
     let now = BsonDateTime::now();
-    let updated = repository::product::adjust_product_stock(db, id, new_quantity, now)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
-        })?;
+    let (previous_stock_quantity, updated) =
+        match repository::product::adjust_product_stock_pipeline(db, id, delta, now).await? {
+            Some(res) => res,
+            None => {
+                let existing = repository::product::find_product_by_id(db, id)
+                    .await?
+                    .ok_or_else(|| {
+                        AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
+                    })?;
+                return Err(AppError::validation_with_code(
+                    format!(
+                        "Requested delta {delta} would result in negative stock (current stock: {})",
+                        existing.stock_quantity
+                    ),
+                    codes::INSUFFICIENT_STOCK,
+                ));
+            }
+        };
 
     repository::stock::insert_stock_movement(
         db,

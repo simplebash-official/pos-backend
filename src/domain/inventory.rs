@@ -96,6 +96,64 @@ pub struct ProductListQuery {
     pub sort_order: Option<String>,
 }
 
+/// Query params for `GET /overview`.
+#[derive(Debug, Clone, Default, Deserialize, IntoParams)]
+#[serde(rename_all = "camelCase")]
+#[into_params(parameter_in = Query)]
+pub struct InventoryOverviewQuery {
+    pub search: Option<String>,
+    pub category_key: Option<String>,
+    pub subcategory_key: Option<String>,
+    pub low_stock: Option<bool>,
+    pub page: Option<u64>,
+    pub limit: Option<u64>,
+    pub sort_by: Option<String>,
+    pub sort_order: Option<String>,
+}
+
+/// Top-level inventory metrics for the dashboard header.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct InventoryMetrics {
+    pub total_items: u64,
+    pub total_categories: u64,
+    pub total_subcategories: u64,
+    pub low_stock_alerts: u64,
+}
+
+/// Subcategory accordion section containing its matching products list and pagination meta.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct InventorySubcategoryOverview {
+    pub key: String,
+    pub category_key: String,
+    pub name: String,
+    pub total_items: u64,
+    pub products: Vec<Product>,
+    pub pagination: PaginationMeta,
+}
+
+/// Category accordion section containing nested subcategories and aggregate counts.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct InventoryCategoryOverview {
+    pub key: String,
+    pub name: String,
+    pub icon: String,
+    pub color: String,
+    pub total_items: u64,
+    pub subcategories_count: u64,
+    pub subcategories: Vec<InventorySubcategoryOverview>,
+}
+
+/// Response payload for `GET /api/inventory/overview`.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct InventoryOverviewResponse {
+    pub metrics: InventoryMetrics,
+    pub categories: Vec<InventoryCategoryOverview>,
+}
+
 /// Pagination metadata attached to any paginated list response.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]

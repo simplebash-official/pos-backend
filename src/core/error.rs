@@ -230,6 +230,15 @@ impl From<jsonwebtoken::errors::Error> for AppError {
     }
 }
 
+// Same idea for BSON (de)serialization failures against a document we built
+// or read ourselves (e.g. deserializing an aggregation pipeline result) —
+// never something a caller can act on, always a 500.
+impl From<bson::error::Error> for AppError {
+    fn from(err: bson::error::Error) -> Self {
+        AppError::internal(err.to_string())
+    }
+}
+
 /// Handler and service-layer return type: every fallible operation in this
 /// codebase resolves to either a domain value or an `AppError` that already
 /// knows how to render itself as the right HTTP response.

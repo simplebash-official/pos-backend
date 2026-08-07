@@ -10,8 +10,12 @@ use mongodb::{
     bson::{Document, doc},
     options::ReturnDocument,
 };
+use serde::Deserialize;
 
-use crate::{core::error::AppResult, modules::inventory::model::CategoryDocument};
+use crate::{
+    core::error::AppResult,
+    modules::inventory::model::{CategoryDocument, SubcategoryDocument},
+};
 
 fn categories(db: &Database) -> Collection<CategoryDocument> {
     db.collection("categories")
@@ -34,32 +38,43 @@ pub(crate) async fn find_category_by_key(
     Ok(categories(db).find_one(doc! { "key": key }).await?)
 }
 
-/// Fetches every category matching one of `keys` in a single query — used
-/// by `service::product::list_products` to batch-resolve display names for
-/// a page of products instead of one lookup per product.
-pub(crate) async fn find_categories_by_keys(
-    db: &Database,
-    keys: &[String],
-) -> AppResult<Vec<CategoryDocument>> {
-    let mut cursor = categories(db).find(doc! { "key": { "$in": keys } }).await?;
-
-    let mut items = Vec::new();
-    while let Some(document) = cursor.try_next().await? {
-        items.push(document);
-    }
-    Ok(items)
+#[derive(Debug, Deserialize)]
+struct CategoryWithSubcategories {
+    #[serde(flatten)]
+    category: CategoryDocument,
+    #[serde(default)]
+    subcategories: Vec<SubcategoryDocument>,
 }
 
-/// Sorted by name for stable, predictable `GET /categories` output.
-pub(crate) async fn list_categories(db: &Database) -> AppResult<Vec<CategoryDocument>> {
-    let mut cursor = categories(db)
-        .find(doc! {})
-        .sort(doc! { "name": 1 })
-        .await?;
+/// Runs a `$lookup` aggregation pipeline joining `categories` to their
+/// `subcategories` (on `key`/`category_key`) in a single round trip —
+/// replaces the "fetch both collections separately, group subcategories by
+/// `category_key` in a `HashMap`" pattern that used to be duplicated across
+/// `service::category::list_categories`/`get_valid_categories` and
+/// `service::overview::get_inventory_overview`. Subcategories are sorted by
+/// name in Rust after the fact (cheap — a handful of items per category)
+/// rather than via `$sortArray`, to avoid depending on MongoDB 5.2+.
+pub(crate) async fn list_categories_with_subcategories(
+    db: &Database,
+) -> AppResult<Vec<(CategoryDocument, Vec<SubcategoryDocument>)>> {
+    let pipeline = vec![
+        doc! { "$sort": { "name": 1 } },
+        doc! {
+            "$lookup": {
+                "from": "subcategories",
+                "localField": "key",
+                "foreignField": "category_key",
+                "as": "subcategories",
+            }
+        },
+    ];
 
+    let mut cursor = categories(db).aggregate(pipeline).await?;
     let mut items = Vec::new();
-    while let Some(document) = cursor.try_next().await? {
-        items.push(document);
+    while let Some(doc) = cursor.try_next().await? {
+        let mut item = bson::deserialize_from_document::<CategoryWithSubcategories>(doc)?;
+        item.subcategories.sort_by(|a, b| a.name.cmp(&b.name));
+        items.push((item.category, item.subcategories));
     }
     Ok(items)
 }
@@ -90,4 +105,18 @@ pub(crate) async fn delete_category(
     Ok(categories(db)
         .find_one_and_delete(doc! { "key": key })
         .await?)
+}
+
+pub(crate) async fn find_category_keys_by_name_pattern(
+    db: &Database,
+    pattern: &mongodb::bson::Regex,
+) -> AppResult<Vec<String>> {
+    let mut cursor = categories(db)
+        .find(doc! { "name": { "$regex": pattern } })
+        .await?;
+    let mut keys = Vec::new();
+    while let Some(doc) = cursor.try_next().await? {
+        keys.push(doc.key);
+    }
+    Ok(keys)
 }
