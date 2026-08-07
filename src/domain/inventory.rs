@@ -24,6 +24,9 @@ pub struct Product {
     pub sku: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub barcode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub barcode_source: Option<BarcodeSource>,
+    pub product_type: ProductType,
     pub name: String,
     pub category_key: String,
     pub category: String,
@@ -50,7 +53,11 @@ pub struct Product {
 #[serde(rename_all = "camelCase")]
 pub struct CreateProductRequest {
     #[serde(default)]
+    pub product_type: ProductType,
+    #[serde(default)]
     pub barcode: Option<String>,
+    #[serde(default)]
+    pub auto_generate_barcode: bool,
     pub name: String,
     pub category_key: String,
     pub subcategory_key: String,
@@ -66,10 +73,12 @@ pub struct CreateProductRequest {
 /// send only what changed — `service::product::update_product` fills in
 /// omitted fields from the existing document rather than clearing them.
 /// `category_key`/`subcategory_key`, like on create, must be keys, not names.
+/// `barcode` and `productType` are deliberately absent here — both are
+/// immutable after creation, same as `sku` (which also has no field on this
+/// struct); a dedicated "replace barcode" action is out of scope for now.
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateProductRequest {
-    pub barcode: Option<String>,
     pub name: Option<String>,
     pub category_key: Option<String>,
     pub subcategory_key: Option<String>,
@@ -235,6 +244,30 @@ pub struct LowStockItem {
 pub struct LowStockResponse {
     pub items: Vec<LowStockItem>,
     pub total: u64,
+}
+
+/// Physical/stockable vs. service line items. Only `Physical` products may
+/// carry a barcode (see `service::product::create_product`) — a service has
+/// no physical unit to label. Defaults to `Physical` for backward
+/// compatibility with every product created before this field existed (see
+/// the `#[serde(default)]` usage on `ProductDocument`/`CreateProductRequest`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ProductType {
+    #[default]
+    Physical,
+    Service,
+}
+
+/// How a product's `barcode` was populated. `None` on `Product` whenever
+/// `barcode` itself is `None` — a physical product may be created with no
+/// barcode at all, since it can never be added later (barcode is immutable
+/// after creation, see `UpdateProductRequest`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BarcodeSource {
+    Generated,
+    Manual,
 }
 
 /// Why a stock movement happened. Every adjustment (manual or automated)

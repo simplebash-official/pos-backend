@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod barcode;
 pub mod billing;
 pub mod customers;
 pub mod inventory;

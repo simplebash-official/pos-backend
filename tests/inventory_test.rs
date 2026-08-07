@@ -342,6 +342,322 @@ async fn create_product_validates_category_and_pricing_and_auto_generates_sequen
     assert!(second_sku.starts_with(&format!("{prefix}-")));
 }
 
+/// A unique 10-digit numeric string per call — used for manual-barcode test
+/// fixtures so repeated test runs against the persistent test DB (see
+/// `common::spawn_app`, which never drops data between runs) never collide
+/// with a barcode a previous run already inserted.
+fn unique_manual_barcode() -> String {
+    let digits: String = Uuid::new_v4()
+        .simple()
+        .to_string()
+        .chars()
+        .filter(|c| c.is_ascii_digit())
+        .take(10)
+        .collect();
+    format!("{digits:0<10}")
+}
+
+#[tokio::test]
+async fn create_product_auto_generates_sequential_ean13_barcodes() {
+    let app = common::spawn_app().await;
+    let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Widgets").await;
+
+    let body = json!({
+        "name": "Auto Barcode Widget",
+        "categoryKey": category_key,
+        "subcategoryKey": subcategory_key,
+        "costPriceCents": 1000,
+        "sellingPriceCents": 2000,
+        "stockQuantity": 1,
+        "minStockThreshold": 1,
+        "autoGenerateBarcode": true,
+    });
+
+    let (status, first) = send(
+        &app.router,
+        "POST",
+        "/api/inventory/products",
+        Some(body.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let first_barcode = first["data"]["barcode"].as_str().unwrap().to_string();
+    assert_eq!(first_barcode.len(), 13);
+    assert!(first_barcode.chars().all(|c| c.is_ascii_digit()));
+    assert!(first_barcode.starts_with("20"));
+    assert_eq!(first["data"]["barcodeSource"], "generated");
+
+    let (status, second) = send(&app.router, "POST", "/api/inventory/products", Some(body)).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let second_barcode = second["data"]["barcode"].as_str().unwrap().to_string();
+    assert_ne!(first_barcode, second_barcode);
+
+    let first_seq: i64 = first_barcode[2..12].parse().unwrap();
+    let second_seq: i64 = second_barcode[2..12].parse().unwrap();
+    assert_eq!(second_seq, first_seq + 1);
+}
+
+#[tokio::test]
+async fn create_product_accepts_manual_barcode() {
+    let app = common::spawn_app().await;
+    let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Widgets").await;
+    let barcode = unique_manual_barcode();
+
+    let (status, created) = send(
+        &app.router,
+        "POST",
+        "/api/inventory/products",
+        Some(json!({
+            "name": "Manual Barcode Widget",
+            "categoryKey": category_key,
+            "subcategoryKey": subcategory_key,
+            "costPriceCents": 1000,
+            "sellingPriceCents": 2000,
+            "stockQuantity": 1,
+            "minStockThreshold": 1,
+            "barcode": barcode,
+        })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(created["data"]["barcode"], barcode);
+    assert_eq!(created["data"]["barcodeSource"], "manual");
+}
+
+#[tokio::test]
+async fn create_product_rejects_invalid_manual_barcode() {
+    let app = common::spawn_app().await;
+    let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Widgets").await;
+
+    for bad_barcode in ["abc12345", "1234", "1234567890123456"] {
+        let (status, body) = send(
+            &app.router,
+            "POST",
+            "/api/inventory/products",
+            Some(json!({
+                "name": "Invalid Barcode Widget",
+                "categoryKey": category_key,
+                "subcategoryKey": subcategory_key,
+                "costPriceCents": 1000,
+                "sellingPriceCents": 2000,
+                "stockQuantity": 1,
+                "minStockThreshold": 1,
+                "barcode": bad_barcode,
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "barcode: {bad_barcode}");
+        assert_eq!(body["code"], "VALIDATION_ERROR");
+    }
+}
+
+#[tokio::test]
+async fn create_product_rejects_duplicate_manual_barcode() {
+    let app = common::spawn_app().await;
+    let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Widgets").await;
+    let barcode = unique_manual_barcode();
+
+    let (status, _first) = send(
+        &app.router,
+        "POST",
+        "/api/inventory/products",
+        Some(json!({
+            "name": "First Widget",
+            "categoryKey": category_key,
+            "subcategoryKey": subcategory_key,
+            "costPriceCents": 1000,
+            "sellingPriceCents": 2000,
+            "stockQuantity": 1,
+            "minStockThreshold": 1,
+            "barcode": barcode,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    let (status, second) = send(
+        &app.router,
+        "POST",
+        "/api/inventory/products",
+        Some(json!({
+            "name": "Second Widget",
+            "categoryKey": category_key,
+            "subcategoryKey": subcategory_key,
+            "costPriceCents": 1000,
+            "sellingPriceCents": 2000,
+            "stockQuantity": 1,
+            "minStockThreshold": 1,
+            "barcode": barcode,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(second["code"], "BARCODE_ALREADY_EXISTS");
+}
+
+#[tokio::test]
+async fn create_product_rejects_barcode_and_auto_generate_together() {
+    let app = common::spawn_app().await;
+    let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Widgets").await;
+
+    let (status, body) = send(
+        &app.router,
+        "POST",
+        "/api/inventory/products",
+        Some(json!({
+            "name": "Conflicting Barcode Widget",
+            "categoryKey": category_key,
+            "subcategoryKey": subcategory_key,
+            "costPriceCents": 1000,
+            "sellingPriceCents": 2000,
+            "stockQuantity": 1,
+            "minStockThreshold": 1,
+            "barcode": "12345678",
+            "autoGenerateBarcode": true,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "VALIDATION_ERROR");
+}
+
+#[tokio::test]
+async fn create_service_product_rejects_barcode_fields() {
+    let app = common::spawn_app().await;
+    let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Widgets").await;
+
+    let (status, auto_generate_rejected) = send(
+        &app.router,
+        "POST",
+        "/api/inventory/products",
+        Some(json!({
+            "name": "Printing Service",
+            "productType": "service",
+            "categoryKey": category_key,
+            "subcategoryKey": subcategory_key,
+            "costPriceCents": 0,
+            "sellingPriceCents": 500,
+            "stockQuantity": 0,
+            "minStockThreshold": 0,
+            "autoGenerateBarcode": true,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(auto_generate_rejected["code"], "VALIDATION_ERROR");
+
+    let (status, manual_rejected) = send(
+        &app.router,
+        "POST",
+        "/api/inventory/products",
+        Some(json!({
+            "name": "Printing Service",
+            "productType": "service",
+            "categoryKey": category_key,
+            "subcategoryKey": subcategory_key,
+            "costPriceCents": 0,
+            "sellingPriceCents": 500,
+            "stockQuantity": 0,
+            "minStockThreshold": 0,
+            "barcode": "12345678",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(manual_rejected["code"], "VALIDATION_ERROR");
+}
+
+#[tokio::test]
+async fn create_service_product_has_no_barcode() {
+    let app = common::spawn_app().await;
+    let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Widgets").await;
+
+    let (status, created) = send(
+        &app.router,
+        "POST",
+        "/api/inventory/products",
+        Some(json!({
+            "name": "Printing Service",
+            "productType": "service",
+            "categoryKey": category_key,
+            "subcategoryKey": subcategory_key,
+            "costPriceCents": 0,
+            "sellingPriceCents": 500,
+            "stockQuantity": 0,
+            "minStockThreshold": 0,
+        })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(created["data"]["productType"], "service");
+    assert!(created["data"]["barcode"].is_null());
+    assert!(created["data"]["barcodeSource"].is_null());
+}
+
+#[tokio::test]
+async fn create_product_defaults_to_physical_product_type() {
+    let app = common::spawn_app().await;
+    let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Widgets").await;
+
+    let (status, created) = send(
+        &app.router,
+        "POST",
+        "/api/inventory/products",
+        Some(json!({
+            "name": "Legacy-Shaped Request Widget",
+            "categoryKey": category_key,
+            "subcategoryKey": subcategory_key,
+            "costPriceCents": 1000,
+            "sellingPriceCents": 2000,
+            "stockQuantity": 1,
+            "minStockThreshold": 1,
+        })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(created["data"]["productType"], "physical");
+}
+
+#[tokio::test]
+async fn update_product_cannot_change_barcode() {
+    let app = common::spawn_app().await;
+    let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Widgets").await;
+    let original_barcode = unique_manual_barcode();
+
+    let (status, created) = send(
+        &app.router,
+        "POST",
+        "/api/inventory/products",
+        Some(json!({
+            "name": "Immutable Barcode Widget",
+            "categoryKey": category_key,
+            "subcategoryKey": subcategory_key,
+            "costPriceCents": 1000,
+            "sellingPriceCents": 2000,
+            "stockQuantity": 1,
+            "minStockThreshold": 1,
+            "barcode": original_barcode,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let id = created["data"]["id"].as_str().unwrap().to_string();
+
+    let (status, updated) = send(
+        &app.router,
+        "PUT",
+        &format!("/api/inventory/products/{id}"),
+        Some(json!({ "name": "Renamed Widget", "barcode": unique_manual_barcode() })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(updated["data"]["name"], "Renamed Widget");
+    assert_eq!(updated["data"]["barcode"], original_barcode);
+}
+
 #[tokio::test]
 async fn list_products_filters_by_category_and_search() {
     let app = common::spawn_app().await;

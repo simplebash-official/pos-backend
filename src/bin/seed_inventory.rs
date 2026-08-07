@@ -2,7 +2,8 @@ use jana2u_pos_backend::{
     clients,
     core::config::Config,
     domain::inventory::{
-        CreateCategoryRequest, CreateProductRequest, ProductListQuery, UpdateCategoryRequest,
+        CreateCategoryRequest, CreateProductRequest, ProductListQuery, ProductType,
+        UpdateCategoryRequest,
     },
     modules::inventory::service::{category, product},
 };
@@ -161,7 +162,9 @@ async fn main() {
                 }
 
                 let req = CreateProductRequest {
+                    product_type: ProductType::Physical,
                     barcode: Some(p.barcode.to_string()),
+                    auto_generate_barcode: false,
                     name: p.name.to_string(),
                     category_key: category_info.key.clone(),
                     subcategory_key: subcat_key.clone(),

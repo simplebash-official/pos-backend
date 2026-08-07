@@ -34,6 +34,15 @@ pub(crate) async fn find_product_by_sku(
     Ok(products(db).find_one(doc! { "sku": sku }).await?)
 }
 
+/// Used for the manual-barcode-collision check and the generated-barcode
+/// defensive fallback check in `service::product::create_product`.
+pub(crate) async fn find_product_by_barcode(
+    db: &Database,
+    barcode: &str,
+) -> AppResult<Option<ProductDocument>> {
+    Ok(products(db).find_one(doc! { "barcode": barcode }).await?)
+}
+
 /// Looked up by `key` rather than `_id` — the entry point for other modules
 /// (e.g. `supplier_products`/`purchases`) that only hold a product's
 /// immutable `key`, never its `ObjectId`.

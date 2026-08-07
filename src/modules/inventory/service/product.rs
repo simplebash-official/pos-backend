@@ -17,8 +17,8 @@ use crate::{
         utils::{build_bson_regex, calculate_pagination},
     },
     domain::inventory::{
-        CreateProductRequest, PaginationMeta, Product, ProductListQuery, ProductListResponse,
-        UpdateProductRequest,
+        BarcodeSource, CreateProductRequest, PaginationMeta, Product, ProductListQuery,
+        ProductListResponse, ProductType, UpdateProductRequest,
     },
     modules::inventory::{model::ProductDocument, repository},
 };
@@ -248,6 +248,88 @@ pub(crate) async fn get_product_by_key(db: &Database, key: &str) -> AppResult<Pr
     Ok(document.into_product(category_name, subcategory_name))
 }
 
+/// Loose validation for a staff-entered manual barcode: numeric digits
+/// only, 8-14 characters — spans common real-world formats (EAN-8/UPC-A/
+/// EAN-13/GTIN-14) a scanned product might already carry. Deliberately does
+/// not require the EAN-13 checksum to be valid — that check only applies to
+/// codes this system generates itself (see `barcode::service::ean13`).
+fn validate_manual_barcode(value: &str) -> AppResult<()> {
+    let trimmed = value.trim();
+    if trimmed.is_empty()
+        || !trimmed.chars().all(|c| c.is_ascii_digit())
+        || !(8..=14).contains(&trimmed.len())
+    {
+        return Err(AppError::validation("Barcode must be 8-14 numeric digits"));
+    }
+    Ok(())
+}
+
+/// 409s with `BARCODE_ALREADY_EXISTS` if another product already carries
+/// `barcode`. Used both for a real, expected-to-sometimes-fire manual-entry
+/// collision and as a defensive check after generation (which should never
+/// actually fire, mirroring the SKU defensive check below).
+async fn ensure_barcode_available(db: &Database, barcode: &str) -> AppResult<()> {
+    if repository::product::find_product_by_barcode(db, barcode)
+        .await?
+        .is_some()
+    {
+        return Err(AppError::custom(
+            StatusCode::CONFLICT,
+            codes::BARCODE_ALREADY_EXISTS,
+            format!("A product with barcode '{barcode}' already exists"),
+        ));
+    }
+    Ok(())
+}
+
+/// Resolves what (if anything) `create_product` should persist for
+/// `barcode`/`barcode_source`, enforcing that only physical products may
+/// carry one and that a manual value and auto-generation are mutually
+/// exclusive. A `Service` product supplying either barcode input is a
+/// validation error (fail fast) rather than a silent ignore — a physical
+/// product supplying neither is fine, since a barcode can never be added
+/// later (it's immutable after creation).
+async fn resolve_barcode(
+    db: &Database,
+    product_type: ProductType,
+    barcode: Option<String>,
+    auto_generate_barcode: bool,
+) -> AppResult<(Option<String>, Option<BarcodeSource>)> {
+    if product_type == ProductType::Service {
+        if barcode.is_some() || auto_generate_barcode {
+            return Err(AppError::validation(
+                "Service products cannot have a barcode",
+            ));
+        }
+        return Ok((None, None));
+    }
+
+    match (barcode, auto_generate_barcode) {
+        (Some(_), true) => Err(AppError::validation(
+            "Provide either 'barcode' or 'autoGenerateBarcode', not both",
+        )),
+        (Some(manual), false) => {
+            validate_manual_barcode(&manual)?;
+            ensure_barcode_available(db, &manual).await?;
+            Ok((Some(manual), Some(BarcodeSource::Manual)))
+        }
+        (None, true) => {
+            let generated = crate::modules::barcode::service::generator::generate(
+                db,
+                crate::modules::barcode::service::generator::namespaces::PRODUCT,
+            )
+            .await?;
+            // Defensive fallback only — the atomic namespaced counter plus
+            // fixed reserved prefix make a collision structurally
+            // impossible, same "should never actually fire" reasoning as
+            // the SKU defensive check below.
+            ensure_barcode_available(db, &generated).await?;
+            Ok((Some(generated), Some(BarcodeSource::Generated)))
+        }
+        (None, false) => Ok((None, None)),
+    }
+}
+
 /// Validates required fields, price/stock invariants, and category
 /// membership, then generates the product's SKU from its category/
 /// subcategory names (see `service::sku::generate_sku`) — validation runs
@@ -264,6 +346,14 @@ pub async fn create_product(db: &Database, body: CreateProductRequest) -> AppRes
     )?;
     let (category_name, subcategory_name) =
         ensure_valid_category(db, &body.category_key, &body.subcategory_key).await?;
+
+    let (barcode, barcode_source) = resolve_barcode(
+        db,
+        body.product_type,
+        body.barcode,
+        body.auto_generate_barcode,
+    )
+    .await?;
 
     let sku = super::sku::generate_sku(db, &category_name, &subcategory_name).await?;
 
@@ -285,7 +375,9 @@ pub async fn create_product(db: &Database, body: CreateProductRequest) -> AppRes
         id: None,
         key: generate_id(prefixes::PRODUCT),
         sku,
-        barcode: body.barcode,
+        barcode,
+        barcode_source,
+        product_type: body.product_type,
         name: body.name,
         category_key: body.category_key,
         subcategory_key: body.subcategory_key,
@@ -352,9 +444,6 @@ pub(crate) async fn update_product(
     };
     if let Some(name) = body.name {
         set_doc.insert("name", name);
-    }
-    if let Some(barcode) = body.barcode {
-        set_doc.insert("barcode", barcode);
     }
 
     let updated = repository::product::update_product(db, id, set_doc)

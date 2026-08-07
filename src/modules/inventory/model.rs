@@ -7,7 +7,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     core::{constants::prefixes, id::generate_id},
-    domain::inventory::{CategoryInfo, Product, StockMovement, StockMovementType, SubcategoryInfo},
+    domain::inventory::{
+        BarcodeSource, CategoryInfo, Product, ProductType, StockMovement, StockMovementType,
+        SubcategoryInfo,
+    },
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,6 +22,10 @@ pub struct ProductDocument {
     pub sku: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub barcode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub barcode_source: Option<BarcodeSource>,
+    #[serde(default)]
+    pub product_type: ProductType,
     pub name: String,
     pub category_key: String,
     pub subcategory_key: String,
@@ -50,6 +57,8 @@ impl ProductDocument {
             key,
             sku: self.sku,
             barcode: self.barcode,
+            barcode_source: self.barcode_source,
+            product_type: self.product_type,
             name: self.name,
             category_key: self.category_key,
             category: category_name,
