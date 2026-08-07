@@ -26,7 +26,7 @@ jobs:
       - name: Run checks (fmt, clippy, tests)
         env:
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
-          MONGODB_DB_NAME: jana2u_pos_dev
+          MONGODB_DB_NAME: ${{ secrets.MONGODB_DB_NAME }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           JWT_EXPIRY_HOURS: 12
         run: make ci
