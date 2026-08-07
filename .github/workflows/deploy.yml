@@ -24,6 +24,9 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run checks (fmt, clippy, tests)
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          MONGODB_DB_NAME: jana2u_pos_dev
         run: make ci
 
   build-and-deploy:
