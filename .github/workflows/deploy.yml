@@ -27,6 +27,8 @@ jobs:
         env:
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
           MONGODB_DB_NAME: jana2u_pos_dev
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          JWT_EXPIRY_HOURS: 12
         run: make ci
 
   build-and-deploy:
