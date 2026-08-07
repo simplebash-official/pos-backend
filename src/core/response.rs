@@ -6,14 +6,18 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-/// Unified API success response wrapper.
+/// Unified API success response wrapper. `core::middleware::timing` splices
+/// a `processingTimeMs` field onto every JSON response body (this and
+/// `ErrorResponse` alike) after the fact, so it's not a struct field here —
+/// it isn't known until the whole request has finished processing.
 ///
 /// Example JSON:
 /// ```json
 /// {
 ///   "success": true,
 ///   "data": { ... },
-///   "message": "Product retrieved successfully"
+///   "message": "Product retrieved successfully",
+///   "processingTimeMs": 12
 /// }
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -60,7 +64,8 @@ impl<T: Serialize> IntoResponse for ApiResponse<T> {
     }
 }
 
-/// Unified API error response payload.
+/// Unified API error response payload. Also gets `processingTimeMs` spliced
+/// in by `core::middleware::timing` — see `ApiResponse` above.
 ///
 /// Example JSON:
 /// ```json
@@ -68,7 +73,8 @@ impl<T: Serialize> IntoResponse for ApiResponse<T> {
 ///   "success": false,
 ///   "message": "Product not found",
 ///   "code": "PRODUCT_NOT_FOUND",
-///   "statusCode": 404
+///   "statusCode": 404,
+///   "processingTimeMs": 3
 /// }
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

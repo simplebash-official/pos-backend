@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use axum::{Json, Router, http::Method};
+use axum::{Json, Router, http::Method, middleware};
 use mongodb::Database;
 use tower_http::{
     LatencyUnit,
@@ -13,7 +13,10 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::{
-    core::{config::Config, openapi::ApiDoc, response::ApiResponse},
+    core::{
+        config::Config, middleware::timing::add_processing_time_to_body, openapi::ApiDoc,
+        response::ApiResponse,
+    },
     domain::HealthResponse,
     modules,
 };
@@ -122,6 +125,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(SwaggerUi::new("/docs").url("/api-docs/openapi.json", openapi))
         .layer(cors)
         .layer(trace)
+        .layer(middleware::from_fn(add_processing_time_to_body))
         .with_state(state)
 }
 

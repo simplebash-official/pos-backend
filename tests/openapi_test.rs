@@ -73,6 +73,59 @@ async fn openapi_json_lists_all_module_paths() {
 }
 
 #[tokio::test]
+async fn response_body_carries_processing_time_on_success() {
+    let router = build_test_app().await;
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/api/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        json["processingTimeMs"].as_u64().is_some(),
+        "missing processingTimeMs in body: {json}"
+    );
+}
+
+#[tokio::test]
+async fn response_body_carries_processing_time_on_error() {
+    let router = build_test_app().await;
+
+    // Missing bearer token trips `CurrentUser`'s extractor before the
+    // handler ever touches Mongo, so this 401 comes back through the normal
+    // `AppError` -> `ErrorResponse` path without needing a live database.
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/api/auth/me")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        json["processingTimeMs"].as_u64().is_some(),
+        "missing processingTimeMs in body: {json}"
+    );
+}
+
+#[tokio::test]
 async fn swagger_ui_is_mounted() {
     let router = build_test_app().await;
 
