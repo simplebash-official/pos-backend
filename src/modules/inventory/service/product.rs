@@ -318,7 +318,7 @@ async fn resolve_barcode(
 }
 
 /// Validates required fields, price/stock invariants, category
-/// membership, and any optional supplier link, then generates the product's
+/// membership, and any optional supplier intake list, then generates the product's
 /// SKU from its category/subcategory names (see `service::sku::generate_sku`) —
 /// validation runs first so an invalid category/supplier never consumes a sequence number.
 pub async fn create_product(db: &Database, body: CreateProductRequest) -> AppResult<Product> {
@@ -334,9 +334,29 @@ pub async fn create_product(db: &Database, body: CreateProductRequest) -> AppRes
     let (category_name, subcategory_name) =
         ensure_valid_category(db, &body.category_key, &body.subcategory_key).await?;
 
-    // Fail fast: verify supplier exists if supplier_key was provided
-    if let Some(ref supplier_key) = body.supplier_key {
-        crate::modules::suppliers::service::get_supplier_by_key(db, supplier_key).await?;
+    // Fail fast: validate suppliers list upfront
+    if !body.suppliers.is_empty() {
+        let mut seen_keys = std::collections::HashSet::new();
+        for intake in &body.suppliers {
+            if !seen_keys.insert(&intake.supplier_key) {
+                return Err(AppError::validation(format!(
+                    "Duplicate supplierKey '{}' in suppliers list",
+                    intake.supplier_key
+                )));
+            }
+            if intake.quantity < 1 {
+                return Err(AppError::validation(
+                    "Supplier intake quantity must be at least 1",
+                ));
+            }
+            if intake.cost_price_cents < 0 {
+                return Err(AppError::validation(
+                    "Supplier intake cost price cannot be negative",
+                ));
+            }
+            crate::modules::suppliers::service::get_supplier_by_key(db, &intake.supplier_key)
+                .await?;
+        }
     }
 
     let (barcode, barcode_source) =
@@ -357,6 +377,18 @@ pub async fn create_product(db: &Database, body: CreateProductRequest) -> AppRes
         ));
     }
 
+    let initial_stock = if body.suppliers.is_empty() {
+        body.stock_quantity
+    } else {
+        0
+    };
+
+    let default_cost_price = if body.cost_price_cents == 0 && !body.suppliers.is_empty() {
+        body.suppliers[0].cost_price_cents
+    } else {
+        body.cost_price_cents
+    };
+
     let now = BsonDateTime::now();
     let document = ProductDocument {
         id: None,
@@ -367,31 +399,50 @@ pub async fn create_product(db: &Database, body: CreateProductRequest) -> AppRes
         name: body.name,
         category_key: body.category_key,
         subcategory_key: body.subcategory_key,
-        cost_price_cents: body.cost_price_cents,
+        cost_price_cents: default_cost_price,
         selling_price_cents: body.selling_price_cents,
-        stock_quantity: body.stock_quantity,
+        stock_quantity: initial_stock,
         min_stock_threshold: body.min_stock_threshold,
         created_at: now,
         updated_at: now,
     };
 
     let inserted = repository::product::insert_product(db, document).await?;
+    let product_object_id = inserted.id.expect("inserted product must have an id");
 
-    // Automatically link supplier if supplier_key was provided
-    if let Some(supplier_key) = body.supplier_key {
+    // Process each supplier intake
+    for intake in body.suppliers {
         crate::modules::supplier_products::service::link::upsert_link(
             db,
             crate::domain::supplier_products::UpsertSupplierProductLinkRequest {
-                supplier_key,
+                supplier_key: intake.supplier_key.clone(),
                 product_key: inserted.key.clone(),
-                cost_price_cents: Some(body.cost_price_cents),
-                notes: None,
+                cost_price_cents: Some(intake.cost_price_cents),
+                notes: intake.notes.clone(),
+            },
+        )
+        .await?;
+
+        crate::modules::purchases::service::purchase::record_purchase(
+            db,
+            crate::domain::purchases::CreatePurchaseRequest {
+                supplier_key: intake.supplier_key,
+                product_key: inserted.key.clone(),
+                quantity: intake.quantity,
+                unit_cost_cents: intake.cost_price_cents,
+                date: chrono::Utc::now(),
+                reference_no: intake.reference_no,
+                notes: intake.notes,
             },
         )
         .await?;
     }
 
-    Ok(inserted.into_product(category_name, subcategory_name))
+    let final_product = repository::product::find_product_by_id(db, product_object_id)
+        .await?
+        .expect("product was just created and must exist");
+
+    Ok(final_product.into_product(category_name, subcategory_name))
 }
 
 /// Partial update — every field in `body` is optional, so each one falls

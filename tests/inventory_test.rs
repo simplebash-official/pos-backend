@@ -568,70 +568,199 @@ async fn create_product_without_barcode_persists_null() {
 }
 
 #[tokio::test]
-async fn create_product_with_supplier_key_links_supplier_atomically() {
+async fn create_product_with_multiple_suppliers_links_and_records_intake_atomically() {
     let app = common::spawn_app().await;
-    let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Widgets").await;
-    let supplier_key = seed_supplier(&app.db).await;
+    let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Screens").await;
+    let supplier_a_key = seed_supplier(&app.db).await;
+    let supplier_b_key = seed_supplier(&app.db).await;
 
     let (status, created) = send(
         &app.router,
         "POST",
         "/api/inventory/products",
         Some(json!({
-            "name": "Supplier-Linked Widget",
+            "name": "iPhone 15 Pro Screen (Multi-Supplier)",
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
-            "costPriceCents": 1000,
-            "sellingPriceCents": 2000,
-            "stockQuantity": 5,
-            "minStockThreshold": 1,
-            "supplierKey": supplier_key,
+            "sellingPriceCents": 1500,
+            "minStockThreshold": 5,
+            "suppliers": [
+                {
+                    "supplierKey": supplier_a_key,
+                    "quantity": 30,
+                    "costPriceCents": 450,
+                    "referenceNo": "INV-SUP-A-001",
+                    "notes": "Batch A OEM"
+                },
+                {
+                    "supplierKey": supplier_b_key,
+                    "quantity": 20,
+                    "costPriceCents": 480,
+                    "referenceNo": "INV-SUP-B-002",
+                    "notes": "Batch B Premium"
+                }
+            ]
         })),
     )
     .await;
 
     assert_eq!(status, StatusCode::CREATED);
-    let product_key = created["data"]["key"].as_str().unwrap();
+    assert_eq!(created["data"]["stockQuantity"], 50);
+    assert_eq!(created["data"]["costPriceCents"], 450);
 
-    // Verify supplier_products link was created in MongoDB
-    let link = app
+    let product_key = created["data"]["key"].as_str().unwrap();
+    let product_id = created["data"]["id"].as_str().unwrap();
+
+    // 1. Verify supplier_products links for both suppliers
+    let link_a = app
         .db
         .collection::<mongodb::bson::Document>("supplier_products")
         .find_one(mongodb::bson::doc! {
-            "supplier_key": &supplier_key,
+            "supplier_key": &supplier_a_key,
             "product_key": product_key,
         })
         .await
-        .expect("query link")
-        .expect("link must exist");
+        .expect("query link A")
+        .expect("link A must exist");
+    assert_eq!(link_a.get_i64("cost_price_cents").unwrap(), 450);
 
-    assert_eq!(link.get_i64("cost_price_cents").unwrap(), 1000);
+    let link_b = app
+        .db
+        .collection::<mongodb::bson::Document>("supplier_products")
+        .find_one(mongodb::bson::doc! {
+            "supplier_key": &supplier_b_key,
+            "product_key": product_key,
+        })
+        .await
+        .expect("query link B")
+        .expect("link B must exist");
+    assert_eq!(link_b.get_i64("cost_price_cents").unwrap(), 480);
+
+    // 2. Verify purchases collection has 2 records
+    let purchases_count = app
+        .db
+        .collection::<mongodb::bson::Document>("purchases")
+        .count_documents(mongodb::bson::doc! { "product_key": product_key })
+        .await
+        .expect("count purchases");
+    assert_eq!(purchases_count, 2);
+
+    // 3. Verify stock movements for the product
+    let (status, movements) = send(
+        &app.router,
+        "GET",
+        &format!("/api/inventory/products/{product_id}/movements"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = movements["data"]["movements"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    let total_delta: i64 = items
+        .iter()
+        .map(|m| m["quantityDelta"].as_i64().unwrap())
+        .sum();
+    assert_eq!(total_delta, 50);
 }
 
 #[tokio::test]
-async fn create_product_with_invalid_supplier_key_fails_fast() {
+async fn create_product_rejects_duplicate_suppliers_in_same_request() {
     let app = common::spawn_app().await;
     let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Widgets").await;
+    let supplier_key = seed_supplier(&app.db).await;
 
     let (status, body) = send(
         &app.router,
         "POST",
         "/api/inventory/products",
         Some(json!({
-            "name": "Invalid Supplier Widget",
+            "name": "Duplicate Supplier Widget",
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
-            "costPriceCents": 1000,
             "sellingPriceCents": 2000,
-            "stockQuantity": 5,
-            "minStockThreshold": 1,
-            "supplierKey": "sup_nonexistent",
+            "suppliers": [
+                {
+                    "supplierKey": supplier_key,
+                    "quantity": 10,
+                    "costPriceCents": 1000
+                },
+                {
+                    "supplierKey": supplier_key,
+                    "quantity": 5,
+                    "costPriceCents": 1100
+                }
+            ]
+        })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "VALIDATION_ERROR");
+}
+
+#[tokio::test]
+async fn create_product_rejects_nonexistent_supplier_in_intake_list() {
+    let app = common::spawn_app().await;
+    let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Widgets").await;
+    let valid_supplier_key = seed_supplier(&app.db).await;
+
+    let (status, body) = send(
+        &app.router,
+        "POST",
+        "/api/inventory/products",
+        Some(json!({
+            "name": "Nonexistent Supplier Widget",
+            "categoryKey": category_key,
+            "subcategoryKey": subcategory_key,
+            "sellingPriceCents": 2000,
+            "suppliers": [
+                {
+                    "supplierKey": valid_supplier_key,
+                    "quantity": 10,
+                    "costPriceCents": 1000
+                },
+                {
+                    "supplierKey": "sup_nonexistent_999",
+                    "quantity": 5,
+                    "costPriceCents": 1100
+                }
+            ]
         })),
     )
     .await;
 
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(body["code"], "SUPPLIER_NOT_FOUND");
+}
+
+#[tokio::test]
+async fn create_product_rejects_zero_or_negative_supplier_quantity() {
+    let app = common::spawn_app().await;
+    let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Widgets").await;
+    let supplier_key = seed_supplier(&app.db).await;
+
+    let (status, body) = send(
+        &app.router,
+        "POST",
+        "/api/inventory/products",
+        Some(json!({
+            "name": "Zero Qty Supplier Widget",
+            "categoryKey": category_key,
+            "subcategoryKey": subcategory_key,
+            "sellingPriceCents": 2000,
+            "suppliers": [
+                {
+                    "supplierKey": supplier_key,
+                    "quantity": 0,
+                    "costPriceCents": 1000
+                }
+            ]
+        })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "VALIDATION_ERROR");
 }
 
 #[tokio::test]

@@ -45,11 +45,30 @@ pub struct Product {
 /// client-supplied. `category_key`/`subcategory_key` must be the system-
 /// generated `key` of an existing category/subcategory (see `GET
 /// /categories` or `GET /categories/valid`) — never the display name.
+/// An individual supplier intake batch submitted during product creation.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductSupplierIntake {
+    pub supplier_key: String,
+    pub quantity: i64,
+    pub cost_price_cents: i64,
+    #[serde(default)]
+    pub reference_no: Option<String>,
+    #[serde(default)]
+    pub notes: Option<String>,
+}
+
+/// Body for `POST /products`. `sku` is deliberately absent — it's
+/// generated server-side from the category/subcategory names resolved from
+/// `category_key`/`subcategory_key` (see `service::sku::generate_sku`), not
+/// client-supplied. `category_key`/`subcategory_key` must be the system-
+/// generated `key` of an existing category/subcategory (see `GET
+/// /categories` or `GET /categories/valid`) — never the display name.
 /// Prices are integer cents (never float) to avoid rounding drift;
 /// `stock_quantity`/`min_stock_threshold` default to `0` via
 /// `#[serde(default)]` so a minimal request still deserializes.
-/// `supplier_key`, if provided, atomically links this product to the
-/// referenced supplier upon creation.
+/// `suppliers`, if provided, atomically links each supplier, records purchase
+/// history receipts, and computes the initial `stock_quantity`.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateProductRequest {
@@ -60,6 +79,7 @@ pub struct CreateProductRequest {
     pub name: String,
     pub category_key: String,
     pub subcategory_key: String,
+    #[serde(default)]
     pub cost_price_cents: i64,
     pub selling_price_cents: i64,
     #[serde(default)]
@@ -67,7 +87,7 @@ pub struct CreateProductRequest {
     #[serde(default)]
     pub min_stock_threshold: i64,
     #[serde(default)]
-    pub supplier_key: Option<String>,
+    pub suppliers: Vec<ProductSupplierIntake>,
 }
 
 /// Body for `PUT /products/{id}`. Every field is optional so a client can

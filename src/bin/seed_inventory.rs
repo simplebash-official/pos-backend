@@ -170,7 +170,7 @@ async fn main() {
                     selling_price_cents: p.selling_price_cents,
                     stock_quantity: p.stock_quantity,
                     min_stock_threshold: p.min_stock_threshold,
-                    supplier_key: None,
+                    suppliers: Vec::new(),
                 };
 
                 let created_product = product::create_product(&db, req)
