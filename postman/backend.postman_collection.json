@@ -445,6 +445,22 @@
             },
             {
               "name": "Create Product",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 201) {",
+                      "    const data = pm.response.json().data;",
+                      "    pm.environment.set(\"productId\", data.id);",
+                      "    pm.environment.set(\"productKey\", data.key);",
+                      "    console.log(`productId (${data.id}) and productKey (${data.key}) saved`);",
+                      "}"
+                    ]
+                  }
+                }
+              ],
               "request": {
                 "method": "POST",
                 "header": [
@@ -678,6 +694,24 @@
             },
             {
               "name": "Create Category",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 201) {",
+                      "    const data = pm.response.json().data;",
+                      "    pm.environment.set(\"categoryKey\", data.key);",
+                      "    if (data.subcategories && data.subcategories.length > 0) {",
+                      "        pm.environment.set(\"subcategoryKey\", data.subcategories[0].key);",
+                      "    }",
+                      "    console.log(`categoryKey (${data.key}) saved`);",
+                      "}"
+                    ]
+                  }
+                }
+              ],
               "request": {
                 "method": "POST",
                 "header": [
@@ -816,6 +850,21 @@
             },
             {
               "name": "Add Subcategory",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 201) {",
+                      "    const data = pm.response.json().data;",
+                      "    pm.environment.set(\"subcategoryKey\", data.key);",
+                      "    console.log(`subcategoryKey (${data.key}) saved`);",
+                      "}"
+                    ]
+                  }
+                }
+              ],
               "request": {
                 "method": "POST",
                 "header": [
@@ -988,6 +1037,22 @@
         },
         {
           "name": "Create Supplier",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const data = pm.response.json().data;",
+                  "    pm.environment.set(\"supplierId\", data.id);",
+                  "    pm.environment.set(\"supplierKey\", data.key);",
+                  "    console.log(`supplierId (${data.id}) and supplierKey (${data.key}) saved`);",
+                  "}"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -1420,6 +1485,21 @@
         },
         {
           "name": "Create User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const data = pm.response.json().data;",
+                  "    pm.environment.set(\"userId\", data.id);",
+                  "    console.log(`userId (${data.id}) saved`);",
+                  "}"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
