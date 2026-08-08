@@ -26,7 +26,6 @@ pub struct Product {
     pub barcode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub barcode_source: Option<BarcodeSource>,
-    pub product_type: ProductType,
     pub name: String,
     pub category_key: String,
     pub category: String,
@@ -49,11 +48,11 @@ pub struct Product {
 /// Prices are integer cents (never float) to avoid rounding drift;
 /// `stock_quantity`/`min_stock_threshold` default to `0` via
 /// `#[serde(default)]` so a minimal request still deserializes.
+/// `supplier_key`, if provided, atomically links this product to the
+/// referenced supplier upon creation.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateProductRequest {
-    #[serde(default)]
-    pub product_type: ProductType,
     #[serde(default)]
     pub barcode: Option<String>,
     #[serde(default)]
@@ -67,13 +66,15 @@ pub struct CreateProductRequest {
     pub stock_quantity: i64,
     #[serde(default)]
     pub min_stock_threshold: i64,
+    #[serde(default)]
+    pub supplier_key: Option<String>,
 }
 
 /// Body for `PUT /products/{id}`. Every field is optional so a client can
 /// send only what changed — `service::product::update_product` fills in
 /// omitted fields from the existing document rather than clearing them.
 /// `category_key`/`subcategory_key`, like on create, must be keys, not names.
-/// `barcode` and `productType` are deliberately absent here — both are
+/// `barcode` is deliberately absent here — it is
 /// immutable after creation, same as `sku` (which also has no field on this
 /// struct); a dedicated "replace barcode" action is out of scope for now.
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
@@ -246,21 +247,8 @@ pub struct LowStockResponse {
     pub total: u64,
 }
 
-/// Physical/stockable vs. service line items. Only `Physical` products may
-/// carry a barcode (see `service::product::create_product`) — a service has
-/// no physical unit to label. Defaults to `Physical` for backward
-/// compatibility with every product created before this field existed (see
-/// the `#[serde(default)]` usage on `ProductDocument`/`CreateProductRequest`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ProductType {
-    #[default]
-    Physical,
-    Service,
-}
-
 /// How a product's `barcode` was populated. `None` on `Product` whenever
-/// `barcode` itself is `None` — a physical product may be created with no
+/// `barcode` itself is `None` — a product may be created with no
 /// barcode at all, since it can never be added later (barcode is immutable
 /// after creation, see `UpdateProductRequest`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

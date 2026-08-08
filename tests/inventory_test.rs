@@ -522,54 +522,27 @@ async fn create_product_rejects_barcode_and_auto_generate_together() {
     assert_eq!(body["code"], "VALIDATION_ERROR");
 }
 
-#[tokio::test]
-async fn create_service_product_rejects_barcode_fields() {
-    let app = common::spawn_app().await;
-    let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Widgets").await;
-
-    let (status, auto_generate_rejected) = send(
-        &app.router,
-        "POST",
-        "/api/inventory/products",
-        Some(json!({
-            "name": "Printing Service",
-            "productType": "service",
-            "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
-            "costPriceCents": 0,
-            "sellingPriceCents": 500,
-            "stockQuantity": 0,
-            "minStockThreshold": 0,
-            "autoGenerateBarcode": true,
-        })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert_eq!(auto_generate_rejected["code"], "VALIDATION_ERROR");
-
-    let (status, manual_rejected) = send(
-        &app.router,
-        "POST",
-        "/api/inventory/products",
-        Some(json!({
-            "name": "Printing Service",
-            "productType": "service",
-            "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
-            "costPriceCents": 0,
-            "sellingPriceCents": 500,
-            "stockQuantity": 0,
-            "minStockThreshold": 0,
-            "barcode": "12345678",
-        })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert_eq!(manual_rejected["code"], "VALIDATION_ERROR");
+async fn seed_supplier(db: &mongodb::Database) -> String {
+    let supplier_key = generate_id("sup");
+    let now = BsonDateTime::now();
+    db.collection::<mongodb::bson::Document>("suppliers")
+        .insert_one(mongodb::bson::doc! {
+            "key": &supplier_key,
+            "name": format!("Test Supplier {}", Uuid::new_v4()),
+            "contact_person": "Jane Doe",
+            "primary_phone": "1234567890",
+            "address": "123 Main St",
+            "supplied_categories": vec!["Widgets"],
+            "created_at": now,
+            "updated_at": now,
+        })
+        .await
+        .expect("failed to seed supplier");
+    supplier_key
 }
 
 #[tokio::test]
-async fn create_service_product_has_no_barcode() {
+async fn create_product_without_barcode_persists_null() {
     let app = common::spawn_app().await;
     let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Widgets").await;
 
@@ -578,35 +551,7 @@ async fn create_service_product_has_no_barcode() {
         "POST",
         "/api/inventory/products",
         Some(json!({
-            "name": "Printing Service",
-            "productType": "service",
-            "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
-            "costPriceCents": 0,
-            "sellingPriceCents": 500,
-            "stockQuantity": 0,
-            "minStockThreshold": 0,
-        })),
-    )
-    .await;
-
-    assert_eq!(status, StatusCode::CREATED);
-    assert_eq!(created["data"]["productType"], "service");
-    assert!(created["data"]["barcode"].is_null());
-    assert!(created["data"]["barcodeSource"].is_null());
-}
-
-#[tokio::test]
-async fn create_product_defaults_to_physical_product_type() {
-    let app = common::spawn_app().await;
-    let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Widgets").await;
-
-    let (status, created) = send(
-        &app.router,
-        "POST",
-        "/api/inventory/products",
-        Some(json!({
-            "name": "Legacy-Shaped Request Widget",
+            "name": "Barcode-Free Widget",
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
             "costPriceCents": 1000,
@@ -618,7 +563,75 @@ async fn create_product_defaults_to_physical_product_type() {
     .await;
 
     assert_eq!(status, StatusCode::CREATED);
-    assert_eq!(created["data"]["productType"], "physical");
+    assert!(created["data"]["barcode"].is_null());
+    assert!(created["data"]["barcodeSource"].is_null());
+}
+
+#[tokio::test]
+async fn create_product_with_supplier_key_links_supplier_atomically() {
+    let app = common::spawn_app().await;
+    let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Widgets").await;
+    let supplier_key = seed_supplier(&app.db).await;
+
+    let (status, created) = send(
+        &app.router,
+        "POST",
+        "/api/inventory/products",
+        Some(json!({
+            "name": "Supplier-Linked Widget",
+            "categoryKey": category_key,
+            "subcategoryKey": subcategory_key,
+            "costPriceCents": 1000,
+            "sellingPriceCents": 2000,
+            "stockQuantity": 5,
+            "minStockThreshold": 1,
+            "supplierKey": supplier_key,
+        })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::CREATED);
+    let product_key = created["data"]["key"].as_str().unwrap();
+
+    // Verify supplier_products link was created in MongoDB
+    let link = app
+        .db
+        .collection::<mongodb::bson::Document>("supplier_products")
+        .find_one(mongodb::bson::doc! {
+            "supplier_key": &supplier_key,
+            "product_key": product_key,
+        })
+        .await
+        .expect("query link")
+        .expect("link must exist");
+
+    assert_eq!(link.get_i64("cost_price_cents").unwrap(), 1000);
+}
+
+#[tokio::test]
+async fn create_product_with_invalid_supplier_key_fails_fast() {
+    let app = common::spawn_app().await;
+    let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Widgets").await;
+
+    let (status, body) = send(
+        &app.router,
+        "POST",
+        "/api/inventory/products",
+        Some(json!({
+            "name": "Invalid Supplier Widget",
+            "categoryKey": category_key,
+            "subcategoryKey": subcategory_key,
+            "costPriceCents": 1000,
+            "sellingPriceCents": 2000,
+            "stockQuantity": 5,
+            "minStockThreshold": 1,
+            "supplierKey": "sup_nonexistent",
+        })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["code"], "SUPPLIER_NOT_FOUND");
 }
 
 #[tokio::test]

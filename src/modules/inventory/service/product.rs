@@ -18,7 +18,7 @@ use crate::{
     },
     domain::inventory::{
         BarcodeSource, CreateProductRequest, PaginationMeta, Product, ProductListQuery,
-        ProductListResponse, ProductType, UpdateProductRequest,
+        ProductListResponse, UpdateProductRequest,
     },
     modules::inventory::{model::ProductDocument, repository},
 };
@@ -283,27 +283,14 @@ async fn ensure_barcode_available(db: &Database, barcode: &str) -> AppResult<()>
 }
 
 /// Resolves what (if anything) `create_product` should persist for
-/// `barcode`/`barcode_source`, enforcing that only physical products may
-/// carry one and that a manual value and auto-generation are mutually
-/// exclusive. A `Service` product supplying either barcode input is a
-/// validation error (fail fast) rather than a silent ignore — a physical
-/// product supplying neither is fine, since a barcode can never be added
-/// later (it's immutable after creation).
+/// `barcode`/`barcode_source`, enforcing that a manual value and
+/// auto-generation are mutually exclusive. A product supplying neither is fine,
+/// since a barcode can never be added later (it's immutable after creation).
 async fn resolve_barcode(
     db: &Database,
-    product_type: ProductType,
     barcode: Option<String>,
     auto_generate_barcode: bool,
 ) -> AppResult<(Option<String>, Option<BarcodeSource>)> {
-    if product_type == ProductType::Service {
-        if barcode.is_some() || auto_generate_barcode {
-            return Err(AppError::validation(
-                "Service products cannot have a barcode",
-            ));
-        }
-        return Ok((None, None));
-    }
-
     match (barcode, auto_generate_barcode) {
         (Some(_), true) => Err(AppError::validation(
             "Provide either 'barcode' or 'autoGenerateBarcode', not both",
@@ -330,10 +317,10 @@ async fn resolve_barcode(
     }
 }
 
-/// Validates required fields, price/stock invariants, and category
-/// membership, then generates the product's SKU from its category/
-/// subcategory names (see `service::sku::generate_sku`) — validation runs
-/// first so an invalid category never consumes a sequence number.
+/// Validates required fields, price/stock invariants, category
+/// membership, and any optional supplier link, then generates the product's
+/// SKU from its category/subcategory names (see `service::sku::generate_sku`) —
+/// validation runs first so an invalid category/supplier never consumes a sequence number.
 pub async fn create_product(db: &Database, body: CreateProductRequest) -> AppResult<Product> {
     if body.name.trim().is_empty() {
         return Err(AppError::validation("Product name is required"));
@@ -347,13 +334,13 @@ pub async fn create_product(db: &Database, body: CreateProductRequest) -> AppRes
     let (category_name, subcategory_name) =
         ensure_valid_category(db, &body.category_key, &body.subcategory_key).await?;
 
-    let (barcode, barcode_source) = resolve_barcode(
-        db,
-        body.product_type,
-        body.barcode,
-        body.auto_generate_barcode,
-    )
-    .await?;
+    // Fail fast: verify supplier exists if supplier_key was provided
+    if let Some(ref supplier_key) = body.supplier_key {
+        crate::modules::suppliers::service::get_supplier_by_key(db, supplier_key).await?;
+    }
+
+    let (barcode, barcode_source) =
+        resolve_barcode(db, body.barcode, body.auto_generate_barcode).await?;
 
     let sku = super::sku::generate_sku(db, &category_name, &subcategory_name).await?;
 
@@ -377,7 +364,6 @@ pub async fn create_product(db: &Database, body: CreateProductRequest) -> AppRes
         sku,
         barcode,
         barcode_source,
-        product_type: body.product_type,
         name: body.name,
         category_key: body.category_key,
         subcategory_key: body.subcategory_key,
@@ -390,6 +376,21 @@ pub async fn create_product(db: &Database, body: CreateProductRequest) -> AppRes
     };
 
     let inserted = repository::product::insert_product(db, document).await?;
+
+    // Automatically link supplier if supplier_key was provided
+    if let Some(supplier_key) = body.supplier_key {
+        crate::modules::supplier_products::service::link::upsert_link(
+            db,
+            crate::domain::supplier_products::UpsertSupplierProductLinkRequest {
+                supplier_key,
+                product_key: inserted.key.clone(),
+                cost_price_cents: Some(body.cost_price_cents),
+                notes: None,
+            },
+        )
+        .await?;
+    }
+
     Ok(inserted.into_product(category_name, subcategory_name))
 }
 

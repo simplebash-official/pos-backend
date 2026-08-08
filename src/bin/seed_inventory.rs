@@ -2,8 +2,7 @@ use jana2u_pos_backend::{
     clients,
     core::config::Config,
     domain::inventory::{
-        CreateCategoryRequest, CreateProductRequest, ProductListQuery, ProductType,
-        UpdateCategoryRequest,
+        CreateCategoryRequest, CreateProductRequest, ProductListQuery, UpdateCategoryRequest,
     },
     modules::inventory::service::{category, product},
 };
@@ -162,7 +161,6 @@ async fn main() {
                 }
 
                 let req = CreateProductRequest {
-                    product_type: ProductType::Physical,
                     barcode: Some(p.barcode.to_string()),
                     auto_generate_barcode: false,
                     name: p.name.to_string(),
@@ -172,6 +170,7 @@ async fn main() {
                     selling_price_cents: p.selling_price_cents,
                     stock_quantity: p.stock_quantity,
                     min_stock_threshold: p.min_stock_threshold,
+                    supplier_key: None,
                 };
 
                 let created_product = product::create_product(&db, req)
