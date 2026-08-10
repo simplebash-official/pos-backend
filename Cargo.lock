@@ -1279,6 +1279,7 @@ version = "0.1.0"
 dependencies = [
  "argon2",
  "axum",
+ "base64",
  "bson 3.1.0",
  "chrono",
  "dotenvy",
@@ -1289,6 +1290,7 @@ dependencies = [
  "rand 0.10.2",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "thiserror",
  "tokio",
  "tower",

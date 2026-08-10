@@ -5,7 +5,7 @@
 
 use mongodb::{
     Database,
-    bson::{DateTime as BsonDateTime, oid::ObjectId},
+    bson::{DateTime as BsonDateTime, doc, oid::ObjectId},
 };
 
 use crate::{
@@ -16,7 +16,8 @@ use crate::{
     },
     domain::inventory::{
         LowStockItem, LowStockResponse, StockAdjustmentRequest, StockAdjustmentResponse,
-        StockMovementType, StockMovementsResponse,
+        StockMovementListQuery, StockMovementListResponse, StockMovementType,
+        StockMovementsResponse,
     },
     modules::inventory::{model::ProductDocument, model::StockMovementDocument, repository},
 };
@@ -51,12 +52,30 @@ pub(crate) async fn apply_stock_delta(
                     .ok_or_else(|| {
                         AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
                     })?;
-                return Err(AppError::validation_with_code(
-                    format!(
-                        "Requested delta {delta} would result in negative stock (current stock: {})",
-                        existing.stock_quantity
-                    ),
+                let requested_qty = -delta;
+                let message = format!(
+                    "Only {} unit{} of {} {} left in stock.",
+                    existing.stock_quantity,
+                    if existing.stock_quantity == 1 {
+                        ""
+                    } else {
+                        "s"
+                    },
+                    existing.name,
+                    if existing.stock_quantity == 1 {
+                        "is"
+                    } else {
+                        "are"
+                    }
+                );
+                return Err(AppError::conflict_with_details(
                     codes::INSUFFICIENT_STOCK,
+                    message,
+                    serde_json::json!({
+                        "available": existing.stock_quantity,
+                        "requested": requested_qty,
+                        "productId": existing.id.map(|i| i.to_hex()).unwrap_or_default(),
+                    }),
                 ));
             }
         };
@@ -71,8 +90,11 @@ pub(crate) async fn apply_stock_delta(
             movement_type,
             reference_id,
             note,
+            version: 1,
             created_at: now,
             updated_at: now,
+            deleted_at: None,
+            updated_by_device: None,
         },
     )
     .await?;
@@ -164,4 +186,59 @@ pub(crate) async fn product_movements(
         .collect();
 
     Ok(StockMovementsResponse { movements })
+}
+
+/// Unfiltered, paginated listing of all stock movements for delta/offline sync.
+pub(crate) async fn list_stock_movements(
+    db: &Database,
+    query: StockMovementListQuery,
+) -> AppResult<StockMovementListResponse> {
+    let mut filter = doc! { "deleted_at": { "$exists": false } };
+
+    if let Some(ref pid_str) = query.product_id
+        && !pid_str.is_empty()
+    {
+        let pid =
+            ObjectId::parse_str(pid_str).map_err(|_| AppError::validation("Invalid product ID"))?;
+        filter.insert("product_id", pid);
+    }
+
+    if let Some(mtype) = query.movement_type {
+        let mtype_str = match mtype {
+            StockMovementType::Sale => "sale",
+            StockMovementType::PurchaseReceipt => "purchase_receipt",
+            StockMovementType::RepairPartConsumption => "repair_part_consumption",
+            StockMovementType::ManualAdjustment => "manual_adjustment",
+            StockMovementType::Return => "return",
+        };
+        filter.insert("movement_type", mtype_str);
+    }
+
+    let page = query.page.unwrap_or(1).max(1);
+    let limit = query.limit.unwrap_or(20).clamp(1, 500);
+    let skip = (page - 1) * limit;
+
+    let (documents, total) =
+        repository::stock::list_stock_movements_paginated(db, filter, skip, limit as i64).await?;
+
+    let total_pages = if total == 0 {
+        1
+    } else {
+        (total as f64 / limit as f64).ceil() as u64
+    };
+
+    let items = documents
+        .into_iter()
+        .map(StockMovementDocument::into_stock_movement)
+        .collect();
+
+    Ok(StockMovementListResponse {
+        items,
+        pagination: crate::domain::inventory::PaginationMeta {
+            page,
+            limit,
+            total,
+            total_pages,
+        },
+    })
 }

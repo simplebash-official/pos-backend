@@ -22,7 +22,9 @@ pub(crate) async fn find_product_by_id(
     db: &Database,
     id: ObjectId,
 ) -> AppResult<Option<ProductDocument>> {
-    Ok(products(db).find_one(doc! { "_id": id }).await?)
+    Ok(products(db)
+        .find_one(doc! { "_id": id, "deleted_at": { "$exists": false } })
+        .await?)
 }
 
 /// Used for the create-time uniqueness check (`service::product::create_product`) —
@@ -31,7 +33,9 @@ pub(crate) async fn find_product_by_sku(
     db: &Database,
     sku: &str,
 ) -> AppResult<Option<ProductDocument>> {
-    Ok(products(db).find_one(doc! { "sku": sku }).await?)
+    Ok(products(db)
+        .find_one(doc! { "sku": sku, "deleted_at": { "$exists": false } })
+        .await?)
 }
 
 /// Used for the manual-barcode-collision check and the generated-barcode
@@ -40,7 +44,9 @@ pub(crate) async fn find_product_by_barcode(
     db: &Database,
     barcode: &str,
 ) -> AppResult<Option<ProductDocument>> {
-    Ok(products(db).find_one(doc! { "barcode": barcode }).await?)
+    Ok(products(db)
+        .find_one(doc! { "barcode": barcode, "deleted_at": { "$exists": false } })
+        .await?)
 }
 
 /// Looked up by `key` rather than `_id` — the entry point for other modules
@@ -50,7 +56,9 @@ pub(crate) async fn find_product_by_key(
     db: &Database,
     key: &str,
 ) -> AppResult<Option<ProductDocument>> {
-    Ok(products(db).find_one(doc! { "key": key }).await?)
+    Ok(products(db)
+        .find_one(doc! { "key": key, "deleted_at": { "$exists": false } })
+        .await?)
 }
 
 /// Fetches every product matching one of `ids` in a single query — used by
@@ -63,7 +71,9 @@ pub(crate) async fn find_products_by_ids(
     if ids.is_empty() {
         return Ok(Vec::new());
     }
-    let mut cursor = products(db).find(doc! { "_id": { "$in": ids } }).await?;
+    let mut cursor = products(db)
+        .find(doc! { "_id": { "$in": ids }, "deleted_at": { "$exists": false } })
+        .await?;
 
     let mut items = Vec::new();
     while let Some(document) = cursor.try_next().await? {
@@ -97,7 +107,10 @@ pub(crate) async fn update_product(
     set_doc: Document,
 ) -> AppResult<Option<ProductDocument>> {
     Ok(products(db)
-        .find_one_and_update(doc! { "_id": id }, doc! { "$set": set_doc })
+        .find_one_and_update(
+            doc! { "_id": id, "deleted_at": { "$exists": false } },
+            doc! { "$set": set_doc, "$inc": { "version": 1 } },
+        )
         .return_document(ReturnDocument::After)
         .await?)
 }
@@ -105,8 +118,26 @@ pub(crate) async fn update_product(
 pub(crate) async fn delete_product(
     db: &Database,
     id: ObjectId,
+    device_id: Option<String>,
 ) -> AppResult<Option<ProductDocument>> {
-    Ok(products(db).find_one_and_delete(doc! { "_id": id }).await?)
+    let now = BsonDateTime::now();
+    let mut set_doc = doc! {
+        "deleted_at": now,
+        "updated_at": now,
+    };
+    if let Some(device) = device_id {
+        set_doc.insert("updated_by_device", device);
+    }
+    Ok(products(db)
+        .find_one_and_update(
+            doc! { "_id": id, "deleted_at": { "$exists": false } },
+            doc! {
+                "$set": set_doc,
+                "$inc": { "version": 1 }
+            },
+        )
+        .return_document(ReturnDocument::After)
+        .await?)
 }
 
 /// Batch delete for `DELETE /products`. Guards the empty-list case
@@ -116,10 +147,17 @@ pub(crate) async fn delete_products(db: &Database, ids: Vec<ObjectId>) -> AppRes
     if ids.is_empty() {
         return Ok(0);
     }
-    Ok(products(db)
-        .delete_many(doc! { "_id": { "$in": ids } })
-        .await?
-        .deleted_count)
+    let now = BsonDateTime::now();
+    let result = products(db)
+        .update_many(
+            doc! { "_id": { "$in": ids }, "deleted_at": { "$exists": false } },
+            doc! {
+                "$set": { "deleted_at": now, "updated_at": now },
+                "$inc": { "version": 1 }
+            },
+        )
+        .await?;
+    Ok(result.modified_count)
 }
 
 /// `$expr`/`$lte` compares two fields of the *same* document
@@ -128,7 +166,10 @@ pub(crate) async fn delete_products(db: &Database, ids: Vec<ObjectId>) -> AppRes
 /// operator even though it's a simple `find`, not an aggregation pipeline.
 pub(crate) async fn find_low_stock_products(db: &Database) -> AppResult<Vec<ProductDocument>> {
     let mut cursor = products(db)
-        .find(doc! { "$expr": { "$lte": ["$stock_quantity", "$min_stock_threshold"] } })
+        .find(doc! {
+            "deleted_at": { "$exists": false },
+            "$expr": { "$lte": ["$stock_quantity", "$min_stock_threshold"] }
+        })
         .await?;
 
     let mut items = Vec::new();
@@ -155,6 +196,7 @@ pub(crate) async fn adjust_product_stock_pipeline(
         "$set": {
             "stock_quantity": { "$add": ["$stock_quantity", delta] },
             "updated_at": now,
+            "version": { "$add": [{ "$ifNull": ["$version", 1] }, 1] },
         }
     }];
 
@@ -191,11 +233,16 @@ pub(crate) async fn list_products_with_display_names(
     limit: i64,
 ) -> AppResult<(Vec<Product>, u64)> {
     let collection = products(db);
-    let total = collection.count_documents(filter.clone()).await?;
+    let mut effective_filter = filter;
+    if !effective_filter.contains_key("deleted_at") {
+        effective_filter.insert("deleted_at", doc! { "$exists": false });
+    }
+
+    let total = collection.count_documents(effective_filter.clone()).await?;
 
     let mut pipeline = Vec::new();
-    if !filter.is_empty() {
-        pipeline.push(doc! { "$match": filter });
+    if !effective_filter.is_empty() {
+        pipeline.push(doc! { "$match": effective_filter });
     }
     if !sort.is_empty() {
         pipeline.push(doc! { "$sort": sort });
@@ -260,7 +307,7 @@ pub(crate) async fn count_products_in_category(
     category_key: &str,
 ) -> AppResult<u64> {
     Ok(products(db)
-        .count_documents(doc! { "category_key": category_key })
+        .count_documents(doc! { "category_key": category_key, "deleted_at": { "$exists": false } })
         .await?)
 }
 
@@ -271,7 +318,9 @@ pub(crate) async fn count_products_in_subcategory(
     subcategory_key: &str,
 ) -> AppResult<u64> {
     Ok(products(db)
-        .count_documents(doc! { "subcategory_key": subcategory_key })
+        .count_documents(
+            doc! { "subcategory_key": subcategory_key, "deleted_at": { "$exists": false } },
+        )
         .await?)
 }
 

@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use mongodb::{
     Database,
-    bson::{DateTime as BsonDateTime, oid::ObjectId},
+    bson::{DateTime as BsonDateTime, doc, oid::ObjectId},
 };
 
 use crate::{
@@ -19,10 +19,10 @@ use crate::{
         id::generate_id,
     },
     domain::{
-        inventory::StockMovementType,
+        inventory::{PaginationMeta, StockMovementType},
         purchases::{
-            CreatePurchaseRequest, ProductSummary, Purchase, PurchaseListQuery, PurchasesResponse,
-            SupplierSummary,
+            CreatePurchaseRequest, ProductSummary, Purchase, PurchaseListQuery,
+            PurchaseListResponse, SupplierSummary,
         },
     },
     modules::{
@@ -60,8 +60,11 @@ pub async fn record_purchase(db: &Database, body: CreatePurchaseRequest) -> AppR
         date: BsonDateTime::from_chrono(body.date),
         reference_no: body.reference_no.clone(),
         notes: body.notes,
+        version: 1,
         created_at: now,
         updated_at: now,
+        deleted_at: None,
+        updated_by_device: None,
     };
 
     let inserted = repository::insert_purchase(db, document).await?;
@@ -98,29 +101,31 @@ pub async fn record_purchase(db: &Database, body: CreatePurchaseRequest) -> AppR
     Ok(inserted.into_purchase(Some(supplier_summary), Some(product_summary)))
 }
 
-/// Lists purchases scoped to a supplier, a product, or their intersection
-/// (400 if neither is given — same rule as `supplier_products::service::link::list_links`),
-/// sorted newest-first, batch-enriched with supplier/product display data
-/// rather than one lookup per row.
+/// Lists purchases scoped to a supplier, a product, their intersection, or all purchases paginated.
 pub async fn list_purchases(
     db: &Database,
     query: PurchaseListQuery,
-) -> AppResult<PurchasesResponse> {
-    let documents = match (&query.supplier_key, &query.product_key) {
-        (Some(supplier_key), None) => {
-            repository::list_purchases_by_supplier(db, supplier_key).await?
-        }
-        (None, Some(product_key)) => repository::list_purchases_by_product(db, product_key).await?,
-        (Some(supplier_key), Some(product_key)) => {
-            let mut items = repository::list_purchases_by_supplier(db, supplier_key).await?;
-            items.retain(|purchase| &purchase.product_key == product_key);
-            items
-        }
-        (None, None) => {
-            return Err(AppError::validation(
-                "Either supplierKey or productKey must be provided",
-            ));
-        }
+) -> AppResult<PurchaseListResponse> {
+    let mut filter = doc! { "deleted_at": { "$exists": false } };
+
+    if let Some(ref supplier_key) = query.supplier_key {
+        filter.insert("supplier_key", supplier_key);
+    }
+    if let Some(ref product_key) = query.product_key {
+        filter.insert("product_key", product_key);
+    }
+
+    let page = query.page.unwrap_or(1).max(1);
+    let limit = query.limit.unwrap_or(20).clamp(1, 500);
+    let skip = (page - 1) * limit;
+
+    let (documents, total) =
+        repository::list_purchases_paginated(db, filter, skip, limit as i64).await?;
+
+    let total_pages = if total == 0 {
+        1
+    } else {
+        (total as f64 / limit as f64).ceil() as u64
     };
 
     let supplier_keys: Vec<String> = documents
@@ -168,7 +173,7 @@ pub async fn list_purchases(
             })
             .collect();
 
-    let purchases = documents
+    let items: Vec<Purchase> = documents
         .into_iter()
         .map(|document| {
             let supplier = suppliers_by_key.get(&document.supplier_key).cloned();
@@ -177,7 +182,16 @@ pub async fn list_purchases(
         })
         .collect();
 
-    Ok(PurchasesResponse { purchases })
+    Ok(PurchaseListResponse {
+        purchases: items.clone(),
+        items,
+        pagination: PaginationMeta {
+            page,
+            limit,
+            total,
+            total_pages,
+        },
+    })
 }
 
 /// Used by `suppliers::service::delete_supplier`'s `SUPPLIER_HAS_PURCHASES`

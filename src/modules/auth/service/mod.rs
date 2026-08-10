@@ -110,9 +110,14 @@ pub(crate) async fn me(db: &Database, user_id: &str) -> AppResult<User> {
     let object_id = ObjectId::parse_str(user_id)
         .map_err(|_| AppError::unauthorized("Invalid token subject"))?;
 
-    let user = users_service::get_user(db, object_id).await.map_err(|_| {
-        AppError::unauthorized_with_code("Account no longer exists", codes::USER_NOT_FOUND)
-    })?;
+    let user = users_service::get_user(db, object_id)
+        .await
+        .map_err(|err| match err {
+            AppError::NotFound { .. } => {
+                AppError::unauthorized_with_code("Account no longer exists", codes::USER_NOT_FOUND)
+            }
+            other => other,
+        })?;
 
     if !user.is_active {
         return Err(AppError::unauthorized_with_code(

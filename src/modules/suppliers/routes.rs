@@ -146,16 +146,20 @@ async fn get_supplier(
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
         (status = 403, description = "Admin access required", body = ErrorResponse),
         (status = 404, description = "Supplier not found", body = ErrorResponse),
+        (status = 409, description = "Version conflict", body = ErrorResponse),
     )
 )]
 async fn replace_supplier(
     _admin: AdminUser,
     State(state): State<AppState>,
+    if_match: crate::core::middleware::sync_headers::IfMatch,
+    device_id: crate::core::middleware::sync_headers::DeviceId,
     Path(id): Path<String>,
     Json(body): Json<CreateSupplierRequest>,
 ) -> AppResult<Json<ApiResponse<Supplier>>> {
     let object_id = parse_object_id(&id)?;
-    let supplier = service::replace_supplier(&state.db, object_id, body).await?;
+    let supplier =
+        service::replace_supplier(&state.db, object_id, body, if_match.0, device_id.0).await?;
 
     Ok(Json(ApiResponse::success(
         supplier,
@@ -173,16 +177,20 @@ async fn replace_supplier(
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
         (status = 403, description = "Admin access required", body = ErrorResponse),
         (status = 404, description = "Supplier not found", body = ErrorResponse),
+        (status = 409, description = "Version conflict", body = ErrorResponse),
     )
 )]
 async fn update_supplier(
     _admin: AdminUser,
     State(state): State<AppState>,
+    if_match: crate::core::middleware::sync_headers::IfMatch,
+    device_id: crate::core::middleware::sync_headers::DeviceId,
     Path(id): Path<String>,
     Json(body): Json<UpdateSupplierRequest>,
 ) -> AppResult<Json<ApiResponse<Supplier>>> {
     let object_id = parse_object_id(&id)?;
-    let supplier = service::update_supplier(&state.db, object_id, body).await?;
+    let supplier =
+        service::update_supplier(&state.db, object_id, body, if_match.0, device_id.0).await?;
 
     Ok(Json(ApiResponse::success(
         supplier,
@@ -198,16 +206,18 @@ async fn update_supplier(
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
         (status = 403, description = "Admin access required", body = ErrorResponse),
         (status = 404, description = "Supplier not found", body = ErrorResponse),
-        (status = 409, description = "Supplier is still referenced by purchase history", body = ErrorResponse),
+        (status = 409, description = "Supplier is still referenced by purchase history or version conflict", body = ErrorResponse),
     )
 )]
 async fn delete_supplier(
     _admin: AdminUser,
     State(state): State<AppState>,
+    if_match: crate::core::middleware::sync_headers::IfMatch,
+    device_id: crate::core::middleware::sync_headers::DeviceId,
     Path(id): Path<String>,
 ) -> AppResult<Json<ApiResponse<Supplier>>> {
     let object_id = parse_object_id(&id)?;
-    let supplier = service::delete_supplier(&state.db, object_id).await?;
+    let supplier = service::delete_supplier(&state.db, object_id, if_match.0, device_id.0).await?;
 
     Ok(Json(ApiResponse::success(
         supplier,

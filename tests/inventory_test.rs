@@ -98,8 +98,11 @@ async fn seed_category(db: &mongodb::Database) -> String {
             name,
             icon: "Box".to_string(),
             color: "blue".to_string(),
+            version: 1,
             created_at: now,
             updated_at: now,
+            deleted_at: None,
+            updated_by_device: None,
         })
         .await
         .expect("failed to seed category");
@@ -117,8 +120,11 @@ async fn seed_subcategory(db: &mongodb::Database, category_key: &str, name: &str
             key: key.clone(),
             category_key: category_key.to_string(),
             name: name.to_string(),
+            version: 1,
             created_at: now,
             updated_at: now,
+            deleted_at: None,
+            updated_by_device: None,
         })
         .await
         .expect("failed to seed subcategory");
@@ -210,8 +216,10 @@ async fn product_lifecycle_create_get_update_stock_and_delete() {
         Some(json!({ "delta": -100 })),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(insufficient["code"], "INSUFFICIENT_STOCK");
+    assert_eq!(insufficient["details"]["available"], 6);
+    assert_eq!(insufficient["details"]["requested"], 100);
 
     let (status, movements) = send(
         &app.router,

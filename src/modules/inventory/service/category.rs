@@ -83,8 +83,11 @@ pub async fn create_category(
         name: body.name,
         icon: body.icon,
         color: body.color,
+        version: 1,
         created_at: now,
         updated_at: now,
+        deleted_at: None,
+        updated_by_device: None,
     };
     repository::category::insert_category(db, &document).await?;
 
@@ -98,8 +101,11 @@ pub async fn create_category(
             key: generate_id(prefixes::SUBCATEGORY),
             category_key: category_key.clone(),
             name,
+            version: 1,
             created_at: now,
             updated_at: now,
+            deleted_at: None,
+            updated_by_device: None,
         };
         repository::subcategory::insert_subcategory(db, &subcategory_document).await?;
         subcategories.push(subcategory_document.into_subcategory_info());
@@ -292,8 +298,11 @@ pub async fn add_subcategory(
         key: generate_id(prefixes::SUBCATEGORY),
         category_key: category_key.clone(),
         name,
+        version: 1,
         created_at: now,
         updated_at: now,
+        deleted_at: None,
+        updated_by_device: None,
     };
     repository::subcategory::insert_subcategory(db, &subcategory_document).await?;
 

@@ -30,9 +30,19 @@ pub struct ProductDocument {
     pub selling_price_cents: i64,
     pub stock_quantity: i64,
     pub min_stock_threshold: i64,
+    #[serde(default = "default_version")]
+    pub version: i64,
     #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
     pub updated_at: BsonDateTime,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<BsonDateTime>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_by_device: Option<String>,
+}
+
+fn default_version() -> i64 {
+    1
 }
 
 impl ProductDocument {
@@ -66,6 +76,9 @@ impl ProductDocument {
             min_stock_threshold: self.min_stock_threshold,
             created_at: self.created_at.to_chrono(),
             updated_at: self.updated_at.to_chrono(),
+            version: self.version,
+            deleted_at: self.deleted_at.map(|d| d.to_chrono()),
+            updated_by_device: self.updated_by_device,
         }
     }
 }
@@ -83,9 +96,15 @@ pub struct StockMovementDocument {
     pub reference_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    #[serde(default = "default_version")]
+    pub version: i64,
     pub created_at: BsonDateTime,
     #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<BsonDateTime>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_by_device: Option<String>,
 }
 
 impl StockMovementDocument {
@@ -108,6 +127,9 @@ impl StockMovementDocument {
             note: self.note,
             created_at: self.created_at.to_chrono(),
             updated_at: self.updated_at.to_chrono(),
+            version: self.version,
+            deleted_at: self.deleted_at.map(|d| d.to_chrono()),
+            updated_by_device: self.updated_by_device,
         }
     }
 }
@@ -128,10 +150,16 @@ pub struct CategoryDocument {
     pub name: String,
     pub icon: String,
     pub color: String,
+    #[serde(default = "default_version")]
+    pub version: i64,
     #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
     #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<BsonDateTime>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_by_device: Option<String>,
 }
 
 impl CategoryDocument {
@@ -152,6 +180,9 @@ impl CategoryDocument {
             subcategories,
             created_at: self.created_at.to_chrono(),
             updated_at: self.updated_at.to_chrono(),
+            version: self.version,
+            deleted_at: self.deleted_at.map(|d| d.to_chrono()),
+            updated_by_device: self.updated_by_device,
         }
     }
 }
@@ -170,10 +201,16 @@ pub struct SubcategoryDocument {
     pub key: String,
     pub category_key: String,
     pub name: String,
+    #[serde(default = "default_version")]
+    pub version: i64,
     #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
     #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<BsonDateTime>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_by_device: Option<String>,
 }
 
 impl SubcategoryDocument {
@@ -189,6 +226,9 @@ impl SubcategoryDocument {
             name: self.name,
             created_at: self.created_at.to_chrono(),
             updated_at: self.updated_at.to_chrono(),
+            version: self.version,
+            deleted_at: self.deleted_at.map(|d| d.to_chrono()),
+            updated_by_device: self.updated_by_device,
         }
     }
 }

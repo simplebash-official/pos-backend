@@ -1258,7 +1258,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/supplier-products?supplierKey={{supplierKey}}&productKey={{productKey}}",
+              "raw": "{{baseUrl}}/api/supplier-products?supplierKey={{supplierKey}}&productKey={{productKey}}&page=1&limit=20",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -1270,13 +1270,24 @@
                 {
                   "key": "supplierKey",
                   "value": "{{supplierKey}}",
-                  "description": "Links for one supplier"
+                  "description": "Optional: links for one supplier. Omit both keys to page through every link (full sync pull).",
+                  "disabled": true
                 },
                 {
                   "key": "productKey",
                   "value": "{{productKey}}",
-                  "description": "Links for one product",
+                  "description": "Optional: links for one product. Combines with supplierKey as an AND filter.",
                   "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "1-based page number (default 1)"
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Page size, 1-500 (default 20)"
                 }
               ]
             },
@@ -1385,7 +1396,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/purchases?supplierKey={{supplierKey}}&productKey={{productKey}}",
+              "raw": "{{baseUrl}}/api/purchases?supplierKey={{supplierKey}}&productKey={{productKey}}&page=1&limit=20",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -1397,13 +1408,24 @@
                 {
                   "key": "supplierKey",
                   "value": "{{supplierKey}}",
-                  "description": "Purchase history for one supplier, newest first"
+                  "description": "Optional: purchase history for one supplier, newest first. Omit both keys to page through every purchase (full sync pull).",
+                  "disabled": true
                 },
                 {
                   "key": "productKey",
                   "value": "{{productKey}}",
-                  "description": "Purchase history for one product, newest first",
+                  "description": "Optional: purchase history for one product, newest first. Combines with supplierKey as an AND filter.",
                   "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "1-based page number (default 1)"
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Page size, 1-500 (default 20)"
                 }
               ]
             },

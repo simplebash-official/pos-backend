@@ -4,24 +4,56 @@ use mongodb::{
 };
 
 pub async fn connect(uri: &str, db_name: &str) -> mongodb::error::Result<Database> {
-    // Some hosts (notably macOS with a link-local IPv6 nameserver like
-    // `fe80::...%en0`) ship a system DNS config the driver's resolver can't
-    // parse, which breaks `mongodb+srv://` SRV/TXT lookups. Pointing the
-    // resolver at a fixed public DNS server sidesteps that instead of
-    // relying on whatever the OS reports.
-    let mut options = ClientOptions::parse(uri)
-        .resolver_config(ResolverConfig::cloudflare())
-        .await?;
-    options.app_name = Some("jana2u-pos-backend".to_string());
+    let mut last_err = None;
+    for attempt in 0..5 {
+        if attempt > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(250 * attempt)).await;
+        }
 
-    let client = Client::with_options(options)?;
+        let parse_res = ClientOptions::parse(uri).await;
+        let options_res = match parse_res {
+            Ok(opts) => Ok(opts),
+            Err(_) => match ClientOptions::parse(uri)
+                .resolver_config(ResolverConfig::cloudflare())
+                .await
+            {
+                Ok(opts) => Ok(opts),
+                Err(_) => {
+                    ClientOptions::parse(uri)
+                        .resolver_config(ResolverConfig::google())
+                        .await
+                }
+            },
+        };
 
-    // Fail fast on a bad connection string / unreachable server rather than
-    // discovering it on the first request.
-    client
-        .database(db_name)
-        .run_command(mongodb::bson::doc! { "ping": 1 })
-        .await?;
+        let mut options = match options_res {
+            Ok(opts) => opts,
+            Err(e) => {
+                last_err = Some(e);
+                continue;
+            }
+        };
+        options.app_name = Some("jana2u-pos-backend".to_string());
 
-    Ok(client.database(db_name))
+        let client = match Client::with_options(options) {
+            Ok(c) => c,
+            Err(e) => {
+                last_err = Some(e);
+                continue;
+            }
+        };
+
+        match client
+            .database(db_name)
+            .run_command(mongodb::bson::doc! { "ping": 1 })
+            .await
+        {
+            Ok(_) => return Ok(client.database(db_name)),
+            Err(e) => {
+                last_err = Some(e);
+            }
+        }
+    }
+
+    Err(last_err.expect("connect failed after retries"))
 }

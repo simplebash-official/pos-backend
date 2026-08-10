@@ -60,7 +60,8 @@ async fn main() {
                         "updated_at": now
                     },
                     "$setOnInsert": {
-                        "created_at": now
+                        "created_at": now,
+                        "version": 1
                     }
                 },
             )
@@ -93,7 +94,8 @@ async fn main() {
                             "updated_at": now
                         },
                         "$setOnInsert": {
-                            "created_at": now
+                            "created_at": now,
+                            "version": 1
                         }
                     },
                 )

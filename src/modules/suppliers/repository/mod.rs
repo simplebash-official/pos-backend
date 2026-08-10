@@ -23,7 +23,9 @@ pub(crate) async fn find_supplier_by_id(
     db: &Database,
     id: ObjectId,
 ) -> AppResult<Option<SupplierDocument>> {
-    Ok(suppliers(db).find_one(doc! { "_id": id }).await?)
+    Ok(suppliers(db)
+        .find_one(doc! { "_id": id, "deleted_at": { "$exists": false } })
+        .await?)
 }
 
 /// Looked up by `key` rather than `_id` — the entry point `supplier_products`/
@@ -32,7 +34,9 @@ pub(crate) async fn find_supplier_by_key(
     db: &Database,
     key: &str,
 ) -> AppResult<Option<SupplierDocument>> {
-    Ok(suppliers(db).find_one(doc! { "key": key }).await?)
+    Ok(suppliers(db)
+        .find_one(doc! { "key": key, "deleted_at": { "$exists": false } })
+        .await?)
 }
 
 /// Fetches every supplier matching one of `keys` in a single query — used
@@ -43,7 +47,9 @@ pub(crate) async fn find_suppliers_by_keys(
     db: &Database,
     keys: &[String],
 ) -> AppResult<Vec<SupplierDocument>> {
-    let mut cursor = suppliers(db).find(doc! { "key": { "$in": keys } }).await?;
+    let mut cursor = suppliers(db)
+        .find(doc! { "key": { "$in": keys }, "deleted_at": { "$exists": false } })
+        .await?;
 
     let mut items = Vec::new();
     while let Some(document) = cursor.try_next().await? {
@@ -74,7 +80,10 @@ pub(crate) async fn update_supplier(
     set_doc: Document,
 ) -> AppResult<Option<SupplierDocument>> {
     Ok(suppliers(db)
-        .find_one_and_update(doc! { "_id": id }, doc! { "$set": set_doc })
+        .find_one_and_update(
+            doc! { "_id": id, "deleted_at": { "$exists": false } },
+            doc! { "$set": set_doc, "$inc": { "version": 1 } },
+        )
         .return_document(ReturnDocument::After)
         .await?)
 }
@@ -82,9 +91,25 @@ pub(crate) async fn update_supplier(
 pub(crate) async fn delete_supplier(
     db: &Database,
     id: ObjectId,
+    device_id: Option<String>,
 ) -> AppResult<Option<SupplierDocument>> {
+    let now = mongodb::bson::DateTime::now();
+    let mut set_doc = doc! {
+        "deleted_at": now,
+        "updated_at": now,
+    };
+    if let Some(device) = device_id {
+        set_doc.insert("updated_by_device", device);
+    }
     Ok(suppliers(db)
-        .find_one_and_delete(doc! { "_id": id })
+        .find_one_and_update(
+            doc! { "_id": id, "deleted_at": { "$exists": false } },
+            doc! {
+                "$set": set_doc,
+                "$inc": { "version": 1 }
+            },
+        )
+        .return_document(ReturnDocument::After)
         .await?)
 }
 
@@ -94,7 +119,14 @@ pub(crate) async fn list_suppliers(
     db: &Database,
     filter: Document,
 ) -> AppResult<Vec<SupplierDocument>> {
-    let mut cursor = suppliers(db).find(filter).sort(doc! { "name": 1 }).await?;
+    let mut effective_filter = filter;
+    if !effective_filter.contains_key("deleted_at") {
+        effective_filter.insert("deleted_at", doc! { "$exists": false });
+    }
+    let mut cursor = suppliers(db)
+        .find(effective_filter)
+        .sort(doc! { "name": 1 })
+        .await?;
 
     let mut items = Vec::new();
     while let Some(document) = cursor.try_next().await? {

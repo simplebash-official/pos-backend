@@ -113,6 +113,14 @@ pub fn build_router(state: AppState) -> Router {
             modules::purchases::routes::router(),
         )
         .nest(
+            &format!("/{}", mod_names::SEQUENCES),
+            modules::sequences::routes::router(),
+        )
+        .nest(
+            &format!("/{}", mod_names::SYNC),
+            modules::sync::routes::router(),
+        )
+        .nest(
             &format!("/{}", mod_names::USERS),
             modules::users::routes::router(),
         );
@@ -125,6 +133,13 @@ pub fn build_router(state: AppState) -> Router {
         .merge(SwaggerUi::new("/docs").url("/api-docs/openapi.json", openapi))
         .layer(cors)
         .layer(trace)
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            crate::core::middleware::idempotency::handle_idempotency,
+        ))
+        .layer(middleware::from_fn(
+            crate::core::middleware::sync_headers::add_server_time_header,
+        ))
         .layer(middleware::from_fn(add_processing_time_to_body))
         .with_state(state)
 }
@@ -135,12 +150,18 @@ pub fn build_router(state: AppState) -> Router {
 /// Liveness check — always returns 200 if the process is up and able to
 /// handle a request at all. Doesn't touch Mongo, so it can't distinguish
 /// "server up, database down"; use a module's own status route or a real
-/// query for that.
-async fn health() -> Json<ApiResponse<HealthResponse>> {
-    Json(ApiResponse::success(
-        HealthResponse {
-            status: "ok".to_string(),
-        },
-        "Service is healthy",
-    ))
+/// query for that. Returns Cache-Control: no-store.
+async fn health() -> (
+    [(axum::http::HeaderName, &'static str); 1],
+    Json<ApiResponse<HealthResponse>>,
+) {
+    (
+        [(axum::http::header::CACHE_CONTROL, "no-store")],
+        Json(ApiResponse::success(
+            HealthResponse {
+                status: "ok".to_string(),
+            },
+            "Service is healthy",
+        )),
+    )
 }

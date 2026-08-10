@@ -31,6 +31,7 @@ pub(crate) async fn insert_purchase(
 }
 
 /// Sorted `date` descending — "newest first" per the frontend contract.
+#[allow(dead_code)]
 pub(crate) async fn list_purchases_by_supplier(
     db: &Database,
     supplier_key: &str,
@@ -47,6 +48,7 @@ pub(crate) async fn list_purchases_by_supplier(
     Ok(items)
 }
 
+#[allow(dead_code)]
 pub(crate) async fn list_purchases_by_product(
     db: &Database,
     product_key: &str,
@@ -70,6 +72,29 @@ pub(crate) async fn count_purchases_for_supplier(
     supplier_key: &str,
 ) -> AppResult<u64> {
     Ok(purchases(db)
-        .count_documents(doc! { "supplier_key": supplier_key })
+        .count_documents(doc! { "supplier_key": supplier_key, "deleted_at": { "$exists": false } })
         .await?)
+}
+
+pub(crate) async fn list_purchases_paginated(
+    db: &Database,
+    filter: mongodb::bson::Document,
+    skip: u64,
+    limit: i64,
+) -> AppResult<(Vec<PurchaseDocument>, u64)> {
+    let collection = purchases(db);
+    let total = collection.count_documents(filter.clone()).await?;
+
+    let mut cursor = collection
+        .find(filter)
+        .sort(doc! { "date": -1 })
+        .skip(skip)
+        .limit(limit)
+        .await?;
+
+    let mut items = Vec::new();
+    while let Some(document) = cursor.try_next().await? {
+        items.push(document);
+    }
+    Ok((items, total))
 }

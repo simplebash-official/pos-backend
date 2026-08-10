@@ -189,8 +189,11 @@ pub async fn create_supplier(db: &Database, body: CreateSupplierRequest) -> AppR
         supplied_categories: body.supplied_categories,
         email: body.email,
         notes: body.notes,
+        version: 1,
         created_at: now,
         updated_at: now,
+        deleted_at: None,
+        updated_by_device: None,
     };
 
     let inserted = repository::insert_supplier(db, document).await?;
@@ -206,7 +209,57 @@ pub(crate) async fn replace_supplier(
     db: &Database,
     id: ObjectId,
     body: CreateSupplierRequest,
+    expected_version: Option<i64>,
+    device_id: Option<String>,
 ) -> AppResult<Supplier> {
+    let existing = repository::find_supplier_by_id(db, id)
+        .await?
+        .ok_or_else(|| {
+            AppError::not_found_with_code("Supplier not found", codes::SUPPLIER_NOT_FOUND)
+        })?;
+
+    if let Some(expected) = expected_version
+        && existing.version != expected
+    {
+        let mut conflicting = Vec::new();
+        if body.name != existing.name {
+            conflicting.push("name");
+        }
+        if body.contact_person != existing.contact_person {
+            conflicting.push("contactPerson");
+        }
+        if body.primary_phone != existing.primary_phone {
+            conflicting.push("primaryPhone");
+        }
+        if body.secondary_phone != existing.secondary_phone {
+            conflicting.push("secondaryPhone");
+        }
+        if body.address != existing.address {
+            conflicting.push("address");
+        }
+        if body.email != existing.email {
+            conflicting.push("email");
+        }
+        if body.supplied_categories != existing.supplied_categories {
+            conflicting.push("suppliedCategories");
+        }
+        if body.notes != existing.notes {
+            conflicting.push("notes");
+        }
+
+        return Err(AppError::conflict_with_details(
+            codes::VERSION_CONFLICT,
+            "This supplier was changed on another device.",
+            serde_json::json!({
+                "expectedVersion": expected,
+                "serverVersion": existing.version,
+                "updatedByDevice": existing.updated_by_device,
+                "server": existing.into_supplier(),
+                "conflictingFields": conflicting,
+            }),
+        ));
+    }
+
     validate_required_fields(
         &body.name,
         &body.contact_person,
@@ -229,6 +282,9 @@ pub(crate) async fn replace_supplier(
     set_doc.insert("secondary_phone", body.secondary_phone);
     set_doc.insert("email", body.email);
     set_doc.insert("notes", body.notes);
+    if let Some(device) = device_id {
+        set_doc.insert("updated_by_device", device);
+    }
 
     let updated = repository::update_supplier(db, id, set_doc)
         .await?
@@ -251,12 +307,72 @@ pub(crate) async fn update_supplier(
     db: &Database,
     id: ObjectId,
     body: UpdateSupplierRequest,
+    expected_version: Option<i64>,
+    device_id: Option<String>,
 ) -> AppResult<Supplier> {
     let existing = repository::find_supplier_by_id(db, id)
         .await?
         .ok_or_else(|| {
             AppError::not_found_with_code("Supplier not found", codes::SUPPLIER_NOT_FOUND)
         })?;
+
+    if let Some(expected) = expected_version
+        && existing.version != expected
+    {
+        let mut conflicting = Vec::new();
+        if let Some(ref name) = body.name
+            && name != &existing.name
+        {
+            conflicting.push("name");
+        }
+        if let Some(ref cp) = body.contact_person
+            && cp != &existing.contact_person
+        {
+            conflicting.push("contactPerson");
+        }
+        if let Some(ref pp) = body.primary_phone
+            && pp != &existing.primary_phone
+        {
+            conflicting.push("primaryPhone");
+        }
+        if let Some(ref sp) = body.secondary_phone
+            && Some(sp) != existing.secondary_phone.as_ref()
+        {
+            conflicting.push("secondaryPhone");
+        }
+        if let Some(ref addr) = body.address
+            && addr != &existing.address
+        {
+            conflicting.push("address");
+        }
+        if let Some(ref email) = body.email
+            && Some(email) != existing.email.as_ref()
+        {
+            conflicting.push("email");
+        }
+        if let Some(ref cats) = body.supplied_categories
+            && cats != &existing.supplied_categories
+        {
+            conflicting.push("suppliedCategories");
+        }
+        if let Some(ref notes) = body.notes
+            && Some(notes) != existing.notes.as_ref()
+        {
+            conflicting.push("notes");
+        }
+
+        return Err(AppError::conflict_with_details(
+            codes::VERSION_CONFLICT,
+            "This supplier was changed on another device.",
+            serde_json::json!({
+                "expectedVersion": expected,
+                "serverVersion": existing.version,
+                "updatedByDevice": existing.updated_by_device,
+                "server": existing.into_supplier(),
+                "conflictingFields": conflicting,
+            }),
+        ));
+    }
 
     let name = body.name.unwrap_or(existing.name);
     let contact_person = body.contact_person.unwrap_or(existing.contact_person);
@@ -294,6 +410,9 @@ pub(crate) async fn update_supplier(
     if let Some(notes) = body.notes {
         set_doc.insert("notes", notes);
     }
+    if let Some(device) = device_id {
+        set_doc.insert("updated_by_device", device);
+    }
 
     let updated = repository::update_supplier(db, id, set_doc)
         .await?
@@ -311,12 +430,33 @@ pub(crate) async fn update_supplier(
 /// `CATEGORY_IN_USE` guard). Once the guard passes, cascades a delete of
 /// every `supplier_products` link for this supplier — those are pure
 /// linking metadata, not audit history, so no data of lasting value is lost.
-pub(crate) async fn delete_supplier(db: &Database, id: ObjectId) -> AppResult<Supplier> {
+pub(crate) async fn delete_supplier(
+    db: &Database,
+    id: ObjectId,
+    expected_version: Option<i64>,
+    device_id: Option<String>,
+) -> AppResult<Supplier> {
     let existing = repository::find_supplier_by_id(db, id)
         .await?
         .ok_or_else(|| {
             AppError::not_found_with_code("Supplier not found", codes::SUPPLIER_NOT_FOUND)
         })?;
+
+    if let Some(expected) = expected_version
+        && existing.version != expected
+    {
+        return Err(AppError::conflict_with_details(
+            codes::VERSION_CONFLICT,
+            "This supplier was changed on another device.",
+            serde_json::json!({
+                "expectedVersion": expected,
+                "serverVersion": existing.version,
+                "updatedByDevice": existing.updated_by_device,
+                "server": existing.into_supplier(),
+                "conflictingFields": Vec::<String>::new(),
+            }),
+        ));
+    }
 
     let purchase_count =
         crate::modules::purchases::service::purchase::count_purchases_for_supplier(
@@ -338,9 +478,11 @@ pub(crate) async fn delete_supplier(db: &Database, id: ObjectId) -> AppResult<Su
     crate::modules::supplier_products::service::link::delete_links_for_supplier(db, &existing.key)
         .await?;
 
-    let deleted = repository::delete_supplier(db, id).await?.ok_or_else(|| {
-        AppError::not_found_with_code("Supplier not found", codes::SUPPLIER_NOT_FOUND)
-    })?;
+    let deleted = repository::delete_supplier(db, id, device_id)
+        .await?
+        .ok_or_else(|| {
+            AppError::not_found_with_code("Supplier not found", codes::SUPPLIER_NOT_FOUND)
+        })?;
 
     Ok(deleted.into_supplier())
 }
@@ -354,7 +496,7 @@ pub(crate) async fn delete_suppliers(db: &Database, ids: Vec<String>) -> AppResu
     let mut deleted_count = 0u64;
     for id in ids {
         if let Ok(object_id) = ObjectId::parse_str(&id)
-            && delete_supplier(db, object_id).await.is_ok()
+            && delete_supplier(db, object_id, None, None).await.is_ok()
         {
             deleted_count += 1;
         }

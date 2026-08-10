@@ -22,10 +22,20 @@ pub struct SupplierProductLinkDocument {
     pub cost_price_cents: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    #[serde(default = "default_version")]
+    pub version: i64,
     #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
     #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<BsonDateTime>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_by_device: Option<String>,
+}
+
+fn default_version() -> i64 {
+    1
 }
 
 impl SupplierProductLinkDocument {
@@ -39,6 +49,11 @@ impl SupplierProductLinkDocument {
             cost_price_cents: self.cost_price_cents,
             notes: self.notes,
             added_at: self.created_at.to_chrono(),
+            created_at: self.created_at.to_chrono(),
+            updated_at: self.updated_at.to_chrono(),
+            version: self.version,
+            deleted_at: self.deleted_at.map(|d| d.to_chrono()),
+            updated_by_device: self.updated_by_device,
         }
     }
 }

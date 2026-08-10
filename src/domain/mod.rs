@@ -4,8 +4,10 @@
 pub mod auth;
 pub mod inventory;
 pub mod purchases;
+pub mod sequences;
 pub mod supplier_products;
 pub mod suppliers;
+pub mod sync;
 pub mod users;
 
 use serde::Serialize;

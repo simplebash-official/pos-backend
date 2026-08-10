@@ -10,3 +10,4 @@ pub const SUPPLIER_PRODUCT: &str = "splink";
 pub const PURCHASE: &str = "pur";
 pub const USER: &str = "usr";
 pub const LOGIN_SESSION: &str = "lgs";
+pub const SEQUENCE_BLOCK: &str = "seq";

@@ -16,7 +16,7 @@ use utoipa::{IntoParams, ToSchema};
 /// (see `modules::inventory::model::ProductDocument`), while the bare
 /// `category`/`subcategory` names are resolved at read time purely for
 /// display so callers don't have to cross-reference `GET /categories`.
-#[derive(Debug, Clone, Serialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Product {
     pub id: String,
@@ -37,6 +37,16 @@ pub struct Product {
     pub min_stock_threshold: i64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    #[serde(default = "default_version")]
+    pub version: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_by_device: Option<String>,
+}
+
+fn default_version() -> i64 {
+    1
 }
 
 /// Body for `POST /products`. `sku` is deliberately absent — it's
@@ -311,6 +321,31 @@ pub struct StockMovement {
     pub note: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    #[serde(default = "default_version")]
+    pub version: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_by_device: Option<String>,
+}
+
+/// Query params for `GET /inventory/stock-movements`.
+#[derive(Debug, Clone, Default, Deserialize, IntoParams)]
+#[serde(rename_all = "camelCase")]
+#[into_params(parameter_in = Query)]
+pub struct StockMovementListQuery {
+    pub product_id: Option<String>,
+    pub movement_type: Option<StockMovementType>,
+    pub page: Option<u64>,
+    pub limit: Option<u64>,
+}
+
+/// Response for `GET /inventory/stock-movements`.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct StockMovementListResponse {
+    pub items: Vec<StockMovement>,
+    pub pagination: PaginationMeta,
 }
 
 /// Response for `GET /products/{id}/movements`.
@@ -331,6 +366,12 @@ pub struct SubcategoryInfo {
     pub name: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    #[serde(default = "default_version")]
+    pub version: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_by_device: Option<String>,
 }
 
 /// A main category and its subcategories, as returned to API clients.
@@ -347,6 +388,12 @@ pub struct CategoryInfo {
     pub subcategories: Vec<SubcategoryInfo>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    #[serde(default = "default_version")]
+    pub version: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_by_device: Option<String>,
 }
 
 /// Response for `GET /categories`.

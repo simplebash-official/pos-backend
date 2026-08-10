@@ -23,7 +23,7 @@ use crate::{
         middleware::auth::AdminUser,
         response::{ApiResponse, ErrorResponse},
     },
-    domain::purchases::{CreatePurchaseRequest, Purchase, PurchaseListQuery, PurchasesResponse},
+    domain::purchases::{CreatePurchaseRequest, Purchase, PurchaseListQuery, PurchaseListResponse},
     modules::purchases::service::purchase,
 };
 
@@ -42,8 +42,7 @@ pub fn router() -> OpenApiRouter<AppState> {
 #[utoipa::path(get, path = "/", tag = modules::PURCHASES, params(PurchaseListQuery),
     security(("bearerAuth" = [])),
     responses(
-        (status = 200, description = "Purchase history for a supplier and/or product, newest first", body = ApiResponse<PurchasesResponse>),
-        (status = 400, description = "Neither supplierKey nor productKey provided", body = ErrorResponse),
+        (status = 200, description = "Purchase history for a supplier and/or product, or full collection paginated", body = ApiResponse<PurchaseListResponse>),
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
         (status = 403, description = "Admin access required", body = ErrorResponse),
     )
@@ -52,7 +51,7 @@ async fn list_purchases(
     _admin: AdminUser,
     State(state): State<AppState>,
     Query(query): Query<PurchaseListQuery>,
-) -> AppResult<Json<ApiResponse<PurchasesResponse>>> {
+) -> AppResult<Json<ApiResponse<PurchaseListResponse>>> {
     let response = purchase::list_purchases(&state.db, query).await?;
 
     Ok(Json(ApiResponse::success(

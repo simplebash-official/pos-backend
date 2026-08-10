@@ -95,8 +95,11 @@ async fn seed_category_with_subcategory(
             name: format!("Test Category {}", Uuid::new_v4()),
             icon: "Box".to_string(),
             color: "gray".to_string(),
+            version: 1,
             created_at: now,
             updated_at: now,
+            deleted_at: None,
+            updated_by_device: None,
         })
         .await
         .expect("failed to seed category");
@@ -108,8 +111,11 @@ async fn seed_category_with_subcategory(
             key: subcategory_key.clone(),
             category_key: category_key.clone(),
             name: subcategory_name.to_string(),
+            version: 1,
             created_at: now,
             updated_at: now,
+            deleted_at: None,
+            updated_by_device: None,
         })
         .await
         .expect("failed to seed subcategory");
@@ -472,6 +478,11 @@ async fn upsert_link_creates_then_updates_in_place() {
     assert_eq!(status, StatusCode::CREATED, "{body}");
     assert_eq!(body["data"]["costPriceCents"], 6000);
     assert_eq!(body["data"]["notes"], "Updated");
+    // Updating in place must bump the sync `version` rather than re-create the
+    // link, and must not leave a `deleted_at` tombstone behind (a present-but-
+    // null one would hide the link from every `$exists: false` read below).
+    assert_eq!(body["data"]["version"], 2, "{body}");
+    assert!(body["data"]["deletedAt"].is_null(), "{body}");
 
     let (status, body) = send_authed(
         &app.router,
@@ -510,12 +521,46 @@ async fn supplier_products_endpoints_require_admin_role() {
     assert_eq!(body["code"], "ADMIN_REQUIRED");
 }
 
+/// `supplierKey`/`productKey` are optional: an unfiltered `GET` returns the
+/// whole collection paginated, which is what a sync client pulls on a first
+/// full download. (Assertions stay on the pagination envelope rather than on
+/// specific rows — the test database is shared and never cleaned, so page 1 of
+/// a `created_at`-ascending listing holds whatever the oldest links happen to
+/// be.)
 #[tokio::test]
-async fn list_links_requires_supplier_or_product_key() {
+async fn list_links_without_keys_returns_paginated_collection() {
     let app = common::spawn_app().await;
     let token = admin_token(&app.config);
-    let (status, _) = send_authed(&app.router, "GET", "/api/supplier-products", None, &token).await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (_supplier_id, supplier_key, _) = create_supplier(&app.router, &token).await;
+    let (_product_id, product_key) = create_product(&app.router, &app.db, 10).await;
+
+    send_authed(
+        &app.router,
+        "POST",
+        "/api/supplier-products",
+        Some(json!({ "supplierKey": supplier_key, "productKey": product_key })),
+        &token,
+    )
+    .await;
+
+    let (status, body) =
+        send_authed(&app.router, "GET", "/api/supplier-products", None, &token).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let links = body["data"]["links"].as_array().unwrap();
+    assert!(links.len() <= 20, "default page size is 20: {body}");
+    assert!(
+        links
+            .iter()
+            .all(|link| link["supplierKey"].is_string() && link["productKey"].is_string()),
+        "{body}"
+    );
+    assert_eq!(body["data"]["pagination"]["page"], 1, "{body}");
+    assert_eq!(body["data"]["pagination"]["limit"], 20, "{body}");
+    assert!(
+        body["data"]["pagination"]["total"].as_u64().unwrap() >= 1,
+        "the link created above must be counted: {body}"
+    );
 }
 
 #[tokio::test]
@@ -698,12 +743,49 @@ async fn record_purchase_requires_auth_and_validates_quantity() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
+/// Same optional-filter contract as
+/// `list_links_without_keys_returns_paginated_collection`: an unfiltered
+/// `GET /purchases` is a full-collection sync pull, not a 400.
 #[tokio::test]
-async fn list_purchases_requires_supplier_or_product_key() {
+async fn list_purchases_without_keys_returns_paginated_collection() {
     let app = common::spawn_app().await;
     let token = admin_token(&app.config);
-    let (status, _) = send_authed(&app.router, "GET", "/api/purchases", None, &token).await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (_supplier_id, supplier_key, _) = create_supplier(&app.router, &token).await;
+    let (_product_id, product_key) = create_product(&app.router, &app.db, 10).await;
+
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/purchases",
+        Some(json!({
+            "supplierKey": supplier_key,
+            "productKey": product_key,
+            "quantity": 3,
+            "unitCostCents": 1500,
+            "date": "2026-01-15T10:00:00Z",
+        })),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+
+    let (status, body) = send_authed(&app.router, "GET", "/api/purchases", None, &token).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let purchases = body["data"]["purchases"].as_array().unwrap();
+    assert!(purchases.len() <= 20, "default page size is 20: {body}");
+    assert!(
+        purchases
+            .iter()
+            .all(|purchase| purchase["supplierKey"].is_string()),
+        "{body}"
+    );
+    assert_eq!(body["data"]["pagination"]["page"], 1, "{body}");
+    assert_eq!(body["data"]["pagination"]["limit"], 20, "{body}");
+    assert!(
+        body["data"]["pagination"]["total"].as_u64().unwrap() >= 1,
+        "the purchase recorded above must be counted: {body}"
+    );
 }
 
 // ============================================================================

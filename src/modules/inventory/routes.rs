@@ -29,8 +29,9 @@ use crate::{
             CreateProductRequest, DeleteProductsRequest, DeleteProductsResponse,
             InventoryOverviewQuery, InventoryOverviewResponse, LowStockResponse, Product,
             ProductListQuery, ProductListResponse, StockAdjustmentRequest, StockAdjustmentResponse,
-            StockMovementsResponse, SubcategoriesResponse, UpdateCategoryRequest,
-            UpdateProductRequest, ValidCategoriesResponse,
+            StockMovementListQuery, StockMovementListResponse, StockMovementsResponse,
+            SubcategoriesResponse, UpdateCategoryRequest, UpdateProductRequest,
+            ValidCategoriesResponse,
         },
     },
     modules::inventory::service,
@@ -55,6 +56,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(list_products, create_product, delete_products))
         .routes(routes!(get_product, update_product, delete_product))
         // Stock
+        .routes(routes!(list_all_stock_movements))
         .routes(routes!(adjust_stock))
         .routes(routes!(low_stock))
         .routes(routes!(product_movements))
@@ -176,15 +178,20 @@ async fn create_product(
         (status = 200, description = "Product updated", body = ApiResponse<Product>),
         (status = 400, description = "Validation error", body = ErrorResponse),
         (status = 404, description = "Product not found", body = ErrorResponse),
+        (status = 409, description = "Version conflict", body = ErrorResponse),
     )
 )]
 async fn update_product(
     State(state): State<AppState>,
+    if_match: crate::core::middleware::sync_headers::IfMatch,
+    device_id: crate::core::middleware::sync_headers::DeviceId,
     Path(id): Path<String>,
     Json(body): Json<UpdateProductRequest>,
 ) -> AppResult<Json<ApiResponse<Product>>> {
     let object_id = parse_object_id(&id)?;
-    let product = service::product::update_product(&state.db, object_id, body).await?;
+    let product =
+        service::product::update_product(&state.db, object_id, body, if_match.0, device_id.0)
+            .await?;
 
     Ok(Json(ApiResponse::success(
         product,
@@ -197,14 +204,18 @@ async fn update_product(
     responses(
         (status = 200, description = "Product deleted", body = ApiResponse<Product>),
         (status = 404, description = "Product not found", body = ErrorResponse),
+        (status = 409, description = "Version conflict", body = ErrorResponse),
     )
 )]
 async fn delete_product(
     State(state): State<AppState>,
+    if_match: crate::core::middleware::sync_headers::IfMatch,
+    device_id: crate::core::middleware::sync_headers::DeviceId,
     Path(id): Path<String>,
 ) -> AppResult<Json<ApiResponse<Product>>> {
     let object_id = parse_object_id(&id)?;
-    let product = service::product::delete_product(&state.db, object_id).await?;
+    let product =
+        service::product::delete_product(&state.db, object_id, if_match.0, device_id.0).await?;
 
     Ok(Json(ApiResponse::success(
         product,
@@ -285,6 +296,23 @@ async fn product_movements(
 ) -> AppResult<Json<ApiResponse<StockMovementsResponse>>> {
     let object_id = parse_object_id(&id)?;
     let response = service::stock::product_movements(&state.db, object_id).await?;
+
+    Ok(Json(ApiResponse::success(
+        response,
+        "Stock movements retrieved successfully",
+    )))
+}
+
+#[utoipa::path(get, path = "/stock-movements", tag = modules::INVENTORY, params(StockMovementListQuery),
+    responses(
+        (status = 200, description = "List all stock movements with pagination", body = ApiResponse<StockMovementListResponse>),
+    )
+)]
+async fn list_all_stock_movements(
+    State(state): State<AppState>,
+    Query(query): Query<StockMovementListQuery>,
+) -> AppResult<Json<ApiResponse<StockMovementListResponse>>> {
+    let response = service::stock::list_stock_movements(&state.db, query).await?;
 
     Ok(Json(ApiResponse::success(
         response,

@@ -16,7 +16,7 @@ use utoipa::{IntoParams, ToSchema};
 /// what a supplier deals in — unlike `category_key` on a product, these are
 /// not a foreign key into any collection, just descriptive labels a
 /// supplier's own record carries.
-#[derive(Debug, Clone, Serialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Supplier {
     pub id: String,
@@ -34,6 +34,16 @@ pub struct Supplier {
     pub notes: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    #[serde(default = "default_version")]
+    pub version: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_by_device: Option<String>,
+}
+
+fn default_version() -> i64 {
+    1
 }
 
 /// Body for `POST /suppliers` and `PUT /suppliers/{id}` (PUT takes the same

@@ -7,6 +7,8 @@ pub mod print_jobs;
 pub mod purchases;
 pub mod repairs;
 pub mod reports;
+pub mod sequences;
 pub mod supplier_products;
 pub mod suppliers;
+pub mod sync;
 pub mod users;

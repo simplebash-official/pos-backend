@@ -52,6 +52,7 @@ pub enum AppError {
         status: StatusCode,
         code: String,
         message: String,
+        details: Option<serde_json::Value>,
     },
 }
 
@@ -140,38 +141,83 @@ impl AppError {
             status,
             code: code.into(),
             message: message.into(),
+            details: None,
         }
+    }
+
+    pub fn custom_with_details(
+        status: StatusCode,
+        code: impl Into<String>,
+        message: impl Into<String>,
+        details: serde_json::Value,
+    ) -> Self {
+        AppError::Custom {
+            status,
+            code: code.into(),
+            message: message.into(),
+            details: Some(details),
+        }
+    }
+
+    pub fn conflict(code: impl Into<String>, message: impl Into<String>) -> Self {
+        AppError::custom(StatusCode::CONFLICT, code, message)
+    }
+
+    pub fn conflict_with_details(
+        code: impl Into<String>,
+        message: impl Into<String>,
+        details: serde_json::Value,
+    ) -> Self {
+        AppError::custom_with_details(StatusCode::CONFLICT, code, message, details)
+    }
+
+    pub fn unprocessable_entity(code: impl Into<String>, message: impl Into<String>) -> Self {
+        AppError::custom(StatusCode::UNPROCESSABLE_ENTITY, code, message)
+    }
+
+    pub fn unprocessable_entity_with_details(
+        code: impl Into<String>,
+        message: impl Into<String>,
+        details: serde_json::Value,
+    ) -> Self {
+        AppError::custom_with_details(StatusCode::UNPROCESSABLE_ENTITY, code, message, details)
     }
 
     /// The single place a variant maps to its wire representation. Centralizing
     /// this (rather than matching in `IntoResponse` directly) keeps the
     /// default-code-per-variant logic in one spot instead of duplicated
     /// wherever an `AppError` needs to be inspected outside of a response.
-    pub fn status_code_code_and_message(&self) -> (StatusCode, String, String) {
+    pub fn status_code_code_message_and_details(
+        &self,
+    ) -> (StatusCode, String, String, Option<serde_json::Value>) {
         match self {
             AppError::NotFound { message, code } => (
                 StatusCode::NOT_FOUND,
                 code.clone()
                     .unwrap_or_else(|| crate::core::constants::codes::NOT_FOUND.to_string()),
                 message.clone(),
+                None,
             ),
             AppError::Validation { message, code } => (
                 StatusCode::BAD_REQUEST,
                 code.clone()
                     .unwrap_or_else(|| crate::core::constants::codes::VALIDATION_ERROR.to_string()),
                 message.clone(),
+                None,
             ),
             AppError::Unauthorized { message, code } => (
                 StatusCode::UNAUTHORIZED,
                 code.clone()
                     .unwrap_or_else(|| crate::core::constants::codes::UNAUTHORIZED.to_string()),
                 message.clone(),
+                None,
             ),
             AppError::Forbidden { message, code } => (
                 StatusCode::FORBIDDEN,
                 code.clone()
                     .unwrap_or_else(|| crate::core::constants::codes::FORBIDDEN.to_string()),
                 message.clone(),
+                None,
             ),
             AppError::Internal { message, code } => (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -179,19 +225,26 @@ impl AppError {
                     crate::core::constants::codes::INTERNAL_SERVER_ERROR.to_string()
                 }),
                 message.clone(),
+                None,
             ),
             AppError::Custom {
                 status,
                 code,
                 message,
-            } => (*status, code.clone(), message.clone()),
+                details,
+            } => (*status, code.clone(), message.clone(), details.clone()),
         }
+    }
+
+    pub fn status_code_code_and_message(&self) -> (StatusCode, String, String) {
+        let (status, code, message, _) = self.status_code_code_message_and_details();
+        (status, code, message)
     }
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let (status, code, message) = self.status_code_code_and_message();
+        let (status, code, message, details) = self.status_code_code_message_and_details();
 
         // 5xx failures are unexpected (Mongo down, a bug) — log them
         // server-side since the client only sees the generic message, not
@@ -205,6 +258,7 @@ impl IntoResponse for AppError {
             message,
             code,
             status_code: status.as_u16(),
+            details,
         };
 
         (status, Json(body)).into_response()

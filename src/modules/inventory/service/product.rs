@@ -403,8 +403,11 @@ pub async fn create_product(db: &Database, body: CreateProductRequest) -> AppRes
         selling_price_cents: body.selling_price_cents,
         stock_quantity: initial_stock,
         min_stock_threshold: body.min_stock_threshold,
+        version: 1,
         created_at: now,
         updated_at: now,
+        deleted_at: None,
+        updated_by_device: None,
     };
 
     let inserted = repository::product::insert_product(db, document).await?;
@@ -452,12 +455,73 @@ pub(crate) async fn update_product(
     db: &Database,
     id: ObjectId,
     body: UpdateProductRequest,
+    expected_version: Option<i64>,
+    device_id: Option<String>,
 ) -> AppResult<Product> {
     let existing = repository::product::find_product_by_id(db, id)
         .await?
         .ok_or_else(|| {
             AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
         })?;
+
+    if let Some(expected) = expected_version
+        && existing.version != expected
+    {
+        let mut conflicting = Vec::new();
+        if let Some(ref name) = body.name
+            && name != &existing.name
+        {
+            conflicting.push("name");
+        }
+        if let Some(price) = body.selling_price_cents
+            && price != existing.selling_price_cents
+        {
+            conflicting.push("sellingPriceCents");
+        }
+        if let Some(cost) = body.cost_price_cents
+            && cost != existing.cost_price_cents
+        {
+            conflicting.push("costPriceCents");
+        }
+        if let Some(ref cat) = body.category_key
+            && cat != &existing.category_key
+        {
+            conflicting.push("categoryKey");
+        }
+        if let Some(ref subcat) = body.subcategory_key
+            && subcat != &existing.subcategory_key
+        {
+            conflicting.push("subcategoryKey");
+        }
+        if let Some(qty) = body.stock_quantity
+            && qty != existing.stock_quantity
+        {
+            conflicting.push("stockQuantity");
+        }
+        if let Some(min) = body.min_stock_threshold
+            && min != existing.min_stock_threshold
+        {
+            conflicting.push("minStockThreshold");
+        }
+
+        let (category_name, subcategory_name) =
+            resolve_display_names(db, &existing.category_key, &existing.subcategory_key).await?;
+        let server_doc = existing
+            .clone()
+            .into_product(category_name, subcategory_name);
+
+        return Err(AppError::conflict_with_details(
+            codes::VERSION_CONFLICT,
+            "This product was changed on another device.",
+            serde_json::json!({
+                "expectedVersion": expected,
+                "serverVersion": existing.version,
+                "updatedByDevice": existing.updated_by_device,
+                "server": server_doc,
+                "conflictingFields": conflicting,
+            }),
+        ));
+    }
 
     if let Some(name) = &body.name
         && name.trim().is_empty()
@@ -497,6 +561,9 @@ pub(crate) async fn update_product(
     if let Some(name) = body.name {
         set_doc.insert("name", name);
     }
+    if let Some(device) = device_id {
+        set_doc.insert("updated_by_device", device);
+    }
 
     let updated = repository::product::update_product(db, id, set_doc)
         .await?
@@ -512,8 +579,41 @@ pub(crate) async fn update_product(
 /// onto any `supplier_products` links pointing at this product's `key` —
 /// mirrors the category/subcategory cascade in `service::category`, just
 /// across a module boundary rather than within one.
-pub(crate) async fn delete_product(db: &Database, id: ObjectId) -> AppResult<Product> {
-    let deleted = repository::product::delete_product(db, id)
+pub(crate) async fn delete_product(
+    db: &Database,
+    id: ObjectId,
+    expected_version: Option<i64>,
+    device_id: Option<String>,
+) -> AppResult<Product> {
+    let existing = repository::product::find_product_by_id(db, id)
+        .await?
+        .ok_or_else(|| {
+            AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
+        })?;
+
+    if let Some(expected) = expected_version
+        && existing.version != expected
+    {
+        let (category_name, subcategory_name) =
+            resolve_display_names(db, &existing.category_key, &existing.subcategory_key).await?;
+        let server_doc = existing
+            .clone()
+            .into_product(category_name, subcategory_name);
+
+        return Err(AppError::conflict_with_details(
+            codes::VERSION_CONFLICT,
+            "This product was changed on another device.",
+            serde_json::json!({
+                "expectedVersion": expected,
+                "serverVersion": existing.version,
+                "updatedByDevice": existing.updated_by_device,
+                "server": server_doc,
+                "conflictingFields": Vec::<String>::new(),
+            }),
+        ));
+    }
+
+    let deleted = repository::product::delete_product(db, id, device_id)
         .await?
         .ok_or_else(|| {
             AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)

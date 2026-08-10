@@ -24,7 +24,7 @@ use crate::{
     },
     domain::supplier_products::{
         BulkReplaceLinksRequest, SupplierProductLink, SupplierProductLinkQuery,
-        SupplierProductLinksResponse, UpsertSupplierProductLinkRequest,
+        SupplierProductListResponse, UpsertSupplierProductLinkRequest,
     },
     modules::supplier_products::service::link,
 };
@@ -47,8 +47,7 @@ pub fn router() -> OpenApiRouter<AppState> {
 #[utoipa::path(get, path = "/", tag = modules::SUPPLIER_PRODUCTS, params(SupplierProductLinkQuery),
     security(("bearerAuth" = [])),
     responses(
-        (status = 200, description = "Links for a supplier and/or product", body = ApiResponse<SupplierProductLinksResponse>),
-        (status = 400, description = "Neither supplierKey nor productKey provided", body = ErrorResponse),
+        (status = 200, description = "Links for a supplier and/or product, or full collection paginated", body = ApiResponse<SupplierProductListResponse>),
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
         (status = 403, description = "Admin access required", body = ErrorResponse),
     )
@@ -57,7 +56,7 @@ async fn list_links(
     _admin: AdminUser,
     State(state): State<AppState>,
     Query(query): Query<SupplierProductLinkQuery>,
-) -> AppResult<Json<ApiResponse<SupplierProductLinksResponse>>> {
+) -> AppResult<Json<ApiResponse<SupplierProductListResponse>>> {
     let response = link::list_links(&state.db, query).await?;
 
     Ok(Json(ApiResponse::success(

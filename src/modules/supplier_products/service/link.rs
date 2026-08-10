@@ -17,9 +17,12 @@ use crate::{
         error::{AppError, AppResult},
         id::generate_id,
     },
-    domain::supplier_products::{
-        BulkReplaceLinksRequest, SupplierProductLink, SupplierProductLinkQuery,
-        SupplierProductLinksResponse, UpsertSupplierProductLinkRequest,
+    domain::{
+        inventory::PaginationMeta,
+        supplier_products::{
+            BulkReplaceLinksRequest, SupplierProductLink, SupplierProductLinkQuery,
+            SupplierProductListResponse, UpsertSupplierProductLinkRequest,
+        },
     },
     modules::{
         inventory::service::product as inventory_product,
@@ -28,35 +31,48 @@ use crate::{
     },
 };
 
-/// Lists links scoped to a supplier, a product, or their intersection.
-/// Rejects (400) an unscoped query — every list use case in the frontend
-/// (a supplier's linked products, a product's linked suppliers) names at
-/// least one side.
+/// Lists links scoped to a supplier, a product, their intersection, or all links paginated.
 pub async fn list_links(
     db: &Database,
     query: SupplierProductLinkQuery,
-) -> AppResult<SupplierProductLinksResponse> {
-    let documents = match (query.supplier_key, query.product_key) {
-        (Some(supplier_key), None) => repository::list_links_by_supplier(db, &supplier_key).await?,
-        (None, Some(product_key)) => repository::list_links_by_product(db, &product_key).await?,
-        (Some(supplier_key), Some(product_key)) => {
-            let mut links = repository::list_links_by_supplier(db, &supplier_key).await?;
-            links.retain(|link| link.product_key == product_key);
-            links
-        }
-        (None, None) => {
-            return Err(AppError::validation(
-                "Either supplierKey or productKey must be provided",
-            ));
-        }
+) -> AppResult<SupplierProductListResponse> {
+    let mut filter = doc! { "deleted_at": { "$exists": false } };
+
+    if let Some(ref supplier_key) = query.supplier_key {
+        filter.insert("supplier_key", supplier_key);
+    }
+    if let Some(ref product_key) = query.product_key {
+        filter.insert("product_key", product_key);
+    }
+
+    let page = query.page.unwrap_or(1).max(1);
+    let limit = query.limit.unwrap_or(20).clamp(1, 500);
+    let skip = (page - 1) * limit;
+
+    let (documents, total) =
+        repository::list_links_paginated(db, filter, skip, limit as i64).await?;
+
+    let total_pages = if total == 0 {
+        1
+    } else {
+        (total as f64 / limit as f64).ceil() as u64
     };
 
-    let links = documents
+    let items: Vec<SupplierProductLink> = documents
         .into_iter()
         .map(SupplierProductLinkDocument::into_link)
         .collect();
 
-    Ok(SupplierProductLinksResponse { links })
+    Ok(SupplierProductListResponse {
+        links: items.clone(),
+        items,
+        pagination: PaginationMeta {
+            page,
+            limit,
+            total,
+            total_pages,
+        },
+    })
 }
 
 /// Validates both `supplierKey` and `productKey` resolve to real documents,
@@ -83,6 +99,8 @@ pub async fn upsert_link(
             let mut set_doc = doc! { "updated_at": BsonDateTime::now() };
             set_doc.insert("cost_price_cents", body.cost_price_cents);
             set_doc.insert("notes", body.notes);
+            // `update_link` owns the `version` bump and the `deleted_at`
+            // tombstone clear, matching `suppliers::repository::update_supplier`.
             repository::update_link(db, &body.supplier_key, &body.product_key, set_doc)
                 .await?
                 .expect("link existed moments ago, update_link must find it")
@@ -96,8 +114,11 @@ pub async fn upsert_link(
                 product_key: body.product_key,
                 cost_price_cents: body.cost_price_cents,
                 notes: body.notes,
+                version: 1,
                 created_at: now,
                 updated_at: now,
+                deleted_at: None,
+                updated_by_device: None,
             };
             repository::insert_link(db, document).await?
         }
@@ -158,8 +179,11 @@ pub(crate) async fn replace_links_for_supplier(
                 product_key,
                 cost_price_cents: existing.cost_price_cents,
                 notes: existing.notes.clone(),
+                version: existing.version + 1,
                 created_at: existing.created_at,
                 updated_at: now,
+                deleted_at: None,
+                updated_by_device: None,
             },
             None => SupplierProductLinkDocument {
                 id: None,
@@ -168,8 +192,11 @@ pub(crate) async fn replace_links_for_supplier(
                 product_key,
                 cost_price_cents: None,
                 notes: None,
+                version: 1,
                 created_at: now,
                 updated_at: now,
+                deleted_at: None,
+                updated_by_device: None,
             },
         };
         let inserted = repository::insert_link(db, document).await?;
