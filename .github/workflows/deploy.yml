@@ -57,10 +57,26 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
 
-      - name: Upload binary to server
+      - name: Generate production .env file
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          MONGODB_DB_NAME: ${{ secrets.MONGODB_DB_NAME }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+        run: |
+          cat << EOF > production.env
+          MONGODB_URI=${MONGODB_URI}
+          MONGODB_DB_NAME=${MONGODB_DB_NAME}
+          JWT_SECRET=${JWT_SECRET}
+          PORT=8080
+          JWT_EXPIRY_HOURS=12
+          EOF
+
+      - name: Upload binary and .env to server
         run: |
           scp target/release/${{ env.BINARY_NAME }} \
             ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:${{ env.DEPLOY_PATH }}/${{ env.BINARY_NAME }}.new
+          scp production.env \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:${{ env.DEPLOY_PATH }}/.env.new
 
       - name: Swap binary and restart service
         run: |
@@ -68,6 +84,8 @@ jobs:
             set -e
             chmod +x ${{ env.DEPLOY_PATH }}/${{ env.BINARY_NAME }}.new
             mv ${{ env.DEPLOY_PATH }}/${{ env.BINARY_NAME }}.new ${{ env.DEPLOY_PATH }}/${{ env.BINARY_NAME }}
+            chmod 600 ${{ env.DEPLOY_PATH }}/.env.new
+            mv ${{ env.DEPLOY_PATH }}/.env.new ${{ env.DEPLOY_PATH }}/.env
             sudo systemctl restart jana2u-backend
             sleep 2
             sudo systemctl is-active jana2u-backend
