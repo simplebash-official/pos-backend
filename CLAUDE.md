@@ -16,6 +16,7 @@ The Rust/Axum API backend for **jana2u-pos**, a point-of-sale system for a repai
 - `cargo run --bin seed_api_key` — generate and insert a random API key into the `api_keys` collection
 - `cargo run --bin seed_providers` — upserts the inventory module's default category/subcategory reference data into the `categories`/`subcategories` collections (see `default_categories` in `src/bin/seed_providers.rs`)
 - `cargo run --bin seed_suppliers` — upserts a handful of sample repair/retail suppliers into the `suppliers` collection (see `sample_suppliers` in `src/bin/seed_suppliers.rs`)
+- `cargo run --bin seed_customers` — upserts 20 realistic retail/repair/corporate/print customer profiles into the `customers` collection (see `sample_customers` in `src/bin/seed_customers.rs`)
 - `cargo run --bin seed_admin` — create-if-missing bootstrap of the first Admin account (requires `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD`/`SEED_ADMIN_NAME` to be set — see `.env.example` — fails fast rather than falling back to a hardcoded password), since registration is admin-provisioned only — see **Auth, users & permissions** below
 - `make check` (defined in the root `Makefile`) — runs `cargo fmt --check`, then `cargo clippy --all-targets --all-features -- -D warnings`, then `cargo test`, in that order, stopping at the first failure; `make ci` is currently just an alias for `make check` (same steps, intended as the CI entrypoint)
 
