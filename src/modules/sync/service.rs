@@ -67,6 +67,7 @@ pub async fn get_changes(db: &Database, query: SyncChangesQuery) -> AppResult<Sy
             "supplierProducts".to_string(),
             "purchases".to_string(),
             "stockMovements".to_string(),
+            "customers".to_string(),
         ]
     };
 
@@ -81,6 +82,7 @@ pub async fn get_changes(db: &Database, query: SyncChangesQuery) -> AppResult<Sy
             "supplierProducts" | "supplier_products" => "supplier_products",
             "purchases" => "purchases",
             "stockMovements" | "stock_movements" => "stock_movements",
+            "customers" => "customers",
             _ => continue,
         };
 

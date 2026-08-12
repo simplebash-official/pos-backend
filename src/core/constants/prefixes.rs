@@ -11,3 +11,4 @@ pub const PURCHASE: &str = "pur";
 pub const USER: &str = "usr";
 pub const LOGIN_SESSION: &str = "lgs";
 pub const SEQUENCE_BLOCK: &str = "seq";
+pub const CUSTOMER: &str = "cust";

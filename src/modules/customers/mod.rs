@@ -1,6 +1,4 @@
-// Placeholder module — only a status route today. `repository`/`service`
-// are scaffolded (see `modules::inventory` for the pattern to follow) but
-// still empty, awaiting real customer-management endpoints.
+pub mod model;
 mod repository;
 pub mod routes;
 mod service;
