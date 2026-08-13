@@ -118,3 +118,77 @@ async fn idempotency_replay_and_body_mismatch_validation() {
     );
     assert_eq!(json3["code"], "IDEMPOTENCY_KEY_REUSED");
 }
+
+#[tokio::test]
+async fn login_responses_are_never_captured_into_the_idempotency_store() {
+    let app = common::spawn_app().await;
+    let idem_key = format!("idem-login-{}", Uuid::new_v4());
+
+    // A login response body *is* the issued JWT. If the middleware captured
+    // it, the token would sit in plaintext in `idempotency_keys` and be
+    // replayed to anyone presenting the same key — so `/api/auth/*` opts out
+    // of capture entirely (`is_idempotency_exempt`).
+    let (status, headers, _) = send_with_headers(
+        &app.router,
+        "irrelevant-token",
+        "POST",
+        "/api/auth/login",
+        Some(serde_json::json!({
+            "email": format!("nobody-{}@example.com", Uuid::new_v4()),
+            "password": "wrong-password",
+        })),
+        vec![("idempotency-key", &idem_key)],
+    )
+    .await;
+
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "fixture expects a failed login"
+    );
+    assert!(headers.get("idempotency-replayed").is_none());
+
+    let stored = app
+        .db
+        .collection::<mongodb::bson::Document>("idempotency_keys")
+        .find_one(mongodb::bson::doc! { "key": &idem_key })
+        .await
+        .expect("query idempotency_keys");
+    assert!(
+        stored.is_none(),
+        "auth routes must not be recorded at all, found: {stored:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_forged_token_is_rejected_rather_than_bucketed_as_anonymous() {
+    let app = common::spawn_app().await;
+    let idem_key = format!("idem-forged-{}", Uuid::new_v4());
+
+    // Previously an unverifiable token fell through to a `device:<id>` or
+    // "anonymous" bucket, letting a caller with no valid claim read cached
+    // responses out of a bucket it doesn't own. It must 401 instead, and
+    // leave no record behind for a later request to collide with.
+    let (status, _, _) = send_with_headers(
+        &app.router,
+        "not-a-valid-jwt",
+        "POST",
+        "/api/sequences/repair/reserve",
+        Some(serde_json::json!({ "blockSize": 10 })),
+        vec![("idempotency-key", &idem_key), ("x-device-id", "till-01")],
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let stored = app
+        .db
+        .collection::<mongodb::bson::Document>("idempotency_keys")
+        .find_one(mongodb::bson::doc! { "key": &idem_key })
+        .await
+        .expect("query idempotency_keys");
+    assert!(
+        stored.is_none(),
+        "a rejected request must not reserve an idempotency record: {stored:?}"
+    );
+}

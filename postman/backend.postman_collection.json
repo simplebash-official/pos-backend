@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "32f8d03c-bdaf-46ba-8fd5-f0be13ee0083",
     "name": "jana2u-pos backend",
-    "description": "Rust/Axum API backend for jana2u-pos, a point-of-sale system for a repair/retail shop.\n\nAll requests inherit the collection-level Bearer auth (`{{accessToken}}`) \u2014 set it once per environment (Developement/Production) after obtaining a JWT via Auth > Login (its Tests script auto-populates `{{accessToken}}`/`{{userId}}` for you on success, so nothing to copy/paste). Admin-gated endpoints (inventory category/subcategory writes, and every Suppliers/Supplier Products/Purchases request \u2014 reads included) require the token's `role` claim to be `admin`. Permission-gated endpoints (Users CRUD, Auth > List Login Sessions) require the token's `permissions` claim to include a specific permission (e.g. `users:manage`, `sessions:view`) \u2014 see CLAUDE.md's \"Auth, users & permissions\" section for the full role\u2192permission table; the seeded Admin (`cargo run --bin seed_admin`) has every permission. Users CRUD is additionally scoped by an Admin/Manager hierarchy on top of that permission gate \u2014 see the Users folder's description.\n\nBase URL, and the access token, are environment variables \u2014 switch the active Postman environment to point requests at dev vs prod.",
+    "description": "Rust/Axum API backend for jana2u-pos, a point-of-sale system for a repair/retail shop.\n\nAll requests inherit the collection-level Bearer auth (`{{accessToken}}`) \u2014 set it once per environment (Developement/Production) after obtaining a JWT via Auth > Login (its Tests script auto-populates `{{accessToken}}`/`{{userId}}` for you on success, so nothing to copy/paste). Admin-gated endpoints (inventory category/subcategory writes, and every Suppliers/Supplier Products/Purchases request \u2014 reads included) require the token's `role` claim to be `admin`. Permission-gated endpoints (all of Inventory except the module-status stub, Customers writes, Users CRUD, Auth > List Login Sessions) require the token's `permissions` claim to include a specific permission (e.g. `inventory:read`, `inventory:write`, `users:manage`, `sessions:view`) \u2014 see CLAUDE.md's \"Auth, users & permissions\" section for the full role\u2192permission table; the seeded Admin (`cargo run --bin seed_admin`) has every permission. Users CRUD is additionally scoped by an Admin/Manager hierarchy on top of that permission gate \u2014 see the Users folder's description.\n\nOnly these endpoints work without a token at all: Health, Auth > Login, and each module's `GET /` status stub. Everything else returns 401 `UNAUTHORIZED` without a valid Bearer token, and 403 `PERMISSION_DENIED`/`ADMIN_REQUIRED` if the token lacks the required permission or role.\n\nBase URL, and the access token, are environment variables \u2014 switch the active Postman environment to point requests at dev vs prod.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "_exporter_id": "46626151"
   },
@@ -345,7 +345,7 @@
                     }
                   ]
                 },
-                "description": "Hierarchical Inventory & Stock overview for the frontend accordion page: dashboard metrics (total items, category/subcategory counts, low-stock alerts), every category paired with its subcategories, and \u2014 per subcategory \u2014 a paginated (max 10/page) product data table. Backed by a single MongoDB `$facet` aggregation pipeline over `products` (see CLAUDE.md's \"MongoDB Aggregation Pipelines\" section) rather than one query per subcategory, so `page`/`limit` here apply uniformly to every subcategory table in the response."
+                "description": "Hierarchical Inventory & Stock overview for the frontend accordion page: dashboard metrics (total items, category/subcategory counts, low-stock alerts), every category paired with its subcategories, and \u2014 per subcategory \u2014 a paginated (max 10/page) product data table. Backed by a single MongoDB `$facet` aggregation pipeline over `products` (see CLAUDE.md's \"MongoDB Aggregation Pipelines\" section) rather than one query per subcategory, so `page`/`limit` here apply uniformly to every subcategory table in the response.\n\n**Requires the `inventory:read` permission** \u2014 held by all three roles, so any logged-in user may call it. Returns 401 without a token."
               },
               "response": []
             }
@@ -418,7 +418,7 @@
                     }
                   ]
                 },
-                "description": "List products with search, filters, pagination and sorting."
+                "description": "List products with search, filters, pagination and sorting.\n\n**Requires the `inventory:read` permission** \u2014 held by all three roles, so any logged-in user may call it. Returns 401 without a token."
               },
               "response": []
             },
@@ -439,7 +439,7 @@
                     "{{productId}}"
                   ]
                 },
-                "description": "Fetch a single product by its Mongo ObjectId."
+                "description": "Fetch a single product by its Mongo ObjectId.\n\n**Requires the `inventory:read` permission** \u2014 held by all three roles, so any logged-in user may call it. Returns 401 without a token."
               },
               "response": []
             },
@@ -480,7 +480,7 @@
                     "products"
                   ]
                 },
-                "description": "Create a new physical product. `categoryKey`/`subcategoryKey` must be a valid pair \u2014 the system-generated keys of an existing category/subcategory (see GET /categories/valid), never their display names. Prices are integer cents. `sku` is NOT sent \u2014 it's auto-generated server-side from the resolved category/subcategory names (e.g. \"PHO-SCR-0001\"); the request body has no field for it. For barcode generation, either set `autoGenerateBarcode: true` to have the server mint an EAN-13 barcode, or supply a manual `barcode` (8-14 numeric digits) \u2014 the two are mutually exclusive, and both may be omitted if the product doesn't need one yet. `suppliers`, if provided as a list of intakes with `supplierKey`, `quantity`, `costPriceCents`, `referenceNo`, and `notes`, will atomically link each supplier, record purchase history receipts, and compute the starting `stockQuantity` as the sum of all intake quantities. Like `sku`, `barcode` is immutable after creation.",
+                "description": "Create a new physical product. `categoryKey`/`subcategoryKey` must be a valid pair \u2014 the system-generated keys of an existing category/subcategory (see GET /categories/valid), never their display names. Prices are integer cents. `sku` is NOT sent \u2014 it's auto-generated server-side from the resolved category/subcategory names (e.g. \"PHO-SCR-0001\"); the request body has no field for it. For barcode generation, either set `autoGenerateBarcode: true` to have the server mint an EAN-13 barcode, or supply a manual `barcode` (8-14 numeric digits) \u2014 the two are mutually exclusive, and both may be omitted if the product doesn't need one yet. `suppliers`, if provided as a list of intakes with `supplierKey`, `quantity`, `costPriceCents`, `referenceNo`, and `notes`, will atomically link each supplier, record purchase history receipts, and compute the starting `stockQuantity` as the sum of all intake quantities. Like `sku`, `barcode` is immutable after creation.\n\n**Requires the `inventory:write` permission** \u2014 held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token.",
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"autoGenerateBarcode\": true,\n  \"name\": \"iPhone 15 Pro Max Tempered Glass\",\n  \"categoryKey\": \"{{categoryKey}}\",\n  \"subcategoryKey\": \"{{subcategoryKey}}\",\n  \"costPriceCents\": 450,\n  \"sellingPriceCents\": 1500,\n  \"minStockThreshold\": 10,\n  \"suppliers\": [\n    {\n      \"supplierKey\": \"{{supplierKey}}\",\n      \"quantity\": 30,\n      \"costPriceCents\": 450,\n      \"referenceNo\": \"INV-2026-001\",\n      \"notes\": \"Initial stock batch\"\n    }\n  ]\n}",
@@ -515,7 +515,7 @@
                     "{{productId}}"
                   ]
                 },
-                "description": "Partially update a product \u2014 omit any field to leave it unchanged. `barcode` is not editable via this endpoint (immutable after creation, same as `sku`).",
+                "description": "Partially update a product \u2014 omit any field to leave it unchanged. `barcode` is not editable via this endpoint (immutable after creation, same as `sku`).\n\n**Requires the `inventory:write` permission** \u2014 held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token.",
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"name\": \"iPhone 13 Screen Replacement (OEM)\",\n  \"sellingPriceCents\": 680000,\n  \"minStockThreshold\": 5\n}",
@@ -545,7 +545,7 @@
                     "{{productId}}"
                   ]
                 },
-                "description": "Delete a single product by id."
+                "description": "Delete a single product by id.\n\n**Requires the `inventory:write` permission** \u2014 held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token."
               },
               "response": []
             },
@@ -570,7 +570,7 @@
                     "products"
                   ]
                 },
-                "description": "Delete multiple products at once. Ids that fail to parse as ObjectId are silently skipped.",
+                "description": "Delete multiple products at once. Ids that fail to parse as ObjectId are silently skipped.\n\n**Requires the `inventory:write` permission** \u2014 held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token.",
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"productIds\": [\n    \"65f1a2b3c4d5e6f7a8b9c0d1\",\n    \"65f1a2b3c4d5e6f7a8b9c0d2\"\n  ]\n}",
@@ -611,7 +611,7 @@
                     "stock"
                   ]
                 },
-                "description": "Adjust a product's stock by a signed delta (positive = receipt, negative = consumption/sale).",
+                "description": "Adjust a product's stock by a signed delta (positive = receipt, negative = consumption/sale).\n\n**Requires the `inventory:write` permission** \u2014 held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token.",
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"delta\": -1,\n  \"reason\": \"Sold to walk-in customer\"\n}",
@@ -641,7 +641,7 @@
                     "low-stock"
                   ]
                 },
-                "description": "List products at or below their minimum stock threshold."
+                "description": "List products at or below their minimum stock threshold.\n\n**Requires the `inventory:read` permission** \u2014 held by all three roles, so any logged-in user may call it. Returns 401 without a token."
               },
               "response": []
             },
@@ -663,7 +663,51 @@
                     "movements"
                   ]
                 },
-                "description": "Stock movement (audit trail) history for a single product."
+                "description": "Stock movement (audit trail) history for a single product.\n\n**Requires the `inventory:read` permission** \u2014 held by all three roles, so any logged-in user may call it. Returns 401 without a token."
+              },
+              "response": []
+            },
+            {
+              "name": "List All Stock Movements",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/inventory/stock-movements?productId={{productId}}&movementType=manual_adjustment&page=1&limit=20",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory",
+                    "stock-movements"
+                  ],
+                  "query": [
+                    {
+                      "key": "productId",
+                      "value": "{{productId}}",
+                      "description": "Filter to a single product's movements. Omit for the whole shop's audit trail.",
+                      "disabled": true
+                    },
+                    {
+                      "key": "movementType",
+                      "value": "manual_adjustment",
+                      "description": "Filter by movement type (e.g. manual_adjustment, purchase_receipt).",
+                      "disabled": true
+                    },
+                    {
+                      "key": "page",
+                      "value": "1",
+                      "description": "1-based page number."
+                    },
+                    {
+                      "key": "limit",
+                      "value": "20",
+                      "description": "Page size."
+                    }
+                  ]
+                },
+                "description": "Paginated stock movement (audit trail) history across every product, optionally filtered by product and movement type. Use Product Stock Movements instead for a single product's unpaginated history.\n\n**Requires the `inventory:read` permission** \u2014 held by all three roles, so any logged-in user may call it. Returns 401 without a token."
               },
               "response": []
             }
@@ -688,7 +732,7 @@
                     "categories"
                   ]
                 },
-                "description": "List all categories with their subcategories."
+                "description": "List all categories with their subcategories.\n\n**Requires the `inventory:read` permission** \u2014 held by all three roles, so any logged-in user may call it. Returns 401 without a token."
               },
               "response": []
             },
@@ -817,7 +861,7 @@
                     "valid"
                   ]
                 },
-                "description": "Category/subcategory key+name pairs (nested), for a client-side form that needs to display names while submitting `categoryKey`/`subcategoryKey` on product create/update."
+                "description": "Category/subcategory key+name pairs (nested), for a client-side form that needs to display names while submitting `categoryKey`/`subcategoryKey` on product create/update.\n\n**Requires the `inventory:read` permission** \u2014 held by all three roles, so any logged-in user may call it. Returns 401 without a token."
               },
               "response": []
             }
@@ -844,7 +888,7 @@
                     "subcategories"
                   ]
                 },
-                "description": "List the subcategories of a single category, looked up by its key."
+                "description": "List the subcategories of a single category, looked up by its key.\n\n**Requires the `inventory:read` permission** \u2014 held by all three roles, so any logged-in user may call it. Returns 401 without a token."
               },
               "response": []
             },

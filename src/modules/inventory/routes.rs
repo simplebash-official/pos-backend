@@ -16,9 +16,9 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 use crate::{
     app::AppState,
     core::{
-        constants::modules,
+        constants::{modules, permissions as perm},
         error::AppResult,
-        middleware::auth::AdminUser,
+        middleware::auth::{AdminUser, CurrentUser},
         response::{ApiResponse, ErrorResponse},
         utils::{module_status_response, parse_object_id as parse_mongo_id},
     },
@@ -95,13 +95,20 @@ async fn status() -> Json<ApiResponse<ModuleStatusResponse>> {
 // Overview
 // ============================================================================
 
-#[utoipa::path(get, path = "/overview", tag = modules::INVENTORY, params(InventoryOverviewQuery), responses(
-    (status = 200, description = "Get inventory overview with metrics, category hierarchy, subcategory data tables, search, and filtration", body = ApiResponse<InventoryOverviewResponse>)
-))]
+#[utoipa::path(get, path = "/overview", tag = modules::INVENTORY, params(InventoryOverviewQuery),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Get inventory overview with metrics, category hierarchy, subcategory data tables, search, and filtration", body = ApiResponse<InventoryOverviewResponse>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+    )
+)]
 async fn inventory_overview(
+    user: CurrentUser,
     State(state): State<AppState>,
     Query(query): Query<InventoryOverviewQuery>,
 ) -> AppResult<Json<ApiResponse<InventoryOverviewResponse>>> {
+    user.require_permission(perm::INVENTORY_READ)?;
     let response = service::overview::get_inventory_overview(&state.db, query).await?;
 
     Ok(Json(ApiResponse::success(
@@ -114,13 +121,20 @@ async fn inventory_overview(
 // Products
 // ============================================================================
 
-#[utoipa::path(get, path = "/products", tag = modules::INVENTORY, params(ProductListQuery), responses(
-    (status = 200, description = "List products", body = ApiResponse<ProductListResponse>)
-))]
+#[utoipa::path(get, path = "/products", tag = modules::INVENTORY, params(ProductListQuery),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "List products", body = ApiResponse<ProductListResponse>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+    )
+)]
 async fn list_products(
+    user: CurrentUser,
     State(state): State<AppState>,
     Query(query): Query<ProductListQuery>,
 ) -> AppResult<Json<ApiResponse<ProductListResponse>>> {
+    user.require_permission(perm::INVENTORY_READ)?;
     let response = service::product::list_products(&state.db, query).await?;
 
     Ok(Json(ApiResponse::success(
@@ -131,15 +145,20 @@ async fn list_products(
 
 #[utoipa::path(get, path = "/products/{id}", tag = modules::INVENTORY,
     params(("id" = String, Path, description = "Product id")),
+    security(("bearerAuth" = [])),
     responses(
         (status = 200, description = "Get a product", body = ApiResponse<Product>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
         (status = 404, description = "Product not found", body = ErrorResponse),
     )
 )]
 async fn get_product(
+    user: CurrentUser,
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> AppResult<Json<ApiResponse<Product>>> {
+    user.require_permission(perm::INVENTORY_READ)?;
     let object_id = parse_object_id(&id)?;
     let product = service::product::get_product(&state.db, object_id).await?;
 
@@ -150,16 +169,21 @@ async fn get_product(
 }
 
 #[utoipa::path(post, path = "/products", tag = modules::INVENTORY, request_body = CreateProductRequest,
+    security(("bearerAuth" = [])),
     responses(
         (status = 201, description = "Product created", body = ApiResponse<Product>),
         (status = 400, description = "Validation error", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
         (status = 409, description = "SKU already exists", body = ErrorResponse),
     )
 )]
 async fn create_product(
+    user: CurrentUser,
     State(state): State<AppState>,
     Json(body): Json<CreateProductRequest>,
 ) -> AppResult<(StatusCode, Json<ApiResponse<Product>>)> {
+    user.require_permission(perm::INVENTORY_WRITE)?;
     let product = service::product::create_product(&state.db, body).await?;
 
     Ok((
@@ -174,20 +198,25 @@ async fn create_product(
 #[utoipa::path(put, path = "/products/{id}", tag = modules::INVENTORY,
     params(("id" = String, Path, description = "Product id")),
     request_body = UpdateProductRequest,
+    security(("bearerAuth" = [])),
     responses(
         (status = 200, description = "Product updated", body = ApiResponse<Product>),
         (status = 400, description = "Validation error", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
         (status = 404, description = "Product not found", body = ErrorResponse),
         (status = 409, description = "Version conflict", body = ErrorResponse),
     )
 )]
 async fn update_product(
+    user: CurrentUser,
     State(state): State<AppState>,
     if_match: crate::core::middleware::sync_headers::IfMatch,
     device_id: crate::core::middleware::sync_headers::DeviceId,
     Path(id): Path<String>,
     Json(body): Json<UpdateProductRequest>,
 ) -> AppResult<Json<ApiResponse<Product>>> {
+    user.require_permission(perm::INVENTORY_WRITE)?;
     let object_id = parse_object_id(&id)?;
     let product =
         service::product::update_product(&state.db, object_id, body, if_match.0, device_id.0)
@@ -201,18 +230,23 @@ async fn update_product(
 
 #[utoipa::path(delete, path = "/products/{id}", tag = modules::INVENTORY,
     params(("id" = String, Path, description = "Product id")),
+    security(("bearerAuth" = [])),
     responses(
         (status = 200, description = "Product deleted", body = ApiResponse<Product>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
         (status = 404, description = "Product not found", body = ErrorResponse),
         (status = 409, description = "Version conflict", body = ErrorResponse),
     )
 )]
 async fn delete_product(
+    user: CurrentUser,
     State(state): State<AppState>,
     if_match: crate::core::middleware::sync_headers::IfMatch,
     device_id: crate::core::middleware::sync_headers::DeviceId,
     Path(id): Path<String>,
 ) -> AppResult<Json<ApiResponse<Product>>> {
+    user.require_permission(perm::INVENTORY_WRITE)?;
     let object_id = parse_object_id(&id)?;
     let product =
         service::product::delete_product(&state.db, object_id, if_match.0, device_id.0).await?;
@@ -224,14 +258,19 @@ async fn delete_product(
 }
 
 #[utoipa::path(delete, path = "/products", tag = modules::INVENTORY, request_body = DeleteProductsRequest,
+    security(("bearerAuth" = [])),
     responses(
         (status = 200, description = "Products deleted", body = ApiResponse<DeleteProductsResponse>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
     )
 )]
 async fn delete_products(
+    user: CurrentUser,
     State(state): State<AppState>,
     Json(body): Json<DeleteProductsRequest>,
 ) -> AppResult<Json<ApiResponse<DeleteProductsResponse>>> {
+    user.require_permission(perm::INVENTORY_WRITE)?;
     let deleted_count = service::product::delete_products(&state.db, body.product_ids).await?;
 
     Ok(Json(ApiResponse::success(
@@ -247,17 +286,22 @@ async fn delete_products(
 #[utoipa::path(patch, path = "/products/{id}/stock", tag = modules::INVENTORY,
     params(("id" = String, Path, description = "Product id")),
     request_body = StockAdjustmentRequest,
+    security(("bearerAuth" = [])),
     responses(
         (status = 200, description = "Stock adjusted", body = ApiResponse<StockAdjustmentResponse>),
         (status = 400, description = "Invalid stock adjustment", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
         (status = 404, description = "Product not found", body = ErrorResponse),
     )
 )]
 async fn adjust_stock(
+    user: CurrentUser,
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(body): Json<StockAdjustmentRequest>,
 ) -> AppResult<Json<ApiResponse<StockAdjustmentResponse>>> {
+    user.require_permission(perm::INVENTORY_WRITE)?;
     let object_id = parse_object_id(&id)?;
     let response = service::stock::adjust_stock(&state.db, object_id, body).await?;
 
@@ -268,13 +312,18 @@ async fn adjust_stock(
 }
 
 #[utoipa::path(get, path = "/products/low-stock", tag = modules::INVENTORY,
+    security(("bearerAuth" = [])),
     responses(
         (status = 200, description = "Products at or below their minimum stock threshold", body = ApiResponse<LowStockResponse>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
     )
 )]
 async fn low_stock(
+    user: CurrentUser,
     State(state): State<AppState>,
 ) -> AppResult<Json<ApiResponse<LowStockResponse>>> {
+    user.require_permission(perm::INVENTORY_READ)?;
     let response = service::stock::low_stock(&state.db).await?;
 
     Ok(Json(ApiResponse::success(
@@ -285,15 +334,20 @@ async fn low_stock(
 
 #[utoipa::path(get, path = "/products/{id}/movements", tag = modules::INVENTORY,
     params(("id" = String, Path, description = "Product id")),
+    security(("bearerAuth" = [])),
     responses(
         (status = 200, description = "Stock movement history for a product", body = ApiResponse<StockMovementsResponse>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
         (status = 404, description = "Product not found", body = ErrorResponse),
     )
 )]
 async fn product_movements(
+    user: CurrentUser,
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> AppResult<Json<ApiResponse<StockMovementsResponse>>> {
+    user.require_permission(perm::INVENTORY_READ)?;
     let object_id = parse_object_id(&id)?;
     let response = service::stock::product_movements(&state.db, object_id).await?;
 
@@ -304,14 +358,19 @@ async fn product_movements(
 }
 
 #[utoipa::path(get, path = "/stock-movements", tag = modules::INVENTORY, params(StockMovementListQuery),
+    security(("bearerAuth" = [])),
     responses(
         (status = 200, description = "List all stock movements with pagination", body = ApiResponse<StockMovementListResponse>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
     )
 )]
 async fn list_all_stock_movements(
+    user: CurrentUser,
     State(state): State<AppState>,
     Query(query): Query<StockMovementListQuery>,
 ) -> AppResult<Json<ApiResponse<StockMovementListResponse>>> {
+    user.require_permission(perm::INVENTORY_READ)?;
     let response = service::stock::list_stock_movements(&state.db, query).await?;
 
     Ok(Json(ApiResponse::success(
@@ -325,13 +384,18 @@ async fn list_all_stock_movements(
 // ============================================================================
 
 #[utoipa::path(get, path = "/categories", tag = modules::INVENTORY,
+    security(("bearerAuth" = [])),
     responses(
         (status = 200, description = "List categories with subcategories", body = ApiResponse<CategoriesResponse>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
     )
 )]
 async fn list_categories(
+    user: CurrentUser,
     State(state): State<AppState>,
 ) -> AppResult<Json<ApiResponse<CategoriesResponse>>> {
+    user.require_permission(perm::INVENTORY_READ)?;
     let response = service::category::list_categories(&state.db).await?;
 
     Ok(Json(ApiResponse::success(
@@ -415,13 +479,18 @@ async fn delete_category(
 }
 
 #[utoipa::path(get, path = "/categories/valid", tag = modules::INVENTORY,
+    security(("bearerAuth" = [])),
     responses(
         (status = 200, description = "Valid category/subcategory validation metadata", body = ApiResponse<ValidCategoriesResponse>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
     )
 )]
 async fn get_valid_categories(
+    user: CurrentUser,
     State(state): State<AppState>,
 ) -> AppResult<Json<ApiResponse<ValidCategoriesResponse>>> {
+    user.require_permission(perm::INVENTORY_READ)?;
     let response = service::category::get_valid_categories(&state.db).await?;
 
     Ok(Json(ApiResponse::success(
@@ -436,15 +505,20 @@ async fn get_valid_categories(
 
 #[utoipa::path(get, path = "/categories/{categoryKey}/subcategories", tag = modules::INVENTORY,
     params(("categoryKey" = String, Path, description = "Category key")),
+    security(("bearerAuth" = [])),
     responses(
         (status = 200, description = "Subcategories for a category", body = ApiResponse<SubcategoriesResponse>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
         (status = 404, description = "Category not found", body = ErrorResponse),
     )
 )]
 async fn get_category_subcategories(
+    user: CurrentUser,
     State(state): State<AppState>,
     Path(category_key): Path<String>,
 ) -> AppResult<Json<ApiResponse<SubcategoriesResponse>>> {
+    user.require_permission(perm::INVENTORY_READ)?;
     let response = service::category::get_category_subcategories(&state.db, category_key).await?;
 
     Ok(Json(ApiResponse::success(

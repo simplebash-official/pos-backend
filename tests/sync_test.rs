@@ -7,7 +7,11 @@ use axum::{
 use bson::DateTime as BsonDateTime;
 use chrono::Utc;
 use jana2u_pos_backend::{
-    core::{constants::prefixes, id::generate_id},
+    core::{
+        config::Config,
+        constants::{prefixes, roles},
+        id::generate_id,
+    },
     domain::{
         inventory::Product, sequences::SequenceReservationResponse, sync::SyncChangesResponse,
         users::Role,
@@ -19,6 +23,17 @@ use jana2u_pos_backend::{
 };
 use tower::ServiceExt;
 use uuid::Uuid;
+
+/// Admin token carrying its *real* permission set rather than an empty one,
+/// so it satisfies the permission gates on the inventory routes these tests
+/// drive (`inventory:read`/`inventory:write`) and not just the role checks.
+fn admin_token(config: &Config) -> String {
+    common::mint_token(
+        config,
+        Some(Role::Admin),
+        roles::default_permissions(Role::Admin),
+    )
+}
 
 async fn send_authed(
     router: &axum::Router,
@@ -94,7 +109,7 @@ async fn health_endpoint_returns_no_store_and_server_time() {
 #[tokio::test]
 async fn sequence_reservation_allocates_sequential_blocks() {
     let app = common::spawn_app().await;
-    let token = common::mint_token(&app.config, Some(Role::Admin), &[]);
+    let token = admin_token(&app.config);
 
     let (status, _, json1) = send_authed(
         &app.router,
@@ -133,7 +148,7 @@ async fn sequence_reservation_allocates_sequential_blocks() {
 #[tokio::test]
 async fn negative_stock_rejection_returns_409_insufficient_stock() {
     let app = common::spawn_app().await;
-    let token = common::mint_token(&app.config, Some(Role::Admin), &[]);
+    let token = admin_token(&app.config);
 
     // Seed category and subcategory
     let cat_key = generate_id("cat");
@@ -221,7 +236,7 @@ async fn negative_stock_rejection_returns_409_insufficient_stock() {
 #[tokio::test]
 async fn optimistic_concurrency_product_version_conflict() {
     let app = common::spawn_app().await;
-    let token = common::mint_token(&app.config, Some(Role::Admin), &[]);
+    let token = admin_token(&app.config);
 
     let cat_key = generate_id("cat");
     let subcat_key = generate_id("subcat");
@@ -339,7 +354,7 @@ async fn optimistic_concurrency_product_version_conflict() {
 #[tokio::test]
 async fn sync_changes_cursor_and_tombstones() {
     let app = common::spawn_app().await;
-    let token = common::mint_token(&app.config, Some(Role::Admin), &[]);
+    let token = admin_token(&app.config);
 
     // 1. Query with 100-day old cursor (older than 90 days) -> returns 400 CURSOR_INVALID
     let old_time = Utc::now() - chrono::Duration::days(100);
@@ -393,7 +408,7 @@ async fn sync_status_returns_latest_resource_timestamps() {
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 
     // 2. Insert Category and Product into MongoDB
-    let token = common::mint_token(&app.config, Some(Role::Admin), &[]);
+    let token = admin_token(&app.config);
     let cat_key = generate_id("cat");
     let now = BsonDateTime::now();
 
@@ -475,7 +490,7 @@ async fn sync_status_returns_latest_resource_timestamps() {
 #[tokio::test]
 async fn sync_changes_items_match_the_rest_dto_shape() {
     let app = common::spawn_app().await;
-    let token = common::mint_token(&app.config, Some(Role::Admin), &[]);
+    let token = admin_token(&app.config);
 
     // The feed pages oldest-first, and a shared test database holds far more
     // than one page of rows. Anchoring to a cursor from just before the

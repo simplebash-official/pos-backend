@@ -8,7 +8,7 @@ use axum::{
     },
 };
 use jana2u_pos_backend::{
-    core::{config::Config, id::generate_id},
+    core::{config::Config, constants::roles, id::generate_id},
     domain::users::Role,
     modules::inventory::model::{CategoryDocument, SubcategoryDocument},
 };
@@ -79,6 +79,17 @@ fn admin_token(config: &Config) -> String {
     common::mint_token(config, Some(Role::Admin), &[])
 }
 
+/// Admin token carrying its *real* permission set, unlike `admin_token`'s
+/// empty one — needed only to seed product fixtures through the inventory
+/// API, whose routes gate on `inventory:write` rather than on the role.
+fn inventory_write_token(config: &Config) -> String {
+    common::mint_token(
+        config,
+        Some(Role::Admin),
+        roles::default_permissions(Role::Admin),
+    )
+}
+
 /// Seeds a category + subcategory directly (bypassing the admin-gated
 /// category API), returning `(category_key, subcategory_key)` — the shape
 /// `create_product` needs to build a valid `CreateProductRequest`.
@@ -123,18 +134,15 @@ async fn seed_category_with_subcategory(
     (category_key, subcategory_key)
 }
 
-/// Creates a product via the real (unauthenticated) inventory API and
-/// returns its `(id, key)` — the fixture every supplier-product-link and
-/// purchase test needs a real product to reference.
-async fn create_product(
-    router: &axum::Router,
-    db: &mongodb::Database,
-    stock_quantity: i64,
-) -> (String, String) {
+/// Creates a product via the real inventory API and returns its `(id, key)`
+/// — the fixture every supplier-product-link and purchase test needs a real
+/// product to reference. Authenticates as Admin carrying its real permission
+/// set, since `POST /api/inventory/products` requires `inventory:write`.
+async fn create_product(app: &common::TestApp, stock_quantity: i64) -> (String, String) {
     let (category_key, subcategory_key) =
-        seed_category_with_subcategory(db, "Test Subcategory").await;
-    let (status, body) = send(
-        router,
+        seed_category_with_subcategory(&app.db, "Test Subcategory").await;
+    let (status, body) = send_authed(
+        &app.router,
         "POST",
         "/api/inventory/products",
         Some(json!({
@@ -146,6 +154,7 @@ async fn create_product(
             "stockQuantity": stock_quantity,
             "minStockThreshold": 1,
         })),
+        &inventory_write_token(&app.config),
     )
     .await;
     assert_eq!(
@@ -445,7 +454,7 @@ async fn upsert_link_creates_then_updates_in_place() {
     let app = common::spawn_app().await;
     let token = admin_token(&app.config);
     let (_supplier_id, supplier_key, _) = create_supplier(&app.router, &token).await;
-    let (_product_id, product_key) = create_product(&app.router, &app.db, 10).await;
+    let (_product_id, product_key) = create_product(&app, 10).await;
 
     let (status, body) = send_authed(
         &app.router,
@@ -532,7 +541,7 @@ async fn list_links_without_keys_returns_paginated_collection() {
     let app = common::spawn_app().await;
     let token = admin_token(&app.config);
     let (_supplier_id, supplier_key, _) = create_supplier(&app.router, &token).await;
-    let (_product_id, product_key) = create_product(&app.router, &app.db, 10).await;
+    let (_product_id, product_key) = create_product(&app, 10).await;
 
     send_authed(
         &app.router,
@@ -568,7 +577,7 @@ async fn unlink_removes_the_link() {
     let app = common::spawn_app().await;
     let token = admin_token(&app.config);
     let (_supplier_id, supplier_key, _) = create_supplier(&app.router, &token).await;
-    let (_product_id, product_key) = create_product(&app.router, &app.db, 10).await;
+    let (_product_id, product_key) = create_product(&app, 10).await;
 
     send_authed(
         &app.router,
@@ -592,9 +601,9 @@ async fn bulk_replace_preserves_existing_link_metadata() {
     let app = common::spawn_app().await;
     let token = admin_token(&app.config);
     let (_supplier_id, supplier_key, _) = create_supplier(&app.router, &token).await;
-    let (_product_one_id, product_one_key) = create_product(&app.router, &app.db, 10).await;
-    let (_product_two_id, product_two_key) = create_product(&app.router, &app.db, 10).await;
-    let (_product_three_id, product_three_key) = create_product(&app.router, &app.db, 10).await;
+    let (_product_one_id, product_one_key) = create_product(&app, 10).await;
+    let (_product_two_id, product_two_key) = create_product(&app, 10).await;
+    let (_product_three_id, product_three_key) = create_product(&app, 10).await;
 
     send_authed(
         &app.router,
@@ -655,7 +664,7 @@ async fn record_purchase_increments_stock_and_writes_movement() {
     let app = common::spawn_app().await;
     let token = admin_token(&app.config);
     let (_supplier_id, supplier_key, _) = create_supplier(&app.router, &token).await;
-    let (product_id, product_key) = create_product(&app.router, &app.db, 10).await;
+    let (product_id, product_key) = create_product(&app, 10).await;
 
     let (status, body) = send_authed(
         &app.router,
@@ -678,21 +687,23 @@ async fn record_purchase_increments_stock_and_writes_movement() {
     assert_eq!(body["data"]["product"]["key"], product_key);
     let purchase_key = body["data"]["key"].as_str().unwrap().to_string();
 
-    let (status, body) = send(
+    let (status, body) = send_authed(
         &app.router,
         "GET",
         &format!("/api/inventory/products/{product_id}"),
         None,
+        &inventory_write_token(&app.config),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["data"]["stockQuantity"], 35);
 
-    let (status, body) = send(
+    let (status, body) = send_authed(
         &app.router,
         "GET",
         &format!("/api/inventory/products/{product_id}/movements"),
         None,
+        &inventory_write_token(&app.config),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -723,7 +734,7 @@ async fn record_purchase_requires_auth_and_validates_quantity() {
     let app = common::spawn_app().await;
     let token = admin_token(&app.config);
     let (_supplier_id, supplier_key, _) = create_supplier(&app.router, &token).await;
-    let (_product_id, product_key) = create_product(&app.router, &app.db, 10).await;
+    let (_product_id, product_key) = create_product(&app, 10).await;
 
     let payload = json!({
         "supplierKey": supplier_key,
@@ -751,7 +762,7 @@ async fn list_purchases_without_keys_returns_paginated_collection() {
     let app = common::spawn_app().await;
     let token = admin_token(&app.config);
     let (_supplier_id, supplier_key, _) = create_supplier(&app.router, &token).await;
-    let (_product_id, product_key) = create_product(&app.router, &app.db, 10).await;
+    let (_product_id, product_key) = create_product(&app, 10).await;
 
     let (status, body) = send_authed(
         &app.router,
@@ -797,7 +808,7 @@ async fn deleting_a_supplier_with_purchase_history_is_blocked() {
     let app = common::spawn_app().await;
     let token = admin_token(&app.config);
     let (supplier_id, supplier_key, _) = create_supplier(&app.router, &token).await;
-    let (_product_id, product_key) = create_product(&app.router, &app.db, 10).await;
+    let (_product_id, product_key) = create_product(&app, 10).await;
 
     send_authed(
         &app.router,

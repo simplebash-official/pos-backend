@@ -49,27 +49,54 @@ mod hex {
     }
 }
 
-fn extract_user_id(request: &Request, jwt_secret: &str) -> String {
+/// Routes whose responses must never be captured into `idempotency_keys`.
+/// `/api/auth` is here because a login response body *is* the issued JWT —
+/// persisting it would leave bearer tokens sitting in plaintext in Mongo and
+/// let anyone replaying the same `Idempotency-Key` read one back. Replaying a
+/// login is meaningless anyway, so the whole route family opts out rather
+/// than only redacting the body.
+fn is_idempotency_exempt(path: &str) -> bool {
+    // Kept as a literal rather than built from `constants::modules::AUTH` so
+    // this stays allocation-free on the hot path for every mutating request.
+    path == "/api/auth" || path.starts_with("/api/auth/")
+}
+
+/// Identifies the bucket an `Idempotency-Key` is scoped to. A valid token
+/// gives the account's id; an unauthenticated caller falls back to its device
+/// id, then to a shared `"anonymous"` bucket.
+///
+/// A *present but unverifiable* Bearer token is an error rather than a
+/// fallback (`Err` → 401): silently downgrading it to the device or anonymous
+/// bucket would let a caller with an expired or forged token land in — and
+/// read cached responses out of — a bucket it has no claim to. Every route
+/// this middleware can reach requires auth anyway (see the intentional-public
+/// list in `app::build_router`), so the handler would reject such a request a
+/// moment later regardless; rejecting here just avoids writing a record for
+/// it first. A non-`Bearer` `Authorization` header is left to fall through,
+/// since it was never a token claim to begin with.
+fn extract_user_id(request: &Request, jwt_secret: &str) -> Result<String, AppError> {
     if let Some(auth_header) = request.headers().get(header::AUTHORIZATION)
         && let Ok(auth_str) = auth_header.to_str()
         && let Some(token) = auth_str.strip_prefix("Bearer ")
-        && let Ok(data) = jsonwebtoken::decode::<Claims>(
+    {
+        return match jsonwebtoken::decode::<Claims>(
             token,
             &jsonwebtoken::DecodingKey::from_secret(jwt_secret.as_bytes()),
             &jsonwebtoken::Validation::default(),
-        )
-    {
-        return data.claims.sub;
+        ) {
+            Ok(data) => Ok(data.claims.sub),
+            Err(err) => Err(AppError::from(err)),
+        };
     }
 
     if let Some(device_header) = request.headers().get("x-device-id")
         && let Ok(device_str) = device_header.to_str()
         && !device_str.trim().is_empty()
     {
-        return format!("device:{}", device_str.trim());
+        return Ok(format!("device:{}", device_str.trim()));
     }
 
-    "anonymous".to_string()
+    Ok("anonymous".to_string())
 }
 
 pub async fn handle_idempotency(
@@ -83,7 +110,7 @@ pub async fn handle_idempotency(
         || method == Method::PATCH
         || method == Method::DELETE;
 
-    if !is_mutating {
+    if !is_mutating || is_idempotency_exempt(request.uri().path()) {
         return next.run(request).await;
     }
 
@@ -98,7 +125,10 @@ pub async fn handle_idempotency(
         return next.run(request).await;
     };
 
-    let user_id = extract_user_id(&request, &state.config.jwt_secret);
+    let user_id = match extract_user_id(&request, &state.config.jwt_secret) {
+        Ok(id) => id,
+        Err(err) => return err.into_response(),
+    };
     let uri = request.uri().to_string();
 
     let (parts, body) = request.into_parts();

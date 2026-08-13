@@ -14,17 +14,30 @@ pub const USERS_MANAGE: &str = "users:manage";
 pub const USERS_MANAGE_STAFF: &str = "users:manage:staff";
 pub const SESSIONS_VIEW: &str = "sessions:view";
 
+/// Read access to the catalog, stock levels, the stock-movement audit trail
+/// and the category tree — every `GET` under `/api/inventory` except the
+/// module-status stub. Granted to all three roles.
+pub const INVENTORY_READ: &str = "inventory:read";
+/// Product create/update/delete and stock adjustment. Granted to Admin and
+/// Manager only, so a Staff token can read the catalog but never mutate it.
+pub const INVENTORY_WRITE: &str = "inventory:write";
+/// Reserved for a future finer-grained split of inventory administration.
+/// Deliberately unenforced: category/subcategory management is gated by
+/// `AdminUser` directly (see `modules::inventory::routes`), matching the
+/// `suppliers`/`supplier_products`/`purchases` note below.
+pub const INVENTORY_ADMIN: &str = "inventory:admin";
+/// Customer create/update/delete. Reads require only a valid token, since
+/// all three roles hold this permission anyway.
+pub const CUSTOMERS_WRITE: &str = "customers:write";
+
 // Placeholders for modules still being built out — no route currently
 // enforces these; wire a real `require_permission` check to one as its
 // module gains real write endpoints, following the pattern `modules::users`
-// already establishes. (`suppliers`/`supplier_products`/`purchases` are
-// deliberately *not* here — those modules are gated by `AdminUser` directly,
-// not a permission, since only Admin may touch them at all.)
-pub const INVENTORY_READ: &str = "inventory:read";
-pub const INVENTORY_WRITE: &str = "inventory:write";
-pub const INVENTORY_ADMIN: &str = "inventory:admin";
+// and `modules::inventory` already establish.
+// (`suppliers`/`supplier_products`/`purchases` are deliberately *not* here —
+// those modules are gated by `AdminUser` directly, not a permission, since
+// only Admin may touch them at all.)
 pub const BILLING_WRITE: &str = "billing:write";
 pub const REPAIRS_WRITE: &str = "repairs:write";
 pub const PRINT_JOBS_WRITE: &str = "print_jobs:write";
 pub const REPORTS_VIEW: &str = "reports:view";
-pub const CUSTOMERS_WRITE: &str = "customers:write";

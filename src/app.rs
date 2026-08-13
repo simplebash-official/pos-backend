@@ -63,6 +63,30 @@ pub fn build_router(state: AppState) -> Router {
 
     use crate::core::constants::modules as mod_names;
 
+    // There is deliberately no global authentication layer below —
+    // authentication is opt-in *per handler*, enforced by declaring
+    // `CurrentUser` or `AdminUser` as a handler argument (see
+    // `core::middleware::auth`). The consequence is the thing to remember
+    // when adding a route: **a handler that declares neither is public**,
+    // and nothing in the type system or the OpenAPI derive will flag it.
+    // Inventory's product/stock endpoints were unauthenticated for exactly
+    // this reason until they were given `CurrentUser` +
+    // `require_permission`.
+    //
+    // The complete set of intentionally-public routes is:
+    //   GET  /api/health              liveness probe, static payload
+    //   POST /api/auth/login          issues the token
+    //   GET  /docs, /api-docs/openapi.json   Swagger UI
+    //   GET  /api/{inventory,billing,repairs,reports,print-jobs}
+    //                                 static module-status stubs
+    //
+    // Anything not on that list must take an auth extractor, and
+    // `tests/authorization_test.rs` fails the build if one doesn't — it walks
+    // every operation in the generated OpenAPI document and asserts an
+    // unauthenticated request gets 401 unless the route is on the matching
+    // allowlist there. Keep the two lists in step. The stubs are the pattern
+    // to be careful with: when one of those modules gains real handlers, they
+    // need their own extractor — they do not inherit one.
     let api_router: OpenApiRouter<AppState> = OpenApiRouter::new()
         .routes(routes!(health))
         .nest(
