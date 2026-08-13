@@ -40,6 +40,9 @@ async fn main() {
         });
     tracing::info!(db = %config.mongodb_db_name, "Successfully connected to MongoDB");
 
+    // Best-effort, and deliberately not fatal — see `ensure_indexes`.
+    clients::indexes::ensure_indexes(&db).await;
+
     let state = AppState {
         config: Arc::new(config),
         db,

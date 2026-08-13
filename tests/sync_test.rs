@@ -379,3 +379,236 @@ async fn sync_changes_cursor_and_tombstones() {
     let prod_changes = &sync_resp.changes["products"];
     assert_eq!(prod_changes["full"], true);
 }
+
+#[tokio::test]
+async fn sync_status_returns_latest_resource_timestamps() {
+    let app = common::spawn_app().await;
+
+    // 1. Unauthenticated request -> 401
+    let req = Request::builder()
+        .uri("/api/sync/status")
+        .body(Body::empty())
+        .unwrap();
+    let res = app.router.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+    // 2. Insert Category and Product into MongoDB
+    let token = common::mint_token(&app.config, Some(Role::Admin), &[]);
+    let cat_key = generate_id("cat");
+    let now = BsonDateTime::now();
+
+    app.db
+        .collection::<CategoryDocument>("categories")
+        .insert_one(CategoryDocument {
+            id: None,
+            key: cat_key.clone(),
+            name: format!("Status Cat {}", Uuid::new_v4()),
+            icon: "Box".to_string(),
+            color: "blue".to_string(),
+            version: 1,
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+            updated_by_device: None,
+        })
+        .await
+        .unwrap();
+
+    // 3. Authenticated request -> 200 with a per-resource watermark
+    let (status, _, json) =
+        send_authed(&app.router, &token, "GET", "/api/sync/status", None, vec![]).await;
+
+    assert_eq!(status, StatusCode::OK, "sync status response: {json}");
+    assert_eq!(json["message"], "Sync status retrieved");
+
+    let resources = json["data"]["resources"]
+        .as_object()
+        .expect("resources must be an object");
+    assert!(resources.contains_key("categories"));
+
+    let cat_ts = resources["categories"]["lastUpdatedAt"].as_str().unwrap();
+    assert!(
+        chrono::DateTime::parse_from_rfc3339(cat_ts).is_ok(),
+        "categories timestamp must be valid RFC3339: {cat_ts}"
+    );
+
+    // The cursor is the whole reason this endpoint exists for the client:
+    // after taking a snapshot it adopts this value so its next pull is a
+    // true delta. `/sync/changes` pages oldest-first and cannot supply it.
+    let cursor = resources["categories"]["cursor"]
+        .as_str()
+        .expect("categories must carry a cursor");
+    assert!(!cursor.is_empty());
+
+    assert!(
+        json["data"]["serverTime"].is_string(),
+        "status must carry serverTime for client clock-skew handling"
+    );
+
+    // That cursor must be usable, and must be the *newest* one: replaying it
+    // immediately returns nothing rather than the whole collection.
+    let (status, _, json) = send_authed(
+        &app.router,
+        &token,
+        "GET",
+        &format!("/api/sync/changes?resources=categories&cursors=categories={cursor}"),
+        None,
+        vec![],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "replay response: {json}");
+    let changes = &json["data"]["changes"]["categories"];
+    assert_eq!(changes["full"], false);
+    assert_eq!(changes["unchanged"], true);
+    assert_eq!(changes["items"].as_array().unwrap().len(), 0);
+}
+
+/// The delta feed and the REST snapshot feed are mirrored into the same
+/// local table by the client, so a row that arrives via `/sync/changes` has
+/// to be indistinguishable from the same row returned by `GET /products`.
+///
+/// This previously was not true: the endpoint serialized raw BSON documents,
+/// so items came back snake_case, with `{"$oid"}`/`{"$date"}` wrappers, and
+/// without the `category`/`subcategory` names the read path resolves — and a
+/// category arrived with no `subcategories` array at all, which is what made
+/// a delta pull wipe the subcategory tree out of the client's mirror.
+#[tokio::test]
+async fn sync_changes_items_match_the_rest_dto_shape() {
+    let app = common::spawn_app().await;
+    let token = common::mint_token(&app.config, Some(Role::Admin), &[]);
+
+    // The feed pages oldest-first, and a shared test database holds far more
+    // than one page of rows. Anchoring to a cursor from just before the
+    // inserts below scopes the response to exactly the seeded rows.
+    let watermark = encode_cursor(Utc::now() - chrono::Duration::seconds(5), "");
+
+    let cat_key = generate_id(prefixes::CATEGORY);
+    let sub_key = generate_id(prefixes::SUBCATEGORY);
+    let now = BsonDateTime::now();
+    let category_name = format!("Shape Cat {}", Uuid::new_v4());
+    let subcategory_name = format!("Shape Sub {}", Uuid::new_v4());
+
+    app.db
+        .collection::<CategoryDocument>("categories")
+        .insert_one(CategoryDocument {
+            id: None,
+            key: cat_key.clone(),
+            name: category_name.clone(),
+            icon: "Box".to_string(),
+            color: "blue".to_string(),
+            version: 1,
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+            updated_by_device: None,
+        })
+        .await
+        .unwrap();
+
+    app.db
+        .collection::<SubcategoryDocument>("subcategories")
+        .insert_one(SubcategoryDocument {
+            id: None,
+            key: sub_key.clone(),
+            category_key: cat_key.clone(),
+            name: subcategory_name.clone(),
+            version: 1,
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+            updated_by_device: None,
+        })
+        .await
+        .unwrap();
+
+    let product_key = generate_id(prefixes::PRODUCT);
+    app.db
+        .collection::<ProductDocument>("products")
+        .insert_one(ProductDocument {
+            id: None,
+            key: product_key.clone(),
+            sku: format!("SKU-{}", Uuid::new_v4()),
+            barcode: None,
+            barcode_source: None,
+            name: "Shape Probe Product".to_string(),
+            category_key: cat_key.clone(),
+            subcategory_key: sub_key.clone(),
+            cost_price_cents: 1000,
+            selling_price_cents: 1500,
+            stock_quantity: 7,
+            min_stock_threshold: 2,
+            version: 1,
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+            updated_by_device: None,
+        })
+        .await
+        .unwrap();
+
+    let (status, _, json) = send_authed(
+        &app.router,
+        &token,
+        "GET",
+        &format!("/api/sync/changes?resources=products,categories&since={watermark}"),
+        None,
+        vec![],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "sync changes: {json}");
+
+    let products = json["data"]["changes"]["products"]["items"]
+        .as_array()
+        .expect("products items must be an array");
+    let product = products
+        .iter()
+        .find(|item| item["key"] == serde_json::json!(product_key))
+        .expect("the seeded product must appear in the delta feed");
+
+    // Deserializing into the very type `GET /products` returns is the
+    // strongest available assertion that the two feeds agree.
+    let typed: Product = serde_json::from_value(product.clone())
+        .expect("a sync item must deserialize as the REST Product DTO");
+    assert_eq!(typed.stock_quantity, 7);
+    assert_eq!(typed.version, 1);
+
+    // The display names the read path resolves must be present, not the keys.
+    assert_eq!(typed.category, category_name);
+    assert_eq!(typed.subcategory, subcategory_name);
+
+    // camelCase, and no BSON wrappers leaking through.
+    assert!(product["costPriceCents"].is_number());
+    assert!(product.get("cost_price_cents").is_none());
+    assert!(product["id"].is_string(), "_id must be a hex string");
+    assert!(product.get("_id").is_none());
+    assert!(
+        product["createdAt"].is_string(),
+        "dates must be ISO strings, not {{$date}}"
+    );
+
+    // A category must carry its subcategories, which live in their own
+    // collection and are absent from the raw document.
+    let categories = json["data"]["changes"]["categories"]["items"]
+        .as_array()
+        .expect("categories items must be an array");
+    let category = categories
+        .iter()
+        .find(|item| item["key"] == serde_json::json!(cat_key))
+        .expect("the seeded category must appear in the delta feed");
+
+    let subcategories = category["subcategories"]
+        .as_array()
+        .expect("a synced category must carry its subcategories");
+    assert!(
+        subcategories
+            .iter()
+            .any(|s| s["name"] == serde_json::json!(subcategory_name)),
+        "subcategories must be resolved into the category: {category}"
+    );
+
+    // `subcategories` is folded into categories, never its own resource.
+    assert!(
+        json["data"]["changes"].get("subcategories").is_none(),
+        "subcategories must not be a standalone syncable resource"
+    );
+}

@@ -293,6 +293,15 @@ impl From<bson::error::Error> for AppError {
     }
 }
 
+// Same idea for JSON serialization of a value we constructed ourselves
+// (e.g. `modules::sync` rendering a hydrated DTO into the changes envelope).
+// A failure here is a bug in our own types, never bad caller input.
+impl From<serde_json::Error> for AppError {
+    fn from(err: serde_json::Error) -> Self {
+        AppError::internal(err.to_string())
+    }
+}
+
 /// Handler and service-layer return type: every fallible operation in this
 /// codebase resolves to either a domain value or an `AppError` that already
 /// knows how to render itself as the right HTTP response.

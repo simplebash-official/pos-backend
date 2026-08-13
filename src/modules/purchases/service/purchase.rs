@@ -202,3 +202,80 @@ pub(crate) async fn count_purchases_for_supplier(
 ) -> AppResult<u64> {
     repository::count_purchases_for_supplier(db, supplier_key).await
 }
+
+/// Converts a page of raw `purchases` documents — as read by the sync
+/// module's cursor scan — into the `Purchase` shape `GET /purchases`
+/// returns, embedded supplier/product summaries included. The summaries are
+/// resolved with the same batch lookups `list_purchases` uses, so a row that
+/// arrives by delta carries the same display data as one from a snapshot.
+/// See `inventory::service::product::hydrate_sync_documents`.
+pub(crate) async fn hydrate_sync_documents(
+    db: &Database,
+    documents: Vec<mongodb::bson::Document>,
+) -> AppResult<Vec<Purchase>> {
+    if documents.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let purchases: Vec<PurchaseDocument> = documents
+        .into_iter()
+        .map(|document| {
+            bson::deserialize_from_document::<PurchaseDocument>(document).map_err(AppError::from)
+        })
+        .collect::<AppResult<Vec<_>>>()?;
+
+    let supplier_keys: Vec<String> = purchases
+        .iter()
+        .map(|purchase| purchase.supplier_key.clone())
+        .collect();
+    let product_keys: Vec<String> = purchases
+        .iter()
+        .map(|purchase| purchase.product_key.clone())
+        .collect();
+
+    let suppliers_by_key: HashMap<String, SupplierSummary> =
+        supplier_service::get_suppliers_by_keys(db, &supplier_keys)
+            .await?
+            .into_iter()
+            .map(|supplier| {
+                (
+                    supplier.key.clone(),
+                    SupplierSummary {
+                        id: supplier.id,
+                        key: supplier.key,
+                        name: supplier.name,
+                        contact_person: supplier.contact_person,
+                        primary_phone: supplier.primary_phone,
+                    },
+                )
+            })
+            .collect();
+
+    let products_by_key: HashMap<String, ProductSummary> =
+        inventory_product::get_products_by_keys(db, &product_keys)
+            .await?
+            .into_iter()
+            .map(|product| {
+                (
+                    product.key.clone(),
+                    ProductSummary {
+                        id: product.id,
+                        key: product.key,
+                        sku: product.sku,
+                        name: product.name,
+                        category: product.category,
+                        subcategory: product.subcategory,
+                    },
+                )
+            })
+            .collect();
+
+    Ok(purchases
+        .into_iter()
+        .map(|purchase| {
+            let supplier = suppliers_by_key.get(&purchase.supplier_key).cloned();
+            let product = products_by_key.get(&purchase.product_key).cloned();
+            purchase.into_purchase(supplier, product)
+        })
+        .collect())
+}

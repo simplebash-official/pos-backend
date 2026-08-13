@@ -12,12 +12,14 @@ use crate::{
         middleware::auth::CurrentUser,
         response::{ApiResponse, ErrorResponse},
     },
-    domain::sync::{SyncChangesQuery, SyncChangesResponse},
+    domain::sync::{SyncChangesQuery, SyncChangesResponse, SyncStatusResponse},
     modules::sync::service,
 };
 
 pub fn router() -> OpenApiRouter<AppState> {
-    OpenApiRouter::new().routes(routes!(get_changes))
+    OpenApiRouter::new()
+        .routes(routes!(get_changes))
+        .routes(routes!(sync_status))
 }
 
 #[utoipa::path(get, path = "/changes", tag = modules::SYNC, params(SyncChangesQuery),
@@ -38,4 +40,19 @@ async fn get_changes(
         response,
         "Sync changes retrieved successfully",
     )))
+}
+
+#[utoipa::path(get, path = "/status", tag = modules::SYNC,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Per-resource last-modified timestamp and newest cursor", body = ApiResponse<SyncStatusResponse>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+    )
+)]
+async fn sync_status(
+    _current_user: CurrentUser,
+    State(state): State<AppState>,
+) -> AppResult<Json<ApiResponse<SyncStatusResponse>>> {
+    let result = service::get_sync_status(&state.db).await?;
+    Ok(Json(ApiResponse::success(result, "Sync status retrieved")))
 }

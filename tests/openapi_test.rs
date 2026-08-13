@@ -68,6 +68,7 @@ async fn openapi_json_lists_all_module_paths() {
         "/api/purchases",
         "/api/sequences/{name}/reserve",
         "/api/sync/changes",
+        "/api/sync/status",
         "/api/inventory/stock-movements",
         "/api/users",
     ] {
