@@ -1,2 +1,7 @@
 /target
 .env
+
+# Generated invoice/receipt PDFs (see clients::document_server /
+# modules::documents::service) — runtime artifacts, never committed. Only
+# their metadata (filename, invoice reference, timestamp) lives in Mongo.
+/generated_documents

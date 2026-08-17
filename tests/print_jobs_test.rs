@@ -1,0 +1,312 @@
+mod common;
+
+use axum::{
+    body::Body,
+    http::{
+        Request, StatusCode,
+        header::{AUTHORIZATION, CONTENT_TYPE},
+    },
+};
+use jana2u_pos_backend::{core::constants::roles, domain::users::Role};
+use serde_json::{Value, json};
+use tower::ServiceExt;
+
+async fn execute(router: &axum::Router, request: Request<Body>) -> (StatusCode, Value) {
+    let response = router.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes).unwrap()
+    };
+    (status, json)
+}
+
+async fn send(
+    router: &axum::Router,
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+) -> (StatusCode, Value) {
+    let request = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(CONTENT_TYPE, "application/json")
+        .body(match body {
+            Some(value) => Body::from(value.to_string()),
+            None => Body::empty(),
+        })
+        .unwrap();
+    execute(router, request).await
+}
+
+async fn send_authed(
+    router: &axum::Router,
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+    token: &str,
+) -> (StatusCode, Value) {
+    let request = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(CONTENT_TYPE, "application/json")
+        .header(AUTHORIZATION, format!("Bearer {token}"))
+        .body(match body {
+            Some(value) => Body::from(value.to_string()),
+            None => Body::empty(),
+        })
+        .unwrap();
+    execute(router, request).await
+}
+
+fn staff_token(config: &jana2u_pos_backend::core::config::Config) -> String {
+    common::mint_token(
+        config,
+        Some(Role::Staff),
+        roles::default_permissions(Role::Staff),
+    )
+}
+
+fn unprivileged_token(config: &jana2u_pos_backend::core::config::Config) -> String {
+    common::mint_token(config, Some(Role::Staff), &[])
+}
+
+fn sample_print_job_payload() -> Value {
+    json!({
+        "customerName": "Nadeesha Perera",
+        "jobType": "t-shirt",
+        "quantity": 12,
+        "estimatedCostCents": 240000,
+    })
+}
+
+#[tokio::test]
+async fn unauthenticated_requests_are_rejected() {
+    let app = common::spawn_app().await;
+
+    let (status, _) = send(&app.router, "GET", "/api/print-jobs", None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let (status, _) = send(
+        &app.router,
+        "POST",
+        "/api/print-jobs",
+        Some(sample_print_job_payload()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn create_without_print_jobs_write_permission_is_rejected() {
+    let app = common::spawn_app().await;
+    let token = unprivileged_token(&app.config);
+
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/print-jobs",
+        Some(sample_print_job_payload()),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "Body: {body}");
+    assert_eq!(body["code"], "PERMISSION_DENIED");
+}
+
+#[tokio::test]
+async fn create_print_job_reserves_ticket_number_and_defaults_status_to_received() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/print-jobs",
+        Some(sample_print_job_payload()),
+        &token,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    let data = &body["data"];
+    assert_eq!(data["status"], "received");
+    assert_eq!(data["jobType"], "t-shirt");
+    assert_eq!(data["quantity"], 12);
+    assert!(
+        data["ticketNumber"].as_str().unwrap().starts_with("PRN-"),
+        "ticket number must start with PRN-, got {}",
+        data["ticketNumber"]
+    );
+    assert!(data["key"].as_str().unwrap().starts_with("prn_"));
+}
+
+#[tokio::test]
+async fn create_print_job_rejects_invalid_job_type_and_zero_quantity() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let mut payload = sample_print_job_payload();
+    payload["jobType"] = json!("not-a-real-type");
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/print-jobs",
+        Some(payload),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "Body: {body}");
+    assert_eq!(body["code"], "INVALID_JOB_TYPE");
+
+    let mut payload = sample_print_job_payload();
+    payload["quantity"] = json!(0);
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/print-jobs",
+        Some(payload),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "Body: {body}");
+}
+
+#[tokio::test]
+async fn get_print_job_by_id_and_key_and_update_status() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let (_, created) = send_authed(
+        &app.router,
+        "POST",
+        "/api/print-jobs",
+        Some(sample_print_job_payload()),
+        &token,
+    )
+    .await;
+    let id = created["data"]["id"].as_str().unwrap();
+    let key = created["data"]["key"].as_str().unwrap();
+
+    let (status, by_id) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/print-jobs/{id}"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(by_id["data"]["key"], key);
+
+    let (status, by_key) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/print-jobs/{key}"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(by_key["data"]["id"], id);
+
+    let (status, updated) = send_authed(
+        &app.router,
+        "PATCH",
+        &format!("/api/print-jobs/{key}"),
+        Some(json!({ "status": "ready" })),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {updated}");
+    assert_eq!(updated["data"]["status"], "ready");
+    assert_eq!(
+        updated["data"]["jobType"], "t-shirt",
+        "unspecified fields must be left unchanged"
+    );
+}
+
+#[tokio::test]
+async fn list_print_jobs_filters_by_search_and_status() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let unique = uuid::Uuid::new_v4().to_string()[..8].to_string();
+    let mut payload = sample_print_job_payload();
+    payload["customerName"] = json!(format!("Findable-{unique}"));
+    send_authed(
+        &app.router,
+        "POST",
+        "/api/print-jobs",
+        Some(payload),
+        &token,
+    )
+    .await;
+
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/print-jobs?search=Findable-{unique}"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let print_jobs = body["data"]["printJobs"].as_array().unwrap();
+    assert_eq!(print_jobs.len(), 1, "Body: {body}");
+    assert_eq!(print_jobs[0]["customerName"], format!("Findable-{unique}"));
+
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        "/api/print-jobs?status=cancelled",
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    for job in body["data"]["printJobs"].as_array().unwrap() {
+        assert_eq!(job["status"], "cancelled");
+    }
+}
+
+#[tokio::test]
+async fn delete_print_job_soft_deletes_and_excludes_from_lists() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let (_, created) = send_authed(
+        &app.router,
+        "POST",
+        "/api/print-jobs",
+        Some(sample_print_job_payload()),
+        &token,
+    )
+    .await;
+    let key = created["data"]["key"].as_str().unwrap();
+
+    let (status, _) = send_authed(
+        &app.router,
+        "DELETE",
+        &format!("/api/print-jobs/{key}"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/print-jobs/{key}"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "Body: {body}");
+    assert_eq!(body["code"], "PRINT_JOB_NOT_FOUND");
+}

@@ -1,6 +1,6 @@
-// Placeholder module — only a status route today. `repository`/`service`
-// are scaffolded (see `modules::inventory` for the pattern to follow) but
-// still empty, awaiting real print-queue endpoints.
+// Print-job-ticket CRUD — mirrors `modules::repairs` exactly in shape and
+// intent; see that module's `mod.rs` comment.
+pub mod model;
 mod repository;
 pub mod routes;
-mod service;
+pub mod service;

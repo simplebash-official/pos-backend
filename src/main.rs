@@ -43,9 +43,15 @@ async fn main() {
     // Best-effort, and deliberately not fatal — see `ensure_indexes`.
     clients::indexes::ensure_indexes(&db).await;
 
+    let document_server = clients::document_server::DocumentServerClient::new(
+        config.document_server_url.clone(),
+        config.document_server_api_key.clone(),
+    );
+
     let state = AppState {
         config: Arc::new(config),
         db,
+        document_server: Arc::new(document_server),
     };
     let router = app::build_router(state);
 

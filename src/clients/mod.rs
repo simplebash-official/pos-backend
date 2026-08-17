@@ -1,4 +1,6 @@
-// External service clients. Currently just MongoDB; `AppState` holds the
-// connected `Database` handle built here so modules never reconnect.
+// External service clients: MongoDB, and the sibling document-server
+// (Typst PDF rendering). `AppState` holds handles built here so modules
+// never reconnect/reconstruct a client themselves.
+pub mod document_server;
 pub mod indexes;
 pub mod mongo;

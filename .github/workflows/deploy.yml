@@ -29,6 +29,9 @@ jobs:
           MONGODB_DB_NAME: ${{ secrets.MONGODB_DB_NAME }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           JWT_EXPIRY_HOURS: 12
+          DOCUMENT_SERVER_URL: http://localhost:8090
+          DOCUMENT_SERVER_API_KEY: ci-test-document-server-api-key
+          GENERATED_DOCUMENTS_DIR: generated_documents
         run: make ci
 
   build-and-deploy:
@@ -62,6 +65,8 @@ jobs:
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
           MONGODB_DB_NAME: ${{ secrets.MONGODB_DB_NAME }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          DOCUMENT_SERVER_URL: ${{ secrets.DOCUMENT_SERVER_URL }}
+          DOCUMENT_SERVER_API_KEY: ${{ secrets.DOCUMENT_SERVER_API_KEY }}
         run: |
           cat << EOF > production.env
           MONGODB_URI=${MONGODB_URI}
@@ -69,6 +74,9 @@ jobs:
           JWT_SECRET=${JWT_SECRET}
           PORT=8080
           JWT_EXPIRY_HOURS=12
+          DOCUMENT_SERVER_URL=${DOCUMENT_SERVER_URL:-http://localhost:8090}
+          DOCUMENT_SERVER_API_KEY=${DOCUMENT_SERVER_API_KEY}
+          GENERATED_DOCUMENTS_DIR=generated_documents
           EOF
 
       - name: Upload binary and .env to server
@@ -86,6 +94,7 @@ jobs:
             mv ${{ env.DEPLOY_PATH }}/${{ env.BINARY_NAME }}.new ${{ env.DEPLOY_PATH }}/${{ env.BINARY_NAME }}
             chmod 600 ${{ env.DEPLOY_PATH }}/.env.new
             mv ${{ env.DEPLOY_PATH }}/.env.new ${{ env.DEPLOY_PATH }}/.env
+            mkdir -p ${{ env.DEPLOY_PATH }}/generated_documents
             sudo systemctl restart jana2u-backend
             sleep 2
             sudo systemctl is-active jana2u-backend

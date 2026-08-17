@@ -2,9 +2,12 @@
 // Populated as domain modules (billing, repairs, inventory, ...) grow.
 
 pub mod auth;
+pub mod billing;
 pub mod customers;
 pub mod inventory;
+pub mod print_jobs;
 pub mod purchases;
+pub mod repairs;
 pub mod sequences;
 pub mod supplier_products;
 pub mod suppliers;

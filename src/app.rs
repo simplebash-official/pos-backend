@@ -13,6 +13,7 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::{
+    clients::document_server::DocumentServerClient,
     core::{
         config::Config, middleware::timing::add_processing_time_to_body, openapi::ApiDoc,
         response::ApiResponse,
@@ -25,11 +26,15 @@ use crate::{
 /// `State` extractor. `Arc<Config>` because `Config` is read-only after
 /// startup and cloned into every request's extensions; `Database` is
 /// already an internally-`Arc`'d handle in the Mongo driver, so cloning it
-/// per-request is cheap.
+/// per-request is cheap. `document_server` is behind its own `Arc` since
+/// `DocumentServerClient` holds a `reqwest::Client` (already internally
+/// `Arc`'d) plus a mutable template-key cache that must be shared, not
+/// cloned, across requests.
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<Config>,
     pub db: Database,
+    pub document_server: Arc<DocumentServerClient>,
 }
 
 /// Assembles the full HTTP router: the top-level `/health` check, every
@@ -77,8 +82,14 @@ pub fn build_router(state: AppState) -> Router {
     //   GET  /api/health              liveness probe, static payload
     //   POST /api/auth/login          issues the token
     //   GET  /docs, /api-docs/openapi.json   Swagger UI
-    //   GET  /api/{inventory,billing,repairs,reports,print-jobs}
+    //   GET  /api/{inventory,billing,reports}
     //                                 static module-status stubs
+    //
+    // `repairs`/`print-jobs` were on this list too until they gained real
+    // handlers (Phase 3 of the billing-backend migration) — their `GET /`
+    // is now the real "list" endpoint, gated by `CurrentUser` like every
+    // other read in those modules, not a stub. Left here as the concrete
+    // example of the warning two lines below.
     //
     // Anything not on that list must take an auth extractor, and
     // `tests/authorization_test.rs` fails the build if one doesn't — it walks

@@ -10,6 +10,18 @@ pub struct Config {
     pub jwt_secret: String,
     pub port: u16,
     pub jwt_expiry_hours: i64,
+    /// Base URL of the sibling document-server (see `clients::document_server`).
+    /// No default — a misconfigured deployment should fail startup rather
+    /// than silently produce broken "print invoice" requests.
+    pub document_server_url: String,
+    /// Shared secret sent as `X-Internal-Api-Key` on every document-server
+    /// call. Must match that service's own `INTERNAL_API_KEY`.
+    pub document_server_api_key: String,
+    /// Filesystem directory (relative to the working directory the binary
+    /// runs from, or absolute) generated invoice/receipt PDFs are saved
+    /// under — see `modules::documents::service`. Defaulted, unlike the two
+    /// fields above, since a sensible relative default is safe either way.
+    pub generated_documents_dir: String,
 }
 
 /// Why startup configuration failed to load. `main.rs` logs this and exits
@@ -43,12 +55,20 @@ impl Config {
             .parse::<i64>()
             .map_err(|_| ConfigError::Invalid("JWT_EXPIRY_HOURS"))?;
 
+        let document_server_url = required("DOCUMENT_SERVER_URL")?;
+        let document_server_api_key = required("DOCUMENT_SERVER_API_KEY")?;
+        let generated_documents_dir = env::var("GENERATED_DOCUMENTS_DIR")
+            .unwrap_or_else(|_| "generated_documents".to_string());
+
         Ok(Self {
             mongodb_uri,
             mongodb_db_name,
             jwt_secret,
             port,
             jwt_expiry_hours,
+            document_server_url,
+            document_server_api_key,
+            generated_documents_dir,
         })
     }
 }

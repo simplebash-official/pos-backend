@@ -14,7 +14,9 @@ use crate::{
         inventory::service::{
             category as inventory_category, product as inventory_product, stock as inventory_stock,
         },
+        print_jobs::service as print_jobs_service,
         purchases::service::purchase as purchases_service,
+        repairs::service as repairs_service,
         supplier_products::service::link as supplier_products_service,
         suppliers::service as suppliers_service,
         sync::{
@@ -40,6 +42,8 @@ const SYNCABLE: &[(&str, &str)] = &[
     ("purchases", "purchases"),
     ("stockMovements", "stock_movements"),
     ("customers", "customers"),
+    ("repairs", "repairs"),
+    ("printJobs", "print_jobs"),
 ];
 
 /// Maps a caller-supplied resource name to its collection, accepting the
@@ -51,6 +55,7 @@ fn collection_for(resource: &str) -> Option<&'static str> {
             *name == resource
                 || (resource == "supplier_products" && *collection == "supplier_products")
                 || (resource == "stock_movements" && *collection == "stock_movements")
+                || (resource == "print_jobs" && *collection == "print_jobs")
         })
         .map(|(_, collection)| *collection)
 }
@@ -111,6 +116,10 @@ async fn hydrate(db: &Database, resource: &str, documents: Vec<Document>) -> App
             to_values(inventory_stock::hydrate_sync_documents(documents)?)?
         }
         "customers" => to_values(customers_service::hydrate_sync_documents(documents)?)?,
+        "repairs" => to_values(repairs_service::hydrate_sync_documents(documents)?)?,
+        "printJobs" | "print_jobs" => {
+            to_values(print_jobs_service::hydrate_sync_documents(documents)?)?
+        }
         _ => Vec::new(),
     };
     Ok(values)

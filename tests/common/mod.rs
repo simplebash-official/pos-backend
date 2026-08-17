@@ -35,9 +35,14 @@ pub async fn spawn_app() -> TestApp {
         .expect("failed to connect to test MongoDB");
 
     let config = Arc::new(config);
+    let document_server = Arc::new(clients::document_server::DocumentServerClient::new(
+        config.document_server_url.clone(),
+        config.document_server_api_key.clone(),
+    ));
     let state = AppState {
         config: config.clone(),
         db: db.clone(),
+        document_server,
     };
 
     TestApp {

@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use jana2u_pos_backend::{app, app::AppState, core::config::Config};
+use jana2u_pos_backend::{app, app::AppState, clients, core::config::Config};
 use mongodb::Client;
 use mongodb::options::{ClientOptions, ResolverConfig};
 use tower::ServiceExt;
@@ -23,9 +23,15 @@ async fn build_test_app() -> axum::Router {
     let client = Client::with_options(options).expect("client construction");
     let db = client.database(&config.mongodb_db_name);
 
+    let config = Arc::new(config);
+    let document_server = Arc::new(clients::document_server::DocumentServerClient::new(
+        config.document_server_url.clone(),
+        config.document_server_api_key.clone(),
+    ));
     let state = AppState {
-        config: Arc::new(config),
+        config,
         db,
+        document_server,
     };
     app::build_router(state)
 }
