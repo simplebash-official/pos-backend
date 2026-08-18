@@ -310,3 +310,87 @@ async fn delete_print_job_soft_deletes_and_excludes_from_lists() {
     assert_eq!(status, StatusCode::NOT_FOUND, "Body: {body}");
     assert_eq!(body["code"], "PRINT_JOB_NOT_FOUND");
 }
+
+async fn seed_customer(app: &common::TestApp, phone_suffix: &str) -> (String, String) {
+    let token = staff_token(&app.config);
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/customers",
+        Some(json!({
+            "name": "Real Customer Name",
+            "primaryPhone": format!("072{phone_suffix}"),
+        })),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    (
+        body["data"]["key"].as_str().unwrap().to_string(),
+        body["data"]["primaryPhone"].as_str().unwrap().to_string(),
+    )
+}
+
+#[tokio::test]
+async fn create_print_job_with_customer_key_resolves_name_and_phone_from_customer_record() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+    let (customer_key, customer_phone) = seed_customer(&app, "9998881").await;
+
+    // customerName/customerPhone here are deliberately wrong — a valid
+    // customerKey must override both from the linked customer record.
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/print-jobs",
+        Some(json!({
+            "customerKey": customer_key,
+            "customerName": "Wrong Name",
+            "customerPhone": "0009999999",
+            "jobType": "t-shirt",
+            "quantity": 12,
+            "estimatedCostCents": 240000,
+        })),
+        &token,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    let data = &body["data"];
+    assert_eq!(data["customerName"], "Real Customer Name");
+    assert_eq!(data["customerPhone"], customer_phone);
+}
+
+#[tokio::test]
+async fn update_print_job_with_customer_key_resolves_name_and_phone_from_customer_record() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+    let (_, created) = send_authed(
+        &app.router,
+        "POST",
+        "/api/print-jobs",
+        Some(sample_print_job_payload()),
+        &token,
+    )
+    .await;
+    let key = created["data"]["key"].as_str().unwrap();
+
+    let (customer_key, customer_phone) = seed_customer(&app, "9998882").await;
+
+    let (status, updated) = send_authed(
+        &app.router,
+        "PATCH",
+        &format!("/api/print-jobs/{key}"),
+        Some(json!({
+            "customerKey": customer_key,
+            "customerName": "Wrong Name",
+            "customerPhone": "0009999999",
+        })),
+        &token,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "Body: {updated}");
+    assert_eq!(updated["data"]["customerName"], "Real Customer Name");
+    assert_eq!(updated["data"]["customerPhone"], customer_phone);
+}

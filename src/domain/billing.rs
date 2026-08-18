@@ -38,6 +38,34 @@ pub struct InvoiceItem {
     pub assigned_employee_name: Option<String>,
 }
 
+/// One line of a `POST /billing/sales` request. Deliberately leaner than
+/// `InvoiceItem`: `name`/`unitPriceCents` (and, for repair/print lines,
+/// `assignedEmployeeName`) are only accepted here as a fallback for an
+/// ad-hoc line with no key to resolve against — `sku`/`totalCents`/
+/// `sourceTicketNumber` are never client-supplied at all, since they're
+/// always derivable once the key resolves. `service::sale::complete_sale`
+/// resolves each item from `productKey`/`sourceTicketKey` before any write;
+/// an unresolvable key fails the whole request, the same way a bad
+/// `customerKey` does.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateSaleItemRequest {
+    #[serde(default)]
+    pub product_key: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub unit_price_cents: Option<i64>,
+    pub quantity: i64,
+    pub discount_cents: i64,
+    /// `"retail"` | `"repair"` | `"print"`.
+    pub source_type: String,
+    #[serde(default)]
+    pub source_ticket_key: Option<String>,
+    #[serde(default)]
+    pub assigned_employee_name: Option<String>,
+}
+
 /// One leg of a split payment. `method` is `"cash"` | `"card"` | `"online"`
 /// (never `"split"` — that's the invoice-level `payment_method` value that
 /// means "see `split_payments`").
@@ -142,7 +170,7 @@ pub struct CreateSaleRequest {
     #[serde(default)]
     pub customer_address: Option<String>,
     pub cashier_name: String,
-    pub items: Vec<InvoiceItem>,
+    pub items: Vec<CreateSaleItemRequest>,
     pub subtotal_cents: i64,
     pub discount_cents: i64,
     pub tax_cents: i64,

@@ -9,6 +9,8 @@
 // codebase, so a partial failure here is the same class of exposure that
 // module already has between "purchase inserted" and "stock bumped".
 
+use std::collections::HashMap;
+
 use mongodb::{
     Database,
     bson::{DateTime as BsonDateTime, doc, oid::ObjectId},
@@ -21,8 +23,11 @@ use crate::{
         id::generate_id,
     },
     domain::{
-        billing::{CancelInvoiceRequest, CompleteSaleResponse, CreateSaleRequest, Invoice},
-        inventory::StockMovementType,
+        billing::{
+            CancelInvoiceRequest, CompleteSaleResponse, CreateSaleItemRequest, CreateSaleRequest,
+            Invoice, InvoiceItem,
+        },
+        inventory::{Product, StockMovementType},
         sequences::ReserveSequenceRequest,
     },
     modules::{
@@ -48,14 +53,14 @@ fn validate_sale_request(body: &CreateSaleRequest) -> AppResult<()> {
         }
         if item.quantity < 1 {
             return Err(AppError::validation(format!(
-                "Item '{}' must have a quantity of at least 1",
-                item.name
+                "An item of source type '{}' must have a quantity of at least 1",
+                item.source_type
             )));
         }
-        if item.total_cents < 0 {
+        if item.discount_cents < 0 {
             return Err(AppError::validation(format!(
-                "Item '{}' cannot have a negative total",
-                item.name
+                "An item of source type '{}' cannot have a negative discount",
+                item.source_type
             )));
         }
     }
@@ -93,6 +98,137 @@ fn validate_sale_request(body: &CreateSaleRequest) -> AppResult<()> {
     Ok(())
 }
 
+/// Resolves each request-side item into a persisted-shape `InvoiceItem`,
+/// pulling `name`/`sku`/`unitPriceCents` (and, for repair/print, the
+/// assigned employee) from the referenced product/ticket rather than
+/// trusting the client — mirrors the customer-key resolution just above it
+/// in `complete_sale`. Also returns the resolved `Product`s keyed by
+/// `product_key` so the post-commit stock-decrement loop doesn't have to
+/// look them up a second time. An item whose `productKey`/`sourceTicketKey`
+/// doesn't resolve fails the whole request (via `?`) before any write,
+/// exactly like a bad `customerKey` already does.
+async fn resolve_sale_items(
+    db: &Database,
+    items: &[CreateSaleItemRequest],
+) -> AppResult<(Vec<InvoiceItem>, HashMap<String, Product>)> {
+    let mut resolved = Vec::with_capacity(items.len());
+    let mut products: HashMap<String, Product> = HashMap::new();
+
+    for item in items {
+        let (name, sku, unit_price_cents, source_ticket_number, assigned_employee_name) =
+            match item.source_type.as_str() {
+                "retail" => match &item.product_key {
+                    Some(product_key) => {
+                        let product =
+                            inventory::service::product::get_product_by_key(db, product_key)
+                                .await?;
+                        let resolved_item = (
+                            product.name.clone(),
+                            Some(product.sku.clone()),
+                            product.selling_price_cents,
+                            None,
+                            None,
+                        );
+                        products.insert(product_key.clone(), product);
+                        resolved_item
+                    }
+                    None => (
+                        item.name.clone().ok_or_else(|| {
+                            AppError::validation("An item with no productKey must include a name")
+                        })?,
+                        None,
+                        item.unit_price_cents.ok_or_else(|| {
+                            AppError::validation(
+                                "An item with no productKey must include unitPriceCents",
+                            )
+                        })?,
+                        None,
+                        None,
+                    ),
+                },
+                "repair" => match &item.source_ticket_key {
+                    Some(ticket_key) => {
+                        let ticket = repairs::service::get_repair(db, ticket_key).await?;
+                        (
+                            item.name
+                                .clone()
+                                .unwrap_or_else(|| ticket.device_model.clone()),
+                            None,
+                            ticket.estimated_cost_cents + ticket.material_cost_cents.unwrap_or(0),
+                            Some(ticket.ticket_number),
+                            ticket.assigned_employee_name,
+                        )
+                    }
+                    None => (
+                        item.name.clone().ok_or_else(|| {
+                            AppError::validation(
+                                "A repair item with no sourceTicketKey must include a name",
+                            )
+                        })?,
+                        None,
+                        item.unit_price_cents.ok_or_else(|| {
+                            AppError::validation(
+                                "A repair item with no sourceTicketKey must include unitPriceCents",
+                            )
+                        })?,
+                        None,
+                        item.assigned_employee_name.clone(),
+                    ),
+                },
+                "print" => match &item.source_ticket_key {
+                    Some(ticket_key) => {
+                        let ticket = print_jobs::service::get_print_job(db, ticket_key).await?;
+                        (
+                            item.name.clone().unwrap_or_else(|| ticket.job_type.clone()),
+                            None,
+                            ticket.estimated_cost_cents + ticket.material_cost_cents.unwrap_or(0),
+                            Some(ticket.ticket_number),
+                            ticket.assigned_employee_name,
+                        )
+                    }
+                    None => (
+                        item.name.clone().ok_or_else(|| {
+                            AppError::validation(
+                                "A print item with no sourceTicketKey must include a name",
+                            )
+                        })?,
+                        None,
+                        item.unit_price_cents.ok_or_else(|| {
+                            AppError::validation(
+                                "A print item with no sourceTicketKey must include unitPriceCents",
+                            )
+                        })?,
+                        None,
+                        item.assigned_employee_name.clone(),
+                    ),
+                },
+                other => {
+                    return Err(AppError::validation(format!(
+                        "Invalid item sourceType '{other}'"
+                    )));
+                }
+            };
+
+        let total_cents = (unit_price_cents * item.quantity - item.discount_cents).max(0);
+
+        resolved.push(InvoiceItem {
+            product_key: item.product_key.clone(),
+            name,
+            sku,
+            unit_price_cents,
+            quantity: item.quantity,
+            discount_cents: item.discount_cents,
+            total_cents,
+            source_type: item.source_type.clone(),
+            source_ticket_key: item.source_ticket_key.clone(),
+            source_ticket_number,
+            assigned_employee_name,
+        });
+    }
+
+    Ok((resolved, products))
+}
+
 pub async fn complete_sale(
     db: &Database,
     body: CreateSaleRequest,
@@ -123,6 +259,11 @@ pub async fn complete_sale(
             ),
         };
 
+    // Same "fail before any write" treatment as the customer lookup above —
+    // an unresolvable productKey/sourceTicketKey can't produce a sensible
+    // line item, so the whole sale is rejected rather than half-completed.
+    let (resolved_items, resolved_products) = resolve_sale_items(db, &body.items).await?;
+
     let reservation = sequences::service::reserve_sequence(
         db,
         "invoice".to_string(),
@@ -152,7 +293,7 @@ pub async fn complete_sale(
         customer_address_snapshot,
         cashier_id: cashier_id.clone(),
         cashier_name_snapshot: body.cashier_name.clone(),
-        items: body.items.clone(),
+        items: resolved_items.clone(),
         subtotal_cents: body.subtotal_cents,
         discount_cents: body.discount_cents,
         tax_cents: body.tax_cents,
@@ -228,44 +369,43 @@ pub async fn complete_sale(
         }
     }
 
-    for item in &body.items {
+    for item in &resolved_items {
         match item.source_type.as_str() {
             "retail" => {
                 let Some(product_key) = item.product_key.as_deref() else {
                     continue;
                 };
-                match inventory::service::product::get_product_by_key(db, product_key).await {
-                    Ok(product) => {
-                        let Ok(object_id) = ObjectId::parse_str(&product.id) else {
-                            warnings.push(format!(
-                                "Product '{}' has an invalid id and its stock was not adjusted",
-                                item.name
-                            ));
-                            continue;
-                        };
-                        if let Err(err) = inventory::service::stock::apply_stock_delta(
-                            db,
-                            object_id,
-                            -item.quantity,
-                            StockMovementType::Sale,
-                            Some(inserted_invoice.key.clone()),
-                            Some(format!(
-                                "Sale on invoice {}",
-                                inserted_invoice.invoice_number
-                            )),
-                        )
-                        .await
-                        {
-                            warnings.push(format!(
-                                "Stock for '{}' could not be adjusted: {err}",
-                                item.name
-                            ));
-                        }
-                    }
-                    Err(err) => warnings.push(format!(
-                        "Product '{}' (key {product_key}) was not found; its stock was not adjusted: {err}",
+                // Already resolved (and guaranteed to exist) above — reuse
+                // it rather than looking the product up again. It can only
+                // be missing here from the map if the item had no
+                // productKey, which the outer `let Some` already excluded.
+                let Some(product) = resolved_products.get(product_key) else {
+                    continue;
+                };
+                let Ok(object_id) = ObjectId::parse_str(&product.id) else {
+                    warnings.push(format!(
+                        "Product '{}' has an invalid id and its stock was not adjusted",
                         item.name
+                    ));
+                    continue;
+                };
+                if let Err(err) = inventory::service::stock::apply_stock_delta(
+                    db,
+                    object_id,
+                    -item.quantity,
+                    StockMovementType::Sale,
+                    Some(inserted_invoice.key.clone()),
+                    Some(format!(
+                        "Sale on invoice {}",
+                        inserted_invoice.invoice_number
                     )),
+                )
+                .await
+                {
+                    warnings.push(format!(
+                        "Stock for '{}' could not be adjusted: {err}",
+                        item.name
+                    ));
                 }
             }
             "repair" => match &item.source_ticket_key {

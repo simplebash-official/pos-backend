@@ -51,6 +51,11 @@ fn default_version() -> i64 {
     1
 }
 
+/// Body for `POST /print-jobs`. `customerName`/`customerPhone` are only
+/// used as-is when `customerKey` is absent (a walk-in with no linked
+/// account); when `customerKey` resolves to a real customer,
+/// `service::create_print_job` overrides both from that record instead of
+/// trusting the payload — same rule as `repairs::CreateRepairRequest`.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatePrintJobRequest {
@@ -76,6 +81,9 @@ pub struct CreatePrintJobRequest {
     pub split_value: Option<f64>,
 }
 
+/// Body for `PATCH /print-jobs/{id}`. Same `customerKey`-overrides-
+/// `customerName`/`customerPhone` rule as `CreatePrintJobRequest` applies
+/// here too (see `service::update_print_job`).
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdatePrintJobRequest {

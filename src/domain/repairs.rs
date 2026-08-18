@@ -60,7 +60,10 @@ fn default_version() -> i64 {
 
 /// Body for `POST /repairs` and `PUT /repairs/{id}`. `ticketNumber` is never
 /// client-supplied — reserved server-side on create only (see
-/// `service::create_repair`).
+/// `service::create_repair`). `customerName`/`customerPhone` are only used
+/// as-is when `customerKey` is absent (a walk-in with no linked account);
+/// when `customerKey` resolves to a real customer, `service::create_repair`
+/// overrides both from that record instead of trusting the payload.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateRepairRequest {
@@ -88,7 +91,9 @@ pub struct CreateRepairRequest {
 }
 
 /// Body for `PATCH /repairs/{id}`. Every field optional so a client sends
-/// only what changed.
+/// only what changed. Same `customerKey`-overrides-`customerName`/
+/// `customerPhone` rule as `CreateRepairRequest` applies here too (see
+/// `service::update_repair`).
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateRepairRequest {

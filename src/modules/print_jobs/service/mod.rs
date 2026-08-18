@@ -23,6 +23,7 @@ use crate::{
         sequences::ReserveSequenceRequest,
     },
     modules::{
+        customers,
         print_jobs::{model::PrintJobDocument, repository},
         sequences,
     },
@@ -136,6 +137,27 @@ pub async fn get_print_job(db: &Database, id_or_key: &str) -> AppResult<PrintJob
     Ok(document.into_print_job())
 }
 
+/// When `customer_key` resolves to a real customer, that record is
+/// authoritative for name/phone — a client-typed name/phone alongside a
+/// valid key could otherwise silently diverge from the linked customer.
+/// Falls back to the client-supplied name/phone only when there's no key
+/// (a walk-in with no linked account). Mirrors
+/// `billing::service::sale::complete_sale`'s customer-key resolution.
+async fn resolve_customer_name_phone(
+    db: &Database,
+    customer_key: Option<&str>,
+    fallback_name: String,
+    fallback_phone: Option<String>,
+) -> AppResult<(String, Option<String>)> {
+    match customer_key {
+        Some(key) => {
+            let customer = customers::service::get_customer_by_key(db, key).await?;
+            Ok((customer.name, Some(customer.primary_phone)))
+        }
+        None => Ok((fallback_name, fallback_phone)),
+    }
+}
+
 pub async fn create_print_job(
     db: &Database,
     body: CreatePrintJobRequest,
@@ -143,8 +165,17 @@ pub async fn create_print_job(
 ) -> AppResult<PrintJob> {
     let status = body.status.unwrap_or_else(|| "received".to_string());
     validate_status(&status)?;
+
+    let (customer_name, customer_phone) = resolve_customer_name_phone(
+        db,
+        body.customer_key.as_deref(),
+        body.customer_name,
+        body.customer_phone,
+    )
+    .await?;
+
     validate_required_fields(
-        &body.customer_name,
+        &customer_name,
         &body.job_type,
         body.quantity,
         body.estimated_cost_cents,
@@ -172,8 +203,8 @@ pub async fn create_print_job(
         key: generate_id(prefixes::PRINT_JOB),
         ticket_number,
         customer_key: body.customer_key,
-        customer_name: body.customer_name.trim().to_string(),
-        customer_phone: body.customer_phone,
+        customer_name: customer_name.trim().to_string(),
+        customer_phone,
         job_type: body.job_type,
         quantity: body.quantity,
         status,
@@ -209,7 +240,14 @@ pub async fn update_print_job(
         .id
         .expect("persisted print job document must have an _id");
 
-    let customer_name = body.customer_name.unwrap_or(existing.customer_name);
+    let effective_customer_key = body.customer_key.clone().or(existing.customer_key.clone());
+    let (customer_name, customer_phone) = resolve_customer_name_phone(
+        db,
+        effective_customer_key.as_deref(),
+        body.customer_name.unwrap_or(existing.customer_name),
+        body.customer_phone.clone().or(existing.customer_phone),
+    )
+    .await?;
     let job_type = body.job_type.unwrap_or(existing.job_type);
     let quantity = body.quantity.unwrap_or(existing.quantity);
     let estimated_cost_cents = body
@@ -231,9 +269,10 @@ pub async fn update_print_job(
     if let Some(key) = body.customer_key {
         set_doc.insert("customer_key", key);
     }
-    if let Some(phone) = body.customer_phone {
-        set_doc.insert("customer_phone", phone);
-    }
+    match customer_phone {
+        Some(phone) => set_doc.insert("customer_phone", phone),
+        None => set_doc.insert("customer_phone", mongodb::bson::Bson::Null),
+    };
     if let Some(mc) = body.material_cost_cents {
         set_doc.insert("material_cost_cents", mc);
     }

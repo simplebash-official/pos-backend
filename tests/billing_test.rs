@@ -263,11 +263,8 @@ async fn complete_sale_retail_cash_decrements_stock_and_marks_paid() {
     let mut payload = base_sale_payload();
     payload["items"] = json!([{
         "productKey": product_key,
-        "name": "Test Widget",
-        "unitPriceCents": price,
         "quantity": 2,
         "discountCents": 0,
-        "totalCents": price * 2,
         "sourceType": "retail",
     }]);
     payload["subtotalCents"] = json!(price * 2);
@@ -297,8 +294,107 @@ async fn complete_sale_retail_cash_decrements_stock_and_marks_paid() {
     assert_eq!(data["payments"][0]["amountCents"], price * 2);
     assert_eq!(data["warnings"], json!([]));
 
+    // name/sku/unitPriceCents/totalCents were never sent — the server must
+    // have resolved them from the product record via `productKey`.
+    let item = &data["invoice"]["items"][0];
+    assert_eq!(item["name"], "Test Widget");
+    assert_eq!(
+        item["sku"].as_str().unwrap(),
+        get_product(&app, &product_id).await["sku"]
+    );
+    assert_eq!(item["unitPriceCents"], price);
+    assert_eq!(item["totalCents"], price * 2);
+
     let product = get_product(&app, &product_id).await;
     assert_eq!(product["stockQuantity"], 8, "stock should decrement by 2");
+}
+
+#[tokio::test]
+async fn complete_sale_retail_item_ignores_client_supplied_name_and_price() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+    let (_product_id, product_key, price) = seed_product(&app).await;
+
+    // A client sending a stale/wrong name and unitPriceCents alongside a
+    // valid productKey must have both overridden by the DB product record,
+    // not trusted from the payload.
+    let mut payload = base_sale_payload();
+    payload["items"] = json!([{
+        "productKey": product_key,
+        "name": "Totally Wrong Name",
+        "unitPriceCents": 1,
+        "quantity": 1,
+        "discountCents": 0,
+        "sourceType": "retail",
+    }]);
+    payload["subtotalCents"] = json!(price);
+    payload["totalCents"] = json!(price);
+
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/billing/sales",
+        Some(payload),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+
+    let item = &body["data"]["invoice"]["items"][0];
+    assert_eq!(item["name"], "Test Widget");
+    assert_eq!(item["unitPriceCents"], price);
+    assert_eq!(item["totalCents"], price);
+}
+
+#[tokio::test]
+async fn complete_sale_ad_hoc_retail_item_requires_name_and_unit_price() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let mut payload = base_sale_payload();
+    payload["items"] = json!([{
+        "quantity": 1,
+        "discountCents": 0,
+        "sourceType": "retail",
+    }]);
+    payload["subtotalCents"] = json!(0);
+    payload["totalCents"] = json!(0);
+
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/billing/sales",
+        Some(payload),
+        &token,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "an item with no productKey must include name/unitPriceCents: {body}"
+    );
+
+    let mut payload = base_sale_payload();
+    payload["items"] = json!([{
+        "name": "Custom Charge",
+        "unitPriceCents": 150000,
+        "quantity": 1,
+        "discountCents": 0,
+        "sourceType": "retail",
+    }]);
+    payload["subtotalCents"] = json!(150000);
+    payload["totalCents"] = json!(150000);
+
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/billing/sales",
+        Some(payload),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    assert_eq!(body["data"]["invoice"]["items"][0]["name"], "Custom Charge");
 }
 
 #[tokio::test]
@@ -405,16 +501,17 @@ async fn complete_sale_with_repair_line_marks_ticket_delivered() {
     let token = staff_token(&app.config);
     let ticket_key = seed_repair(&app).await;
 
+    // unitPriceCents/assignedEmployeeName are deliberately omitted — both
+    // must be resolved from the repair ticket (estimatedCostCents 850000,
+    // no assigned employee) rather than trusted from the payload.
+    // sourceTicketNumber is also omitted — always server-resolved now.
     let mut payload = base_sale_payload();
     payload["items"] = json!([{
         "name": "Screen Replacement",
-        "unitPriceCents": 850000,
         "quantity": 1,
         "discountCents": 0,
-        "totalCents": 850000,
         "sourceType": "repair",
         "sourceTicketKey": ticket_key,
-        "sourceTicketNumber": "REP-000001",
     }]);
     payload["subtotalCents"] = json!(850000);
     payload["totalCents"] = json!(850000);
@@ -430,6 +527,10 @@ async fn complete_sale_with_repair_line_marks_ticket_delivered() {
     assert_eq!(status, StatusCode::OK, "Body: {body}");
     assert_eq!(body["data"]["warnings"], json!([]));
 
+    let item = &body["data"]["invoice"]["items"][0];
+    assert_eq!(item["unitPriceCents"], 850000);
+    assert_eq!(item["assignedEmployeeName"], Value::Null);
+
     let (status, repair_body) = send_authed(
         &app.router,
         "GET",
@@ -440,21 +541,22 @@ async fn complete_sale_with_repair_line_marks_ticket_delivered() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(repair_body["data"]["status"], "delivered");
+    assert_eq!(
+        item["sourceTicketNumber"],
+        repair_body["data"]["ticketNumber"]
+    );
 }
 
 #[tokio::test]
-async fn complete_sale_with_unknown_product_key_returns_a_warning_but_still_succeeds() {
+async fn complete_sale_with_unknown_product_key_fails_the_whole_request() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);
 
     let mut payload = base_sale_payload();
     payload["items"] = json!([{
         "productKey": "prod_does_not_exist",
-        "name": "Ghost Item",
-        "unitPriceCents": 100000,
         "quantity": 1,
         "discountCents": 0,
-        "totalCents": 100000,
         "sourceType": "retail",
     }]);
     payload["subtotalCents"] = json!(100000);
@@ -468,12 +570,37 @@ async fn complete_sale_with_unknown_product_key_returns_a_warning_but_still_succ
         &token,
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "Body: {body}");
-    assert!(
-        !body["data"]["warnings"].as_array().unwrap().is_empty(),
-        "Body: {body}"
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "an unresolvable productKey must reject the whole request before any write: {body}"
     );
-    assert_eq!(body["data"]["invoice"]["status"], "paid");
+}
+
+#[tokio::test]
+async fn complete_sale_with_unknown_source_ticket_key_fails_the_whole_request() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let mut payload = base_sale_payload();
+    payload["items"] = json!([{
+        "quantity": 1,
+        "discountCents": 0,
+        "sourceType": "repair",
+        "sourceTicketKey": "rep_does_not_exist",
+    }]);
+    payload["subtotalCents"] = json!(0);
+    payload["totalCents"] = json!(0);
+
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/billing/sales",
+        Some(payload),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "Body: {body}");
 }
 
 #[tokio::test]
@@ -514,11 +641,8 @@ async fn cancel_invoice_reverses_stock_requires_admin_and_is_idempotent_guarded(
     let mut payload = base_sale_payload();
     payload["items"] = json!([{
         "productKey": product_key,
-        "name": "Test Widget",
-        "unitPriceCents": price,
         "quantity": 3,
         "discountCents": 0,
-        "totalCents": price * 3,
         "sourceType": "retail",
     }]);
     payload["subtotalCents"] = json!(price * 3);

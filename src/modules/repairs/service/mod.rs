@@ -22,6 +22,7 @@ use crate::{
         sequences::ReserveSequenceRequest,
     },
     modules::{
+        customers,
         repairs::{model::RepairDocument, repository},
         sequences,
     },
@@ -138,6 +139,27 @@ pub async fn get_repair(db: &Database, id_or_key: &str) -> AppResult<Repair> {
     Ok(document.into_repair())
 }
 
+/// When `customer_key` resolves to a real customer, that record is
+/// authoritative for name/phone — a client-typed name/phone alongside a
+/// valid key could otherwise silently diverge from the linked customer.
+/// Falls back to the client-supplied name/phone only when there's no key
+/// (a walk-in with no linked account). Mirrors
+/// `billing::service::sale::complete_sale`'s customer-key resolution.
+async fn resolve_customer_name_phone(
+    db: &Database,
+    customer_key: Option<&str>,
+    fallback_name: String,
+    fallback_phone: String,
+) -> AppResult<(String, String)> {
+    match customer_key {
+        Some(key) => {
+            let customer = customers::service::get_customer_by_key(db, key).await?;
+            Ok((customer.name, customer.primary_phone))
+        }
+        None => Ok((fallback_name, fallback_phone)),
+    }
+}
+
 pub async fn create_repair(
     db: &Database,
     body: CreateRepairRequest,
@@ -145,9 +167,18 @@ pub async fn create_repair(
 ) -> AppResult<Repair> {
     let status = body.status.unwrap_or_else(|| "received".to_string());
     validate_status(&status)?;
+
+    let (customer_name, customer_phone) = resolve_customer_name_phone(
+        db,
+        body.customer_key.as_deref(),
+        body.customer_name,
+        body.customer_phone,
+    )
+    .await?;
+
     validate_required_fields(
-        &body.customer_name,
-        &body.customer_phone,
+        &customer_name,
+        &customer_phone,
         &body.device_model,
         &body.issue_description,
         body.estimated_cost_cents,
@@ -175,8 +206,8 @@ pub async fn create_repair(
         key: generate_id(prefixes::REPAIR),
         ticket_number,
         customer_key: body.customer_key,
-        customer_name: body.customer_name.trim().to_string(),
-        customer_phone: body.customer_phone.trim().to_string(),
+        customer_name: customer_name.trim().to_string(),
+        customer_phone: customer_phone.trim().to_string(),
         device_model: body.device_model,
         serial_number: body.serial_number,
         issue_description: body.issue_description,
@@ -213,8 +244,14 @@ pub async fn update_repair(
         .id
         .expect("persisted repair document must have an _id");
 
-    let customer_name = body.customer_name.unwrap_or(existing.customer_name);
-    let customer_phone = body.customer_phone.unwrap_or(existing.customer_phone);
+    let effective_customer_key = body.customer_key.clone().or(existing.customer_key.clone());
+    let (customer_name, customer_phone) = resolve_customer_name_phone(
+        db,
+        effective_customer_key.as_deref(),
+        body.customer_name.unwrap_or(existing.customer_name),
+        body.customer_phone.unwrap_or(existing.customer_phone),
+    )
+    .await?;
     let device_model = body.device_model.unwrap_or(existing.device_model);
     let issue_description = body.issue_description.unwrap_or(existing.issue_description);
     let estimated_cost_cents = body
