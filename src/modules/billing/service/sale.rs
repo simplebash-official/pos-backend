@@ -154,126 +154,238 @@ fn compute_discount(
 /// look them up a second time. An item whose `productKey`/`sourceTicketKey`
 /// doesn't resolve fails the whole request (via `?`) before any write,
 /// exactly like a bad `customerKey` already does.
+///
+/// Retail products are fetched in one batched `$in` query up front (see
+/// `inventory::service::product::get_products_by_keys`) rather than one
+/// `get_product_by_key` round trip per item — a large cart previously paid 3
+/// sequential Mongo round trips per retail line just for this lookup.
+/// Remaining per-item work (repair/print ticket lookups) runs concurrently
+/// via `try_join_all` instead of a sequential loop, so the whole resolution
+/// step costs roughly one round trip's worth of latency regardless of cart
+/// size, not N.
 async fn resolve_sale_items(
     db: &Database,
     items: &[CreateSaleItemRequest],
 ) -> AppResult<(Vec<InvoiceItem>, HashMap<String, Product>)> {
-    let mut resolved = Vec::with_capacity(items.len());
-    let mut products: HashMap<String, Product> = HashMap::new();
+    let retail_product_keys: Vec<String> = items
+        .iter()
+        .filter(|item| item.source_type == "retail")
+        .filter_map(|item| item.product_key.clone())
+        .collect();
+    let products: HashMap<String, Product> =
+        inventory::service::product::get_products_by_keys(db, &retail_product_keys)
+            .await?
+            .into_iter()
+            .map(|product| (product.key.clone(), product))
+            .collect();
 
-    for item in items {
-        let (name, sku, unit_price_cents, source_ticket_number, assigned_employee_name) =
-            match item.source_type.as_str() {
-                "retail" => match &item.product_key {
-                    Some(product_key) => {
-                        let product =
-                            inventory::service::product::get_product_by_key(db, product_key)
-                                .await?;
-                        let resolved_item = (
-                            product.name.clone(),
-                            Some(product.sku.clone()),
-                            product.selling_price_cents,
-                            None,
-                            None,
-                        );
-                        products.insert(product_key.clone(), product);
-                        resolved_item
-                    }
-                    None => (
-                        item.name.clone().ok_or_else(|| {
-                            AppError::validation("An item with no productKey must include a name")
-                        })?,
-                        None,
-                        item.unit_price_cents.ok_or_else(|| {
-                            AppError::validation(
-                                "An item with no productKey must include unitPriceCents",
-                            )
-                        })?,
-                        None,
-                        None,
-                    ),
-                },
-                "repair" => match &item.source_ticket_key {
-                    Some(ticket_key) => {
-                        let ticket = repairs::service::get_repair(db, ticket_key).await?;
-                        (
-                            item.name
-                                .clone()
-                                .unwrap_or_else(|| ticket.device_model.clone()),
-                            None,
-                            ticket.estimated_cost_cents + ticket.material_cost_cents.unwrap_or(0),
-                            Some(ticket.ticket_number),
-                            ticket.assigned_employee_name,
-                        )
-                    }
-                    None => (
-                        item.name.clone().ok_or_else(|| {
-                            AppError::validation(
-                                "A repair item with no sourceTicketKey must include a name",
-                            )
-                        })?,
-                        None,
-                        item.unit_price_cents.ok_or_else(|| {
-                            AppError::validation(
-                                "A repair item with no sourceTicketKey must include unitPriceCents",
-                            )
-                        })?,
-                        None,
-                        item.assigned_employee_name.clone(),
-                    ),
-                },
-                "print" => match &item.source_ticket_key {
-                    Some(ticket_key) => {
-                        let ticket = print_jobs::service::get_print_job(db, ticket_key).await?;
-                        (
-                            item.name.clone().unwrap_or_else(|| ticket.job_type.clone()),
-                            None,
-                            ticket.estimated_cost_cents + ticket.material_cost_cents.unwrap_or(0),
-                            Some(ticket.ticket_number),
-                            ticket.assigned_employee_name,
-                        )
-                    }
-                    None => (
-                        item.name.clone().ok_or_else(|| {
-                            AppError::validation(
-                                "A print item with no sourceTicketKey must include a name",
-                            )
-                        })?,
-                        None,
-                        item.unit_price_cents.ok_or_else(|| {
-                            AppError::validation(
-                                "A print item with no sourceTicketKey must include unitPriceCents",
-                            )
-                        })?,
-                        None,
-                        item.assigned_employee_name.clone(),
-                    ),
-                },
-                other => {
-                    return Err(AppError::validation(format!(
-                        "Invalid item sourceType '{other}'"
-                    )));
-                }
-            };
-
-        let total_cents = (unit_price_cents * item.quantity - item.discount_cents).max(0);
-
-        resolved.push(InvoiceItem {
-            product_key: item.product_key.clone(),
-            name,
-            sku,
-            unit_price_cents,
-            quantity: item.quantity,
-            discount_cents: item.discount_cents,
-            total_cents,
-            source_type: item.source_type.clone(),
-            source_ticket_key: item.source_ticket_key.clone(),
-            source_ticket_number,
-            assigned_employee_name,
-        });
-    }
+    let resolved: Vec<InvoiceItem> = futures_util::future::try_join_all(
+        items.iter().map(|item| resolve_sale_item(db, item, &products)),
+    )
+    .await?;
 
     Ok((resolved, products))
+}
+
+async fn resolve_sale_item(
+    db: &Database,
+    item: &CreateSaleItemRequest,
+    products: &HashMap<String, Product>,
+) -> AppResult<InvoiceItem> {
+    let (name, sku, unit_price_cents, source_ticket_number, assigned_employee_name) =
+        match item.source_type.as_str() {
+            "retail" => match &item.product_key {
+                Some(product_key) => {
+                    let product = products.get(product_key).ok_or_else(|| {
+                        AppError::not_found_with_code(
+                            "Product not found",
+                            codes::PRODUCT_NOT_FOUND,
+                        )
+                    })?;
+                    (
+                        product.name.clone(),
+                        Some(product.sku.clone()),
+                        product.selling_price_cents,
+                        None,
+                        None,
+                    )
+                }
+                None => (
+                    item.name.clone().ok_or_else(|| {
+                        AppError::validation("An item with no productKey must include a name")
+                    })?,
+                    None,
+                    item.unit_price_cents.ok_or_else(|| {
+                        AppError::validation(
+                            "An item with no productKey must include unitPriceCents",
+                        )
+                    })?,
+                    None,
+                    None,
+                ),
+            },
+            "repair" => match &item.source_ticket_key {
+                Some(ticket_key) => {
+                    let ticket = repairs::service::get_repair(db, ticket_key).await?;
+                    (
+                        item.name
+                            .clone()
+                            .unwrap_or_else(|| ticket.device_model.clone()),
+                        None,
+                        ticket.estimated_cost_cents + ticket.material_cost_cents.unwrap_or(0),
+                        Some(ticket.ticket_number),
+                        ticket.assigned_employee_name,
+                    )
+                }
+                None => (
+                    item.name.clone().ok_or_else(|| {
+                        AppError::validation(
+                            "A repair item with no sourceTicketKey must include a name",
+                        )
+                    })?,
+                    None,
+                    item.unit_price_cents.ok_or_else(|| {
+                        AppError::validation(
+                            "A repair item with no sourceTicketKey must include unitPriceCents",
+                        )
+                    })?,
+                    None,
+                    item.assigned_employee_name.clone(),
+                ),
+            },
+            "print" => match &item.source_ticket_key {
+                Some(ticket_key) => {
+                    let ticket = print_jobs::service::get_print_job(db, ticket_key).await?;
+                    (
+                        item.name.clone().unwrap_or_else(|| ticket.job_type.clone()),
+                        None,
+                        ticket.estimated_cost_cents + ticket.material_cost_cents.unwrap_or(0),
+                        Some(ticket.ticket_number),
+                        ticket.assigned_employee_name,
+                    )
+                }
+                None => (
+                    item.name.clone().ok_or_else(|| {
+                        AppError::validation(
+                            "A print item with no sourceTicketKey must include a name",
+                        )
+                    })?,
+                    None,
+                    item.unit_price_cents.ok_or_else(|| {
+                        AppError::validation(
+                            "A print item with no sourceTicketKey must include unitPriceCents",
+                        )
+                    })?,
+                    None,
+                    item.assigned_employee_name.clone(),
+                ),
+            },
+            other => {
+                return Err(AppError::validation(format!(
+                    "Invalid item sourceType '{other}'"
+                )));
+            }
+        };
+
+    let total_cents = (unit_price_cents * item.quantity - item.discount_cents).max(0);
+
+    Ok(InvoiceItem {
+        product_key: item.product_key.clone(),
+        name,
+        sku,
+        unit_price_cents,
+        quantity: item.quantity,
+        discount_cents: item.discount_cents,
+        total_cents,
+        source_type: item.source_type.clone(),
+        source_ticket_key: item.source_ticket_key.clone(),
+        source_ticket_number,
+        assigned_employee_name,
+    })
+}
+
+/// One line item's post-commit side effect (stock decrement for retail,
+/// ticket-delivered for repair/print) — factored out of `complete_sale` so
+/// every item's side effect can run concurrently via `join_all` rather than
+/// sequentially. Returns `Some(warning)` on a non-fatal failure, `None` on
+/// success; never fails the request itself (D4).
+async fn apply_line_item_side_effects(
+    db: &Database,
+    item: &InvoiceItem,
+    resolved_products: &HashMap<String, Product>,
+    inserted_invoice: &InvoiceDocument,
+) -> Option<String> {
+    match item.source_type.as_str() {
+        "retail" => {
+            let product_key = item.product_key.as_deref()?;
+            // Already resolved (and guaranteed to exist) above — reuse it
+            // rather than looking the product up again. It can only be
+            // missing here if the item had no productKey, which the early
+            // return above already excluded.
+            let product = resolved_products.get(product_key)?;
+            let object_id = match ObjectId::parse_str(&product.id) {
+                Ok(id) => id,
+                Err(_) => {
+                    return Some(format!(
+                        "Product '{}' has an invalid id and its stock was not adjusted",
+                        item.name
+                    ));
+                }
+            };
+            if let Err(err) = inventory::service::stock::apply_stock_delta(
+                db,
+                object_id,
+                -item.quantity,
+                StockMovementType::Sale,
+                Some(inserted_invoice.key.clone()),
+                Some(format!(
+                    "Sale on invoice {}",
+                    inserted_invoice.invoice_number
+                )),
+            )
+            .await
+            {
+                return Some(format!(
+                    "Stock for '{}' could not be adjusted: {err}",
+                    item.name
+                ));
+            }
+            None
+        }
+        "repair" => match &item.source_ticket_key {
+            Some(ticket_key) => {
+                if let Err(err) = repairs::service::mark_delivered(db, ticket_key).await {
+                    Some(format!(
+                        "Repair ticket {} could not be marked delivered: {err}",
+                        item.source_ticket_number.as_deref().unwrap_or(ticket_key)
+                    ))
+                } else {
+                    None
+                }
+            }
+            None => Some(format!(
+                "Item '{}' is a repair line with no ticket key; its ticket was not updated",
+                item.name
+            )),
+        },
+        "print" => match &item.source_ticket_key {
+            Some(ticket_key) => {
+                if let Err(err) = print_jobs::service::mark_delivered(db, ticket_key).await {
+                    Some(format!(
+                        "Print job ticket {} could not be marked delivered: {err}",
+                        item.source_ticket_number.as_deref().unwrap_or(ticket_key)
+                    ))
+                } else {
+                    None
+                }
+            }
+            None => Some(format!(
+                "Item '{}' is a print-job line with no ticket key; its ticket was not updated",
+                item.name
+            )),
+        },
+        _ => None,
+    }
 }
 
 pub async fn complete_sale(
@@ -446,76 +558,21 @@ pub async fn complete_sale(
         }
     }
 
-    for item in &resolved_items {
-        match item.source_type.as_str() {
-            "retail" => {
-                let Some(product_key) = item.product_key.as_deref() else {
-                    continue;
-                };
-                // Already resolved (and guaranteed to exist) above — reuse
-                // it rather than looking the product up again. It can only
-                // be missing here from the map if the item had no
-                // productKey, which the outer `let Some` already excluded.
-                let Some(product) = resolved_products.get(product_key) else {
-                    continue;
-                };
-                let Ok(object_id) = ObjectId::parse_str(&product.id) else {
-                    warnings.push(format!(
-                        "Product '{}' has an invalid id and its stock was not adjusted",
-                        item.name
-                    ));
-                    continue;
-                };
-                if let Err(err) = inventory::service::stock::apply_stock_delta(
-                    db,
-                    object_id,
-                    -item.quantity,
-                    StockMovementType::Sale,
-                    Some(inserted_invoice.key.clone()),
-                    Some(format!(
-                        "Sale on invoice {}",
-                        inserted_invoice.invoice_number
-                    )),
-                )
-                .await
-                {
-                    warnings.push(format!(
-                        "Stock for '{}' could not be adjusted: {err}",
-                        item.name
-                    ));
-                }
-            }
-            "repair" => match &item.source_ticket_key {
-                Some(ticket_key) => {
-                    if let Err(err) = repairs::service::mark_delivered(db, ticket_key).await {
-                        warnings.push(format!(
-                            "Repair ticket {} could not be marked delivered: {err}",
-                            item.source_ticket_number.as_deref().unwrap_or(ticket_key)
-                        ));
-                    }
-                }
-                None => warnings.push(format!(
-                    "Item '{}' is a repair line with no ticket key; its ticket was not updated",
-                    item.name
-                )),
-            },
-            "print" => match &item.source_ticket_key {
-                Some(ticket_key) => {
-                    if let Err(err) = print_jobs::service::mark_delivered(db, ticket_key).await {
-                        warnings.push(format!(
-                            "Print job ticket {} could not be marked delivered: {err}",
-                            item.source_ticket_number.as_deref().unwrap_or(ticket_key)
-                        ));
-                    }
-                }
-                None => warnings.push(format!(
-                    "Item '{}' is a print-job line with no ticket key; its ticket was not updated",
-                    item.name
-                )),
-            },
-            _ => {}
-        }
-    }
+    // Run every line item's stock/ticket side effect concurrently instead of
+    // one-at-a-time — each retail line pays up to 3 sequential Mongo round
+    // trips inside `apply_stock_delta`, so a large cart processed serially
+    // here was the other half (alongside item resolution above) of what
+    // pushed checkout past the frontend's request timeout. Order relative to
+    // `warnings` no longer matters (D4: this section only ever collects
+    // warnings, never fails the request), so collecting results after the
+    // fact is equivalent to the old sequential push.
+    let side_effect_warnings: Vec<Option<String>> = futures_util::future::join_all(
+        resolved_items
+            .iter()
+            .map(|item| apply_line_item_side_effects(db, item, &resolved_products, &inserted_invoice)),
+    )
+    .await;
+    warnings.extend(side_effect_warnings.into_iter().flatten());
 
     if let Some(customer_key) = &customer_key {
         let balance_delta = if body.payment.is_credit {
