@@ -18,22 +18,32 @@ use crate::domain::{auth::LoginSession, users::Role};
 /// still be correlated back to the current account if needed.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoginSessionDocument {
+    /// MongoDB internal document identifier.
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<ObjectId>,
+    /// Unique human-readable business key for this login session.
     pub key: String,
+    /// Foreign key referencing the user who logged in.
     pub user_key: String,
+    /// User's display name at the moment they logged in.
     pub name_at_login: String,
+    /// User's email address at the moment they logged in.
     pub email_at_login: String,
+    /// User's assigned role at the moment they logged in.
     pub role_at_login: Role,
+    /// IP address where the login request originated from.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ip_address: Option<String>,
+    /// Web browser or client software information used to log in.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_agent: Option<String>,
     // `updated_at` is set once at insert and never changes again — this is
     // an append-only log, kept only for consistency with the Collection
     // Document Timestamps rule the rest of this codebase follows.
+    /// Timestamp when this login session record was created.
     #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
+    /// Timestamp when this record was last modified.
     #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
 }

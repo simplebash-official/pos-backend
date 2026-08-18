@@ -41,13 +41,21 @@ impl Role {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct User {
+    /// MongoDB hex ID.
     pub id: String,
+    /// Unique business key identifying this user (e.g. usr_...).
     pub key: String,
+    /// Full display name.
     pub name: String,
+    /// Unique email address.
     pub email: String,
+    /// User permission role (admin, manager, or staff).
     pub role: Role,
+    /// Whether user account is active.
     pub is_active: bool,
+    /// Timestamp when user was created.
     pub created_at: DateTime<Utc>,
+    /// Timestamp when user was last updated.
     pub updated_at: DateTime<Utc>,
 }
 
@@ -57,9 +65,13 @@ pub struct User {
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateUserRequest {
+    /// Full display name.
     pub name: String,
+    /// Login email address.
     pub email: String,
+    /// Plaintext password to hash and store.
     pub password: String,
+    /// Role to assign to new user (admin, manager, or staff).
     pub role: Role,
 }
 
@@ -71,10 +83,15 @@ pub struct CreateUserRequest {
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateUserRequest {
+    /// Updated display name.
     pub name: Option<String>,
+    /// Updated login email address.
     pub email: Option<String>,
+    /// New plaintext password, if changing password.
     pub password: Option<String>,
+    /// Updated user role.
     pub role: Option<Role>,
+    /// Updated active status flag.
     pub is_active: Option<bool>,
 }
 
@@ -83,7 +100,9 @@ pub struct UpdateUserRequest {
 #[serde(rename_all = "camelCase")]
 #[into_params(parameter_in = Query)]
 pub struct UserListQuery {
+    /// Search term matching name or email.
     pub search: Option<String>,
+    /// Filter users by role.
     pub role: Option<Role>,
 }
 
@@ -92,5 +111,6 @@ pub struct UserListQuery {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UsersResponse {
+    /// Complete list of manageable users.
     pub users: Vec<User>,
 }

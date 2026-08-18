@@ -15,20 +15,30 @@ fn default_true() -> bool {
     true
 }
 
+/// Mongo document shape representing a user account.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserDocument {
+    /// MongoDB internal document identifier.
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<ObjectId>,
+    /// Unique business key identifying this user (e.g. usr_...).
     #[serde(default)]
     pub key: String,
+    /// Full display name of the user.
     pub name: String,
+    /// Unique login email address.
     pub email: String,
+    /// Argon2id hashed password string.
     pub password_hash: String,
+    /// System role assigned to this account (Admin, Manager, or Staff).
     pub role: Role,
+    /// Whether the user account is enabled and allowed to log in.
     #[serde(default = "default_true")]
     pub is_active: bool,
+    /// Timestamp when user account was created.
     #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
+    /// Timestamp when user account was last updated.
     #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
 }

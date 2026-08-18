@@ -20,6 +20,7 @@ use utoipa::ToSchema;
 /// Payload for the top-level `/health` liveness check (see `app.rs`).
 #[derive(Debug, Serialize, ToSchema)]
 pub struct HealthResponse {
+    /// Overall application health status (e.g. "ok").
     pub status: String,
 }
 
@@ -28,6 +29,8 @@ pub struct HealthResponse {
 /// module wired up" check, not a health/readiness probe.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ModuleStatusResponse {
+    /// Name of the module.
     pub module: String,
+    /// Module status string (e.g. "active").
     pub status: String,
 }

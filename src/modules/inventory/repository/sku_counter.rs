@@ -9,10 +9,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::error::AppResult;
 
+/// Mongo document shape tracking auto-increment SKU sequence per prefix.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SkuCounterDocument {
+    /// Derived category and subcategory prefix code (e.g. "PHO-SCR").
     #[serde(rename = "_id")]
     code: String,
+    /// Last generated sequence number for this prefix.
     seq: i64,
 }
 

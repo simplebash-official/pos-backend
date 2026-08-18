@@ -10,31 +10,47 @@ use crate::{
     domain::suppliers::Supplier,
 };
 
+/// Mongo document shape representing a supplier record.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SupplierDocument {
+    /// MongoDB internal document identifier.
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<ObjectId>,
+    /// Unique business key identifying this supplier (e.g. sup_...).
     #[serde(default)]
     pub key: String,
+    /// Supplier company or trading name.
     pub name: String,
+    /// Name of main point of contact at the supplier.
     pub contact_person: String,
+    /// Primary contact telephone number.
     pub primary_phone: String,
+    /// Secondary contact telephone number, if available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub secondary_phone: Option<String>,
+    /// Physical or mailing address of the supplier.
     pub address: String,
+    /// List of product categories supplied by this vendor.
     pub supplied_categories: Vec<String>,
+    /// Email address of the supplier, if available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
+    /// Internal notes or remarks regarding the supplier.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    /// Concurrency version counter for optimistic locking.
     #[serde(default = "default_version")]
     pub version: i64,
+    /// Timestamp when supplier record was created.
     #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
+    /// Timestamp when supplier record was last updated.
     #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
+    /// Soft-delete timestamp, if deleted.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deleted_at: Option<BsonDateTime>,
+    /// Device identifier that last updated this supplier record.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by_device: Option<String>,
 }

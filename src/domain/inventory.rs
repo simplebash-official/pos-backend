@@ -19,28 +19,47 @@ use utoipa::{IntoParams, ToSchema};
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Product {
+    /// MongoDB internal hex ID.
     pub id: String,
+    /// Unique business key identifying this product (e.g. prd_...).
     pub key: String,
+    /// Sequential SKU code (e.g. PHO-SCR-0001).
     pub sku: String,
+    /// Scannable barcode string, if set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub barcode: Option<String>,
+    /// Source origin of barcode ("generated" or "manual").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub barcode_source: Option<BarcodeSource>,
+    /// Product title or description.
     pub name: String,
+    /// Key of parent category.
     pub category_key: String,
+    /// Resolved display name of parent category.
     pub category: String,
+    /// Key of subcategory.
     pub subcategory_key: String,
+    /// Resolved display name of subcategory.
     pub subcategory: String,
+    /// Cost/wholesale price in cents.
     pub cost_price_cents: i64,
+    /// Retail sales price in cents.
     pub selling_price_cents: i64,
+    /// Current count of items in stock.
     pub stock_quantity: i64,
+    /// Threshold count for low stock warnings.
     pub min_stock_threshold: i64,
+    /// Timestamp when product was created.
     pub created_at: DateTime<Utc>,
+    /// Timestamp when product was last modified.
     pub updated_at: DateTime<Utc>,
+    /// Optimistic locking version.
     #[serde(default = "default_version")]
     pub version: i64,
+    /// Deletion timestamp if soft-deleted.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deleted_at: Option<DateTime<Utc>>,
+    /// ID of client device that last updated this product.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by_device: Option<String>,
 }
@@ -49,21 +68,20 @@ fn default_version() -> i64 {
     1
 }
 
-/// Body for `POST /products`. `sku` is deliberately absent — it's
-/// generated server-side from the category/subcategory names resolved from
-/// `category_key`/`subcategory_key` (see `service::sku::generate_sku`), not
-/// client-supplied. `category_key`/`subcategory_key` must be the system-
-/// generated `key` of an existing category/subcategory (see `GET
-/// /categories` or `GET /categories/valid`) — never the display name.
 /// An individual supplier intake batch submitted during product creation.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ProductSupplierIntake {
+    /// Key of the supplier providing this stock.
     pub supplier_key: String,
+    /// Number of units supplied.
     pub quantity: i64,
+    /// Purchase unit cost in cents.
     pub cost_price_cents: i64,
+    /// Supplier invoice or shipment reference number.
     #[serde(default)]
     pub reference_no: Option<String>,
+    /// Optional remarks or notes for this intake.
     #[serde(default)]
     pub notes: Option<String>,
 }
@@ -82,20 +100,30 @@ pub struct ProductSupplierIntake {
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateProductRequest {
+    /// Optional manual barcode (omitted or null to skip).
     #[serde(default)]
     pub barcode: Option<String>,
+    /// True to automatically generate a sequential EAN-13 barcode.
     #[serde(default)]
     pub auto_generate_barcode: bool,
+    /// Name of the new product.
     pub name: String,
+    /// Category key under which the product belongs.
     pub category_key: String,
+    /// Subcategory key under which the product belongs.
     pub subcategory_key: String,
+    /// Cost price in cents.
     #[serde(default)]
     pub cost_price_cents: i64,
+    /// Selling price in cents.
     pub selling_price_cents: i64,
+    /// Initial stock count (computed from suppliers if supplied).
     #[serde(default)]
     pub stock_quantity: i64,
+    /// Minimum stock alert threshold.
     #[serde(default)]
     pub min_stock_threshold: i64,
+    /// Optional initial purchase deliveries from suppliers.
     #[serde(default)]
     pub suppliers: Vec<ProductSupplierIntake>,
 }
@@ -110,12 +138,19 @@ pub struct CreateProductRequest {
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateProductRequest {
+    /// Updated product name.
     pub name: Option<String>,
+    /// Updated category key.
     pub category_key: Option<String>,
+    /// Updated subcategory key.
     pub subcategory_key: Option<String>,
+    /// Updated cost price in cents.
     pub cost_price_cents: Option<i64>,
+    /// Updated selling price in cents.
     pub selling_price_cents: Option<i64>,
+    /// Updated stock quantity.
     pub stock_quantity: Option<i64>,
+    /// Updated low-stock warning threshold.
     pub min_stock_threshold: Option<i64>,
 }
 
@@ -126,13 +161,21 @@ pub struct UpdateProductRequest {
 #[serde(rename_all = "camelCase")]
 #[into_params(parameter_in = Query)]
 pub struct ProductListQuery {
+    /// Search term matching product name or SKU.
     pub search: Option<String>,
+    /// Filter products by category key.
     pub category_key: Option<String>,
+    /// Filter products by subcategory key.
     pub subcategory_key: Option<String>,
+    /// Filter products below their min stock threshold.
     pub low_stock: Option<bool>,
+    /// Page number (1-indexed).
     pub page: Option<u64>,
+    /// Items per page.
     pub limit: Option<u64>,
+    /// Field to sort by.
     pub sort_by: Option<String>,
+    /// Sort order ("asc" or "desc").
     pub sort_order: Option<String>,
 }
 
@@ -141,13 +184,21 @@ pub struct ProductListQuery {
 #[serde(rename_all = "camelCase")]
 #[into_params(parameter_in = Query)]
 pub struct InventoryOverviewQuery {
+    /// Search keyword.
     pub search: Option<String>,
+    /// Filter by category key.
     pub category_key: Option<String>,
+    /// Filter by subcategory key.
     pub subcategory_key: Option<String>,
+    /// Filter only low stock items.
     pub low_stock: Option<bool>,
+    /// Page number.
     pub page: Option<u64>,
+    /// Page size.
     pub limit: Option<u64>,
+    /// Sort field.
     pub sort_by: Option<String>,
+    /// Sort direction.
     pub sort_order: Option<String>,
 }
 
@@ -155,9 +206,13 @@ pub struct InventoryOverviewQuery {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct InventoryMetrics {
+    /// Total count of all products in catalog.
     pub total_items: u64,
+    /// Total count of categories.
     pub total_categories: u64,
+    /// Total count of subcategories.
     pub total_subcategories: u64,
+    /// Total number of products currently below low stock threshold.
     pub low_stock_alerts: u64,
 }
 
@@ -165,11 +220,17 @@ pub struct InventoryMetrics {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct InventorySubcategoryOverview {
+    /// Subcategory key.
     pub key: String,
+    /// Parent category key.
     pub category_key: String,
+    /// Subcategory name.
     pub name: String,
+    /// Total product count in this subcategory.
     pub total_items: u64,
+    /// List of products on the current page.
     pub products: Vec<Product>,
+    /// Pagination details for this subcategory.
     pub pagination: PaginationMeta,
 }
 
@@ -177,12 +238,19 @@ pub struct InventorySubcategoryOverview {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct InventoryCategoryOverview {
+    /// Category key.
     pub key: String,
+    /// Category name.
     pub name: String,
+    /// Category icon.
     pub icon: String,
+    /// Category color code.
     pub color: String,
+    /// Total items across all subcategories in this category.
     pub total_items: u64,
+    /// Count of subcategories under this category.
     pub subcategories_count: u64,
+    /// Overview list of nested subcategories.
     pub subcategories: Vec<InventorySubcategoryOverview>,
 }
 
@@ -190,7 +258,9 @@ pub struct InventoryCategoryOverview {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct InventoryOverviewResponse {
+    /// Summary inventory metrics.
     pub metrics: InventoryMetrics,
+    /// Grouped category hierarchical data.
     pub categories: Vec<InventoryCategoryOverview>,
 }
 
@@ -198,9 +268,13 @@ pub struct InventoryOverviewResponse {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PaginationMeta {
+    /// Current page number.
     pub page: u64,
+    /// Items per page limit.
     pub limit: u64,
+    /// Total records across all pages.
     pub total: u64,
+    /// Total number of pages.
     pub total_pages: u64,
 }
 
@@ -208,7 +282,9 @@ pub struct PaginationMeta {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ProductListResponse {
+    /// List of products for the requested page.
     pub items: Vec<Product>,
+    /// Pagination metadata.
     pub pagination: PaginationMeta,
 }
 
@@ -218,6 +294,7 @@ pub struct ProductListResponse {
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteProductsRequest {
+    /// List of product IDs or keys to delete.
     pub product_ids: Vec<String>,
 }
 
@@ -226,6 +303,7 @@ pub struct DeleteProductsRequest {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteProductsResponse {
+    /// Number of products successfully deleted.
     pub deleted_count: u64,
 }
 
@@ -235,7 +313,9 @@ pub struct DeleteProductsResponse {
 /// overwrite each other's target value.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct StockAdjustmentRequest {
+    /// Signed integer change in stock quantity (+/-).
     pub delta: i64,
+    /// Reason or note for manual stock adjustment.
     #[serde(default)]
     pub reason: Option<String>,
 }
@@ -245,13 +325,21 @@ pub struct StockAdjustmentRequest {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct StockAdjustmentResponse {
+    /// MongoDB internal hex ID.
     pub id: String,
+    /// Product business key.
     pub key: String,
+    /// Product SKU code.
     pub sku: String,
+    /// Product name.
     pub name: String,
+    /// New stock level after adjustment.
     pub stock_quantity: i64,
+    /// Stock level prior to adjustment.
     pub previous_stock_quantity: i64,
+    /// Quantity difference applied (+/-).
     pub delta: i64,
+    /// Timestamp of adjustment.
     pub updated_at: DateTime<Utc>,
 }
 
@@ -261,19 +349,28 @@ pub struct StockAdjustmentResponse {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LowStockItem {
+    /// Product MongoDB hex ID.
     pub id: String,
+    /// Product business key.
     pub key: String,
+    /// Product SKU code.
     pub sku: String,
+    /// Product name.
     pub name: String,
+    /// Current stock on hand.
     pub stock_quantity: i64,
+    /// Threshold configured for alerts.
     pub min_stock_threshold: i64,
+    /// Units below threshold (min_stock_threshold - stock_quantity).
     pub deficit: i64,
 }
 
 /// Response for `GET /products/low-stock`.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct LowStockResponse {
+    /// List of products requiring restocking.
     pub items: Vec<LowStockItem>,
+    /// Total count of low stock items.
     pub total: u64,
 }
 
@@ -311,20 +408,32 @@ pub enum StockMovementType {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct StockMovement {
+    /// MongoDB hex ID.
     pub id: String,
+    /// Unique business key of the movement record (e.g. stm_...).
     pub key: String,
+    /// Product ID referencing the affected inventory item.
     pub product_id: String,
+    /// Number of items added or deducted (+/-).
     pub quantity_delta: i64,
+    /// Classification type for the stock movement.
     #[serde(rename = "type")]
     pub movement_type: StockMovementType,
+    /// External reference key (e.g. invoice key, purchase key).
     pub reference_id: Option<String>,
+    /// Optional explanatory note.
     pub note: Option<String>,
+    /// Timestamp when movement occurred.
     pub created_at: DateTime<Utc>,
+    /// Timestamp when movement was recorded/updated.
     pub updated_at: DateTime<Utc>,
+    /// Version for optimistic locking.
     #[serde(default = "default_version")]
     pub version: i64,
+    /// Deletion timestamp if soft-deleted.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deleted_at: Option<DateTime<Utc>>,
+    /// Device identifier that recorded this movement.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by_device: Option<String>,
 }
@@ -334,9 +443,13 @@ pub struct StockMovement {
 #[serde(rename_all = "camelCase")]
 #[into_params(parameter_in = Query)]
 pub struct StockMovementListQuery {
+    /// Filter movements by product ID.
     pub product_id: Option<String>,
+    /// Filter movements by movement type.
     pub movement_type: Option<StockMovementType>,
+    /// Page number (1-indexed).
     pub page: Option<u64>,
+    /// Items per page limit.
     pub limit: Option<u64>,
 }
 
@@ -344,13 +457,16 @@ pub struct StockMovementListQuery {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct StockMovementListResponse {
+    /// List of stock movements for current page.
     pub items: Vec<StockMovement>,
+    /// Pagination metadata.
     pub pagination: PaginationMeta,
 }
 
 /// Response for `GET /products/{id}/movements`.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct StockMovementsResponse {
+    /// List of historical stock movements for a specific product.
     pub movements: Vec<StockMovement>,
 }
 
@@ -361,15 +477,23 @@ pub struct StockMovementsResponse {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SubcategoryInfo {
+    /// Unique business key identifying the subcategory (e.g. sub_...).
     pub key: String,
+    /// Foreign key referencing the parent category key.
     pub category_key: String,
+    /// Subcategory display name.
     pub name: String,
+    /// Creation timestamp.
     pub created_at: DateTime<Utc>,
+    /// Last update timestamp.
     pub updated_at: DateTime<Utc>,
+    /// Version counter.
     #[serde(default = "default_version")]
     pub version: i64,
+    /// Deletion timestamp if soft-deleted.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deleted_at: Option<DateTime<Utc>>,
+    /// Device identifier that last updated this subcategory.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by_device: Option<String>,
 }
@@ -381,17 +505,27 @@ pub struct SubcategoryInfo {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CategoryInfo {
+    /// Unique business key identifying the category (e.g. cat_...).
     pub key: String,
+    /// Category display name.
     pub name: String,
+    /// Icon name/identifier.
     pub icon: String,
+    /// Category color hex code or CSS color.
     pub color: String,
+    /// Nested list of subcategories belonging to this category.
     pub subcategories: Vec<SubcategoryInfo>,
+    /// Creation timestamp.
     pub created_at: DateTime<Utc>,
+    /// Last update timestamp.
     pub updated_at: DateTime<Utc>,
+    /// Version counter.
     #[serde(default = "default_version")]
     pub version: i64,
+    /// Deletion timestamp if soft-deleted.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deleted_at: Option<DateTime<Utc>>,
+    /// Device identifier that last updated this category.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by_device: Option<String>,
 }
@@ -399,6 +533,7 @@ pub struct CategoryInfo {
 /// Response for `GET /categories`.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct CategoriesResponse {
+    /// List of all categories with their subcategories.
     pub categories: Vec<CategoryInfo>,
 }
 
@@ -406,7 +541,9 @@ pub struct CategoriesResponse {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SubcategoriesResponse {
+    /// Parent category key.
     pub category_key: String,
+    /// Subcategories under the parent category.
     pub subcategories: Vec<SubcategoryInfo>,
 }
 
@@ -416,8 +553,11 @@ pub struct SubcategoriesResponse {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ValidCategoryOption {
+    /// Category key.
     pub key: String,
+    /// Category name.
     pub name: String,
+    /// Subcategory selection options.
     pub subcategories: Vec<ValidSubcategoryOption>,
 }
 
@@ -425,7 +565,9 @@ pub struct ValidCategoryOption {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ValidSubcategoryOption {
+    /// Subcategory key.
     pub key: String,
+    /// Subcategory name.
     pub name: String,
 }
 
@@ -436,6 +578,7 @@ pub struct ValidSubcategoryOption {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ValidCategoriesResponse {
+    /// List of category and subcategory selection options.
     pub categories: Vec<ValidCategoryOption>,
 }
 
@@ -446,9 +589,13 @@ pub struct ValidCategoriesResponse {
 /// starter subcategories in one call.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct CreateCategoryRequest {
+    /// Display name of the new category.
     pub name: String,
+    /// Icon name or identifier.
     pub icon: String,
+    /// UI theme color code.
     pub color: String,
+    /// Initial list of subcategory names to create under this category.
     #[serde(default)]
     pub subcategories: Vec<String>,
 }
@@ -460,13 +607,17 @@ pub struct CreateCategoryRequest {
 /// needed (see `service::category::update_category`).
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 pub struct UpdateCategoryRequest {
+    /// Updated display name.
     pub name: Option<String>,
+    /// Updated icon name.
     pub icon: Option<String>,
+    /// Updated theme color code.
     pub color: Option<String>,
 }
 
 /// Body for `POST /categories/{categoryKey}/subcategories` (admin-only).
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct AddSubcategoryRequest {
+    /// Name of the new subcategory to add.
     pub name: String,
 }

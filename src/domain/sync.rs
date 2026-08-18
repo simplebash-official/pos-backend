@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use utoipa::{IntoParams, ToSchema};
 
+/// Query parameters for fetching incremental change deltas.
 #[derive(Debug, Clone, Deserialize, IntoParams)]
 #[serde(rename_all = "camelCase")]
 #[into_params(parameter_in = Query)]
@@ -20,13 +21,19 @@ pub struct SyncChangesQuery {
     pub resources: Option<String>,
 }
 
+/// Change delta container for a specific entity type.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ResourceChanges<T: Serialize> {
+    /// Indicates if a full snapshot is returned (e.g. initial sync).
     pub full: bool,
+    /// List of created or updated records.
     pub items: Vec<T>,
+    /// List of keys for records deleted since the cursor.
     pub deleted: Vec<String>,
+    /// Next cursor token to pass on subsequent sync calls.
     pub next_cursor: Option<String>,
+    /// Whether more changes remain to be fetched.
     pub has_more: bool,
     /// True when the request carried a cursor and nothing has changed since.
     /// Distinguishes "no new rows" from "same cursor echoed back", which the
@@ -34,10 +41,13 @@ pub struct ResourceChanges<T: Serialize> {
     pub unchanged: bool,
 }
 
+/// Response payload containing change deltas across requested resources.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncChangesResponse {
+    /// Current server timestamp in UTC.
     pub server_time: DateTime<Utc>,
+    /// Map of resource name (e.g. "products") to its change payload.
     pub changes: HashMap<String, serde_json::Value>,
 }
 
@@ -49,13 +59,18 @@ pub struct SyncChangesResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ResourceSyncStatus {
+    /// Timestamp of most recent record update in this collection.
     pub last_updated_at: DateTime<Utc>,
+    /// Opaque cursor token for newest record in this collection.
     pub cursor: String,
 }
 
+/// Response payload containing the latest sync watermark for all resources.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncStatusResponse {
+    /// Current server timestamp in UTC.
     pub server_time: DateTime<Utc>,
+    /// Map of resource name to current sync watermark status.
     pub resources: HashMap<String, ResourceSyncStatus>,
 }

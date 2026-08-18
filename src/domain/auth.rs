@@ -13,7 +13,9 @@ use crate::domain::users::{Role, User};
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginRequest {
+    /// User's login email address.
     pub email: String,
+    /// User's plain text password.
     pub password: String,
 }
 
@@ -23,8 +25,11 @@ pub struct LoginRequest {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginResponse {
+    /// Signed JWT access token for authenticating subsequent requests.
     pub token: String,
+    /// Number of seconds until the access token expires.
     pub expires_in: i64,
+    /// Profile details of the logged-in user.
     pub user: User,
 }
 
@@ -36,16 +41,25 @@ pub struct LoginResponse {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginSession {
+    /// Unique database ID of the login session.
     pub id: String,
+    /// Unique business key of the login session.
     pub key: String,
+    /// Unique key of the user who logged in.
     pub user_key: String,
+    /// User's name at the time of login.
     pub name: String,
+    /// User's email at the time of login.
     pub email: String,
+    /// User's role at the time of login.
     pub role: Role,
+    /// Originating IP address of the login request, if available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ip_address: Option<String>,
+    /// Client browser or app info used for logging in, if available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_agent: Option<String>,
+    /// Date and time when the user logged in.
     pub logged_in_at: DateTime<Utc>,
 }
 
@@ -58,8 +72,11 @@ pub struct LoginSession {
 #[serde(rename_all = "camelCase")]
 #[into_params(parameter_in = Query)]
 pub struct LoginSessionListQuery {
+    /// Optional user ID or key to filter sessions for a specific user.
     pub user_id: Option<String>,
+    /// Page number for pagination (defaults to 1).
     pub page: Option<u64>,
+    /// Number of session records to return per page.
     pub limit: Option<u64>,
 }
 
@@ -67,8 +84,12 @@ pub struct LoginSessionListQuery {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginSessionsResponse {
+    /// List of login sessions for the current page.
     pub sessions: Vec<LoginSession>,
+    /// Total count of matching login sessions across all pages.
     pub total: u64,
+    /// Current page number.
     pub page: u64,
+    /// Maximum number of items returned per page.
     pub limit: u64,
 }

@@ -8,15 +8,22 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
+/// Print job domain model representing an active or completed print job.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PrintJob {
+    /// MongoDB hex ID.
     pub id: String,
+    /// Unique business key identifying this print job (e.g. prj_...).
     pub key: String,
+    /// Human-friendly ticket number (e.g. PRN-000001).
     pub ticket_number: String,
+    /// Key of linked customer, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub customer_key: Option<String>,
+    /// Customer name.
     pub customer_name: String,
+    /// Customer contact phone.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub customer_phone: Option<String>,
     /// `"mug" | "t-shirt" | "handbill" | "banner" | "custom"` — validated
@@ -24,25 +31,38 @@ pub struct PrintJob {
     /// the frontend's `PrintJobType` union stays the single source of truth
     /// without a serde-rename mapping to keep in sync.
     pub job_type: String,
+    /// Quantity of printed items.
     pub quantity: i32,
+    /// Status ("received", "in_progress", "completed", "delivered", "cancelled").
     pub status: String,
+    /// Quoted or estimated price in cents.
     pub estimated_cost_cents: i64,
+    /// Direct materials cost in cents.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub material_cost_cents: Option<i64>,
+    /// Staff ID of assigned worker.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assigned_employee_id: Option<String>,
+    /// Display name of assigned worker.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assigned_employee_name: Option<String>,
+    /// Commission split type ("percentage" or "fixed").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub split_type: Option<String>,
+    /// Commission split value.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub split_value: Option<f64>,
+    /// Timestamp when job was created.
     pub created_at: DateTime<Utc>,
+    /// Timestamp when job was last updated.
     pub updated_at: DateTime<Utc>,
+    /// Optimistic concurrency version.
     #[serde(default = "default_version")]
     pub version: i64,
+    /// Soft deletion timestamp if deleted.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deleted_at: Option<DateTime<Utc>>,
+    /// Device identifier that last updated this record.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by_device: Option<String>,
 }
@@ -57,10 +77,13 @@ fn default_version() -> i64 {
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PrintJobCustomer {
+    /// Registered customer key.
     #[serde(default)]
     pub customer_key: Option<String>,
+    /// Walk-in customer name.
     #[serde(default)]
     pub customer_name: Option<String>,
+    /// Walk-in customer phone number.
     #[serde(default)]
     pub customer_phone: Option<String>,
 }
@@ -70,12 +93,16 @@ pub struct PrintJobCustomer {
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PrintJobAssignment {
+    /// User ID of employee assigned to job.
     #[serde(default)]
     pub assigned_employee_id: Option<String>,
+    /// Name of employee assigned to job.
     #[serde(default)]
     pub assigned_employee_name: Option<String>,
+    /// Commission split type ("percentage" or "fixed").
     #[serde(default)]
     pub split_type: Option<String>,
+    /// Commission rate or fixed amount.
     #[serde(default)]
     pub split_value: Option<f64>,
 }
@@ -88,15 +115,22 @@ pub struct PrintJobAssignment {
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatePrintJobRequest {
+    /// Customer contact information.
     #[serde(default)]
     pub customer: PrintJobCustomer,
+    /// Category of print job.
     pub job_type: String,
+    /// Quantity of copies/items.
     pub quantity: i32,
+    /// Initial status (defaults to "received").
     #[serde(default)]
     pub status: Option<String>,
+    /// Estimated total customer cost in cents.
     pub estimated_cost_cents: i64,
+    /// Optional material cost in cents.
     #[serde(default)]
     pub material_cost_cents: Option<i64>,
+    /// Staff assignment details.
     #[serde(default)]
     pub assignment: Option<PrintJobAssignment>,
 }
@@ -107,31 +141,49 @@ pub struct CreatePrintJobRequest {
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdatePrintJobRequest {
+    /// Updated customer details.
     pub customer: Option<PrintJobCustomer>,
+    /// Updated print job category.
     pub job_type: Option<String>,
+    /// Updated quantity.
     pub quantity: Option<i32>,
+    /// Updated lifecycle status.
     pub status: Option<String>,
+    /// Updated customer charge estimate in cents.
     pub estimated_cost_cents: Option<i64>,
+    /// Updated material cost in cents.
     pub material_cost_cents: Option<i64>,
+    /// Updated staff assignment.
     pub assignment: Option<PrintJobAssignment>,
 }
 
+/// Query parameters for listing and filtering print jobs.
 #[derive(Debug, Clone, Default, Deserialize, IntoParams)]
 #[serde(rename_all = "camelCase")]
 #[into_params(parameter_in = Query)]
 pub struct PrintJobListQuery {
+    /// Keyword search matching ticket number or customer name/phone.
     pub search: Option<String>,
+    /// Filter by status.
     pub status: Option<String>,
+    /// Page number (1-indexed).
     pub page: Option<u64>,
+    /// Page items limit.
     pub limit: Option<u64>,
 }
 
+/// Paginated response payload containing a list of print jobs.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PrintJobListResponse {
+    /// List of print jobs on current page.
     pub print_jobs: Vec<PrintJob>,
+    /// Total count of matching print jobs.
     pub total: u64,
+    /// Current page number.
     pub page: u64,
+    /// Items limit per page.
     pub limit: u64,
+    /// Total number of pages.
     pub total_pages: u64,
 }

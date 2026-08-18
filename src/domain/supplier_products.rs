@@ -13,20 +13,31 @@ use utoipa::{IntoParams, ToSchema};
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SupplierProductLink {
+    /// Unique business key identifying this link record (e.g. spl_...).
     pub key: String,
+    /// Foreign key referencing the supplier.
     pub supplier_key: String,
+    /// Foreign key referencing the product.
     pub product_key: String,
+    /// Specific purchase cost price from this supplier in cents.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_price_cents: Option<i64>,
+    /// Optional supplier remarks or SKU reference notes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    /// Date when product was linked to supplier.
     pub added_at: DateTime<Utc>,
+    /// Timestamp when link was created.
     pub created_at: DateTime<Utc>,
+    /// Timestamp when link was last modified.
     pub updated_at: DateTime<Utc>,
+    /// Optimistic concurrency control version number.
     #[serde(default = "default_version")]
     pub version: i64,
+    /// Deletion timestamp if soft-deleted.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deleted_at: Option<DateTime<Utc>>,
+    /// Device identifier that last updated this link.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by_device: Option<String>,
 }
@@ -42,10 +53,14 @@ fn default_version() -> i64 {
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpsertSupplierProductLinkRequest {
+    /// Foreign key of the supplier to link.
     pub supplier_key: String,
+    /// Foreign key of the product to link.
     pub product_key: String,
+    /// Optional agreed cost price in cents.
     #[serde(default)]
     pub cost_price_cents: Option<i64>,
+    /// Optional supplier notes.
     #[serde(default)]
     pub notes: Option<String>,
 }
@@ -58,6 +73,7 @@ pub struct UpsertSupplierProductLinkRequest {
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BulkReplaceLinksRequest {
+    /// List of product keys that should be linked to the supplier.
     pub product_keys: Vec<String>,
 }
 
@@ -65,6 +81,7 @@ pub struct BulkReplaceLinksRequest {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SupplierProductLinksResponse {
+    /// List of supplier-product links.
     pub links: Vec<SupplierProductLink>,
 }
 
@@ -72,8 +89,11 @@ pub struct SupplierProductLinksResponse {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SupplierProductListResponse {
+    /// List of link records.
     pub items: Vec<SupplierProductLink>,
+    /// Duplicate list alias for backwards-compatibility.
     pub links: Vec<SupplierProductLink>,
+    /// Pagination metadata.
     pub pagination: PaginationMeta,
 }
 
@@ -83,8 +103,12 @@ pub struct SupplierProductListResponse {
 #[serde(rename_all = "camelCase")]
 #[into_params(parameter_in = Query)]
 pub struct SupplierProductLinkQuery {
+    /// Filter links by supplier key.
     pub supplier_key: Option<String>,
+    /// Filter links by product key.
     pub product_key: Option<String>,
+    /// Page number (1-indexed).
     pub page: Option<u64>,
+    /// Items per page limit.
     pub limit: Option<u64>,
 }

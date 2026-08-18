@@ -19,25 +19,40 @@ use utoipa::{IntoParams, ToSchema};
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Supplier {
+    /// MongoDB hex ID.
     pub id: String,
+    /// Unique business key identifying this supplier (e.g. sup_...).
     pub key: String,
+    /// Supplier company or vendor name.
     pub name: String,
+    /// Primary contact person.
     pub contact_person: String,
+    /// Primary telephone number.
     pub primary_phone: String,
+    /// Secondary phone number if available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub secondary_phone: Option<String>,
+    /// Physical or postal address.
     pub address: String,
+    /// Categories of products supplied by this vendor.
     pub supplied_categories: Vec<String>,
+    /// Email address of the supplier.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
+    /// General notes or remarks.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    /// Timestamp when supplier was created.
     pub created_at: DateTime<Utc>,
+    /// Timestamp when supplier was last updated.
     pub updated_at: DateTime<Utc>,
+    /// Optimistic locking version number.
     #[serde(default = "default_version")]
     pub version: i64,
+    /// Deletion timestamp if soft-deleted.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deleted_at: Option<DateTime<Utc>>,
+    /// Device identifier that last updated this record.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by_device: Option<String>,
 }
@@ -53,15 +68,23 @@ fn default_version() -> i64 {
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateSupplierRequest {
+    /// Supplier name.
     pub name: String,
+    /// Main contact person's name.
     pub contact_person: String,
+    /// Primary phone number.
     pub primary_phone: String,
+    /// Optional secondary phone number.
     #[serde(default)]
     pub secondary_phone: Option<String>,
+    /// Address of supplier.
     pub address: String,
+    /// List of supplied product categories.
     pub supplied_categories: Vec<String>,
+    /// Optional email address.
     #[serde(default)]
     pub email: Option<String>,
+    /// Optional remarks or notes.
     #[serde(default)]
     pub notes: Option<String>,
 }
@@ -73,13 +96,21 @@ pub struct CreateSupplierRequest {
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateSupplierRequest {
+    /// Updated supplier name.
     pub name: Option<String>,
+    /// Updated contact person.
     pub contact_person: Option<String>,
+    /// Updated primary phone.
     pub primary_phone: Option<String>,
+    /// Updated secondary phone.
     pub secondary_phone: Option<String>,
+    /// Updated address.
     pub address: Option<String>,
+    /// Updated supplied categories list.
     pub supplied_categories: Option<Vec<String>>,
+    /// Updated email address.
     pub email: Option<String>,
+    /// Updated remarks or notes.
     pub notes: Option<String>,
 }
 
@@ -90,7 +121,9 @@ pub struct UpdateSupplierRequest {
 #[serde(rename_all = "camelCase")]
 #[into_params(parameter_in = Query)]
 pub struct SupplierListQuery {
+    /// Search term matching name, contact person, phone, or address.
     pub search: Option<String>,
+    /// Filter suppliers by supplied category name.
     pub category: Option<String>,
 }
 
@@ -100,6 +133,7 @@ pub struct SupplierListQuery {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SuppliersResponse {
+    /// Complete list of suppliers.
     pub suppliers: Vec<Supplier>,
 }
 
@@ -109,6 +143,7 @@ pub struct SuppliersResponse {
 /// `service::delete_suppliers`.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct DeleteSuppliersRequest {
+    /// List of supplier Mongo hex IDs to delete.
     pub ids: Vec<String>,
 }
 
@@ -117,6 +152,7 @@ pub struct DeleteSuppliersRequest {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteSuppliersResponse {
+    /// Number of suppliers successfully deleted.
     pub deleted_count: u64,
 }
 
@@ -126,5 +162,6 @@ pub struct DeleteSuppliersResponse {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SupplierCategoriesResponse {
+    /// Unique list of category tags across all suppliers.
     pub categories: Vec<String>,
 }

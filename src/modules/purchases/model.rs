@@ -14,26 +14,40 @@ use crate::domain::purchases::{ProductSummary, Purchase, SupplierSummary};
 /// stored (see `domain::purchases::Purchase`'s doc comment).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PurchaseDocument {
+    /// MongoDB internal document identifier.
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<ObjectId>,
+    /// Unique business key identifying this purchase record (e.g. pur_...).
     pub key: String,
+    /// Foreign key referencing the supplier.
     pub supplier_key: String,
+    /// Foreign key referencing the purchased product.
     pub product_key: String,
+    /// Number of product units received.
     pub quantity: i64,
+    /// Cost price per unit in cents.
     pub unit_cost_cents: i64,
+    /// Date when the stock purchase occurred.
     pub date: BsonDateTime,
+    /// Supplier invoice or purchase order reference number.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reference_no: Option<String>,
+    /// Optional remarks or notes regarding the purchase.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    /// Concurrency version counter for optimistic locking.
     #[serde(default = "default_version")]
     pub version: i64,
+    /// Timestamp when purchase document was created.
     #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
+    /// Timestamp when purchase document was last updated.
     #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
+    /// Soft-delete timestamp, if deleted.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deleted_at: Option<BsonDateTime>,
+    /// Device identifier that last updated this purchase record.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by_device: Option<String>,
 }

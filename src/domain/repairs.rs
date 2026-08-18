@@ -21,35 +21,56 @@ use utoipa::{IntoParams, ToSchema};
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Repair {
+    /// MongoDB hex ID.
     pub id: String,
+    /// Unique business key identifying this repair ticket (e.g. rep_...).
     pub key: String,
+    /// Human-friendly ticket number (e.g. REP-000001).
     pub ticket_number: String,
+    /// Key of linked customer, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub customer_key: Option<String>,
+    /// Customer name.
     pub customer_name: String,
+    /// Customer phone number.
     pub customer_phone: String,
+    /// Device model/brand.
     pub device_model: String,
+    /// Serial number or IMEI of the device.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub serial_number: Option<String>,
+    /// Diagnosis or reported issue description.
     pub issue_description: String,
+    /// Lifecycle status ("received", "in_progress", "completed", "delivered", "cancelled").
     pub status: String,
+    /// Quoted or final repair price in cents.
     pub estimated_cost_cents: i64,
+    /// Direct cost of parts/materials in cents.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub material_cost_cents: Option<i64>,
+    /// Staff ID of assigned technician.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assigned_employee_id: Option<String>,
+    /// Display name of assigned technician.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assigned_employee_name: Option<String>,
+    /// Commission split calculation type ("percentage" or "fixed").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub split_type: Option<String>,
+    /// Commission split value.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub split_value: Option<f64>,
+    /// Timestamp when ticket was created.
     pub created_at: DateTime<Utc>,
+    /// Timestamp when ticket was last updated.
     pub updated_at: DateTime<Utc>,
+    /// Optimistic locking version number.
     #[serde(default = "default_version")]
     pub version: i64,
+    /// Soft deletion timestamp if deleted.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deleted_at: Option<DateTime<Utc>>,
+    /// Device identifier that last updated this record.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by_device: Option<String>,
 }
@@ -71,10 +92,13 @@ fn default_version() -> i64 {
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RepairCustomer {
+    /// Key of registered customer.
     #[serde(default)]
     pub customer_key: Option<String>,
+    /// Walk-in customer name.
     #[serde(default)]
     pub customer_name: Option<String>,
+    /// Walk-in customer phone number.
     #[serde(default)]
     pub customer_phone: Option<String>,
 }
@@ -86,12 +110,16 @@ pub struct RepairCustomer {
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RepairAssignment {
+    /// Staff ID of assigned technician.
     #[serde(default)]
     pub assigned_employee_id: Option<String>,
+    /// Name of assigned technician.
     #[serde(default)]
     pub assigned_employee_name: Option<String>,
+    /// Commission split method ("percentage" or "fixed").
     #[serde(default)]
     pub split_type: Option<String>,
+    /// Commission rate or fixed amount.
     #[serde(default)]
     pub split_value: Option<f64>,
 }
@@ -102,17 +130,25 @@ pub struct RepairAssignment {
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateRepairRequest {
+    /// Customer contact information.
     #[serde(default)]
     pub customer: RepairCustomer,
+    /// Device model/brand.
     pub device_model: String,
+    /// Optional serial number or IMEI.
     #[serde(default)]
     pub serial_number: Option<String>,
+    /// Reported issue or symptom description.
     pub issue_description: String,
+    /// Initial status (defaults to "received").
     #[serde(default)]
     pub status: Option<String>,
+    /// Estimated charge to customer in cents.
     pub estimated_cost_cents: i64,
+    /// Optional cost of parts/materials in cents.
     #[serde(default)]
     pub material_cost_cents: Option<i64>,
+    /// Optional technician assignment.
     #[serde(default)]
     pub assignment: Option<RepairAssignment>,
 }
@@ -124,13 +160,21 @@ pub struct CreateRepairRequest {
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateRepairRequest {
+    /// Updated customer details.
     pub customer: Option<RepairCustomer>,
+    /// Updated device model.
     pub device_model: Option<String>,
+    /// Updated serial number or IMEI.
     pub serial_number: Option<String>,
+    /// Updated issue description.
     pub issue_description: Option<String>,
+    /// Updated status.
     pub status: Option<String>,
+    /// Updated customer price estimate in cents.
     pub estimated_cost_cents: Option<i64>,
+    /// Updated material cost in cents.
     pub material_cost_cents: Option<i64>,
+    /// Updated technician assignment.
     pub assignment: Option<RepairAssignment>,
 }
 
@@ -141,18 +185,28 @@ pub struct UpdateRepairRequest {
 #[serde(rename_all = "camelCase")]
 #[into_params(parameter_in = Query)]
 pub struct RepairListQuery {
+    /// Search term matching ticket number, customer name/phone, or model.
     pub search: Option<String>,
+    /// Filter by status.
     pub status: Option<String>,
+    /// Page number (1-indexed).
     pub page: Option<u64>,
+    /// Items per page limit.
     pub limit: Option<u64>,
 }
 
+/// Paginated response payload containing list of repair tickets.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RepairListResponse {
+    /// List of repair tickets on current page.
     pub repairs: Vec<Repair>,
+    /// Total count of matching repair tickets.
     pub total: u64,
+    /// Current page number.
     pub page: u64,
+    /// Items limit per page.
     pub limit: u64,
+    /// Total number of pages.
     pub total_pages: u64,
 }

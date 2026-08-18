@@ -19,65 +19,101 @@ use crate::{
 /// once at insert and never touched again.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InvoiceDocument {
+    /// MongoDB internal document identifier.
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<ObjectId>,
+    /// Unique business key for this invoice (e.g. inv_...).
     #[serde(default)]
     pub key: String,
+    /// Human-friendly sequential invoice number (e.g. INV-000001).
     pub invoice_number: String,
+    /// Key of the customer linked to this invoice, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub customer_key: Option<String>,
+    /// Snapshot of customer's name at the time of sale.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub customer_name_snapshot: Option<String>,
+    /// Snapshot of customer's phone number at the time of sale.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub customer_phone_snapshot: Option<String>,
+    /// Snapshot of customer's address at the time of sale.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub customer_address_snapshot: Option<String>,
+    /// Identifier of the cashier who processed this sale.
     pub cashier_id: String,
+    /// Snapshot of the cashier's display name at the time of sale.
     pub cashier_name_snapshot: String,
+    /// Line items included in this invoice.
     pub items: Vec<InvoiceItem>,
+    /// Subtotal price before discounts in cents.
     pub subtotal_cents: i64,
+    /// Type of discount applied ("percentage" or "fixed").
     #[serde(default = "default_discount_type")]
     pub discount_type: String,
+    /// Discount value (percentage rate or fixed amount).
     #[serde(default)]
     pub discount_value: f64,
+    /// Total computed discount amount in cents.
     pub discount_cents: i64,
+    /// Final total invoice amount in cents.
     pub total_cents: i64,
+    /// Payment method used ("cash", "card", "online", "split", "credit").
     pub payment_method: String,
+    /// Breakdown of split payments if payment method is "split".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub split_payments: Option<Vec<SplitPayment>>,
+    /// Whether this invoice was issued on credit.
     pub is_credit: bool,
+    /// Total cash amount handed over by customer in cents.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub amount_received_cents: Option<i64>,
+    /// Change due back to customer in cents.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub change_due_cents: Option<i64>,
+    /// Due date for credit invoice repayment (YYYY-MM-DD).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub due_date: Option<String>,
+    /// Last 4 digits of credit/debit card, if card payment.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub card_last4: Option<String>,
+    /// Card transaction authorization reference number.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub card_ref: Option<String>,
+    /// Online payment transaction reference ID.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub online_ref: Option<String>,
+    /// Additional notes for online payment.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub online_note: Option<String>,
+    /// Current invoice status ("paid", "pending", "cancelled").
     pub status: String,
+    /// General notes or remarks for this invoice.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    /// Frozen snapshot of shop profile info at the time of sale.
     pub shop_profile_snapshot: serde_json::Value,
+    /// Frozen snapshot of warranty terms printed on invoice.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub warranty_terms_snapshot: Option<String>,
+    /// Selected document template or format style.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub document_selection: Option<String>,
+    /// Date and time when invoice was cancelled, if cancelled.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cancelled_at: Option<BsonDateTime>,
+    /// User ID of staff member who cancelled the invoice.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cancelled_by: Option<String>,
+    /// Explanation why this invoice was cancelled.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cancellation_reason: Option<String>,
+    /// Concurrency version number for optimistic locking.
     #[serde(default = "default_version")]
     pub version: i64,
+    /// Timestamp when invoice was created.
     #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
+    /// Timestamp when invoice was last updated.
     #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
 }
@@ -144,22 +180,34 @@ impl InvoiceDocument {
 /// Payments are append-only — no edit/delete endpoint exists.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaymentDocument {
+    /// MongoDB internal document identifier.
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<ObjectId>,
+    /// Unique business key for this payment record (e.g. pay_...).
     #[serde(default)]
     pub key: String,
+    /// Key of the invoice this payment is applied to.
     pub invoice_key: String,
+    /// Amount paid in cents.
     pub amount_cents: i64,
+    /// Payment method used ("cash", "card", "online").
     pub payment_method: String,
+    /// Optional remarks or reference note for this payment.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    /// User ID of the staff member who collected this payment.
     pub recorded_by_user_id: String,
+    /// Name snapshot of the staff member who collected this payment.
     pub recorded_by_name_snapshot: String,
+    /// Timestamp when this payment occurred.
     pub recorded_at: BsonDateTime,
+    /// Concurrency version number for optimistic locking.
     #[serde(default = "default_version")]
     pub version: i64,
+    /// Timestamp when payment document was created.
     #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
+    /// Timestamp when payment document was last updated.
     #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
 }

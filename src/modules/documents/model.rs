@@ -7,29 +7,29 @@
 use mongodb::bson::{DateTime as BsonDateTime, oid::ObjectId};
 use serde::{Deserialize, Serialize};
 
+/// Mongo document shape for tracking generated PDF/print documents.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct GeneratedDocumentDocument {
+    /// MongoDB internal document identifier.
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<ObjectId>,
+    /// Unique business key identifying this generated document record.
     #[serde(default)]
     pub key: String,
-    /// The key of the entity this document was rendered for (an invoice's
-    /// `key`, so far — the only caller today). Not a strict foreign key
-    /// constraint at the Mongo level, same convention as every other
-    /// `*_key` field in this codebase.
+    /// Key of the entity this document was rendered for (e.g. invoice key).
     pub entity_key: String,
-    /// e.g. `"a4-invoice"` / `"thermal-receipt"` — matches the
-    /// document-server template name this was rendered from.
+    /// Document layout type (e.g. "a4-invoice", "thermal-receipt").
     pub document_type: String,
-    /// The document-server template name actually used, kept alongside
-    /// `document_type` (currently always equal) so a future template
-    /// rename doesn't retroactively relabel history.
+    /// Document template name used for rendering.
     pub template_name: String,
-    /// Path to the saved PDF, relative to `Config::generated_documents_dir`.
+    /// Relative filesystem path to the saved PDF file.
     pub file_path: String,
+    /// Size of the generated PDF document in bytes.
     pub file_size_bytes: i64,
+    /// Timestamp when this document record was created.
     #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
+    /// Timestamp when this document record was last updated.
     #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
 }
