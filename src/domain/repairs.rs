@@ -58,28 +58,34 @@ fn default_version() -> i64 {
     1
 }
 
-/// Body for `POST /repairs` and `PUT /repairs/{id}`. `ticketNumber` is never
-/// client-supplied — reserved server-side on create only (see
-/// `service::create_repair`). `customerName`/`customerPhone` are only used
-/// as-is when `customerKey` is absent (a walk-in with no linked account);
-/// when `customerKey` resolves to a real customer, `service::create_repair`
-/// overrides both from that record instead of trusting the payload.
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+/// The `customer{}` sub-object of `CreateRepairRequest`/`UpdateRepairRequest`.
+/// `customerName`/`customerPhone` are only used as-is when `customerKey` is
+/// absent (a walk-in with no linked account); when `customerKey` resolves
+/// to a real customer, `service::create_repair`/`update_repair` overrides
+/// both from that record instead of trusting the payload. `customerName`/
+/// `customerPhone` are typed `Option` here (rather than required strings)
+/// so the same struct serves both create and update — `service::
+/// create_repair`'s `validate_required_fields` is what actually enforces
+/// they're non-empty on create when there's no `customerKey` to resolve
+/// from instead.
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct CreateRepairRequest {
+pub struct RepairCustomer {
     #[serde(default)]
     pub customer_key: Option<String>,
-    pub customer_name: String,
-    pub customer_phone: String,
-    pub device_model: String,
     #[serde(default)]
-    pub serial_number: Option<String>,
-    pub issue_description: String,
+    pub customer_name: Option<String>,
     #[serde(default)]
-    pub status: Option<String>,
-    pub estimated_cost_cents: i64,
-    #[serde(default)]
-    pub material_cost_cents: Option<i64>,
+    pub customer_phone: Option<String>,
+}
+
+/// The `assignment{}` sub-object of `CreateRepairRequest`/
+/// `UpdateRepairRequest` — every field is optional at every layer (no
+/// `employees` backend module exists yet, see `Repair`'s doc comment), so
+/// the whole object is typically omitted entirely on an unassigned ticket.
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RepairAssignment {
     #[serde(default)]
     pub assigned_employee_id: Option<String>,
     #[serde(default)]
@@ -90,6 +96,27 @@ pub struct CreateRepairRequest {
     pub split_value: Option<f64>,
 }
 
+/// Body for `POST /repairs` and `PUT /repairs/{id}`. `ticketNumber` is never
+/// client-supplied — reserved server-side on create only (see
+/// `service::create_repair`).
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateRepairRequest {
+    #[serde(default)]
+    pub customer: RepairCustomer,
+    pub device_model: String,
+    #[serde(default)]
+    pub serial_number: Option<String>,
+    pub issue_description: String,
+    #[serde(default)]
+    pub status: Option<String>,
+    pub estimated_cost_cents: i64,
+    #[serde(default)]
+    pub material_cost_cents: Option<i64>,
+    #[serde(default)]
+    pub assignment: Option<RepairAssignment>,
+}
+
 /// Body for `PATCH /repairs/{id}`. Every field optional so a client sends
 /// only what changed. Same `customerKey`-overrides-`customerName`/
 /// `customerPhone` rule as `CreateRepairRequest` applies here too (see
@@ -97,19 +124,14 @@ pub struct CreateRepairRequest {
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateRepairRequest {
-    pub customer_key: Option<String>,
-    pub customer_name: Option<String>,
-    pub customer_phone: Option<String>,
+    pub customer: Option<RepairCustomer>,
     pub device_model: Option<String>,
     pub serial_number: Option<String>,
     pub issue_description: Option<String>,
     pub status: Option<String>,
     pub estimated_cost_cents: Option<i64>,
     pub material_cost_cents: Option<i64>,
-    pub assigned_employee_id: Option<String>,
-    pub assigned_employee_name: Option<String>,
-    pub split_type: Option<String>,
-    pub split_value: Option<f64>,
+    pub assignment: Option<RepairAssignment>,
 }
 
 /// Query params for `GET /repairs`. `search` matches ticket number,

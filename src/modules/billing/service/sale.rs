@@ -25,7 +25,7 @@ use crate::{
     domain::{
         billing::{
             CancelInvoiceRequest, CompleteSaleResponse, CreateSaleItemRequest, CreateSaleRequest,
-            Invoice, InvoiceItem,
+            Invoice, InvoiceItem, PricingAdjustments,
         },
         inventory::{Product, StockMovementType},
         sequences::ReserveSequenceRequest,
@@ -38,6 +38,7 @@ use crate::{
 
 const VALID_PAYMENT_METHODS: &[&str] = &["cash", "card", "online", "split", "credit"];
 const VALID_SOURCE_TYPES: &[&str] = &["retail", "repair", "print"];
+const VALID_DISCOUNT_TYPES: &[&str] = &["percentage", "fixed"];
 
 fn validate_sale_request(body: &CreateSaleRequest) -> AppResult<()> {
     if body.items.is_empty() {
@@ -64,25 +65,84 @@ fn validate_sale_request(body: &CreateSaleRequest) -> AppResult<()> {
             )));
         }
     }
-    if !VALID_PAYMENT_METHODS.contains(&body.payment_method.as_str()) {
+    if !VALID_PAYMENT_METHODS.contains(&body.payment.payment_method.as_str()) {
         return Err(AppError::validation(format!(
             "Invalid paymentMethod '{}'. Must be one of: {}",
-            body.payment_method,
+            body.payment.payment_method,
             VALID_PAYMENT_METHODS.join(", ")
         )));
     }
-    if body.payment_method == "split" {
-        let legs = body.split_payments.as_deref().unwrap_or(&[]);
+    if body.payment.payment_method == "split" {
+        let legs = body.payment.split_payments.as_deref().unwrap_or(&[]);
         if legs.is_empty() {
             return Err(AppError::validation(
                 "A split payment must include at least one split leg",
             ));
         }
     }
-    if body.cashier_name.trim().is_empty() {
-        return Err(AppError::validation("cashierName is required"));
+    if let Some(adjustments) = &body.pricing_adjustments {
+        validate_pricing_adjustments(adjustments)?;
+    }
+    if body.staff.cashier_name.trim().is_empty() {
+        return Err(AppError::validation("staff.cashierName is required"));
     }
     Ok(())
+}
+
+fn validate_pricing_adjustments(adjustments: &PricingAdjustments) -> AppResult<()> {
+    match adjustments.discount_type.as_str() {
+        "percentage" => {
+            if !(0.0..=100.0).contains(&adjustments.discount_value) {
+                return Err(AppError::validation(
+                    "pricingAdjustments.discountValue must be between 0 and 100 for a percentage discount",
+                ));
+            }
+        }
+        "fixed" => {
+            if adjustments.discount_value < 0.0 {
+                return Err(AppError::validation(
+                    "pricingAdjustments.discountValue cannot be negative for a fixed discount",
+                ));
+            }
+        }
+        other => {
+            return Err(AppError::validation(format!(
+                "Invalid pricingAdjustments.discountType '{other}'. Must be one of: {}",
+                VALID_DISCOUNT_TYPES.join(", ")
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Computes the actual discount cents from `pricingAdjustments` against the
+/// resolved subtotal — `None` (no `pricingAdjustments` sent) means no
+/// discount, `"fixed"` is the value verbatim (as cents), `"percentage"` is
+/// `subtotal * value / 100`, floored. The type/value themselves default to
+/// `("fixed", 0.0)` when absent so the persisted/returned invoice always
+/// has a concrete value to display, never an `Option`.
+fn compute_discount(
+    adjustments: Option<&PricingAdjustments>,
+    subtotal_cents: i64,
+) -> (String, f64, i64) {
+    match adjustments {
+        Some(PricingAdjustments {
+            discount_type,
+            discount_value,
+        }) if discount_type == "percentage" => {
+            let discount_cents = ((subtotal_cents as f64) * discount_value / 100.0).floor() as i64;
+            (discount_type.clone(), *discount_value, discount_cents)
+        }
+        Some(PricingAdjustments {
+            discount_type,
+            discount_value,
+        }) => (
+            discount_type.clone(),
+            *discount_value,
+            *discount_value as i64,
+        ),
+        None => ("fixed".to_string(), 0.0, 0),
+    }
 }
 
 /// Resolves each request-side item into a persisted-shape `InvoiceItem`,
@@ -226,10 +286,10 @@ pub async fn complete_sale(
 
     // Resolve the linked customer, if any, before any write — a bad
     // customerKey should fail the whole request, not half-complete it.
-    let resolved_customer = if let Some(ref key) = body.customer_key {
-        Some(customers::service::get_customer_by_key(db, key).await?)
-    } else {
-        None
+    let customer_key = body.customer.as_ref().and_then(|c| c.customer_key.clone());
+    let resolved_customer = match &customer_key {
+        Some(key) => Some(customers::service::get_customer_by_key(db, key).await?),
+        None => None,
     };
 
     let (customer_name_snapshot, customer_phone_snapshot, customer_address_snapshot) =
@@ -239,11 +299,14 @@ pub async fn complete_sale(
                 Some(customer.primary_phone.clone()),
                 customer.address.clone(),
             ),
-            None => (
-                body.customer_name.clone(),
-                body.customer_phone.clone(),
-                body.customer_address.clone(),
-            ),
+            None => {
+                let customer_ref = body.customer.as_ref();
+                (
+                    customer_ref.and_then(|c| c.customer_name.clone()),
+                    customer_ref.and_then(|c| c.customer_phone.clone()),
+                    customer_ref.and_then(|c| c.customer_address.clone()),
+                )
+            }
         };
 
     // Same "fail before any write" treatment as the customer lookup above —
@@ -251,16 +314,20 @@ pub async fn complete_sale(
     // line item, so the whole sale is rejected rather than half-completed.
     let (resolved_items, resolved_products) = resolve_sale_items(db, &body.items).await?;
 
-    // subtotal/total/change are never client-supplied — see the doc comment
-    // on `CreateSaleRequest` for why each is fully derivable at this point.
+    // subtotal/discount/total/change are never client-supplied — see the
+    // doc comment on `CreateSaleRequest` for why each is fully derivable at
+    // this point.
     let subtotal_cents: i64 = resolved_items.iter().map(|item| item.total_cents).sum();
-    let total_cents = (subtotal_cents - body.discount_cents + body.tax_cents).max(0);
+    let (discount_type, discount_value, discount_cents) =
+        compute_discount(body.pricing_adjustments.as_ref(), subtotal_cents);
+    let total_cents = (subtotal_cents - discount_cents).max(0);
     let change_due_cents = body
+        .payment
         .amount_received_cents
         .map(|amount_received| amount_received - total_cents);
 
-    if body.payment_method == "split" {
-        let legs = body.split_payments.as_deref().unwrap_or(&[]);
+    if body.payment.payment_method == "split" {
+        let legs = body.payment.split_payments.as_deref().unwrap_or(&[]);
         let legs_total: i64 = legs.iter().map(|leg| leg.amount_cents).sum();
         if legs_total > total_cents {
             return Err(AppError::validation(
@@ -285,34 +352,39 @@ pub async fn complete_sale(
         width = reservation.padding
     );
 
-    let status = if body.is_credit { "pending" } else { "paid" };
+    let status = if body.payment.is_credit {
+        "pending"
+    } else {
+        "paid"
+    };
     let now = BsonDateTime::now();
 
     let invoice_document = InvoiceDocument {
         id: None,
         key: generate_id(prefixes::INVOICE),
         invoice_number,
-        customer_key: body.customer_key.clone(),
+        customer_key: customer_key.clone(),
         customer_name_snapshot,
         customer_phone_snapshot,
         customer_address_snapshot,
         cashier_id: cashier_id.clone(),
-        cashier_name_snapshot: body.cashier_name.clone(),
+        cashier_name_snapshot: body.staff.cashier_name.clone(),
         items: resolved_items.clone(),
         subtotal_cents,
-        discount_cents: body.discount_cents,
-        tax_cents: body.tax_cents,
+        discount_type,
+        discount_value,
+        discount_cents,
         total_cents,
-        payment_method: body.payment_method.clone(),
-        split_payments: body.split_payments.clone(),
-        is_credit: body.is_credit,
-        amount_received_cents: body.amount_received_cents,
+        payment_method: body.payment.payment_method.clone(),
+        split_payments: body.payment.split_payments.clone(),
+        is_credit: body.payment.is_credit,
+        amount_received_cents: body.payment.amount_received_cents,
         change_due_cents,
-        due_date: body.due_date.clone(),
-        card_last4: body.card_last4.clone(),
-        card_ref: body.card_ref.clone(),
-        online_ref: body.online_ref.clone(),
-        online_note: body.online_note.clone(),
+        due_date: body.payment.due_date.clone(),
+        card_last4: body.payment.card_last4.clone(),
+        card_ref: body.payment.card_ref.clone(),
+        online_ref: body.payment.online_ref.clone(),
+        online_note: body.payment.online_note.clone(),
         status: status.to_string(),
         notes: body.notes.clone(),
         shop_profile_snapshot: body.shop_profile_snapshot.clone(),
@@ -333,19 +405,19 @@ pub async fn complete_sale(
     let mut warnings: Vec<String> = Vec::new();
 
     let mut payment_documents = Vec::new();
-    if !body.is_credit {
+    if !body.payment.is_credit {
         // Matches the mock's simplicity (`mockInvoices.ts::createInvoice`):
         // a non-credit sale is fully paid at completion, regardless of the
         // tendered/change breakdown recorded for display.
-        let legs: Vec<(String, i64, Option<String>)> = match &body.split_payments {
-            Some(split) if body.payment_method == "split" => split
+        let legs: Vec<(String, i64, Option<String>)> = match &body.payment.split_payments {
+            Some(split) if body.payment.payment_method == "split" => split
                 .iter()
                 .map(|leg| (leg.method.clone(), leg.amount_cents, leg.card_last4.clone()))
                 .collect(),
             _ => vec![(
-                body.payment_method.clone(),
+                body.payment.payment_method.clone(),
                 total_cents,
-                body.card_last4.clone(),
+                body.payment.card_last4.clone(),
             )],
         };
 
@@ -358,7 +430,7 @@ pub async fn complete_sale(
                 payment_method: method,
                 notes: card_last4.map(|last4| format!("Card ending {last4}")),
                 recorded_by_user_id: cashier_id.clone(),
-                recorded_by_name_snapshot: body.cashier_name.clone(),
+                recorded_by_name_snapshot: body.staff.cashier_name.clone(),
                 recorded_at: now,
                 version: 1,
                 created_at: now,
@@ -445,8 +517,12 @@ pub async fn complete_sale(
         }
     }
 
-    if let Some(customer_key) = &body.customer_key {
-        let balance_delta = if body.is_credit { total_cents } else { 0 };
+    if let Some(customer_key) = &customer_key {
+        let balance_delta = if body.payment.is_credit {
+            total_cents
+        } else {
+            0
+        };
         if let Err(err) =
             customers::service::apply_financial_delta(db, customer_key, total_cents, balance_delta)
                 .await

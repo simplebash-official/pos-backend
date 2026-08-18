@@ -77,8 +77,10 @@ fn unprivileged_token(config: &jana2u_pos_backend::core::config::Config) -> Stri
 
 fn sample_repair_payload(phone_suffix: &str) -> Value {
     json!({
-        "customerName": "Kasun Silva",
-        "customerPhone": format!("077{phone_suffix}"),
+        "customer": {
+            "customerName": "Kasun Silva",
+            "customerPhone": format!("077{phone_suffix}"),
+        },
         "deviceModel": "iPhone 14",
         "issueDescription": "Cracked screen",
         "estimatedCostCents": 850000,
@@ -226,7 +228,7 @@ async fn list_repairs_filters_by_search_and_status() {
 
     let unique = uuid::Uuid::new_v4().to_string()[..8].to_string();
     let mut payload = sample_repair_payload("6666666");
-    payload["customerName"] = json!(format!("Findable-{unique}"));
+    payload["customer"]["customerName"] = json!(format!("Findable-{unique}"));
     send_authed(&app.router, "POST", "/api/repairs", Some(payload), &token).await;
 
     let (status, body) = send_authed(
@@ -326,9 +328,11 @@ async fn create_repair_with_customer_key_resolves_name_and_phone_from_customer_r
         "POST",
         "/api/repairs",
         Some(json!({
-            "customerKey": customer_key,
-            "customerName": "Wrong Name",
-            "customerPhone": "0009999999",
+            "customer": {
+                "customerKey": customer_key,
+                "customerName": "Wrong Name",
+                "customerPhone": "0009999999",
+            },
             "deviceModel": "iPhone 14",
             "issueDescription": "Cracked screen",
             "estimatedCostCents": 850000,
@@ -364,9 +368,11 @@ async fn update_repair_with_customer_key_resolves_name_and_phone_from_customer_r
         "PATCH",
         &format!("/api/repairs/{key}"),
         Some(json!({
-            "customerKey": customer_key,
-            "customerName": "Wrong Name",
-            "customerPhone": "0009999999",
+            "customer": {
+                "customerKey": customer_key,
+                "customerName": "Wrong Name",
+                "customerPhone": "0009999999",
+            },
         })),
         &token,
     )

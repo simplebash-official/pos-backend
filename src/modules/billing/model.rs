@@ -36,8 +36,11 @@ pub struct InvoiceDocument {
     pub cashier_name_snapshot: String,
     pub items: Vec<InvoiceItem>,
     pub subtotal_cents: i64,
+    #[serde(default = "default_discount_type")]
+    pub discount_type: String,
+    #[serde(default)]
+    pub discount_value: f64,
     pub discount_cents: i64,
-    pub tax_cents: i64,
     pub total_cents: i64,
     pub payment_method: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -83,6 +86,10 @@ fn default_version() -> i64 {
     1
 }
 
+fn default_discount_type() -> String {
+    "fixed".to_string()
+}
+
 impl InvoiceDocument {
     pub fn into_invoice(self) -> Invoice {
         let key = if self.key.is_empty() {
@@ -105,8 +112,9 @@ impl InvoiceDocument {
             cashier_name_snapshot: self.cashier_name_snapshot,
             items: self.items,
             subtotal_cents: self.subtotal_cents,
+            discount_type: self.discount_type,
+            discount_value: self.discount_value,
             discount_cents: self.discount_cents,
-            tax_cents: self.tax_cents,
             total_cents: self.total_cents,
             payment_method: self.payment_method,
             split_payments: self.split_payments,

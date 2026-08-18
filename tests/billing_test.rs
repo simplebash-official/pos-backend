@@ -202,8 +202,10 @@ async fn seed_repair(app: &common::TestApp) -> String {
         "POST",
         "/api/repairs",
         Some(json!({
-            "customerName": "Kasun Silva",
-            "customerPhone": "0771234567",
+            "customer": {
+                "customerName": "Kasun Silva",
+                "customerPhone": "0771234567",
+            },
             "deviceModel": "iPhone 14",
             "issueDescription": "Cracked screen",
             "estimatedCostCents": 850000,
@@ -215,17 +217,17 @@ async fn seed_repair(app: &common::TestApp) -> String {
     body["data"]["key"].as_str().unwrap().to_string()
 }
 
-/// `subtotalCents`/`totalCents`/`changeDueCents` are deliberately absent —
-/// they're always server-computed from `items`/`discountCents`/`taxCents`/
-/// `amountReceivedCents` now (see `CreateSaleRequest`'s doc comment).
+/// Nested request shape: `staff{cashierName}`, `customer{}` (omitted here —
+/// a walk-in with no linked account), `items[]`, `pricingAdjustments{}`
+/// (omitted — no discount), `payment{paymentMethod, isCredit, ...}`, and
+/// `shopProfileSnapshot` at the top level. `subtotalCents`/`totalCents`/
+/// `changeDueCents` are never sent — always server-computed (see
+/// `CreateSaleRequest`'s doc comment). There is no tax concept.
 fn base_sale_payload() -> Value {
     json!({
-        "cashierName": "Nimal Perera",
+        "staff": { "cashierName": "Nimal Perera" },
         "items": [],
-        "discountCents": 0,
-        "taxCents": 0,
-        "paymentMethod": "cash",
-        "isCredit": false,
+        "payment": { "paymentMethod": "cash", "isCredit": false },
         "shopProfileSnapshot": { "tradingName": "TechFix Repairs" },
     })
 }
@@ -268,7 +270,7 @@ async fn complete_sale_retail_cash_decrements_stock_and_marks_paid() {
         "discountCents": 0,
         "sourceType": "retail",
     }]);
-    payload["amountReceivedCents"] = json!(price * 2);
+    payload["payment"]["amountReceivedCents"] = json!(price * 2);
 
     let (status, body) = send_authed(
         &app.router,
@@ -293,8 +295,12 @@ async fn complete_sale_retail_cash_decrements_stock_and_marks_paid() {
     assert_eq!(data["warnings"], json!([]));
 
     // subtotalCents/totalCents/changeDueCents were never sent — the server
-    // must compute them from the resolved items/discount/tax/amountReceived.
+    // must compute them from the resolved items and the (omitted)
+    // pricingAdjustments/amountReceived.
     assert_eq!(data["invoice"]["subtotalCents"], price * 2);
+    assert_eq!(data["invoice"]["discountType"], "fixed");
+    assert_eq!(data["invoice"]["discountValue"], 0.0);
+    assert_eq!(data["invoice"]["discountCents"], 0);
     assert_eq!(data["invoice"]["totalCents"], price * 2);
     assert_eq!(data["invoice"]["changeDueCents"], 0);
 
@@ -402,8 +408,8 @@ async fn complete_sale_credit_sale_increases_customer_balance_and_stays_pending(
     let (_customer_id, customer_key) = seed_customer(&app).await;
 
     let mut payload = base_sale_payload();
-    payload["customerKey"] = json!(customer_key);
-    payload["isCredit"] = json!(true);
+    payload["customer"] = json!({ "customerKey": customer_key });
+    payload["payment"]["isCredit"] = json!(true);
     payload["items"] = json!([{
         "name": "Ad-hoc repair charge",
         "unitPriceCents": 500000,
@@ -447,7 +453,7 @@ async fn complete_sale_split_payment_records_one_payment_per_leg() {
     let token = staff_token(&app.config);
 
     let mut payload = base_sale_payload();
-    payload["paymentMethod"] = json!("split");
+    payload["payment"]["paymentMethod"] = json!("split");
     payload["items"] = json!([{
         "name": "Bundle",
         "unitPriceCents": 300000,
@@ -455,7 +461,7 @@ async fn complete_sale_split_payment_records_one_payment_per_leg() {
         "discountCents": 0,
         "sourceType": "retail",
     }]);
-    payload["splitPayments"] = json!([
+    payload["payment"]["splitPayments"] = json!([
         { "method": "cash", "amountCents": 200000 },
         { "method": "card", "amountCents": 100000, "cardLast4": "4242" },
     ]);
@@ -590,15 +596,13 @@ async fn complete_sale_with_unknown_source_ticket_key_fails_the_whole_request() 
 }
 
 #[tokio::test]
-async fn complete_sale_computes_subtotal_total_and_change_from_items_discount_tax_and_amount_received()
- {
+async fn complete_sale_computes_fixed_discount() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);
 
     let mut payload = base_sale_payload();
-    payload["discountCents"] = json!(200);
-    payload["taxCents"] = json!(50);
-    payload["amountReceivedCents"] = json!(2000);
+    payload["pricingAdjustments"] = json!({ "discountType": "fixed", "discountValue": 200 });
+    payload["payment"]["amountReceivedCents"] = json!(2000);
     payload["items"] = json!([{
         "name": "Widget",
         "unitPriceCents": 1000,
@@ -622,14 +626,91 @@ async fn complete_sale_computes_subtotal_total_and_change_from_items_discount_ta
         invoice["subtotalCents"], 1000,
         "sum of resolved item totals"
     );
+    assert_eq!(invoice["discountType"], "fixed");
+    assert_eq!(invoice["discountValue"], 200.0);
+    assert_eq!(invoice["discountCents"], 200);
     assert_eq!(
-        invoice["totalCents"], 850,
-        "subtotalCents(1000) - discountCents(200) + taxCents(50)"
+        invoice["totalCents"], 800,
+        "subtotalCents(1000) - discountCents(200) — there is no tax"
     );
     assert_eq!(
-        invoice["changeDueCents"], 1150,
-        "amountReceivedCents(2000) - totalCents(850)"
+        invoice["changeDueCents"], 1200,
+        "amountReceivedCents(2000) - totalCents(800)"
     );
+}
+
+#[tokio::test]
+async fn complete_sale_computes_percentage_discount() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let mut payload = base_sale_payload();
+    payload["pricingAdjustments"] = json!({ "discountType": "percentage", "discountValue": 10 });
+    payload["payment"]["amountReceivedCents"] = json!(1000);
+    payload["items"] = json!([{
+        "name": "Widget",
+        "unitPriceCents": 1000,
+        "quantity": 1,
+        "discountCents": 0,
+        "sourceType": "retail",
+    }]);
+
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/billing/sales",
+        Some(payload),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+
+    let invoice = &body["data"]["invoice"];
+    assert_eq!(invoice["subtotalCents"], 1000);
+    assert_eq!(invoice["discountType"], "percentage");
+    assert_eq!(invoice["discountValue"], 10.0);
+    assert_eq!(invoice["discountCents"], 100, "10% of subtotalCents(1000)");
+    assert_eq!(invoice["totalCents"], 900);
+    assert_eq!(invoice["changeDueCents"], 100);
+}
+
+#[tokio::test]
+async fn complete_sale_rejects_invalid_pricing_adjustments() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let cases = [
+        json!({ "discountType": "bogus", "discountValue": 10 }),
+        json!({ "discountType": "percentage", "discountValue": 101 }),
+        json!({ "discountType": "percentage", "discountValue": -1 }),
+        json!({ "discountType": "fixed", "discountValue": -1 }),
+    ];
+
+    for adjustments in cases {
+        let mut payload = base_sale_payload();
+        payload["pricingAdjustments"] = adjustments.clone();
+        payload["items"] = json!([{
+            "name": "Widget",
+            "unitPriceCents": 1000,
+            "quantity": 1,
+            "discountCents": 0,
+            "sourceType": "retail",
+        }]);
+
+        let (status, body) = send_authed(
+            &app.router,
+            "POST",
+            "/api/billing/sales",
+            Some(payload),
+            &token,
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "adjustments {adjustments:?} should be rejected — Body: {body}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -638,7 +719,7 @@ async fn complete_sale_split_payment_rejects_legs_exceeding_computed_total() {
     let token = staff_token(&app.config);
 
     let mut payload = base_sale_payload();
-    payload["paymentMethod"] = json!("split");
+    payload["payment"]["paymentMethod"] = json!("split");
     payload["items"] = json!([{
         "name": "Widget",
         "unitPriceCents": 1000,
@@ -647,7 +728,7 @@ async fn complete_sale_split_payment_rejects_legs_exceeding_computed_total() {
         "sourceType": "retail",
     }]);
     // Computed total is 1000, but the split legs sum to 1500.
-    payload["splitPayments"] = json!([
+    payload["payment"]["splitPayments"] = json!([
         { "method": "cash", "amountCents": 1000 },
         { "method": "card", "amountCents": 500 },
     ]);
@@ -742,8 +823,8 @@ async fn record_payment_against_credit_invoice_pays_it_off_over_installments() {
     let (_customer_id, customer_key) = seed_customer(&app).await;
 
     let mut payload = base_sale_payload();
-    payload["customerKey"] = json!(customer_key);
-    payload["isCredit"] = json!(true);
+    payload["customer"] = json!({ "customerKey": customer_key });
+    payload["payment"]["isCredit"] = json!(true);
     payload["items"] = json!([{
         "name": "Credit Purchase",
         "unitPriceCents": 1000000,

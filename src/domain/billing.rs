@@ -80,6 +80,73 @@ pub struct SplitPayment {
     pub reference: Option<String>,
 }
 
+/// The `staff{}` sub-object of `CreateSaleRequest` — just the cashier's
+/// display name today, kept as its own struct (rather than a bare top-level
+/// field) so the request groups "who completed this sale" the same way it
+/// groups "who it was sold to" (`CustomerRef`) and "how it was paid"
+/// (`PaymentDetails`).
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct StaffRef {
+    pub cashier_name: String,
+}
+
+/// The `customer{}` sub-object of `CreateSaleRequest`. `customerName`/
+/// `Phone`/`Address` are only used as the walk-in snapshot when
+/// `customerKey` is absent; when a real customer is linked,
+/// `service::sale::complete_sale` snapshots from the resolved `Customer`
+/// record instead (server-authoritative, not client-supplied).
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerRef {
+    #[serde(default)]
+    pub customer_key: Option<String>,
+    #[serde(default)]
+    pub customer_name: Option<String>,
+    #[serde(default)]
+    pub customer_phone: Option<String>,
+    #[serde(default)]
+    pub customer_address: Option<String>,
+}
+
+/// `discountType` must be `"percentage"` (`discountValue` is a 0–100
+/// percent, e.g. `7.5`) or `"fixed"` (`discountValue` is a plain cents
+/// amount) — `service::sale::complete_sale` computes the actual
+/// `discountCents` from this against the resolved subtotal, and persists
+/// both this type/value (source of truth) and the resulting cents on the
+/// `Invoice`. Omitting `pricingAdjustments` entirely means no discount.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PricingAdjustments {
+    pub discount_type: String,
+    pub discount_value: f64,
+}
+
+/// The `payment{}` sub-object of `CreateSaleRequest` — every field that
+/// describes how the sale was (or will be) paid for, grouped together
+/// rather than scattered across the request's top level.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PaymentDetails {
+    /// `"cash"` | `"card"` | `"online"` | `"split"` | `"credit"`.
+    pub payment_method: String,
+    pub is_credit: bool,
+    #[serde(default)]
+    pub amount_received_cents: Option<i64>,
+    #[serde(default)]
+    pub split_payments: Option<Vec<SplitPayment>>,
+    #[serde(default)]
+    pub card_last4: Option<String>,
+    #[serde(default)]
+    pub card_ref: Option<String>,
+    #[serde(default)]
+    pub online_ref: Option<String>,
+    #[serde(default)]
+    pub online_note: Option<String>,
+    #[serde(default)]
+    pub due_date: Option<String>,
+}
+
 /// A completed or pending sale as returned to API clients. `id` is the
 /// Mongo `ObjectId` hex string; `key` (`inv_...`) is the prefixed id other
 /// modules/the frontend reference this invoice by. `shop_profile_snapshot`
@@ -104,8 +171,13 @@ pub struct Invoice {
     pub cashier_name_snapshot: String,
     pub items: Vec<InvoiceItem>,
     pub subtotal_cents: i64,
+    /// `"percentage"` | `"fixed"` — the discount type this invoice's
+    /// `discountCents` was computed from (`"fixed"`/`0.0` when no discount
+    /// was applied). Kept alongside the computed cents so a receipt can
+    /// show "5% off" rather than just the resulting amount.
+    pub discount_type: String,
+    pub discount_value: f64,
     pub discount_cents: i64,
-    pub tax_cents: i64,
     pub total_cents: i64,
     /// `"cash"` | `"card"` | `"online"` | `"split"` | `"credit"`.
     pub payment_method: String,
@@ -151,53 +223,39 @@ fn default_version() -> i64 {
     1
 }
 
-/// Body for `POST /billing/sales`. `cashierId` is deliberately absent —
-/// the completing cashier is always `CurrentUser::user_id` from the bearer
-/// token, never client-supplied. `customerName`/`Phone`/`Address` are only
-/// used as the walk-in snapshot when `customerKey` is absent; when a real
-/// customer is linked, `service::sale::complete_sale` snapshots from the
-/// resolved `Customer` record instead (server-authoritative, not
-/// client-supplied) — see the migration plan's D2/D4 notes.
+/// Body for `POST /billing/sales`, grouped into sub-objects by concern
+/// rather than one flat field list: `staff` (who completed it), `customer`
+/// (who it was sold to, optional — a walk-in with no linked account omits
+/// it entirely), `items`, `pricingAdjustments` (the invoice-level
+/// discount, optional — omit for no discount), `payment` (how it was/will
+/// be paid), and `shopProfileSnapshot` (frozen shop details for reprints,
+/// left top-level since it isn't really "about" any one sub-concern).
+/// `notes`/`warrantyTermsSnapshot`/`documentSelection` stay flat top-level
+/// fields too — each is a single independent optional value with no
+/// natural group to join.
+///
+/// `cashierId` is deliberately absent from `staff` — the completing cashier
+/// is always `CurrentUser::user_id` from the bearer token, never
+/// client-supplied.
 ///
 /// `subtotalCents`/`totalCents`/`changeDueCents` are never client-supplied
-/// either — all three are arithmetic derived from data the server already
-/// has once items are resolved: `subtotalCents` is the sum of the resolved
-/// items' `totalCents`, `totalCents` is `subtotalCents - discountCents +
-/// taxCents`, and `changeDueCents` (when `amountReceivedCents` is given) is
-/// `amountReceivedCents - totalCents`. `discountCents`/`taxCents` stay
-/// client-supplied — an invoice-level discount/tax isn't derivable from
-/// anything already stored server-side.
+/// — all three are arithmetic derived from data the server already has
+/// once items are resolved: `subtotalCents` is the sum of the resolved
+/// items' `totalCents`, `discountCents` is computed from
+/// `pricingAdjustments` against that subtotal, `totalCents` is
+/// `subtotalCents - discountCents` (there is no tax concept in this
+/// system), and `changeDueCents` (when `payment.amountReceivedCents` is
+/// given) is `amountReceivedCents - totalCents`.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateSaleRequest {
+    pub staff: StaffRef,
     #[serde(default)]
-    pub customer_key: Option<String>,
-    #[serde(default)]
-    pub customer_name: Option<String>,
-    #[serde(default)]
-    pub customer_phone: Option<String>,
-    #[serde(default)]
-    pub customer_address: Option<String>,
-    pub cashier_name: String,
+    pub customer: Option<CustomerRef>,
     pub items: Vec<CreateSaleItemRequest>,
-    pub discount_cents: i64,
-    pub tax_cents: i64,
-    pub payment_method: String,
     #[serde(default)]
-    pub split_payments: Option<Vec<SplitPayment>>,
-    pub is_credit: bool,
-    #[serde(default)]
-    pub amount_received_cents: Option<i64>,
-    #[serde(default)]
-    pub due_date: Option<String>,
-    #[serde(default)]
-    pub card_last4: Option<String>,
-    #[serde(default)]
-    pub card_ref: Option<String>,
-    #[serde(default)]
-    pub online_ref: Option<String>,
-    #[serde(default)]
-    pub online_note: Option<String>,
+    pub pricing_adjustments: Option<PricingAdjustments>,
+    pub payment: PaymentDetails,
     #[serde(default)]
     pub notes: Option<String>,
     pub shop_profile_snapshot: serde_json::Value,

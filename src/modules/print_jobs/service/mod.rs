@@ -17,8 +17,8 @@ use crate::{
     },
     domain::{
         print_jobs::{
-            CreatePrintJobRequest, PrintJob, PrintJobListQuery, PrintJobListResponse,
-            UpdatePrintJobRequest,
+            CreatePrintJobRequest, PrintJob, PrintJobAssignment, PrintJobListQuery,
+            PrintJobListResponse, UpdatePrintJobRequest,
         },
         sequences::ReserveSequenceRequest,
     },
@@ -168,9 +168,9 @@ pub async fn create_print_job(
 
     let (customer_name, customer_phone) = resolve_customer_name_phone(
         db,
-        body.customer_key.as_deref(),
-        body.customer_name,
-        body.customer_phone,
+        body.customer.customer_key.as_deref(),
+        body.customer.customer_name.unwrap_or_default(),
+        body.customer.customer_phone,
     )
     .await?;
 
@@ -180,6 +180,14 @@ pub async fn create_print_job(
         body.quantity,
         body.estimated_cost_cents,
     )?;
+
+    let assignment = body.assignment.unwrap_or_default();
+    let PrintJobAssignment {
+        assigned_employee_id,
+        assigned_employee_name,
+        split_type,
+        split_value,
+    } = assignment;
 
     let reservation = sequences::service::reserve_sequence(
         db,
@@ -202,7 +210,7 @@ pub async fn create_print_job(
         id: None,
         key: generate_id(prefixes::PRINT_JOB),
         ticket_number,
-        customer_key: body.customer_key,
+        customer_key: body.customer.customer_key,
         customer_name: customer_name.trim().to_string(),
         customer_phone,
         job_type: body.job_type,
@@ -210,10 +218,10 @@ pub async fn create_print_job(
         status,
         estimated_cost_cents: body.estimated_cost_cents,
         material_cost_cents: body.material_cost_cents,
-        assigned_employee_id: body.assigned_employee_id,
-        assigned_employee_name: body.assigned_employee_name,
-        split_type: body.split_type,
-        split_value: body.split_value,
+        assigned_employee_id,
+        assigned_employee_name,
+        split_type,
+        split_value,
         version: 1,
         created_at: now,
         updated_at: now,
@@ -240,12 +248,16 @@ pub async fn update_print_job(
         .id
         .expect("persisted print job document must have an _id");
 
-    let effective_customer_key = body.customer_key.clone().or(existing.customer_key.clone());
+    let customer = body.customer.unwrap_or_default();
+    let effective_customer_key = customer
+        .customer_key
+        .clone()
+        .or(existing.customer_key.clone());
     let (customer_name, customer_phone) = resolve_customer_name_phone(
         db,
         effective_customer_key.as_deref(),
-        body.customer_name.unwrap_or(existing.customer_name),
-        body.customer_phone.clone().or(existing.customer_phone),
+        customer.customer_name.unwrap_or(existing.customer_name),
+        customer.customer_phone.or(existing.customer_phone),
     )
     .await?;
     let job_type = body.job_type.unwrap_or(existing.job_type);
@@ -266,7 +278,7 @@ pub async fn update_print_job(
         "status": &status,
         "updated_at": BsonDateTime::now(),
     };
-    if let Some(key) = body.customer_key {
+    if let Some(key) = effective_customer_key {
         set_doc.insert("customer_key", key);
     }
     match customer_phone {
@@ -276,17 +288,19 @@ pub async fn update_print_job(
     if let Some(mc) = body.material_cost_cents {
         set_doc.insert("material_cost_cents", mc);
     }
-    if let Some(eid) = body.assigned_employee_id {
-        set_doc.insert("assigned_employee_id", eid);
-    }
-    if let Some(ename) = body.assigned_employee_name {
-        set_doc.insert("assigned_employee_name", ename);
-    }
-    if let Some(st) = body.split_type {
-        set_doc.insert("split_type", st);
-    }
-    if let Some(sv) = body.split_value {
-        set_doc.insert("split_value", sv);
+    if let Some(assignment) = body.assignment {
+        if let Some(eid) = assignment.assigned_employee_id {
+            set_doc.insert("assigned_employee_id", eid);
+        }
+        if let Some(ename) = assignment.assigned_employee_name {
+            set_doc.insert("assigned_employee_name", ename);
+        }
+        if let Some(st) = assignment.split_type {
+            set_doc.insert("split_type", st);
+        }
+        if let Some(sv) = assignment.split_value {
+            set_doc.insert("split_value", sv);
+        }
     }
     if let Some(device) = device_id {
         set_doc.insert("updated_by_device", device);

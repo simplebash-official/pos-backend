@@ -51,26 +51,25 @@ fn default_version() -> i64 {
     1
 }
 
-/// Body for `POST /print-jobs`. `customerName`/`customerPhone` are only
-/// used as-is when `customerKey` is absent (a walk-in with no linked
-/// account); when `customerKey` resolves to a real customer,
-/// `service::create_print_job` overrides both from that record instead of
-/// trusting the payload — same rule as `repairs::CreateRepairRequest`.
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+/// The `customer{}` sub-object of `CreatePrintJobRequest`/
+/// `UpdatePrintJobRequest` — same shape and override rule as
+/// `repairs::RepairCustomer`.
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct CreatePrintJobRequest {
+pub struct PrintJobCustomer {
     #[serde(default)]
     pub customer_key: Option<String>,
-    pub customer_name: String,
+    #[serde(default)]
+    pub customer_name: Option<String>,
     #[serde(default)]
     pub customer_phone: Option<String>,
-    pub job_type: String,
-    pub quantity: i32,
-    #[serde(default)]
-    pub status: Option<String>,
-    pub estimated_cost_cents: i64,
-    #[serde(default)]
-    pub material_cost_cents: Option<i64>,
+}
+
+/// The `assignment{}` sub-object of `CreatePrintJobRequest`/
+/// `UpdatePrintJobRequest` — same shape as `repairs::RepairAssignment`.
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PrintJobAssignment {
     #[serde(default)]
     pub assigned_employee_id: Option<String>,
     #[serde(default)]
@@ -81,24 +80,40 @@ pub struct CreatePrintJobRequest {
     pub split_value: Option<f64>,
 }
 
+/// Body for `POST /print-jobs`. `customer.customerName`/`customerPhone` are
+/// only used as-is when `customer.customerKey` is absent (a walk-in with no
+/// linked account); when it resolves to a real customer,
+/// `service::create_print_job` overrides both from that record instead of
+/// trusting the payload — same rule as `repairs::CreateRepairRequest`.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatePrintJobRequest {
+    #[serde(default)]
+    pub customer: PrintJobCustomer,
+    pub job_type: String,
+    pub quantity: i32,
+    #[serde(default)]
+    pub status: Option<String>,
+    pub estimated_cost_cents: i64,
+    #[serde(default)]
+    pub material_cost_cents: Option<i64>,
+    #[serde(default)]
+    pub assignment: Option<PrintJobAssignment>,
+}
+
 /// Body for `PATCH /print-jobs/{id}`. Same `customerKey`-overrides-
 /// `customerName`/`customerPhone` rule as `CreatePrintJobRequest` applies
 /// here too (see `service::update_print_job`).
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdatePrintJobRequest {
-    pub customer_key: Option<String>,
-    pub customer_name: Option<String>,
-    pub customer_phone: Option<String>,
+    pub customer: Option<PrintJobCustomer>,
     pub job_type: Option<String>,
     pub quantity: Option<i32>,
     pub status: Option<String>,
     pub estimated_cost_cents: Option<i64>,
     pub material_cost_cents: Option<i64>,
-    pub assigned_employee_id: Option<String>,
-    pub assigned_employee_name: Option<String>,
-    pub split_type: Option<String>,
-    pub split_value: Option<f64>,
+    pub assignment: Option<PrintJobAssignment>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, IntoParams)]

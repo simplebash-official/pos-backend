@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "4a99e5db-6dab-4289-be33-7994c1253468",
     "name": "backend",
-    "description": "Rust/Axum API backend for jana2u-pos, a point-of-sale system for a repair/retail shop.\n\nAll requests inherit the collection-level Bearer auth (`{{accessToken}}`) — set it once per environment (Developement/Production) after obtaining a JWT via Auth > Login (its Tests script auto-populates `{{accessToken}}`/`{{userId}}` for you on success, so nothing to copy/paste). Admin-gated endpoints (inventory category/subcategory writes, Billing > Cancel Invoice, and every Suppliers/Supplier Products/Purchases request — reads included) require the token's `role` claim to be `admin`. Permission-gated endpoints (all of Inventory except the module-status stub, Customers writes, Billing > Complete Sale/Record Payment, Repairs writes, Print Jobs writes, Users CRUD, Auth > List Login Sessions) require the token's `permissions` claim to include a specific permission (e.g. `inventory:read`, `inventory:write`, `billing:write`, `repairs:write`, `print_jobs:write`, `users:manage`, `sessions:view`) — see CLAUDE.md's \"Auth, users & permissions\" section for the full role→permission table; the seeded Admin (`cargo run --bin seed_admin`) has every permission. Users CRUD is additionally scoped by an Admin/Manager hierarchy on top of that permission gate — see the Users folder's description.\n\nOnly these endpoints work without a token at all: Health, Auth > Login, Swagger, and the `GET /` module-status stubs still remaining on Inventory/Billing/Customers/Reports (Repairs and Print Jobs lost theirs once they gained real `GET /` list endpoints — those now require a token like every other read). Everything else returns 401 `UNAUTHORIZED` without a valid Bearer token, and 403 `PERMISSION_DENIED`/`ADMIN_REQUIRED` if the token lacks the required permission or role.\n\nBase URL (`{{backendBaseUrl}}`), and the access token, are environment variables — switch the active Postman environment to point requests at dev vs prod.",
+    "description": "Rust/Axum API backend for jana2u-pos, a point-of-sale system for a repair/retail shop.\n\nAll requests inherit the collection-level Bearer auth (`{{accessToken}}`) \u2014 set it once per environment (Developement/Production) after obtaining a JWT via Auth > Login (its Tests script auto-populates `{{accessToken}}`/`{{userId}}` for you on success, so nothing to copy/paste). Admin-gated endpoints (inventory category/subcategory writes, Billing > Cancel Invoice, and every Suppliers/Supplier Products/Purchases request \u2014 reads included) require the token's `role` claim to be `admin`. Permission-gated endpoints (all of Inventory except the module-status stub, Customers writes, Billing > Complete Sale/Record Payment, Repairs writes, Print Jobs writes, Users CRUD, Auth > List Login Sessions) require the token's `permissions` claim to include a specific permission (e.g. `inventory:read`, `inventory:write`, `billing:write`, `repairs:write`, `print_jobs:write`, `users:manage`, `sessions:view`) \u2014 see CLAUDE.md's \"Auth, users & permissions\" section for the full role\u2192permission table; the seeded Admin (`cargo run --bin seed_admin`) has every permission. Users CRUD is additionally scoped by an Admin/Manager hierarchy on top of that permission gate \u2014 see the Users folder's description.\n\nOnly these endpoints work without a token at all: Health, Auth > Login, Swagger, and the `GET /` module-status stubs still remaining on Inventory/Billing/Customers/Reports (Repairs and Print Jobs lost theirs once they gained real `GET /` list endpoints \u2014 those now require a token like every other read). Everything else returns 401 `UNAUTHORIZED` without a valid Bearer token, and 403 `PERMISSION_DENIED`/`ADMIN_REQUIRED` if the token lacks the required permission or role.\n\nBase URL (`{{backendBaseUrl}}`), and the access token, are environment variables \u2014 switch the active Postman environment to point requests at dev vs prod.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "_exporter_id": "46626151"
   },
@@ -25,7 +25,7 @@
                 "health"
               ]
             },
-            "description": "Liveness check — always returns 200 if the process is up. Doesn't touch MongoDB."
+            "description": "Liveness check \u2014 always returns 200 if the process is up. Doesn't touch MongoDB."
           },
           "response": []
         }
@@ -83,7 +83,7 @@
                 "login"
               ]
             },
-            "description": "Exchanges email/password for a JWT carrying the account's role and its role's default permission set. No auth required. On success, this request's Tests script auto-populates the `{{accessToken}}`/`{{userId}}` environment variables, so every other request's inherited Bearer auth picks it up immediately.\n\nUse `cargo run --bin seed_admin` to bootstrap the very first Admin account (registration is admin-provisioned only — there is no public register endpoint)."
+            "description": "Exchanges email/password for a JWT carrying the account's role and its role's default permission set. No auth required. On success, this request's Tests script auto-populates the `{{accessToken}}`/`{{userId}}` environment variables, so every other request's inherited Bearer auth picks it up immediately.\n\nUse `cargo run --bin seed_admin` to bootstrap the very first Admin account (registration is admin-provisioned only \u2014 there is no public register endpoint)."
           },
           "response": []
         },
@@ -141,12 +141,12 @@
                 }
               ]
             },
-            "description": "Login history audit log — newest first. Each entry snapshots the account's name/email/role at the moment of that login, so it keeps reading the same way even if the account is later renamed. Not paginated the way Suppliers/Products are — this is an append-only log that grows without bound.\n\n**Requires the token's `permissions` claim to include `sessions:view`** (granted to Admin/Manager by default) or the API returns 403 `PERMISSION_DENIED`."
+            "description": "Login history audit log \u2014 newest first. Each entry snapshots the account's name/email/role at the moment of that login, so it keeps reading the same way even if the account is later renamed. Not paginated the way Suppliers/Products are \u2014 this is an append-only log that grows without bound.\n\n**Requires the token's `permissions` claim to include `sessions:view`** (granted to Admin/Manager by default) or the API returns 403 `PERMISSION_DENIED`."
           },
           "response": []
         }
       ],
-      "description": "Login, \"who am I\", and login-session (audit) history. `users` (below) owns account CRUD/role management — see CLAUDE.md's \"Auth, users & permissions\" section."
+      "description": "Login, \"who am I\", and login-session (audit) history. `users` (below) owns account CRUD/role management \u2014 see CLAUDE.md's \"Auth, users & permissions\" section."
     },
     {
       "name": "Billing",
@@ -199,7 +199,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"cashierName\": \"Nimal Perera\",\n    \"customerName\": \"Walk-in Customer\",\n    \"items\": [\n        {\n            \"productKey\": \"prod_vV5MdqUu9pb4PLRB\",\n            \"quantity\": 1,\n            \"discountCents\": 0,\n            \"sourceType\": \"retail\"\n        },\n        {\n            \"productKey\": \"prod_bnwm19dFjZMb_MlV\",\n            \"quantity\": 1,\n            \"discountCents\": 0,\n            \"sourceType\": \"retail\"\n        },\n        {\n            \"productKey\": \"prod_YyeS9HYrB1mrJXbu\",\n            \"quantity\": 1,\n            \"discountCents\": 0,\n            \"sourceType\": \"retail\"\n        },\n        {\n            \"productKey\": \"prod_Od-SNpuusY0BD-hM\",\n            \"quantity\": 1,\n            \"discountCents\": 0,\n            \"sourceType\": \"retail\"\n        },\n        {\n            \"productKey\": \"prod_0GTJkxVVeQRM6DhS\",\n            \"quantity\": 1,\n            \"discountCents\": 0,\n            \"sourceType\": \"retail\"\n        },\n        {\n            \"productKey\": \"prod_bmep131grOtOLlg1\",\n            \"quantity\": 1,\n            \"discountCents\": 0,\n            \"sourceType\": \"retail\"\n        },\n        {\n            \"productKey\": \"prod_sUoKrjtaRkqnrWst\",\n            \"quantity\": 1,\n            \"discountCents\": 0,\n            \"sourceType\": \"retail\"\n        },\n        {\n            \"productKey\": \"prod_87DxPdIW9_CLjNzb\",\n            \"quantity\": 1,\n            \"discountCents\": 0,\n            \"sourceType\": \"retail\"\n        },\n        {\n            \"productKey\": \"prod_8SFmf69yOPnyyPZ4\",\n            \"quantity\": 1,\n            \"discountCents\": 0,\n            \"sourceType\": \"retail\"\n        },\n        {\n            \"productKey\": \"prod_zgic03VcQen4KOyx\",\n            \"quantity\": 1,\n            \"discountCents\": 0,\n            \"sourceType\": \"retail\"\n        },\n        {\n            \"productKey\": \"prod_S0lMggeli71oKQGR\",\n            \"quantity\": 1,\n            \"discountCents\": 0,\n            \"sourceType\": \"retail\"\n        },\n        {\n            \"productKey\": \"prod_LJXiyEc6Igt9opli\",\n            \"quantity\": 1,\n            \"discountCents\": 0,\n            \"sourceType\": \"retail\"\n        },\n        {\n            \"productKey\": \"prod_xdZqGbnzBYiktVNy\",\n            \"quantity\": 1,\n            \"discountCents\": 0,\n            \"sourceType\": \"retail\"\n        },\n        {\n            \"productKey\": \"prod_M_qR-bJlMP3qqQZT\",\n            \"quantity\": 1,\n            \"discountCents\": 0,\n            \"sourceType\": \"retail\"\n        },\n        {\n            \"productKey\": \"prod_llQi0geWF01LmvuW\",\n            \"quantity\": 1,\n            \"discountCents\": 0,\n            \"sourceType\": \"retail\"\n        },\n        {\n            \"productKey\": \"prod_JdC2stRLyIir4nlr\",\n            \"quantity\": 1,\n            \"discountCents\": 0,\n            \"sourceType\": \"retail\"\n        },\n        {\n            \"productKey\": \"prod_ISaUzZfR6EInrAVn\",\n            \"quantity\": 1,\n            \"discountCents\": 0,\n            \"sourceType\": \"retail\"\n        },\n        {\n            \"productKey\": \"prod_KBFeChexGaBcWvNq\",\n            \"quantity\": 1,\n            \"discountCents\": 0,\n            \"sourceType\": \"retail\"\n        },\n        {\n            \"productKey\": \"prod_EK7e44M50ZsdNfja\",\n            \"quantity\": 1,\n            \"discountCents\": 0,\n            \"sourceType\": \"retail\"\n        },\n        {\n            \"productKey\": \"prod_y1UK17b1gvE9ZI0K\",\n            \"quantity\": 1,\n            \"discountCents\": 0,\n            \"sourceType\": \"retail\"\n        }\n    ],\n    \"discountCents\": 0,\n    \"taxCents\": 0,\n    \"paymentMethod\": \"cash\",\n    \"isCredit\": false,\n    \"amountReceivedCents\": 700000,\n    \"shopProfileSnapshot\": {\n        \"tradingName\": \"TechFix Repairs\",\n        \"address\": \"123 Galle Road, Colombo 03\",\n        \"phone\": \"011 234 5678\"\n    }\n}",
+              "raw": "{\n  \"staff\": {\n    \"cashierName\": \"Nimal Perera\"\n  },\n  \"customer\": {\n    \"customerName\": \"Walk-in Customer\"\n  },\n  \"items\": [\n    {\n      \"productKey\": \"prod_vV5MdqUu9pb4PLRB\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_bnwm19dFjZMb_MlV\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_YyeS9HYrB1mrJXbu\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_Od-SNpuusY0BD-hM\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_0GTJkxVVeQRM6DhS\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_bmep131grOtOLlg1\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_sUoKrjtaRkqnrWst\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_87DxPdIW9_CLjNzb\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_8SFmf69yOPnyyPZ4\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_zgic03VcQen4KOyx\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_S0lMggeli71oKQGR\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_LJXiyEc6Igt9opli\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_xdZqGbnzBYiktVNy\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_M_qR-bJlMP3qqQZT\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_llQi0geWF01LmvuW\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_JdC2stRLyIir4nlr\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_ISaUzZfR6EInrAVn\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_KBFeChexGaBcWvNq\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_EK7e44M50ZsdNfja\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_y1UK17b1gvE9ZI0K\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    }\n  ],\n  \"pricingAdjustments\": {\n    \"discountType\": \"fixed\",\n    \"discountValue\": 0\n  },\n  \"payment\": {\n    \"paymentMethod\": \"cash\",\n    \"isCredit\": false,\n    \"amountReceivedCents\": 700000\n  },\n  \"shopProfileSnapshot\": {\n    \"tradingName\": \"TechFix Repairs\",\n    \"address\": \"123 Galle Road, Colombo 03\",\n    \"phone\": \"011 234 5678\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -217,7 +217,7 @@
                 "sales"
               ]
             },
-            "description": "Completes a sale: creates the invoice (and, unless `isCredit`, its payment record(s)), decrements stock for any `productKey` line items, and marks any linked repair/print-job ticket (`sourceTicketKey`) delivered. `cashierId` is never sent — the completing cashier is always the bearer token's user. Line items are resolved server-side, never trusted from the payload: a retail item's `name`/`sku`/`unitPriceCents` come from the product record via `productKey`, a repair/print item's `unitPriceCents`/`assignedEmployeeName`/`sourceTicketNumber` come from the ticket via `sourceTicketKey`, and an item's `totalCents` is always computed as `unitPriceCents * quantity - discountCents`. `name`/`unitPriceCents` are only required on an item when it has no `productKey`/`sourceTicketKey` to resolve from (an ad-hoc line). `subtotalCents`/`totalCents`/`changeDueCents` are likewise never sent — `subtotalCents` is the sum of the resolved items' `totalCents`, `totalCents` is `subtotalCents - discountCents + taxCents`, and `changeDueCents` (when `amountReceivedCents` is given) is `amountReceivedCents - totalCents`. `discountCents`/`taxCents` stay client-supplied — an invoice-level discount/tax isn't derivable from anything already stored server-side. An unresolvable `productKey`/`sourceTicketKey` rejects the whole request before any write. If `customerKey` is set, the customer snapshot fields (`customerName`/`Phone`/`Address`) are resolved server-side from the linked `Customer` record instead of trusting the client-supplied ones. `warnings` in the response surfaces any post-write side effect (stock decrement, ticket status, customer balance) that failed without rolling back the already-durable invoice/payment — see CLAUDE.md's billing module notes.\n\n**Requires the `billing:write` permission** in the token's `permissions` claim — granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role, 404 if a `productKey`/`sourceTicketKey`/`customerKey` doesn't resolve."
+            "description": "Completes a sale: creates the invoice (and, unless `payment.isCredit`, its payment record(s)), decrements stock for any `productKey` line items, and marks any linked repair/print-job ticket (`sourceTicketKey`) delivered. `cashierId` is never sent \u2014 the completing cashier is always the bearer token's user. There is no tax in this system. The request is grouped into sub-objects: `staff{cashierName}`, `customer{}` (optional \u2014 omit for a walk-in with no linked account; only used as typed when `customerKey` is absent, otherwise resolved from the linked `Customer` record), `items[]`, `pricingAdjustments{}` (optional \u2014 omit for no discount; `discountType` is `\"percentage\"` [0-100, e.g. 7.5] or `\"fixed\"` [a cents amount]; the server computes the actual `discountCents` from this against the resolved subtotal), and `payment{paymentMethod, isCredit, amountReceivedCents, splitPayments, cardLast4, cardRef, onlineRef, onlineNote, dueDate}`. `shopProfileSnapshot`/`notes`/`warrantyTermsSnapshot`/`documentSelection` stay top-level. Line items are resolved server-side, never trusted from the payload: a retail item's `name`/`sku`/`unitPriceCents` come from the product record via `productKey`, a repair/print item's `unitPriceCents`/`assignedEmployeeName`/`sourceTicketNumber` come from the ticket via `sourceTicketKey`, and an item's `totalCents` is always computed as `unitPriceCents * quantity - discountCents`. `name`/`unitPriceCents` are only required on an item when it has no `productKey`/`sourceTicketKey` to resolve from (an ad-hoc line). `subtotalCents`/`totalCents`/`changeDueCents` are likewise never sent \u2014 `subtotalCents` is the sum of the resolved items' `totalCents`, `totalCents` is `subtotalCents - discountCents`, and `changeDueCents` (when `payment.amountReceivedCents` is given) is `amountReceivedCents - totalCents`. An unresolvable `productKey`/`sourceTicketKey`/`customerKey` rejects the whole request before any write. `warnings` in the response surfaces any post-write side effect (stock decrement, ticket status, customer balance) that failed without rolling back the already-durable invoice/payment \u2014 see CLAUDE.md's billing module notes.\n\n**Requires the `billing:write` permission** in the token's `permissions` claim \u2014 granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role, 400 for an invalid `pricingAdjustments`/split-leg total, 404 if a `productKey`/`sourceTicketKey`/`customerKey` doesn't resolve."
           },
           "response": []
         },
@@ -267,7 +267,7 @@
                 }
               ]
             },
-            "description": "List invoices with free-text search, status/customer filtering, and pagination.\n\n**Requires a valid Bearer token** (any role — `CurrentUser`, no specific permission) or the API returns 401."
+            "description": "List invoices with free-text search, status/customer filtering, and pagination.\n\n**Requires a valid Bearer token** (any role \u2014 `CurrentUser`, no specific permission) or the API returns 401."
           },
           "response": []
         },
@@ -288,7 +288,7 @@
                 "{{invoiceKey}}"
               ]
             },
-            "description": "Fetch a single invoice by its Mongo ObjectId or prefixed `key`.\n\n**Requires a valid Bearer token** (any role — `CurrentUser`, no specific permission) or the API returns 401."
+            "description": "Fetch a single invoice by its Mongo ObjectId or prefixed `key`.\n\n**Requires a valid Bearer token** (any role \u2014 `CurrentUser`, no specific permission) or the API returns 401."
           },
           "response": []
         },
@@ -324,7 +324,7 @@
                 "cancel"
               ]
             },
-            "description": "Cancels an invoice — reverses stock and customer balance where applicable. Blocked with 409 if already cancelled, or if any payment beyond the original sale-time one has been recorded.\n\n**Requires Admin JWT** (`role: admin` claim) or the API returns 403 `ADMIN_REQUIRED`."
+            "description": "Cancels an invoice \u2014 reverses stock and customer balance where applicable. Blocked with 409 if already cancelled, or if any payment beyond the original sale-time one has been recorded.\n\n**Requires Admin JWT** (`role: admin` claim) or the API returns 403 `ADMIN_REQUIRED`."
           },
           "response": []
         },
@@ -347,7 +347,7 @@
                 "a4-invoice"
               ]
             },
-            "description": "Renders (or returns the cached) PDF for an invoice. `documentType` in the path is either `a4-invoice` or `thermal-receipt` — this request is the A4 variant; duplicate it and change the last path segment to `thermal-receipt` for the receipt variant, which also accepts the `paperWidthMm` query param (58 or 80, default 80). Response is `application/pdf` bytes, not the usual JSON envelope.\n\n**Requires a valid Bearer token** (any role — `CurrentUser`, no specific permission) or the API returns 401."
+            "description": "Renders (or returns the cached) PDF for an invoice. `documentType` in the path is either `a4-invoice` or `thermal-receipt` \u2014 this request is the A4 variant; duplicate it and change the last path segment to `thermal-receipt` for the receipt variant, which also accepts the `paperWidthMm` query param (58 or 80, default 80). Response is `application/pdf` bytes, not the usual JSON envelope.\n\n**Requires a valid Bearer token** (any role \u2014 `CurrentUser`, no specific permission) or the API returns 401."
           },
           "response": []
         },
@@ -378,7 +378,7 @@
                 }
               ]
             },
-            "description": "Thermal-receipt variant of Get Invoice Document — see that request's description for the shared behavior. Response is `application/pdf` bytes, not the usual JSON envelope.\n\n**Requires a valid Bearer token** (any role — `CurrentUser`, no specific permission) or the API returns 401."
+            "description": "Thermal-receipt variant of Get Invoice Document \u2014 see that request's description for the shared behavior. Response is `application/pdf` bytes, not the usual JSON envelope.\n\n**Requires a valid Bearer token** (any role \u2014 `CurrentUser`, no specific permission) or the API returns 401."
           },
           "response": []
         },
@@ -414,7 +414,7 @@
                 "payments"
               ]
             },
-            "description": "Records a payment against an invoice (e.g. partial credit repayment). Blocked with 409 if the invoice is already cancelled or the amount exceeds the outstanding balance.\n\n**Requires the `billing:write` permission** in the token's `permissions` claim — granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role."
+            "description": "Records a payment against an invoice (e.g. partial credit repayment). Blocked with 409 if the invoice is already cancelled or the amount exceeds the outstanding balance.\n\n**Requires the `billing:write` permission** in the token's `permissions` claim \u2014 granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role."
           },
           "response": []
         },
@@ -436,12 +436,12 @@
                 "payments"
               ]
             },
-            "description": "List every payment recorded against an invoice.\n\n**Requires a valid Bearer token** (any role — `CurrentUser`, no specific permission) or the API returns 401."
+            "description": "List every payment recorded against an invoice.\n\n**Requires a valid Bearer token** (any role \u2014 `CurrentUser`, no specific permission) or the API returns 401."
           },
           "response": []
         }
       ],
-      "description": "Sale completion (invoice + payment creation), invoice reads, payment recording/history, invoice cancellation, and on-demand invoice PDF documents (A4 invoice / thermal receipt, rendered via the external document-server and cached). `/invoices` is the real \"list\" entry point — `GET /` stays the placeholder module-status stub since billing's root has no natural single-collection meaning the way `/invoices` does."
+      "description": "Sale completion (invoice + payment creation), invoice reads, payment recording/history, invoice cancellation, and on-demand invoice PDF documents (A4 invoice / thermal receipt, rendered via the external document-server and cached). `/invoices` is the real \"list\" entry point \u2014 `GET /` stays the placeholder module-status stub since billing's root has no natural single-collection meaning the way `/invoices` does."
     },
     {
       "name": "Customers",
@@ -561,7 +561,7 @@
                     }
                   ]
                 },
-                "description": "Hierarchical Inventory & Stock overview for the frontend accordion page: dashboard metrics (total items, category/subcategory counts, low-stock alerts), every category paired with its subcategories, and — per subcategory — a paginated (max 10/page) product data table. Backed by a single MongoDB `$facet` aggregation pipeline over `products` (see CLAUDE.md's \"MongoDB Aggregation Pipelines\" section) rather than one query per subcategory, so `page`/`limit` here apply uniformly to every subcategory table in the response.\n\n**Requires the `inventory:read` permission** — held by all three roles, so any logged-in user may call it. Returns 401 without a token."
+                "description": "Hierarchical Inventory & Stock overview for the frontend accordion page: dashboard metrics (total items, category/subcategory counts, low-stock alerts), every category paired with its subcategories, and \u2014 per subcategory \u2014 a paginated (max 10/page) product data table. Backed by a single MongoDB `$facet` aggregation pipeline over `products` (see CLAUDE.md's \"MongoDB Aggregation Pipelines\" section) rather than one query per subcategory, so `page`/`limit` here apply uniformly to every subcategory table in the response.\n\n**Requires the `inventory:read` permission** \u2014 held by all three roles, so any logged-in user may call it. Returns 401 without a token."
               },
               "response": []
             }
@@ -634,7 +634,7 @@
                     }
                   ]
                 },
-                "description": "List products with search, filters, pagination and sorting.\n\n**Requires the `inventory:read` permission** — held by all three roles, so any logged-in user may call it. Returns 401 without a token."
+                "description": "List products with search, filters, pagination and sorting.\n\n**Requires the `inventory:read` permission** \u2014 held by all three roles, so any logged-in user may call it. Returns 401 without a token."
               },
               "response": []
             },
@@ -655,7 +655,7 @@
                     "{{productId}}"
                   ]
                 },
-                "description": "Fetch a single product by its Mongo ObjectId.\n\n**Requires the `inventory:read` permission** — held by all three roles, so any logged-in user may call it. Returns 401 without a token."
+                "description": "Fetch a single product by its Mongo ObjectId.\n\n**Requires the `inventory:read` permission** \u2014 held by all three roles, so any logged-in user may call it. Returns 401 without a token."
               },
               "response": []
             },
@@ -705,7 +705,7 @@
                     "products"
                   ]
                 },
-                "description": "Create a new physical product. `categoryKey`/`subcategoryKey` must be a valid pair — the system-generated keys of an existing category/subcategory (see GET /categories/valid), never their display names. Prices are integer cents. `sku` is NOT sent — it's auto-generated server-side from the resolved category/subcategory names (e.g. \"PHO-SCR-0001\"); the request body has no field for it. For barcode generation, either set `autoGenerateBarcode: true` to have the server mint an EAN-13 barcode, or supply a manual `barcode` (8-14 numeric digits) — the two are mutually exclusive, and both may be omitted if the product doesn't need one yet. `suppliers`, if provided as a list of intakes with `supplierKey`, `quantity`, `costPriceCents`, `referenceNo`, and `notes`, will atomically link each supplier, record purchase history receipts, and compute the starting `stockQuantity` as the sum of all intake quantities. Like `sku`, `barcode` is immutable after creation.\n\n**Requires the `inventory:write` permission** — held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token."
+                "description": "Create a new physical product. `categoryKey`/`subcategoryKey` must be a valid pair \u2014 the system-generated keys of an existing category/subcategory (see GET /categories/valid), never their display names. Prices are integer cents. `sku` is NOT sent \u2014 it's auto-generated server-side from the resolved category/subcategory names (e.g. \"PHO-SCR-0001\"); the request body has no field for it. For barcode generation, either set `autoGenerateBarcode: true` to have the server mint an EAN-13 barcode, or supply a manual `barcode` (8-14 numeric digits) \u2014 the two are mutually exclusive, and both may be omitted if the product doesn't need one yet. `suppliers`, if provided as a list of intakes with `supplierKey`, `quantity`, `costPriceCents`, `referenceNo`, and `notes`, will atomically link each supplier, record purchase history receipts, and compute the starting `stockQuantity` as the sum of all intake quantities. Like `sku`, `barcode` is immutable after creation.\n\n**Requires the `inventory:write` permission** \u2014 held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token."
               },
               "response": []
             },
@@ -740,7 +740,7 @@
                     "{{productId}}"
                   ]
                 },
-                "description": "Partially update a product — omit any field to leave it unchanged. `barcode` is not editable via this endpoint (immutable after creation, same as `sku`).\n\n**Requires the `inventory:write` permission** — held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token."
+                "description": "Partially update a product \u2014 omit any field to leave it unchanged. `barcode` is not editable via this endpoint (immutable after creation, same as `sku`).\n\n**Requires the `inventory:write` permission** \u2014 held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token."
               },
               "response": []
             },
@@ -761,7 +761,7 @@
                     "{{productId}}"
                   ]
                 },
-                "description": "Delete a single product by id.\n\n**Requires the `inventory:write` permission** — held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token."
+                "description": "Delete a single product by id.\n\n**Requires the `inventory:write` permission** \u2014 held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token."
               },
               "response": []
             },
@@ -795,7 +795,7 @@
                     "products"
                   ]
                 },
-                "description": "Delete multiple products at once. Ids that fail to parse as ObjectId are silently skipped.\n\n**Requires the `inventory:write` permission** — held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token."
+                "description": "Delete multiple products at once. Ids that fail to parse as ObjectId are silently skipped.\n\n**Requires the `inventory:write` permission** \u2014 held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token."
               },
               "response": []
             }
@@ -836,7 +836,7 @@
                     "stock"
                   ]
                 },
-                "description": "Adjust a product's stock by a signed delta (positive = receipt, negative = consumption/sale).\n\n**Requires the `inventory:write` permission** — held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token."
+                "description": "Adjust a product's stock by a signed delta (positive = receipt, negative = consumption/sale).\n\n**Requires the `inventory:write` permission** \u2014 held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token."
               },
               "response": []
             },
@@ -857,7 +857,7 @@
                     "low-stock"
                   ]
                 },
-                "description": "List products at or below their minimum stock threshold.\n\n**Requires the `inventory:read` permission** — held by all three roles, so any logged-in user may call it. Returns 401 without a token."
+                "description": "List products at or below their minimum stock threshold.\n\n**Requires the `inventory:read` permission** \u2014 held by all three roles, so any logged-in user may call it. Returns 401 without a token."
               },
               "response": []
             },
@@ -879,7 +879,7 @@
                     "movements"
                   ]
                 },
-                "description": "Stock movement (audit trail) history for a single product.\n\n**Requires the `inventory:read` permission** — held by all three roles, so any logged-in user may call it. Returns 401 without a token."
+                "description": "Stock movement (audit trail) history for a single product.\n\n**Requires the `inventory:read` permission** \u2014 held by all three roles, so any logged-in user may call it. Returns 401 without a token."
               },
               "response": []
             },
@@ -923,7 +923,7 @@
                     }
                   ]
                 },
-                "description": "Paginated stock movement (audit trail) history across every product, optionally filtered by product and movement type. Use Product Stock Movements instead for a single product's unpaginated history.\n\n**Requires the `inventory:read` permission** — held by all three roles, so any logged-in user may call it. Returns 401 without a token."
+                "description": "Paginated stock movement (audit trail) history across every product, optionally filtered by product and movement type. Use Product Stock Movements instead for a single product's unpaginated history.\n\n**Requires the `inventory:read` permission** \u2014 held by all three roles, so any logged-in user may call it. Returns 401 without a token."
               },
               "response": []
             }
@@ -948,7 +948,7 @@
                     "categories"
                   ]
                 },
-                "description": "List all categories with their subcategories.\n\n**Requires the `inventory:read` permission** — held by all three roles, so any logged-in user may call it. Returns 401 without a token."
+                "description": "List all categories with their subcategories.\n\n**Requires the `inventory:read` permission** \u2014 held by all three roles, so any logged-in user may call it. Returns 401 without a token."
               },
               "response": []
             },
@@ -1000,7 +1000,7 @@
                     "categories"
                   ]
                 },
-                "description": "Create a new top-level category with its starter subcategories (by name — each becomes its own subcategory document with a generated key). The response's `key`/`subcategories[].key` are what other requests (Create Product, Update/Delete Category, Add/Remove Subcategory) must use — copy them into the `categoryKey`/`subcategoryKey` collection variables.\n\n**Requires admin JWT** (`role: admin` claim) — inherited Bearer token must be an admin token or the API returns 403 `ADMIN_REQUIRED`."
+                "description": "Create a new top-level category with its starter subcategories (by name \u2014 each becomes its own subcategory document with a generated key). The response's `key`/`subcategories[].key` are what other requests (Create Product, Update/Delete Category, Add/Remove Subcategory) must use \u2014 copy them into the `categoryKey`/`subcategoryKey` collection variables.\n\n**Requires admin JWT** (`role: admin` claim) \u2014 inherited Bearer token must be an admin token or the API returns 403 `ADMIN_REQUIRED`."
               },
               "response": []
             },
@@ -1035,7 +1035,7 @@
                     "{{categoryKey}}"
                   ]
                 },
-                "description": "Partially update a category, looked up by its key. Renaming `name` is a pure display-label change — products reference this category by its immutable key, so nothing else needs to change.\n\n**Requires admin JWT** (`role: admin` claim) — inherited Bearer token must be an admin token or the API returns 403 `ADMIN_REQUIRED`."
+                "description": "Partially update a category, looked up by its key. Renaming `name` is a pure display-label change \u2014 products reference this category by its immutable key, so nothing else needs to change.\n\n**Requires admin JWT** (`role: admin` claim) \u2014 inherited Bearer token must be an admin token or the API returns 403 `ADMIN_REQUIRED`."
               },
               "response": []
             },
@@ -1056,7 +1056,7 @@
                     "{{categoryKey}}"
                   ]
                 },
-                "description": "Delete a category, looked up by its key. Blocked with 409 while any product still references it; on success also deletes every subcategory under it.\n\n**Requires admin JWT** (`role: admin` claim) — inherited Bearer token must be an admin token or the API returns 403 `ADMIN_REQUIRED`."
+                "description": "Delete a category, looked up by its key. Blocked with 409 while any product still references it; on success also deletes every subcategory under it.\n\n**Requires admin JWT** (`role: admin` claim) \u2014 inherited Bearer token must be an admin token or the API returns 403 `ADMIN_REQUIRED`."
               },
               "response": []
             },
@@ -1077,7 +1077,7 @@
                     "valid"
                   ]
                 },
-                "description": "Category/subcategory key+name pairs (nested), for a client-side form that needs to display names while submitting `categoryKey`/`subcategoryKey` on product create/update.\n\n**Requires the `inventory:read` permission** — held by all three roles, so any logged-in user may call it. Returns 401 without a token."
+                "description": "Category/subcategory key+name pairs (nested), for a client-side form that needs to display names while submitting `categoryKey`/`subcategoryKey` on product create/update.\n\n**Requires the `inventory:read` permission** \u2014 held by all three roles, so any logged-in user may call it. Returns 401 without a token."
               },
               "response": []
             }
@@ -1104,7 +1104,7 @@
                     "subcategories"
                   ]
                 },
-                "description": "List the subcategories of a single category, looked up by its key.\n\n**Requires the `inventory:read` permission** — held by all three roles, so any logged-in user may call it. Returns 401 without a token."
+                "description": "List the subcategories of a single category, looked up by its key.\n\n**Requires the `inventory:read` permission** \u2014 held by all three roles, so any logged-in user may call it. Returns 401 without a token."
               },
               "response": []
             },
@@ -1155,7 +1155,7 @@
                     "subcategories"
                   ]
                 },
-                "description": "Add a new subcategory to a category (looked up by its key). The response includes the new subcategory's generated `key`.\n\n**Requires admin JWT** (`role: admin` claim) — inherited Bearer token must be an admin token or the API returns 403 `ADMIN_REQUIRED`."
+                "description": "Add a new subcategory to a category (looked up by its key). The response includes the new subcategory's generated `key`.\n\n**Requires admin JWT** (`role: admin` claim) \u2014 inherited Bearer token must be an admin token or the API returns 403 `ADMIN_REQUIRED`."
               },
               "response": []
             },
@@ -1178,14 +1178,14 @@
                     "{{subcategoryKey}}"
                   ]
                 },
-                "description": "Remove a subcategory (looked up by its key). Blocked with 409 while any product still references it.\n\n**Requires admin JWT** (`role: admin` claim) — inherited Bearer token must be an admin token or the API returns 403 `ADMIN_REQUIRED`."
+                "description": "Remove a subcategory (looked up by its key). Blocked with 409 while any product still references it.\n\n**Requires admin JWT** (`role: admin` claim) \u2014 inherited Bearer token must be an admin token or the API returns 403 `ADMIN_REQUIRED`."
               },
               "response": []
             }
           ]
         }
       ],
-      "description": "Reference module — full product CRUD, stock adjustment/movements, and category/subcategory management."
+      "description": "Reference module \u2014 full product CRUD, stock adjustment/movements, and category/subcategory management."
     },
     {
       "name": "Print Jobs",
@@ -1229,7 +1229,7 @@
                 }
               ]
             },
-            "description": "List print jobs with search, status filtering, and pagination. `GET /` used to be a static module-status placeholder — it is now this real, authenticated list endpoint (see CLAUDE.md's `app::build_router` public-routes note).\n\n**Requires a valid Bearer token** (any role — `CurrentUser`, no specific permission) or the API returns 401."
+            "description": "List print jobs with search, status filtering, and pagination. `GET /` used to be a static module-status placeholder \u2014 it is now this real, authenticated list endpoint (see CLAUDE.md's `app::build_router` public-routes note).\n\n**Requires a valid Bearer token** (any role \u2014 `CurrentUser`, no specific permission) or the API returns 401."
           },
           "response": []
         },
@@ -1260,7 +1260,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"customerName\": \"Nadeesha Perera\",\n  \"customerPhone\": \"0711234567\",\n  \"jobType\": \"mug\",\n  \"quantity\": 25,\n  \"estimatedCostCents\": 500000,\n  \"materialCostCents\": 200000\n}",
+              "raw": "{\n  \"customer\": {\n    \"customerName\": \"Nadeesha Perera\",\n    \"customerPhone\": \"0711234567\"\n  },\n  \"jobType\": \"mug\",\n  \"quantity\": 25,\n  \"estimatedCostCents\": 500000,\n  \"materialCostCents\": 200000\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1277,7 +1277,7 @@
                 "print-jobs"
               ]
             },
-            "description": "Create a print job ticket. `ticketNumber` is never client-supplied — reserved server-side on create. `jobType` must be one of `mug | t-shirt | handbill | banner | custom`; `status` defaults to `received` if omitted.\n\n**Requires the `print_jobs:write` permission** in the token's `permissions` claim — granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role. If `customerKey` is set, `customerName`/`customerPhone` in this request are ignored and resolved server-side from the linked `Customer` record instead — only used as typed when there's no `customerKey` (a walk-in with no linked account)."
+            "description": "Create a print job ticket. `ticketNumber` is never client-supplied \u2014 reserved server-side on create. `jobType` must be one of `mug | t-shirt | handbill | banner | custom`; `status` defaults to `received` if omitted. The request nests customer identity into `customer{customerKey, customerName, customerPhone}` and technician assignment into `assignment{assignedEmployeeId, assignedEmployeeName, splitType, splitValue}` (both optional groups). If `customer.customerKey` is set, `customer.customerName`/`customerPhone` in this request are ignored and resolved server-side from the linked `Customer` record instead \u2014 only used as typed when there's no `customerKey` (a walk-in with no linked account).\n\n**Requires the `print_jobs:write` permission** in the token's `permissions` claim \u2014 granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role."
           },
           "response": []
         },
@@ -1297,7 +1297,7 @@
                 "{{printJobKey}}"
               ]
             },
-            "description": "Fetch a single print job by its Mongo ObjectId or prefixed `key`.\n\n**Requires a valid Bearer token** (any role — `CurrentUser`, no specific permission) or the API returns 401."
+            "description": "Fetch a single print job by its Mongo ObjectId or prefixed `key`.\n\n**Requires a valid Bearer token** (any role \u2014 `CurrentUser`, no specific permission) or the API returns 401."
           },
           "response": []
         },
@@ -1331,7 +1331,7 @@
                 "{{printJobKey}}"
               ]
             },
-            "description": "Partially update a print job — omit any field to leave it unchanged.\n\n**Requires the `print_jobs:write` permission** in the token's `permissions` claim — granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role. If `customerKey` is set, `customerName`/`customerPhone` in this request are ignored and resolved server-side from the linked `Customer` record instead — only used as typed when there's no `customerKey` (a walk-in with no linked account)."
+            "description": "Partially update a print job \u2014 omit any field to leave it unchanged. The request nests customer identity into `customer{customerKey, customerName, customerPhone}` and technician assignment into `assignment{assignedEmployeeId, assignedEmployeeName, splitType, splitValue}` (both optional groups). If `customer.customerKey` is set, `customer.customerName`/`customerPhone` in this request are ignored and resolved server-side from the linked `Customer` record instead \u2014 only used as typed when there's no `customerKey` (a walk-in with no linked account).\n\n**Requires the `print_jobs:write` permission** in the token's `permissions` claim \u2014 granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role."
           },
           "response": []
         },
@@ -1351,12 +1351,12 @@
                 "{{printJobKey}}"
               ]
             },
-            "description": "Soft-deletes a print job (sets `deletedAt` so it can still appear as a sync tombstone).\n\n**Requires the `print_jobs:write` permission** in the token's `permissions` claim — granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role."
+            "description": "Soft-deletes a print job (sets `deletedAt` so it can still appear as a sync tombstone).\n\n**Requires the `print_jobs:write` permission** in the token's `permissions` claim \u2014 granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role."
           },
           "response": []
         }
       ],
-      "description": "Print job ticket CRUD (mug/t-shirt/handbill/banner/custom jobs). `GET /` is now the real list endpoint, not a status stub — see List Print Jobs' description."
+      "description": "Print job ticket CRUD (mug/t-shirt/handbill/banner/custom jobs). `GET /` is now the real list endpoint, not a status stub \u2014 see List Print Jobs' description."
     },
     {
       "name": "Repairs",
@@ -1400,7 +1400,7 @@
                 }
               ]
             },
-            "description": "List repair tickets with search, status filtering, and pagination. `GET /` used to be a static module-status placeholder — it is now this real, authenticated list endpoint (see CLAUDE.md's `app::build_router` public-routes note).\n\n**Requires a valid Bearer token** (any role — `CurrentUser`, no specific permission) or the API returns 401."
+            "description": "List repair tickets with search, status filtering, and pagination. `GET /` used to be a static module-status placeholder \u2014 it is now this real, authenticated list endpoint (see CLAUDE.md's `app::build_router` public-routes note).\n\n**Requires a valid Bearer token** (any role \u2014 `CurrentUser`, no specific permission) or the API returns 401."
           },
           "response": []
         },
@@ -1431,7 +1431,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"customerName\": \"Kasun Silva\",\n  \"customerPhone\": \"0771234567\",\n  \"deviceModel\": \"iPhone 14\",\n  \"serialNumber\": \"C02XG2AVJHD3\",\n  \"issueDescription\": \"Cracked screen, touch unresponsive in top corner\",\n  \"estimatedCostCents\": 850000\n}",
+              "raw": "{\n  \"customer\": {\n    \"customerName\": \"Kasun Silva\",\n    \"customerPhone\": \"0771234567\"\n  },\n  \"deviceModel\": \"iPhone 14\",\n  \"serialNumber\": \"C02XG2AVJHD3\",\n  \"issueDescription\": \"Cracked screen, touch unresponsive in top corner\",\n  \"estimatedCostCents\": 850000\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1448,7 +1448,7 @@
                 "repairs"
               ]
             },
-            "description": "Create a repair ticket. `ticketNumber` is never client-supplied — reserved server-side on create. `status` defaults to `received` if omitted.\n\n**Requires the `repairs:write` permission** in the token's `permissions` claim — granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role. If `customerKey` is set, `customerName`/`customerPhone` in this request are ignored and resolved server-side from the linked `Customer` record instead — only used as typed when there's no `customerKey` (a walk-in with no linked account)."
+            "description": "Create a repair ticket. `ticketNumber` is never client-supplied \u2014 reserved server-side on create. `status` defaults to `received` if omitted. The request nests customer identity into `customer{customerKey, customerName, customerPhone}` and technician assignment into `assignment{assignedEmployeeId, assignedEmployeeName, splitType, splitValue}` (both optional groups). If `customer.customerKey` is set, `customer.customerName`/`customerPhone` in this request are ignored and resolved server-side from the linked `Customer` record instead \u2014 only used as typed when there's no `customerKey` (a walk-in with no linked account).\n\n**Requires the `repairs:write` permission** in the token's `permissions` claim \u2014 granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role."
           },
           "response": []
         },
@@ -1468,7 +1468,7 @@
                 "{{repairKey}}"
               ]
             },
-            "description": "Fetch a single repair ticket by its Mongo ObjectId or prefixed `key`.\n\n**Requires a valid Bearer token** (any role — `CurrentUser`, no specific permission) or the API returns 401."
+            "description": "Fetch a single repair ticket by its Mongo ObjectId or prefixed `key`.\n\n**Requires a valid Bearer token** (any role \u2014 `CurrentUser`, no specific permission) or the API returns 401."
           },
           "response": []
         },
@@ -1502,7 +1502,7 @@
                 "{{repairKey}}"
               ]
             },
-            "description": "Partially update a repair ticket — omit any field to leave it unchanged.\n\n**Requires the `repairs:write` permission** in the token's `permissions` claim — granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role. If `customerKey` is set, `customerName`/`customerPhone` in this request are ignored and resolved server-side from the linked `Customer` record instead — only used as typed when there's no `customerKey` (a walk-in with no linked account)."
+            "description": "Partially update a repair ticket \u2014 omit any field to leave it unchanged. The request nests customer identity into `customer{customerKey, customerName, customerPhone}` and technician assignment into `assignment{assignedEmployeeId, assignedEmployeeName, splitType, splitValue}` (both optional groups). If `customer.customerKey` is set, `customer.customerName`/`customerPhone` in this request are ignored and resolved server-side from the linked `Customer` record instead \u2014 only used as typed when there's no `customerKey` (a walk-in with no linked account).\n\n**Requires the `repairs:write` permission** in the token's `permissions` claim \u2014 granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role."
           },
           "response": []
         },
@@ -1522,12 +1522,12 @@
                 "{{repairKey}}"
               ]
             },
-            "description": "Soft-deletes a repair ticket (sets `deletedAt` so it can still appear as a sync tombstone).\n\n**Requires the `repairs:write` permission** in the token's `permissions` claim — granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role."
+            "description": "Soft-deletes a repair ticket (sets `deletedAt` so it can still appear as a sync tombstone).\n\n**Requires the `repairs:write` permission** in the token's `permissions` claim \u2014 granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role."
           },
           "response": []
         }
       ],
-      "description": "Repair ticket CRUD. `GET /` is now the real list endpoint, not a status stub — see List Repairs' description."
+      "description": "Repair ticket CRUD. `GET /` is now the real list endpoint, not a status stub \u2014 see List Repairs' description."
     },
     {
       "name": "Reports",
@@ -1585,7 +1585,7 @@
                 }
               ]
             },
-            "description": "List all suppliers (not paginated).\n\n**Requires Admin JWT** (`role: admin` claim) — every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
+            "description": "List all suppliers (not paginated).\n\n**Requires Admin JWT** (`role: admin` claim) \u2014 every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
           },
           "response": []
         },
@@ -1634,7 +1634,7 @@
                 "suppliers"
               ]
             },
-            "description": "Create a new supplier. `key` is server-generated, never client-supplied. The response's `key` is what Supplier Products/Purchases requests reference — copy it into the `supplierKey` collection variable (and the `id` into `supplierId`).\n\n**Requires Admin JWT** (`role: admin` claim) — every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
+            "description": "Create a new supplier. `key` is server-generated, never client-supplied. The response's `key` is what Supplier Products/Purchases requests reference \u2014 copy it into the `supplierKey` collection variable (and the `id` into `supplierId`).\n\n**Requires Admin JWT** (`role: admin` claim) \u2014 every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
           },
           "response": []
         },
@@ -1654,7 +1654,7 @@
                 "{{supplierId}}"
               ]
             },
-            "description": "Fetch a single supplier by its Mongo ObjectId.\n\n**Requires Admin JWT** (`role: admin` claim) — every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
+            "description": "Fetch a single supplier by its Mongo ObjectId.\n\n**Requires Admin JWT** (`role: admin` claim) \u2014 every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
           },
           "response": []
         },
@@ -1688,7 +1688,7 @@
                 "{{supplierId}}"
               ]
             },
-            "description": "Full replace — same shape as Create Supplier. Any optional field (secondaryPhone/email/notes) omitted from the body is cleared, unlike Update Supplier (PATCH) which leaves omitted fields untouched.\n\n**Requires Admin JWT** (`role: admin` claim) — every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
+            "description": "Full replace \u2014 same shape as Create Supplier. Any optional field (secondaryPhone/email/notes) omitted from the body is cleared, unlike Update Supplier (PATCH) which leaves omitted fields untouched.\n\n**Requires Admin JWT** (`role: admin` claim) \u2014 every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
           },
           "response": []
         },
@@ -1722,7 +1722,7 @@
                 "{{supplierId}}"
               ]
             },
-            "description": "Partial update — omit any field to leave it unchanged.\n\n**Requires Admin JWT** (`role: admin` claim) — every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
+            "description": "Partial update \u2014 omit any field to leave it unchanged.\n\n**Requires Admin JWT** (`role: admin` claim) \u2014 every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
           },
           "response": []
         },
@@ -1742,7 +1742,7 @@
                 "{{supplierId}}"
               ]
             },
-            "description": "Delete a single supplier by id. Cascades to remove its Supplier Product links. Blocked with 409 `SUPPLIER_HAS_PURCHASES` while any purchase still references it.\n\n**Requires Admin JWT** (`role: admin` claim) — every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
+            "description": "Delete a single supplier by id. Cascades to remove its Supplier Product links. Blocked with 409 `SUPPLIER_HAS_PURCHASES` while any purchase still references it.\n\n**Requires Admin JWT** (`role: admin` claim) \u2014 every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
           },
           "response": []
         },
@@ -1776,7 +1776,7 @@
                 "batch"
               ]
             },
-            "description": "Delete multiple suppliers at once. Ids that fail to parse as ObjectId, don't resolve, or are blocked by the purchase-history guard are silently skipped — the response count reflects only what was actually deleted.\n\n**Requires Admin JWT** (`role: admin` claim) — every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
+            "description": "Delete multiple suppliers at once. Ids that fail to parse as ObjectId, don't resolve, or are blocked by the purchase-history guard are silently skipped \u2014 the response count reflects only what was actually deleted.\n\n**Requires Admin JWT** (`role: admin` claim) \u2014 every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
           },
           "response": []
         },
@@ -1796,12 +1796,12 @@
                 "categories"
               ]
             },
-            "description": "Every distinct `suppliedCategories` tag currently in use across all suppliers, for autocomplete.\n\n**Requires Admin JWT** (`role: admin` claim) — every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
+            "description": "Every distinct `suppliedCategories` tag currently in use across all suppliers, for autocomplete.\n\n**Requires Admin JWT** (`role: admin` claim) \u2014 every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
           },
           "response": []
         }
       ],
-      "description": "Supplier CRUD: contact/business info plus the free-text category tags a supplier deals in. Every route (reads included) requires Admin — see the Admin note on each request."
+      "description": "Supplier CRUD: contact/business info plus the free-text category tags a supplier deals in. Every route (reads included) requires Admin \u2014 see the Admin note on each request."
     },
     {
       "name": "Supplier Products",
@@ -1845,7 +1845,7 @@
                 }
               ]
             },
-            "description": "Lists links scoped to a supplier, a product, or their intersection. At least one of supplierKey/productKey is required (400 otherwise).\n\n**Requires Admin JWT** (`role: admin` claim) — every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
+            "description": "Lists links scoped to a supplier, a product, or their intersection. At least one of supplierKey/productKey is required (400 otherwise).\n\n**Requires Admin JWT** (`role: admin` claim) \u2014 every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
           },
           "response": []
         },
@@ -1878,7 +1878,7 @@
                 "supplier-products"
               ]
             },
-            "description": "Links a supplier to a product. If the (supplierKey, productKey) pair already has a link, updates its costPriceCents/notes in place instead of creating a duplicate. Both keys must reference existing documents (404 otherwise).\n\n**Requires Admin JWT** (`role: admin` claim) — every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
+            "description": "Links a supplier to a product. If the (supplierKey, productKey) pair already has a link, updates its costPriceCents/notes in place instead of creating a duplicate. Both keys must reference existing documents (404 otherwise).\n\n**Requires Admin JWT** (`role: admin` claim) \u2014 every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
           },
           "response": []
         },
@@ -1899,7 +1899,7 @@
                 "{{productKey}}"
               ]
             },
-            "description": "Removes a supplier-product link. 404 `SUPPLIER_PRODUCT_LINK_NOT_FOUND` if no such link exists.\n\n**Requires Admin JWT** (`role: admin` claim) — every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
+            "description": "Removes a supplier-product link. 404 `SUPPLIER_PRODUCT_LINK_NOT_FOUND` if no such link exists.\n\n**Requires Admin JWT** (`role: admin` claim) \u2014 every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
           },
           "response": []
         },
@@ -1934,12 +1934,12 @@
                 "{{supplierKey}}"
               ]
             },
-            "description": "Replaces every product link for a supplier with the given set of productKeys. Links for product keys that already existed keep their costPriceCents/notes; ones no longer listed are removed.\n\n**Requires Admin JWT** (`role: admin` claim) — every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
+            "description": "Replaces every product link for a supplier with the given set of productKeys. Links for product keys that already existed keep their costPriceCents/notes; ones no longer listed are removed.\n\n**Requires Admin JWT** (`role: admin` claim) \u2014 every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
           },
           "response": []
         }
       ],
-      "description": "The many-to-many join between suppliers and inventory products. Every route (reads included) requires Admin — see the Admin note on each request."
+      "description": "The many-to-many join between suppliers and inventory products. Every route (reads included) requires Admin \u2014 see the Admin note on each request."
     },
     {
       "name": "Purchases",
@@ -1983,7 +1983,7 @@
                 }
               ]
             },
-            "description": "Purchase history scoped to a supplier, a product, or their intersection — enriched with supplier/product display data. At least one of supplierKey/productKey is required (400 otherwise).\n\n**Requires Admin JWT** (`role: admin` claim) — every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
+            "description": "Purchase history scoped to a supplier, a product, or their intersection \u2014 enriched with supplier/product display data. At least one of supplierKey/productKey is required (400 otherwise).\n\n**Requires Admin JWT** (`role: admin` claim) \u2014 every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
           },
           "response": []
         },
@@ -2016,12 +2016,12 @@
                 "purchases"
               ]
             },
-            "description": "Records a stock intake from a supplier. Also increments the product's stockQuantity and writes a PurchaseReceipt stock movement (see Inventory > Stock > Product Stock Movements). Both keys must reference existing documents (404 otherwise).\n\n**Requires Admin JWT** (`role: admin` claim) — every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
+            "description": "Records a stock intake from a supplier. Also increments the product's stockQuantity and writes a PurchaseReceipt stock movement (see Inventory > Stock > Product Stock Movements). Both keys must reference existing documents (404 otherwise).\n\n**Requires Admin JWT** (`role: admin` claim) \u2014 every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
           },
           "response": []
         }
       ],
-      "description": "Supplier purchase / stock-intake history — recording a stock receipt also bumps the referenced product's stock in Inventory. Every route (reads included) requires Admin — see the Admin note on each request."
+      "description": "Supplier purchase / stock-intake history \u2014 recording a stock receipt also bumps the referenced product's stock in Inventory. Every route (reads included) requires Admin \u2014 see the Admin note on each request."
     },
     {
       "name": "Sync",
@@ -2068,7 +2068,7 @@
                 }
               ]
             },
-            "description": "Delta sync feed for offline-first clients. Pass `cursors` (JSON map or comma-delimited `resource=cursor,...`) to resume per-resource, or `since` as a shorthand single cursor when syncing one resource. `limit=0` returns no items but still reports `nextCursor` pointing at the newest row — use this after taking a snapshot via the plain REST list endpoints to start incremental syncing without replaying the whole collection. Paging is oldest-first by `(updatedAt, key)`, and deleted rows are returned as tombstone keys under each resource's `deleted` list — see CLAUDE.md's \"Offline sync\" section.\n\n**Requires a valid Bearer token** (any role — `CurrentUser`, no specific permission) or the API returns 401."
+            "description": "Delta sync feed for offline-first clients. Pass `cursors` (JSON map or comma-delimited `resource=cursor,...`) to resume per-resource, or `since` as a shorthand single cursor when syncing one resource. `limit=0` returns no items but still reports `nextCursor` pointing at the newest row \u2014 use this after taking a snapshot via the plain REST list endpoints to start incremental syncing without replaying the whole collection. Paging is oldest-first by `(updatedAt, key)`, and deleted rows are returned as tombstone keys under each resource's `deleted` list \u2014 see CLAUDE.md's \"Offline sync\" section.\n\n**Requires a valid Bearer token** (any role \u2014 `CurrentUser`, no specific permission) or the API returns 401."
           },
           "response": []
         },
@@ -2088,7 +2088,7 @@
                 "status"
               ]
             },
-            "description": "Per-resource watermark: the newest `updatedAt` and its cursor for every syncable resource. A client adopts these cursors directly right after taking a full snapshot via the plain REST list endpoints, so its first `GET /sync/changes` call is a true delta — deriving a starting cursor from `/sync/changes` itself isn't possible, since that endpoint pages oldest-first and would hand back the *first* row's cursor instead.\n\n**Requires a valid Bearer token** (any role — `CurrentUser`, no specific permission) or the API returns 401."
+            "description": "Per-resource watermark: the newest `updatedAt` and its cursor for every syncable resource. A client adopts these cursors directly right after taking a full snapshot via the plain REST list endpoints, so its first `GET /sync/changes` call is a true delta \u2014 deriving a starting cursor from `/sync/changes` itself isn't possible, since that endpoint pages oldest-first and would hand back the *first* row's cursor instead.\n\n**Requires a valid Bearer token** (any role \u2014 `CurrentUser`, no specific permission) or the API returns 401."
           },
           "response": []
         }
@@ -2127,7 +2127,7 @@
                 }
               ]
             },
-            "description": "List user accounts (not paginated — a shop's staff roster is small). An Admin's list never includes the Admin account; a Manager's list is filtered to Staff accounts only (any `role` query param a Manager sends is ignored in favor of that).\n\n**Requires `users:manage` (Admin) or `users:manage:staff` (Manager)** in the token's `permissions` claim, or the API returns 403 `PERMISSION_DENIED`. Scope beyond that gate is role-based: an Admin may create/view/edit/delete Manager and Staff accounts; a Manager may do the same to Staff accounts only. An Admin account is never reachable through this endpoint by anyone — not even by another Admin, and not even by itself — this is a single-shop deployment with exactly one Admin, bootstrapped via `cargo run --bin seed_admin` and otherwise untouchable via the API."
+            "description": "List user accounts (not paginated \u2014 a shop's staff roster is small). An Admin's list never includes the Admin account; a Manager's list is filtered to Staff accounts only (any `role` query param a Manager sends is ignored in favor of that).\n\n**Requires `users:manage` (Admin) or `users:manage:staff` (Manager)** in the token's `permissions` claim, or the API returns 403 `PERMISSION_DENIED`. Scope beyond that gate is role-based: an Admin may create/view/edit/delete Manager and Staff accounts; a Manager may do the same to Staff accounts only. An Admin account is never reachable through this endpoint by anyone \u2014 not even by another Admin, and not even by itself \u2014 this is a single-shop deployment with exactly one Admin, bootstrapped via `cargo run --bin seed_admin` and otherwise untouchable via the API."
           },
           "response": []
         },
@@ -2175,7 +2175,7 @@
                 "users"
               ]
             },
-            "description": "Creates a new user account — admin-provisioned only, there is no public self-registration endpoint. `role` must be within what the caller may create (Admin: manager/staff; Manager: staff) — requesting `admin`, or a role outside the caller's scope, is rejected with 403 `PERMISSION_DENIED`, not just 401. Its default permission set is computed fresh at that user's next login, never stored on the account.\n\n**Requires `users:manage` (Admin) or `users:manage:staff` (Manager)** in the token's `permissions` claim, or the API returns 403 `PERMISSION_DENIED`. Scope beyond that gate is role-based: an Admin may create/view/edit/delete Manager and Staff accounts; a Manager may do the same to Staff accounts only. An Admin account is never reachable through this endpoint by anyone — not even by another Admin, and not even by itself — this is a single-shop deployment with exactly one Admin, bootstrapped via `cargo run --bin seed_admin` and otherwise untouchable via the API."
+            "description": "Creates a new user account \u2014 admin-provisioned only, there is no public self-registration endpoint. `role` must be within what the caller may create (Admin: manager/staff; Manager: staff) \u2014 requesting `admin`, or a role outside the caller's scope, is rejected with 403 `PERMISSION_DENIED`, not just 401. Its default permission set is computed fresh at that user's next login, never stored on the account.\n\n**Requires `users:manage` (Admin) or `users:manage:staff` (Manager)** in the token's `permissions` claim, or the API returns 403 `PERMISSION_DENIED`. Scope beyond that gate is role-based: an Admin may create/view/edit/delete Manager and Staff accounts; a Manager may do the same to Staff accounts only. An Admin account is never reachable through this endpoint by anyone \u2014 not even by another Admin, and not even by itself \u2014 this is a single-shop deployment with exactly one Admin, bootstrapped via `cargo run --bin seed_admin` and otherwise untouchable via the API."
           },
           "response": []
         },
@@ -2195,7 +2195,7 @@
                 "{{userId}}"
               ]
             },
-            "description": "Fetch a single user account by its Mongo ObjectId. Returns 404 (not 403) if `{{userId}}` resolves to an account outside what the caller may manage — including an Admin account, which reads as \"not found\" to every caller, Admin included.\n\n**Requires `users:manage` (Admin) or `users:manage:staff` (Manager)** in the token's `permissions` claim, or the API returns 403 `PERMISSION_DENIED`. Scope beyond that gate is role-based: an Admin may create/view/edit/delete Manager and Staff accounts; a Manager may do the same to Staff accounts only. An Admin account is never reachable through this endpoint by anyone — not even by another Admin, and not even by itself — this is a single-shop deployment with exactly one Admin, bootstrapped via `cargo run --bin seed_admin` and otherwise untouchable via the API."
+            "description": "Fetch a single user account by its Mongo ObjectId. Returns 404 (not 403) if `{{userId}}` resolves to an account outside what the caller may manage \u2014 including an Admin account, which reads as \"not found\" to every caller, Admin included.\n\n**Requires `users:manage` (Admin) or `users:manage:staff` (Manager)** in the token's `permissions` claim, or the API returns 403 `PERMISSION_DENIED`. Scope beyond that gate is role-based: an Admin may create/view/edit/delete Manager and Staff accounts; a Manager may do the same to Staff accounts only. An Admin account is never reachable through this endpoint by anyone \u2014 not even by another Admin, and not even by itself \u2014 this is a single-shop deployment with exactly one Admin, bootstrapped via `cargo run --bin seed_admin` and otherwise untouchable via the API."
           },
           "response": []
         },
@@ -2229,7 +2229,7 @@
                 "{{userId}}"
               ]
             },
-            "description": "Partial update — omit any field to leave it unchanged. `password` present means rehash to the new value (takes effect on that user's next login); `isActive: false` deactivates the account, blocking both future logins and its already-issued tokens' next `GET /auth/me` call. A `role` change is checked the same way Create User's `role` is — e.g. a Manager can never promote a Staff account to Manager, and no one can ever set `role: admin`.\n\n**Requires `users:manage` (Admin) or `users:manage:staff` (Manager)** in the token's `permissions` claim, or the API returns 403 `PERMISSION_DENIED`. Scope beyond that gate is role-based: an Admin may create/view/edit/delete Manager and Staff accounts; a Manager may do the same to Staff accounts only. An Admin account is never reachable through this endpoint by anyone — not even by another Admin, and not even by itself — this is a single-shop deployment with exactly one Admin, bootstrapped via `cargo run --bin seed_admin` and otherwise untouchable via the API."
+            "description": "Partial update \u2014 omit any field to leave it unchanged. `password` present means rehash to the new value (takes effect on that user's next login); `isActive: false` deactivates the account, blocking both future logins and its already-issued tokens' next `GET /auth/me` call. A `role` change is checked the same way Create User's `role` is \u2014 e.g. a Manager can never promote a Staff account to Manager, and no one can ever set `role: admin`.\n\n**Requires `users:manage` (Admin) or `users:manage:staff` (Manager)** in the token's `permissions` claim, or the API returns 403 `PERMISSION_DENIED`. Scope beyond that gate is role-based: an Admin may create/view/edit/delete Manager and Staff accounts; a Manager may do the same to Staff accounts only. An Admin account is never reachable through this endpoint by anyone \u2014 not even by another Admin, and not even by itself \u2014 this is a single-shop deployment with exactly one Admin, bootstrapped via `cargo run --bin seed_admin` and otherwise untouchable via the API."
           },
           "response": []
         },
@@ -2249,7 +2249,7 @@
                 "{{userId}}"
               ]
             },
-            "description": "Delete a user account. Returns 404 (not 403) if `{{userId}}` is outside what the caller may manage — since no role is ever able to manage its own role (Admin doesn't manage Admin, Manager doesn't manage Manager), this also means a caller can never delete their own account through this endpoint; it 404s the same as targeting anyone else out of scope.\n\n**Requires `users:manage` (Admin) or `users:manage:staff` (Manager)** in the token's `permissions` claim, or the API returns 403 `PERMISSION_DENIED`. Scope beyond that gate is role-based: an Admin may create/view/edit/delete Manager and Staff accounts; a Manager may do the same to Staff accounts only. An Admin account is never reachable through this endpoint by anyone — not even by another Admin, and not even by itself — this is a single-shop deployment with exactly one Admin, bootstrapped via `cargo run --bin seed_admin` and otherwise untouchable via the API."
+            "description": "Delete a user account. Returns 404 (not 403) if `{{userId}}` is outside what the caller may manage \u2014 since no role is ever able to manage its own role (Admin doesn't manage Admin, Manager doesn't manage Manager), this also means a caller can never delete their own account through this endpoint; it 404s the same as targeting anyone else out of scope.\n\n**Requires `users:manage` (Admin) or `users:manage:staff` (Manager)** in the token's `permissions` claim, or the API returns 403 `PERMISSION_DENIED`. Scope beyond that gate is role-based: an Admin may create/view/edit/delete Manager and Staff accounts; a Manager may do the same to Staff accounts only. An Admin account is never reachable through this endpoint by anyone \u2014 not even by another Admin, and not even by itself \u2014 this is a single-shop deployment with exactly one Admin, bootstrapped via `cargo run --bin seed_admin` and otherwise untouchable via the API."
           },
           "response": []
         }
@@ -2271,57 +2271,57 @@
     {
       "key": "productId",
       "value": "65f1a2b3c4d5e6f7a8b9c0d1",
-      "description": "Sample product ObjectId — replace with a real id from List Products."
+      "description": "Sample product ObjectId \u2014 replace with a real id from List Products."
     },
     {
       "key": "categoryKey",
       "value": "cat_xxxxxxxxxxxxxxxx",
-      "description": "A category's system-generated `key` (seeded via `cargo run --bin seed_providers`) — grab a real value from the List Categories / Create Category / Valid Categories response, never the display name."
+      "description": "A category's system-generated `key` (seeded via `cargo run --bin seed_providers`) \u2014 grab a real value from the List Categories / Create Category / Valid Categories response, never the display name."
     },
     {
       "key": "subcategoryKey",
       "value": "subcat_xxxxxxxxxxxxxxxx",
-      "description": "A subcategory's system-generated `key`, valid under categoryKey — grab a real value from the same responses as categoryKey, never the display name."
+      "description": "A subcategory's system-generated `key`, valid under categoryKey \u2014 grab a real value from the same responses as categoryKey, never the display name."
     },
     {
       "key": "productKey",
       "value": "prod_xxxxxxxxxxxxxxxx",
-      "description": "A product's system-generated `key` (from List/Get/Create Product) — used by Supplier Products/Purchases requests, never the raw productId."
+      "description": "A product's system-generated `key` (from List/Get/Create Product) \u2014 used by Supplier Products/Purchases requests, never the raw productId."
     },
     {
       "key": "customerKey",
       "value": "cus_xxxxxxxxxxxxxxxx",
-      "description": "A customer's system-generated `key` — grab a real value from a Customers response once that module's real endpoints are added to this collection; used to scope Billing > List Invoices and to link a sale to a customer in Complete Sale."
+      "description": "A customer's system-generated `key` \u2014 grab a real value from a Customers response once that module's real endpoints are added to this collection; used to scope Billing > List Invoices and to link a sale to a customer in Complete Sale."
     },
     {
       "key": "supplierId",
       "value": "65f1a2b3c4d5e6f7a8b9c0d1",
-      "description": "Sample supplier ObjectId — replace with a real id from List Suppliers / Create Supplier."
+      "description": "Sample supplier ObjectId \u2014 replace with a real id from List Suppliers / Create Supplier."
     },
     {
       "key": "supplierKey",
       "value": "sup_xxxxxxxxxxxxxxxx",
-      "description": "A supplier's system-generated `key` (from List/Get/Create Supplier) — used by Supplier Products/Purchases requests, never the raw supplierId."
+      "description": "A supplier's system-generated `key` (from List/Get/Create Supplier) \u2014 used by Supplier Products/Purchases requests, never the raw supplierId."
     },
     {
       "key": "userId",
       "value": "65f1a2b3c4d5e6f7a8b9c0d1",
-      "description": "A user account's Mongo ObjectId (from Login's response, or List/Create User) — used by Get/Update/Delete User and to filter List Login Sessions."
+      "description": "A user account's Mongo ObjectId (from Login's response, or List/Create User) \u2014 used by Get/Update/Delete User and to filter List Login Sessions."
     },
     {
       "key": "invoiceKey",
       "value": "inv_xxxxxxxxxxxxxxxx",
-      "description": "An invoice's system-generated `key` (from Complete Sale / List/Get Invoice) — used by the invoice-scoped Billing requests below."
+      "description": "An invoice's system-generated `key` (from Complete Sale / List/Get Invoice) \u2014 used by the invoice-scoped Billing requests below."
     },
     {
       "key": "printJobKey",
       "value": "prj_xxxxxxxxxxxxxxxx",
-      "description": "A print job's system-generated `key` (from List/Get/Create Print Job) — used by Get/Update/Delete Print Job."
+      "description": "A print job's system-generated `key` (from List/Get/Create Print Job) \u2014 used by Get/Update/Delete Print Job."
     },
     {
       "key": "repairKey",
       "value": "rep_xxxxxxxxxxxxxxxx",
-      "description": "A repair ticket's system-generated `key` (from List/Get/Create Repair) — used by Get/Update/Delete Repair."
+      "description": "A repair ticket's system-generated `key` (from List/Get/Create Repair) \u2014 used by Get/Update/Delete Repair."
     }
   ]
 }

@@ -17,7 +17,8 @@ use crate::{
     },
     domain::{
         repairs::{
-            CreateRepairRequest, Repair, RepairListQuery, RepairListResponse, UpdateRepairRequest,
+            CreateRepairRequest, Repair, RepairAssignment, RepairListQuery, RepairListResponse,
+            UpdateRepairRequest,
         },
         sequences::ReserveSequenceRequest,
     },
@@ -170,9 +171,9 @@ pub async fn create_repair(
 
     let (customer_name, customer_phone) = resolve_customer_name_phone(
         db,
-        body.customer_key.as_deref(),
-        body.customer_name,
-        body.customer_phone,
+        body.customer.customer_key.as_deref(),
+        body.customer.customer_name.unwrap_or_default(),
+        body.customer.customer_phone.unwrap_or_default(),
     )
     .await?;
 
@@ -183,6 +184,14 @@ pub async fn create_repair(
         &body.issue_description,
         body.estimated_cost_cents,
     )?;
+
+    let assignment = body.assignment.unwrap_or_default();
+    let RepairAssignment {
+        assigned_employee_id,
+        assigned_employee_name,
+        split_type,
+        split_value,
+    } = assignment;
 
     let reservation = sequences::service::reserve_sequence(
         db,
@@ -205,7 +214,7 @@ pub async fn create_repair(
         id: None,
         key: generate_id(prefixes::REPAIR),
         ticket_number,
-        customer_key: body.customer_key,
+        customer_key: body.customer.customer_key,
         customer_name: customer_name.trim().to_string(),
         customer_phone: customer_phone.trim().to_string(),
         device_model: body.device_model,
@@ -214,10 +223,10 @@ pub async fn create_repair(
         status,
         estimated_cost_cents: body.estimated_cost_cents,
         material_cost_cents: body.material_cost_cents,
-        assigned_employee_id: body.assigned_employee_id,
-        assigned_employee_name: body.assigned_employee_name,
-        split_type: body.split_type,
-        split_value: body.split_value,
+        assigned_employee_id,
+        assigned_employee_name,
+        split_type,
+        split_value,
         version: 1,
         created_at: now,
         updated_at: now,
@@ -244,12 +253,16 @@ pub async fn update_repair(
         .id
         .expect("persisted repair document must have an _id");
 
-    let effective_customer_key = body.customer_key.clone().or(existing.customer_key.clone());
+    let customer = body.customer.unwrap_or_default();
+    let effective_customer_key = customer
+        .customer_key
+        .clone()
+        .or(existing.customer_key.clone());
     let (customer_name, customer_phone) = resolve_customer_name_phone(
         db,
         effective_customer_key.as_deref(),
-        body.customer_name.unwrap_or(existing.customer_name),
-        body.customer_phone.unwrap_or(existing.customer_phone),
+        customer.customer_name.unwrap_or(existing.customer_name),
+        customer.customer_phone.unwrap_or(existing.customer_phone),
     )
     .await?;
     let device_model = body.device_model.unwrap_or(existing.device_model);
@@ -277,7 +290,7 @@ pub async fn update_repair(
         "status": &status,
         "updated_at": BsonDateTime::now(),
     };
-    if let Some(key) = body.customer_key {
+    if let Some(key) = effective_customer_key {
         set_doc.insert("customer_key", key);
     }
     if let Some(sn) = body.serial_number {
@@ -286,17 +299,19 @@ pub async fn update_repair(
     if let Some(mc) = body.material_cost_cents {
         set_doc.insert("material_cost_cents", mc);
     }
-    if let Some(eid) = body.assigned_employee_id {
-        set_doc.insert("assigned_employee_id", eid);
-    }
-    if let Some(ename) = body.assigned_employee_name {
-        set_doc.insert("assigned_employee_name", ename);
-    }
-    if let Some(st) = body.split_type {
-        set_doc.insert("split_type", st);
-    }
-    if let Some(sv) = body.split_value {
-        set_doc.insert("split_value", sv);
+    if let Some(assignment) = body.assignment {
+        if let Some(eid) = assignment.assigned_employee_id {
+            set_doc.insert("assigned_employee_id", eid);
+        }
+        if let Some(ename) = assignment.assigned_employee_name {
+            set_doc.insert("assigned_employee_name", ename);
+        }
+        if let Some(st) = assignment.split_type {
+            set_doc.insert("split_type", st);
+        }
+        if let Some(sv) = assignment.split_value {
+            set_doc.insert("split_value", sv);
+        }
     }
     if let Some(device) = device_id {
         set_doc.insert("updated_by_device", device);

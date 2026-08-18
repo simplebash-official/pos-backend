@@ -77,7 +77,7 @@ fn unprivileged_token(config: &jana2u_pos_backend::core::config::Config) -> Stri
 
 fn sample_print_job_payload() -> Value {
     json!({
-        "customerName": "Nadeesha Perera",
+        "customer": { "customerName": "Nadeesha Perera" },
         "jobType": "t-shirt",
         "quantity": 12,
         "estimatedCostCents": 240000,
@@ -237,7 +237,7 @@ async fn list_print_jobs_filters_by_search_and_status() {
 
     let unique = uuid::Uuid::new_v4().to_string()[..8].to_string();
     let mut payload = sample_print_job_payload();
-    payload["customerName"] = json!(format!("Findable-{unique}"));
+    payload["customer"]["customerName"] = json!(format!("Findable-{unique}"));
     send_authed(
         &app.router,
         "POST",
@@ -344,9 +344,11 @@ async fn create_print_job_with_customer_key_resolves_name_and_phone_from_custome
         "POST",
         "/api/print-jobs",
         Some(json!({
-            "customerKey": customer_key,
-            "customerName": "Wrong Name",
-            "customerPhone": "0009999999",
+            "customer": {
+                "customerKey": customer_key,
+                "customerName": "Wrong Name",
+                "customerPhone": "0009999999",
+            },
             "jobType": "t-shirt",
             "quantity": 12,
             "estimatedCostCents": 240000,
@@ -382,9 +384,11 @@ async fn update_print_job_with_customer_key_resolves_name_and_phone_from_custome
         "PATCH",
         &format!("/api/print-jobs/{key}"),
         Some(json!({
-            "customerKey": customer_key,
-            "customerName": "Wrong Name",
-            "customerPhone": "0009999999",
+            "customer": {
+                "customerKey": customer_key,
+                "customerName": "Wrong Name",
+                "customerPhone": "0009999999",
+            },
         })),
         &token,
     )
