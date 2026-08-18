@@ -61,10 +61,20 @@ const PUBLIC_ROUTES: &[(&str, &str)] = &[
 async fn build_test_app() -> axum::Router {
     dotenvy::dotenv().ok();
     let config = Config::from_env().expect("invalid configuration for test run");
-    let options = ClientOptions::parse(&config.mongodb_uri)
-        .resolver_config(ResolverConfig::cloudflare())
-        .await
-        .expect("valid mongodb uri");
+    let parse_res = ClientOptions::parse(&config.mongodb_uri).await;
+    let options = match parse_res {
+        Ok(opts) => opts,
+        Err(_) => match ClientOptions::parse(&config.mongodb_uri)
+            .resolver_config(ResolverConfig::cloudflare())
+            .await
+        {
+            Ok(opts) => opts,
+            Err(_) => ClientOptions::parse(&config.mongodb_uri)
+                .resolver_config(ResolverConfig::google())
+                .await
+                .expect("valid mongodb uri"),
+        },
+    };
     let client = Client::with_options(options).expect("client construction");
     let db = client.database(&config.mongodb_db_name);
 

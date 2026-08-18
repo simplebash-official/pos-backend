@@ -724,4 +724,39 @@ async fn get_invoice_document_returns_pdf_and_caches_by_paper_width() {
         .await
         .unwrap();
     assert!(pdf_bytes.starts_with(b"%PDF-"));
+
+    // Second call against the same document type is served from cache.
+    let cached_req = Request::builder()
+        .method("GET")
+        .uri(format!(
+            "/api/billing/invoices/{invoice_key}/documents/a4-invoice"
+        ))
+        .header(AUTHORIZATION, format!("Bearer {token}"))
+        .body(Body::empty())
+        .unwrap();
+    let cached_resp = app.router.clone().oneshot(cached_req).await.unwrap();
+    assert_eq!(cached_resp.status(), StatusCode::OK);
+    let cached_bytes = axum::body::to_bytes(cached_resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(cached_bytes, pdf_bytes);
+
+    // Thermal receipt with specific paper width works.
+    let thermal_req = Request::builder()
+        .method("GET")
+        .uri(format!(
+            "/api/billing/invoices/{invoice_key}/documents/thermal-receipt?paperWidthMm=58"
+        ))
+        .header(AUTHORIZATION, format!("Bearer {token}"))
+        .body(Body::empty())
+        .unwrap();
+    let thermal_resp = app.router.clone().oneshot(thermal_req).await.unwrap();
+    assert_eq!(thermal_resp.status(), StatusCode::OK);
+    assert_eq!(
+        thermal_resp
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok()),
+        Some("application/pdf")
+    );
 }

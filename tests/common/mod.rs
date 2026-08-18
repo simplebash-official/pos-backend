@@ -20,6 +20,75 @@ pub struct TestApp {
     pub config: Arc<Config>,
 }
 
+/// Spawns a lightweight in-process mock document-server on a free port so
+/// integration tests can exercise document rendering endpoints without
+/// requiring a live external document-server process.
+pub async fn start_mock_document_server() -> String {
+    use axum::{
+        Json,
+        body::Body,
+        extract::Path,
+        http::{HeaderMap, StatusCode, header},
+        routing::{get, post},
+    };
+    use serde_json::json;
+
+    let mock_app = Router::new()
+        .route(
+            "/api/templates",
+            get(|| async {
+                Json(json!({
+                    "success": true,
+                    "message": "Templates fetched",
+                    "data": {
+                        "templates": [
+                            { "key": "tpl_a4_invoice", "name": "a4-invoice" },
+                            { "key": "tpl_thermal_receipt", "name": "thermal-receipt" },
+                        ]
+                    }
+                }))
+            }),
+        )
+        .route(
+            "/api/render/{template_key}",
+            post(
+                |Path(template_key): Path<String>,
+                 headers: HeaderMap,
+                 _body: axum::body::Bytes| async move {
+                    if let Some(auth) = headers.get("X-Internal-Api-Key")
+                        && auth.is_empty()
+                    {
+                        return (
+                            StatusCode::UNAUTHORIZED,
+                            [(header::CONTENT_TYPE, "application/json")],
+                            Body::from(
+                                r#"{"status":"error","code":"UNAUTHORIZED","message":"missing api key"}"#,
+                            ),
+                        );
+                    }
+                    (
+                        StatusCode::OK,
+                        [(header::CONTENT_TYPE, "application/pdf")],
+                        Body::from(
+                            format!("%PDF-1.7 mock rendered PDF for template {template_key}")
+                                .into_bytes(),
+                        ),
+                    )
+                },
+            ),
+        );
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("failed to bind mock document server");
+    let addr = listener.local_addr().expect("failed to get local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, mock_app).await.ok();
+    });
+
+    format!("http://{}", addr)
+}
+
 /// Builds the real router against a Mongo test database. Reads connection
 /// details from the environment (`.env` is loaded, same as production) but
 /// always targets `MONGODB_TEST_DB_NAME` so tests never touch dev data.
@@ -33,6 +102,9 @@ pub async fn spawn_app() -> TestApp {
     let db = clients::mongo::connect(&config.mongodb_uri, &config.mongodb_db_name)
         .await
         .expect("failed to connect to test MongoDB");
+
+    let mock_doc_server_url = start_mock_document_server().await;
+    config.document_server_url = mock_doc_server_url;
 
     let config = Arc::new(config);
     let document_server = Arc::new(clients::document_server::DocumentServerClient::new(
