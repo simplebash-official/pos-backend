@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "32f8d03c-bdaf-46ba-8fd5-f0be13ee0083",
     "name": "jana2u-pos backend",
-    "description": "Rust/Axum API backend for jana2u-pos, a point-of-sale system for a repair/retail shop.\n\nAll requests inherit the collection-level Bearer auth (`{{accessToken}}`) \u2014 set it once per environment (Developement/Production) after obtaining a JWT via Auth > Login (its Tests script auto-populates `{{accessToken}}`/`{{userId}}` for you on success, so nothing to copy/paste). Admin-gated endpoints (inventory category/subcategory writes, and every Suppliers/Supplier Products/Purchases request \u2014 reads included) require the token's `role` claim to be `admin`. Permission-gated endpoints (all of Inventory except the module-status stub, Customers writes, Users CRUD, Auth > List Login Sessions) require the token's `permissions` claim to include a specific permission (e.g. `inventory:read`, `inventory:write`, `users:manage`, `sessions:view`) \u2014 see CLAUDE.md's \"Auth, users & permissions\" section for the full role\u2192permission table; the seeded Admin (`cargo run --bin seed_admin`) has every permission. Users CRUD is additionally scoped by an Admin/Manager hierarchy on top of that permission gate \u2014 see the Users folder's description.\n\nOnly these endpoints work without a token at all: Health, Auth > Login, and each module's `GET /` status stub. Everything else returns 401 `UNAUTHORIZED` without a valid Bearer token, and 403 `PERMISSION_DENIED`/`ADMIN_REQUIRED` if the token lacks the required permission or role.\n\nBase URL, and the access token, are environment variables \u2014 switch the active Postman environment to point requests at dev vs prod.",
+    "description": "Rust/Axum API backend for jana2u-pos, a point-of-sale system for a repair/retail shop.\n\nAll requests inherit the collection-level Bearer auth (`{{accessToken}}`) \u2014 set it once per environment (Developement/Production) after obtaining a JWT via Auth > Login (its Tests script auto-populates `{{accessToken}}`/`{{userId}}` for you on success, so nothing to copy/paste). Admin-gated endpoints (inventory category/subcategory writes, Billing > Cancel Invoice, and every Suppliers/Supplier Products/Purchases request \u2014 reads included) require the token's `role` claim to be `admin`. Permission-gated endpoints (all of Inventory except the module-status stub, Customers writes, Billing > Complete Sale/Record Payment, Repairs writes, Print Jobs writes, Users CRUD, Auth > List Login Sessions) require the token's `permissions` claim to include a specific permission (e.g. `inventory:read`, `inventory:write`, `billing:write`, `repairs:write`, `print_jobs:write`, `users:manage`, `sessions:view`) \u2014 see CLAUDE.md's \"Auth, users & permissions\" section for the full role\u2192permission table; the seeded Admin (`cargo run --bin seed_admin`) has every permission. Users CRUD is additionally scoped by an Admin/Manager hierarchy on top of that permission gate \u2014 see the Users folder's description.\n\nOnly these endpoints work without a token at all: Health, Auth > Login, Swagger, and the `GET /` module-status stubs still remaining on Inventory/Billing/Customers/Reports (Repairs and Print Jobs lost theirs once they gained real `GET /` list endpoints \u2014 those now require a token like every other read). Everything else returns 401 `UNAUTHORIZED` without a valid Bearer token, and 403 `PERMISSION_DENIED`/`ADMIN_REQUIRED` if the token lacks the required permission or role.\n\nBase URL (`{{backendBaseUrl}}`), and the access token, are environment variables \u2014 switch the active Postman environment to point requests at dev vs prod.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "_exporter_id": "46626151"
   },
@@ -43,6 +43,12 @@
       "description": "A product's system-generated `key` (from List/Get/Create Product) \u2014 used by Supplier Products/Purchases requests, never the raw productId."
     },
     {
+      "key": "customerKey",
+      "value": "cus_xxxxxxxxxxxxxxxx",
+      "type": "string",
+      "description": "A customer's system-generated `key` \u2014 grab a real value from a Customers response once that module's real endpoints are added to this collection; used to scope Billing > List Invoices and to link a sale to a customer in Complete Sale."
+    },
+    {
       "key": "supplierId",
       "value": "65f1a2b3c4d5e6f7a8b9c0d1",
       "type": "string",
@@ -59,6 +65,24 @@
       "value": "65f1a2b3c4d5e6f7a8b9c0d1",
       "type": "string",
       "description": "A user account's Mongo ObjectId (from Login's response, or List/Create User) \u2014 used by Get/Update/Delete User and to filter List Login Sessions."
+    },
+    {
+      "key": "invoiceKey",
+      "value": "inv_xxxxxxxxxxxxxxxx",
+      "type": "string",
+      "description": "An invoice's system-generated `key` (from Complete Sale / List/Get Invoice) \u2014 used by the invoice-scoped Billing requests below."
+    },
+    {
+      "key": "printJobKey",
+      "value": "prj_xxxxxxxxxxxxxxxx",
+      "type": "string",
+      "description": "A print job's system-generated `key` (from List/Get/Create Print Job) \u2014 used by Get/Update/Delete Print Job."
+    },
+    {
+      "key": "repairKey",
+      "value": "rep_xxxxxxxxxxxxxxxx",
+      "type": "string",
+      "description": "A repair ticket's system-generated `key` (from List/Get/Create Repair) \u2014 used by Get/Update/Delete Repair."
     }
   ],
   "item": [
@@ -71,9 +95,9 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/health",
+              "raw": "{{backendBaseUrl}}/api/health",
               "host": [
-                "{{baseUrl}}"
+                "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
@@ -119,9 +143,9 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/auth/login",
+              "raw": "{{backendBaseUrl}}/api/auth/login",
               "host": [
-                "{{baseUrl}}"
+                "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
@@ -148,9 +172,9 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/auth/me",
+              "raw": "{{backendBaseUrl}}/api/auth/me",
               "host": [
-                "{{baseUrl}}"
+                "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
@@ -168,9 +192,9 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/auth/sessions?userId={{userId}}&page=1&limit=20",
+              "raw": "{{backendBaseUrl}}/api/auth/sessions?userId={{userId}}&page=1&limit=20",
               "host": [
-                "{{baseUrl}}"
+                "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
@@ -212,9 +236,9 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/billing",
+              "raw": "{{backendBaseUrl}}/api/billing",
               "host": [
-                "{{baseUrl}}"
+                "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
@@ -224,8 +248,277 @@
             "description": "Placeholder status route for the billing module. Real endpoints are not implemented yet."
           },
           "response": []
+        },
+        {
+          "name": "Complete Sale",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const data = pm.response.json().data;",
+                  "    pm.environment.set(\"invoiceKey\", data.invoice.key);",
+                  "    console.log(`invoiceKey (${data.invoice.key}) saved`);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/billing/sales",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "billing",
+                "sales"
+              ]
+            },
+            "description": "Completes a sale: creates the invoice (and, unless `isCredit`, its payment record(s)), decrements stock for any `productKey` line items, and marks any linked repair/print-job ticket (`sourceTicketKey`) delivered. `cashierId` is never sent \u2014 the completing cashier is always the bearer token's user. If `customerKey` is set, the customer snapshot fields (`customerName`/`Phone`/`Address`) are resolved server-side from the linked `Customer` record instead of trusting the client-supplied ones. `warnings` in the response surfaces any post-write side effect (stock decrement, ticket status, customer balance) that failed without rolling back the already-durable invoice/payment \u2014 see CLAUDE.md's billing module notes.\n\n**Requires the `billing:write` permission** in the token's `permissions` claim \u2014 granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cashierName\": \"Nimal Perera\",\n  \"customerName\": \"Walk-in Customer\",\n  \"items\": [\n    {\n      \"productKey\": \"{{productKey}}\",\n      \"name\": \"iPhone 13 Screen Replacement (OEM)\",\n      \"sku\": \"PHO-SCR-0001\",\n      \"unitPriceCents\": 680000,\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"totalCents\": 680000,\n      \"sourceType\": \"retail\"\n    }\n  ],\n  \"subtotalCents\": 680000,\n  \"discountCents\": 0,\n  \"taxCents\": 0,\n  \"totalCents\": 680000,\n  \"paymentMethod\": \"cash\",\n  \"isCredit\": false,\n  \"tenderedAmountCents\": 700000,\n  \"changeDueCents\": 20000,\n  \"shopProfileSnapshot\": {\n    \"tradingName\": \"TechFix Repairs\",\n    \"address\": \"123 Galle Road, Colombo 03\",\n    \"phone\": \"011 234 5678\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List Invoices",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/billing/invoices?search=INV-2026&status=paid&customerKey={{customerKey}}&page=1&limit=20",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "billing",
+                "invoices"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "INV-2026",
+                  "description": "Free-text search across invoiceNumber/customer name/phone",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "paid",
+                  "description": "paid | pending | cancelled",
+                  "disabled": true
+                },
+                {
+                  "key": "customerKey",
+                  "value": "{{customerKey}}",
+                  "description": "Restrict to one customer's invoices",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "1-based page number (default 1)"
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Page size (default 20)"
+                }
+              ]
+            },
+            "description": "List invoices with free-text search, status/customer filtering, and pagination.\n\n**Requires a valid Bearer token** (any role \u2014 `CurrentUser`, no specific permission) or the API returns 401."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Invoice",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/billing/invoices/{{invoiceKey}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "billing",
+                "invoices",
+                "{{invoiceKey}}"
+              ]
+            },
+            "description": "Fetch a single invoice by its Mongo ObjectId or prefixed `key`.\n\n**Requires a valid Bearer token** (any role \u2014 `CurrentUser`, no specific permission) or the API returns 401."
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel Invoice",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/billing/invoices/{{invoiceKey}}/cancel",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "billing",
+                "invoices",
+                "{{invoiceKey}}",
+                "cancel"
+              ]
+            },
+            "description": "Cancels an invoice \u2014 reverses stock and customer balance where applicable. Blocked with 409 if already cancelled, or if any payment beyond the original sale-time one has been recorded.\n\n**Requires Admin JWT** (`role: admin` claim) or the API returns 403 `ADMIN_REQUIRED`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Customer requested refund\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Invoice Document (A4 Invoice)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/billing/invoices/{{invoiceKey}}/documents/a4-invoice",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "billing",
+                "invoices",
+                "{{invoiceKey}}",
+                "documents",
+                "a4-invoice"
+              ]
+            },
+            "description": "Renders (or returns the cached) PDF for an invoice. `documentType` in the path is either `a4-invoice` or `thermal-receipt` \u2014 this request is the A4 variant; duplicate it and change the last path segment to `thermal-receipt` for the receipt variant, which also accepts the `paperWidthMm` query param (58 or 80, default 80). Response is `application/pdf` bytes, not the usual JSON envelope.\n\n**Requires a valid Bearer token** (any role \u2014 `CurrentUser`, no specific permission) or the API returns 401."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Invoice Document (Thermal Receipt)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/billing/invoices/{{invoiceKey}}/documents/thermal-receipt?paperWidthMm=80",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "billing",
+                "invoices",
+                "{{invoiceKey}}",
+                "documents",
+                "thermal-receipt"
+              ],
+              "query": [
+                {
+                  "key": "paperWidthMm",
+                  "value": "80",
+                  "description": "58 or 80, defaults to 80",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Thermal-receipt variant of Get Invoice Document \u2014 see that request's description for the shared behavior. Response is `application/pdf` bytes, not the usual JSON envelope.\n\n**Requires a valid Bearer token** (any role \u2014 `CurrentUser`, no specific permission) or the API returns 401."
+          },
+          "response": []
+        },
+        {
+          "name": "Record Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/billing/invoices/{{invoiceKey}}/payments",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "billing",
+                "invoices",
+                "{{invoiceKey}}",
+                "payments"
+              ]
+            },
+            "description": "Records a payment against an invoice (e.g. partial credit repayment). Blocked with 409 if the invoice is already cancelled or the amount exceeds the outstanding balance.\n\n**Requires the `billing:write` permission** in the token's `permissions` claim \u2014 granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amountCents\": 200000,\n  \"paymentMethod\": \"cash\",\n  \"notes\": \"Partial repayment on credit sale\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List Payments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/billing/invoices/{{invoiceKey}}/payments",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "billing",
+                "invoices",
+                "{{invoiceKey}}",
+                "payments"
+              ]
+            },
+            "description": "List every payment recorded against an invoice.\n\n**Requires a valid Bearer token** (any role \u2014 `CurrentUser`, no specific permission) or the API returns 401."
+          },
+          "response": []
         }
-      ]
+      ],
+      "description": "Sale completion (invoice + payment creation), invoice reads, payment recording/history, invoice cancellation, and on-demand invoice PDF documents (A4 invoice / thermal receipt, rendered via the external document-server and cached). `/invoices` is the real \"list\" entry point \u2014 `GET /` stays the placeholder module-status stub since billing's root has no natural single-collection meaning the way `/invoices` does."
     },
     {
       "name": "Customers",
@@ -236,9 +529,9 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/customers",
+              "raw": "{{backendBaseUrl}}/api/customers",
               "host": [
-                "{{baseUrl}}"
+                "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
@@ -263,9 +556,9 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{baseUrl}}/api/inventory",
+                  "raw": "{{backendBaseUrl}}/api/inventory",
                   "host": [
-                    "{{baseUrl}}"
+                    "{{backendBaseUrl}}"
                   ],
                   "path": [
                     "api",
@@ -287,9 +580,9 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{baseUrl}}/api/inventory/overview?search=screen&categoryKey={{categoryKey}}&subcategoryKey={{subcategoryKey}}&lowStock=true&page=1&limit=10&sortBy=updatedAt&sortOrder=desc",
+                  "raw": "{{backendBaseUrl}}/api/inventory/overview?search=screen&categoryKey={{categoryKey}}&subcategoryKey={{subcategoryKey}}&lowStock=true&page=1&limit=10&sortBy=updatedAt&sortOrder=desc",
                   "host": [
-                    "{{baseUrl}}"
+                    "{{backendBaseUrl}}"
                   ],
                   "path": [
                     "api",
@@ -360,9 +653,9 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{baseUrl}}/api/inventory/products?search=screen&categoryKey={{categoryKey}}&subcategoryKey={{subcategoryKey}}&lowStock=true&page=1&limit=20&sortBy=updatedAt&sortOrder=desc",
+                  "raw": "{{backendBaseUrl}}/api/inventory/products?search=screen&categoryKey={{categoryKey}}&subcategoryKey={{subcategoryKey}}&lowStock=true&page=1&limit=20&sortBy=updatedAt&sortOrder=desc",
                   "host": [
-                    "{{baseUrl}}"
+                    "{{backendBaseUrl}}"
                   ],
                   "path": [
                     "api",
@@ -428,9 +721,9 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{baseUrl}}/api/inventory/products/{{productId}}",
+                  "raw": "{{backendBaseUrl}}/api/inventory/products/{{productId}}",
                   "host": [
-                    "{{baseUrl}}"
+                    "{{backendBaseUrl}}"
                   ],
                   "path": [
                     "api",
@@ -470,9 +763,9 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{baseUrl}}/api/inventory/products",
+                  "raw": "{{backendBaseUrl}}/api/inventory/products",
                   "host": [
-                    "{{baseUrl}}"
+                    "{{backendBaseUrl}}"
                   ],
                   "path": [
                     "api",
@@ -504,9 +797,9 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{baseUrl}}/api/inventory/products/{{productId}}",
+                  "raw": "{{backendBaseUrl}}/api/inventory/products/{{productId}}",
                   "host": [
-                    "{{baseUrl}}"
+                    "{{backendBaseUrl}}"
                   ],
                   "path": [
                     "api",
@@ -534,9 +827,9 @@
                 "method": "DELETE",
                 "header": [],
                 "url": {
-                  "raw": "{{baseUrl}}/api/inventory/products/{{productId}}",
+                  "raw": "{{backendBaseUrl}}/api/inventory/products/{{productId}}",
                   "host": [
-                    "{{baseUrl}}"
+                    "{{backendBaseUrl}}"
                   ],
                   "path": [
                     "api",
@@ -560,9 +853,9 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{baseUrl}}/api/inventory/products",
+                  "raw": "{{backendBaseUrl}}/api/inventory/products",
                   "host": [
-                    "{{baseUrl}}"
+                    "{{backendBaseUrl}}"
                   ],
                   "path": [
                     "api",
@@ -599,9 +892,9 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{baseUrl}}/api/inventory/products/{{productId}}/stock",
+                  "raw": "{{backendBaseUrl}}/api/inventory/products/{{productId}}/stock",
                   "host": [
-                    "{{baseUrl}}"
+                    "{{backendBaseUrl}}"
                   ],
                   "path": [
                     "api",
@@ -630,9 +923,9 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{baseUrl}}/api/inventory/products/low-stock",
+                  "raw": "{{backendBaseUrl}}/api/inventory/products/low-stock",
                   "host": [
-                    "{{baseUrl}}"
+                    "{{backendBaseUrl}}"
                   ],
                   "path": [
                     "api",
@@ -651,9 +944,9 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{baseUrl}}/api/inventory/products/{{productId}}/movements",
+                  "raw": "{{backendBaseUrl}}/api/inventory/products/{{productId}}/movements",
                   "host": [
-                    "{{baseUrl}}"
+                    "{{backendBaseUrl}}"
                   ],
                   "path": [
                     "api",
@@ -673,9 +966,9 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{baseUrl}}/api/inventory/stock-movements?productId={{productId}}&movementType=manual_adjustment&page=1&limit=20",
+                  "raw": "{{backendBaseUrl}}/api/inventory/stock-movements?productId={{productId}}&movementType=manual_adjustment&page=1&limit=20",
                   "host": [
-                    "{{baseUrl}}"
+                    "{{backendBaseUrl}}"
                   ],
                   "path": [
                     "api",
@@ -722,9 +1015,9 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{baseUrl}}/api/inventory/categories",
+                  "raw": "{{backendBaseUrl}}/api/inventory/categories",
                   "host": [
-                    "{{baseUrl}}"
+                    "{{backendBaseUrl}}"
                   ],
                   "path": [
                     "api",
@@ -765,9 +1058,9 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{baseUrl}}/api/inventory/categories",
+                  "raw": "{{backendBaseUrl}}/api/inventory/categories",
                   "host": [
-                    "{{baseUrl}}"
+                    "{{backendBaseUrl}}"
                   ],
                   "path": [
                     "api",
@@ -799,9 +1092,9 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{baseUrl}}/api/inventory/categories/{{categoryKey}}",
+                  "raw": "{{backendBaseUrl}}/api/inventory/categories/{{categoryKey}}",
                   "host": [
-                    "{{baseUrl}}"
+                    "{{backendBaseUrl}}"
                   ],
                   "path": [
                     "api",
@@ -829,9 +1122,9 @@
                 "method": "DELETE",
                 "header": [],
                 "url": {
-                  "raw": "{{baseUrl}}/api/inventory/categories/{{categoryKey}}",
+                  "raw": "{{backendBaseUrl}}/api/inventory/categories/{{categoryKey}}",
                   "host": [
-                    "{{baseUrl}}"
+                    "{{backendBaseUrl}}"
                   ],
                   "path": [
                     "api",
@@ -850,9 +1143,9 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{baseUrl}}/api/inventory/categories/valid",
+                  "raw": "{{backendBaseUrl}}/api/inventory/categories/valid",
                   "host": [
-                    "{{baseUrl}}"
+                    "{{backendBaseUrl}}"
                   ],
                   "path": [
                     "api",
@@ -876,9 +1169,9 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{baseUrl}}/api/inventory/categories/{{categoryKey}}/subcategories",
+                  "raw": "{{backendBaseUrl}}/api/inventory/categories/{{categoryKey}}/subcategories",
                   "host": [
-                    "{{baseUrl}}"
+                    "{{backendBaseUrl}}"
                   ],
                   "path": [
                     "api",
@@ -918,9 +1211,9 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{baseUrl}}/api/inventory/categories/{{categoryKey}}/subcategories",
+                  "raw": "{{backendBaseUrl}}/api/inventory/categories/{{categoryKey}}/subcategories",
                   "host": [
-                    "{{baseUrl}}"
+                    "{{backendBaseUrl}}"
                   ],
                   "path": [
                     "api",
@@ -949,9 +1242,9 @@
                 "method": "DELETE",
                 "header": [],
                 "url": {
-                  "raw": "{{baseUrl}}/api/inventory/categories/{{categoryKey}}/subcategories/{{subcategoryKey}}",
+                  "raw": "{{backendBaseUrl}}/api/inventory/categories/{{categoryKey}}/subcategories/{{subcategoryKey}}",
                   "host": [
-                    "{{baseUrl}}"
+                    "{{backendBaseUrl}}"
                   ],
                   "path": [
                     "api",
@@ -975,49 +1268,343 @@
       "name": "Print Jobs",
       "item": [
         {
-          "name": "Print Jobs Module Status",
+          "name": "List Print Jobs",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/print-jobs",
+              "raw": "{{backendBaseUrl}}/api/print-jobs?search=mug&status=received&page=1&limit=20",
               "host": [
-                "{{baseUrl}}"
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "print-jobs"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "mug",
+                  "description": "Free-text search across ticketNumber/customer name/phone/jobType",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "received",
+                  "description": "One exact status: received | diagnosing | in_repair | ready | delivered | cancelled",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "1-based page number (default 1)"
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Page size (default 20)"
+                }
+              ]
+            },
+            "description": "List print jobs with search, status filtering, and pagination. `GET /` used to be a static module-status placeholder \u2014 it is now this real, authenticated list endpoint (see CLAUDE.md's `app::build_router` public-routes note).\n\n**Requires a valid Bearer token** (any role \u2014 `CurrentUser`, no specific permission) or the API returns 401."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Print Job",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const data = pm.response.json().data;",
+                  "    pm.environment.set(\"printJobKey\", data.key);",
+                  "    console.log(`printJobKey (${data.key}) saved`);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/print-jobs",
+              "host": [
+                "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
                 "print-jobs"
               ]
             },
-            "description": "Placeholder status route for the print jobs module. Real endpoints are not implemented yet."
+            "description": "Create a print job ticket. `ticketNumber` is never client-supplied \u2014 reserved server-side on create. `jobType` must be one of `mug | t-shirt | handbill | banner | custom`; `status` defaults to `received` if omitted.\n\n**Requires the `print_jobs:write` permission** in the token's `permissions` claim \u2014 granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerName\": \"Nadeesha Perera\",\n  \"customerPhone\": \"0711234567\",\n  \"jobType\": \"mug\",\n  \"quantity\": 25,\n  \"estimatedCostCents\": 500000,\n  \"materialCostCents\": 200000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Print Job",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/print-jobs/{{printJobKey}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "print-jobs",
+                "{{printJobKey}}"
+              ]
+            },
+            "description": "Fetch a single print job by its Mongo ObjectId or prefixed `key`.\n\n**Requires a valid Bearer token** (any role \u2014 `CurrentUser`, no specific permission) or the API returns 401."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Print Job",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/print-jobs/{{printJobKey}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "print-jobs",
+                "{{printJobKey}}"
+              ]
+            },
+            "description": "Partially update a print job \u2014 omit any field to leave it unchanged.\n\n**Requires the `print_jobs:write` permission** in the token's `permissions` claim \u2014 granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"ready\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Print Job",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/print-jobs/{{printJobKey}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "print-jobs",
+                "{{printJobKey}}"
+              ]
+            },
+            "description": "Soft-deletes a print job (sets `deletedAt` so it can still appear as a sync tombstone).\n\n**Requires the `print_jobs:write` permission** in the token's `permissions` claim \u2014 granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role."
           },
           "response": []
         }
-      ]
+      ],
+      "description": "Print job ticket CRUD (mug/t-shirt/handbill/banner/custom jobs). `GET /` is now the real list endpoint, not a status stub \u2014 see List Print Jobs' description."
     },
     {
       "name": "Repairs",
       "item": [
         {
-          "name": "Repairs Module Status",
+          "name": "List Repairs",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/repairs",
+              "raw": "{{backendBaseUrl}}/api/repairs?search=iPhone&status=received&page=1&limit=20",
               "host": [
-                "{{baseUrl}}"
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "repairs"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "iPhone",
+                  "description": "Free-text search across ticketNumber/customer name/phone/deviceModel",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "received",
+                  "description": "One exact status: received | diagnosing | in_repair | ready | delivered | cancelled",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "1-based page number (default 1)"
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Page size (default 20)"
+                }
+              ]
+            },
+            "description": "List repair tickets with search, status filtering, and pagination. `GET /` used to be a static module-status placeholder \u2014 it is now this real, authenticated list endpoint (see CLAUDE.md's `app::build_router` public-routes note).\n\n**Requires a valid Bearer token** (any role \u2014 `CurrentUser`, no specific permission) or the API returns 401."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Repair",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const data = pm.response.json().data;",
+                  "    pm.environment.set(\"repairKey\", data.key);",
+                  "    console.log(`repairKey (${data.key}) saved`);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/repairs",
+              "host": [
+                "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
                 "repairs"
               ]
             },
-            "description": "Placeholder status route for the repairs module. Real endpoints are not implemented yet."
+            "description": "Create a repair ticket. `ticketNumber` is never client-supplied \u2014 reserved server-side on create. `status` defaults to `received` if omitted.\n\n**Requires the `repairs:write` permission** in the token's `permissions` claim \u2014 granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerName\": \"Kasun Silva\",\n  \"customerPhone\": \"0771234567\",\n  \"deviceModel\": \"iPhone 14\",\n  \"serialNumber\": \"C02XG2AVJHD3\",\n  \"issueDescription\": \"Cracked screen, touch unresponsive in top corner\",\n  \"estimatedCostCents\": 850000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Repair",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/repairs/{{repairKey}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "repairs",
+                "{{repairKey}}"
+              ]
+            },
+            "description": "Fetch a single repair ticket by its Mongo ObjectId or prefixed `key`.\n\n**Requires a valid Bearer token** (any role \u2014 `CurrentUser`, no specific permission) or the API returns 401."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Repair",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/repairs/{{repairKey}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "repairs",
+                "{{repairKey}}"
+              ]
+            },
+            "description": "Partially update a repair ticket \u2014 omit any field to leave it unchanged.\n\n**Requires the `repairs:write` permission** in the token's `permissions` claim \u2014 granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"ready\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Repair",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/repairs/{{repairKey}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "repairs",
+                "{{repairKey}}"
+              ]
+            },
+            "description": "Soft-deletes a repair ticket (sets `deletedAt` so it can still appear as a sync tombstone).\n\n**Requires the `repairs:write` permission** in the token's `permissions` claim \u2014 granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role."
           },
           "response": []
         }
-      ]
+      ],
+      "description": "Repair ticket CRUD. `GET /` is now the real list endpoint, not a status stub \u2014 see List Repairs' description."
     },
     {
       "name": "Reports",
@@ -1028,9 +1615,9 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/reports",
+              "raw": "{{backendBaseUrl}}/api/reports",
               "host": [
-                "{{baseUrl}}"
+                "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
@@ -1052,9 +1639,9 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/suppliers?search=mobile&category=Phone Parts",
+              "raw": "{{backendBaseUrl}}/api/suppliers?search=mobile&category=Phone Parts",
               "host": [
-                "{{baseUrl}}"
+                "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
@@ -1106,9 +1693,9 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/suppliers",
+              "raw": "{{backendBaseUrl}}/api/suppliers",
               "host": [
-                "{{baseUrl}}"
+                "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
@@ -1134,9 +1721,9 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/suppliers/{{supplierId}}",
+              "raw": "{{backendBaseUrl}}/api/suppliers/{{supplierId}}",
               "host": [
-                "{{baseUrl}}"
+                "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
@@ -1159,9 +1746,9 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/suppliers/{{supplierId}}",
+              "raw": "{{backendBaseUrl}}/api/suppliers/{{supplierId}}",
               "host": [
-                "{{baseUrl}}"
+                "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
@@ -1193,9 +1780,9 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/suppliers/{{supplierId}}",
+              "raw": "{{backendBaseUrl}}/api/suppliers/{{supplierId}}",
               "host": [
-                "{{baseUrl}}"
+                "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
@@ -1222,9 +1809,9 @@
             "method": "DELETE",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/suppliers/{{supplierId}}",
+              "raw": "{{backendBaseUrl}}/api/suppliers/{{supplierId}}",
               "host": [
-                "{{baseUrl}}"
+                "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
@@ -1247,9 +1834,9 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/suppliers/batch",
+              "raw": "{{backendBaseUrl}}/api/suppliers/batch",
               "host": [
-                "{{baseUrl}}"
+                "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
@@ -1276,9 +1863,9 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/suppliers/categories",
+              "raw": "{{backendBaseUrl}}/api/suppliers/categories",
               "host": [
-                "{{baseUrl}}"
+                "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
@@ -1302,9 +1889,9 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/supplier-products?supplierKey={{supplierKey}}&productKey={{productKey}}&page=1&limit=20",
+              "raw": "{{backendBaseUrl}}/api/supplier-products?supplierKey={{supplierKey}}&productKey={{productKey}}&page=1&limit=20",
               "host": [
-                "{{baseUrl}}"
+                "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
@@ -1350,9 +1937,9 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/supplier-products",
+              "raw": "{{backendBaseUrl}}/api/supplier-products",
               "host": [
-                "{{baseUrl}}"
+                "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
@@ -1378,9 +1965,9 @@
             "method": "DELETE",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/supplier-products/{{supplierKey}}/{{productKey}}",
+              "raw": "{{backendBaseUrl}}/api/supplier-products/{{supplierKey}}/{{productKey}}",
               "host": [
-                "{{baseUrl}}"
+                "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
@@ -1404,9 +1991,9 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/supplier-products/bulk/{{supplierKey}}",
+              "raw": "{{backendBaseUrl}}/api/supplier-products/bulk/{{supplierKey}}",
               "host": [
-                "{{baseUrl}}"
+                "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
@@ -1440,9 +2027,9 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/purchases?supplierKey={{supplierKey}}&productKey={{productKey}}&page=1&limit=20",
+              "raw": "{{backendBaseUrl}}/api/purchases?supplierKey={{supplierKey}}&productKey={{productKey}}&page=1&limit=20",
               "host": [
-                "{{baseUrl}}"
+                "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
@@ -1488,9 +2075,9 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/purchases",
+              "raw": "{{backendBaseUrl}}/api/purchases",
               "host": [
-                "{{baseUrl}}"
+                "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
@@ -1514,6 +2101,78 @@
       "description": "Supplier purchase / stock-intake history \u2014 recording a stock receipt also bumps the referenced product's stock in Inventory. Every route (reads included) requires Admin \u2014 see the Admin note on each request."
     },
     {
+      "name": "Sync",
+      "item": [
+        {
+          "name": "Get Changes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/sync/changes?cursors={\"products\":\"<cursor>\",\"suppliers\":\"<cursor>\"}&since=<cursor>&limit=500&resources=products,suppliers",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "sync",
+                "changes"
+              ],
+              "query": [
+                {
+                  "key": "cursors",
+                  "value": "{\"products\":\"<cursor>\",\"suppliers\":\"<cursor>\"}",
+                  "description": "Per-resource cursor map (JSON) or comma-delimited resource=cursor pairs",
+                  "disabled": true
+                },
+                {
+                  "key": "since",
+                  "value": "<cursor>",
+                  "description": "Shorthand single cursor when syncing only one resource (use with resources=)",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "500",
+                  "description": "Per-resource item cap, 1-500 (default 500). 0 = cursor-only response.",
+                  "disabled": true
+                },
+                {
+                  "key": "resources",
+                  "value": "products,suppliers",
+                  "description": "Comma-separated resource names to sync (defaults to all syncable resources)",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Delta sync feed for offline-first clients. Pass `cursors` (JSON map or comma-delimited `resource=cursor,...`) to resume per-resource, or `since` as a shorthand single cursor when syncing one resource. `limit=0` returns no items but still reports `nextCursor` pointing at the newest row \u2014 use this after taking a snapshot via the plain REST list endpoints to start incremental syncing without replaying the whole collection. Paging is oldest-first by `(updatedAt, key)`, and deleted rows are returned as tombstone keys under each resource's `deleted` list \u2014 see CLAUDE.md's \"Offline sync\" section.\n\n**Requires a valid Bearer token** (any role \u2014 `CurrentUser`, no specific permission) or the API returns 401."
+          },
+          "response": []
+        },
+        {
+          "name": "Sync Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/sync/status",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "sync",
+                "status"
+              ]
+            },
+            "description": "Per-resource watermark: the newest `updatedAt` and its cursor for every syncable resource. A client adopts these cursors directly right after taking a full snapshot via the plain REST list endpoints, so its first `GET /sync/changes` call is a true delta \u2014 deriving a starting cursor from `/sync/changes` itself isn't possible, since that endpoint pages oldest-first and would hand back the *first* row's cursor instead.\n\n**Requires a valid Bearer token** (any role \u2014 `CurrentUser`, no specific permission) or the API returns 401."
+          },
+          "response": []
+        }
+      ],
+      "description": "Delta sync for the offline-first frontend (`../frontend` mirrors every syncable collection into IndexedDB). See CLAUDE.md's \"Offline sync\" section for cursor format, soft-delete semantics, and the `Idempotency-Key`/`If-Match`/`X-Device-Id` headers other write endpoints use alongside this feed."
+    },
+    {
       "name": "Users",
       "item": [
         {
@@ -1522,9 +2181,9 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/users?search=jane&role=staff",
+              "raw": "{{backendBaseUrl}}/api/users?search=jane&role=staff",
               "host": [
-                "{{baseUrl}}"
+                "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
@@ -1575,9 +2234,9 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/users",
+              "raw": "{{backendBaseUrl}}/api/users",
               "host": [
-                "{{baseUrl}}"
+                "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
@@ -1603,9 +2262,9 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/users/{{userId}}",
+              "raw": "{{backendBaseUrl}}/api/users/{{userId}}",
               "host": [
-                "{{baseUrl}}"
+                "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
@@ -1628,9 +2287,9 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/users/{{userId}}",
+              "raw": "{{backendBaseUrl}}/api/users/{{userId}}",
               "host": [
-                "{{baseUrl}}"
+                "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
@@ -1657,9 +2316,9 @@
             "method": "DELETE",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/users/{{userId}}",
+              "raw": "{{backendBaseUrl}}/api/users/{{userId}}",
               "host": [
-                "{{baseUrl}}"
+                "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
