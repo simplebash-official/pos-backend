@@ -78,19 +78,6 @@ fn validate_sale_request(body: &CreateSaleRequest) -> AppResult<()> {
                 "A split payment must include at least one split leg",
             ));
         }
-        let legs_total: i64 = legs.iter().map(|leg| leg.amount_cents).sum();
-        if legs_total > body.total_cents {
-            return Err(AppError::validation(
-                "Split payment legs cannot sum to more than the invoice total",
-            ));
-        }
-    }
-    let expected_total = (body.subtotal_cents - body.discount_cents + body.tax_cents).max(0);
-    if expected_total != body.total_cents {
-        return Err(AppError::validation(format!(
-            "totalCents ({}) does not match subtotalCents - discountCents + taxCents ({})",
-            body.total_cents, expected_total
-        )));
     }
     if body.cashier_name.trim().is_empty() {
         return Err(AppError::validation("cashierName is required"));
@@ -264,6 +251,24 @@ pub async fn complete_sale(
     // line item, so the whole sale is rejected rather than half-completed.
     let (resolved_items, resolved_products) = resolve_sale_items(db, &body.items).await?;
 
+    // subtotal/total/change are never client-supplied — see the doc comment
+    // on `CreateSaleRequest` for why each is fully derivable at this point.
+    let subtotal_cents: i64 = resolved_items.iter().map(|item| item.total_cents).sum();
+    let total_cents = (subtotal_cents - body.discount_cents + body.tax_cents).max(0);
+    let change_due_cents = body
+        .amount_received_cents
+        .map(|amount_received| amount_received - total_cents);
+
+    if body.payment_method == "split" {
+        let legs = body.split_payments.as_deref().unwrap_or(&[]);
+        let legs_total: i64 = legs.iter().map(|leg| leg.amount_cents).sum();
+        if legs_total > total_cents {
+            return Err(AppError::validation(
+                "Split payment legs cannot sum to more than the invoice total",
+            ));
+        }
+    }
+
     let reservation = sequences::service::reserve_sequence(
         db,
         "invoice".to_string(),
@@ -294,15 +299,15 @@ pub async fn complete_sale(
         cashier_id: cashier_id.clone(),
         cashier_name_snapshot: body.cashier_name.clone(),
         items: resolved_items.clone(),
-        subtotal_cents: body.subtotal_cents,
+        subtotal_cents,
         discount_cents: body.discount_cents,
         tax_cents: body.tax_cents,
-        total_cents: body.total_cents,
+        total_cents,
         payment_method: body.payment_method.clone(),
         split_payments: body.split_payments.clone(),
         is_credit: body.is_credit,
-        tendered_amount_cents: body.tendered_amount_cents,
-        change_due_cents: body.change_due_cents,
+        amount_received_cents: body.amount_received_cents,
+        change_due_cents,
         due_date: body.due_date.clone(),
         card_last4: body.card_last4.clone(),
         card_ref: body.card_ref.clone(),
@@ -339,7 +344,7 @@ pub async fn complete_sale(
                 .collect(),
             _ => vec![(
                 body.payment_method.clone(),
-                body.total_cents,
+                total_cents,
                 body.card_last4.clone(),
             )],
         };
@@ -441,14 +446,10 @@ pub async fn complete_sale(
     }
 
     if let Some(customer_key) = &body.customer_key {
-        let balance_delta = if body.is_credit { body.total_cents } else { 0 };
-        if let Err(err) = customers::service::apply_financial_delta(
-            db,
-            customer_key,
-            body.total_cents,
-            balance_delta,
-        )
-        .await
+        let balance_delta = if body.is_credit { total_cents } else { 0 };
+        if let Err(err) =
+            customers::service::apply_financial_delta(db, customer_key, total_cents, balance_delta)
+                .await
         {
             warnings.push(format!("Customer financials could not be updated: {err}"));
         }

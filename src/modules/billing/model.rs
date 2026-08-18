@@ -44,7 +44,7 @@ pub struct InvoiceDocument {
     pub split_payments: Option<Vec<SplitPayment>>,
     pub is_credit: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tendered_amount_cents: Option<i64>,
+    pub amount_received_cents: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub change_due_cents: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -111,7 +111,7 @@ impl InvoiceDocument {
             payment_method: self.payment_method,
             split_payments: self.split_payments,
             is_credit: self.is_credit,
-            tendered_amount_cents: self.tendered_amount_cents,
+            amount_received_cents: self.amount_received_cents,
             change_due_cents: self.change_due_cents,
             due_date: self.due_date,
             card_last4: self.card_last4,

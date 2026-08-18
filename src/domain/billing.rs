@@ -113,7 +113,7 @@ pub struct Invoice {
     pub split_payments: Option<Vec<SplitPayment>>,
     pub is_credit: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tendered_amount_cents: Option<i64>,
+    pub amount_received_cents: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub change_due_cents: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -158,6 +158,15 @@ fn default_version() -> i64 {
 /// customer is linked, `service::sale::complete_sale` snapshots from the
 /// resolved `Customer` record instead (server-authoritative, not
 /// client-supplied) — see the migration plan's D2/D4 notes.
+///
+/// `subtotalCents`/`totalCents`/`changeDueCents` are never client-supplied
+/// either — all three are arithmetic derived from data the server already
+/// has once items are resolved: `subtotalCents` is the sum of the resolved
+/// items' `totalCents`, `totalCents` is `subtotalCents - discountCents +
+/// taxCents`, and `changeDueCents` (when `amountReceivedCents` is given) is
+/// `amountReceivedCents - totalCents`. `discountCents`/`taxCents` stay
+/// client-supplied — an invoice-level discount/tax isn't derivable from
+/// anything already stored server-side.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateSaleRequest {
@@ -171,18 +180,14 @@ pub struct CreateSaleRequest {
     pub customer_address: Option<String>,
     pub cashier_name: String,
     pub items: Vec<CreateSaleItemRequest>,
-    pub subtotal_cents: i64,
     pub discount_cents: i64,
     pub tax_cents: i64,
-    pub total_cents: i64,
     pub payment_method: String,
     #[serde(default)]
     pub split_payments: Option<Vec<SplitPayment>>,
     pub is_credit: bool,
     #[serde(default)]
-    pub tendered_amount_cents: Option<i64>,
-    #[serde(default)]
-    pub change_due_cents: Option<i64>,
+    pub amount_received_cents: Option<i64>,
     #[serde(default)]
     pub due_date: Option<String>,
     #[serde(default)]
