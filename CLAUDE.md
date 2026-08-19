@@ -217,3 +217,13 @@ Every file should make it obvious what it does and why without the reader having
 2. **Doc comments (`///`) on `pub`/`pub(crate)` items** whose purpose isn't obvious from the signature alone: every `repository::*` function gets a one-liner naming the query intent, every `service::*` function gets a one-liner naming the business rule it enforces, every `domain`/`model` struct or enum gets a one-liner on non-obvious fields (why a field exists, why it's `Option`, why an enum has the variants it has). Trivial CRUD wrappers still get a short one-liner for consistency — not a paragraph.
 3. **Inline comments explain *why*, not *what***: a non-obvious invariant, a workaround, or a decision a future reader would otherwise have to reverse-engineer (e.g. the `$expr`/`$lte` low-stock query shape in `modules/inventory/repository/product.rs`, the cascade-delete-of-subcategories-on-category-delete safety argument in `modules/inventory/service/category.rs`, the DNS resolver workaround in `clients/mongo.rs`). Never restate what a line of code already says — if removing the comment wouldn't confuse a future reader, don't write it.
 4. **Reference examples**: `clients/mongo.rs` (DNS resolver workaround), `core/middleware/auth.rs` (why `CurrentUser`/`AdminUser` exist and how they gate routes), `modules/inventory/service/category.rs` (key-based-reference/cascade-delete rationale), `modules/inventory/model.rs` (`CategoryDocument`'s DB-backed-source-of-truth rationale and the `ProductDocument`/`SubcategoryDocument` key-FK pattern), `core/error.rs` (`AppError`'s variant/`Custom`-escape-hatch design).
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
