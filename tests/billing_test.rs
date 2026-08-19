@@ -7,10 +7,14 @@ use axum::{
         header::{AUTHORIZATION, CONTENT_TYPE},
     },
 };
+use chrono::Utc;
 use jana2u_pos_backend::{
     core::{config::Config, constants::roles, id::generate_id},
     domain::users::Role,
-    modules::inventory::model::{CategoryDocument, SubcategoryDocument},
+    modules::{
+        inventory::model::{CategoryDocument, SubcategoryDocument},
+        sync::cursor::encode_cursor,
+    },
 };
 use mongodb::bson::DateTime as BsonDateTime;
 use serde_json::{Value, json};
@@ -317,6 +321,60 @@ async fn complete_sale_retail_cash_decrements_stock_and_marks_paid() {
 
     let product = get_product(&app, &product_id).await;
     assert_eq!(product["stockQuantity"], 8, "stock should decrement by 2");
+}
+
+/// Proves the sync registration (`SYNCABLE` in `modules::sync::service`)
+/// reads live data through the real `complete_sale` endpoint, not just a
+/// hand-seeded Mongo row like `sync_test.rs`'s DTO-parity test does.
+#[tokio::test]
+async fn complete_sale_invoice_is_immediately_visible_via_sync_changes() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+    let (_product_id, product_key, price) = seed_product(&app).await;
+
+    // Anchor to a cursor from just before the sale so the delta feed is
+    // scoped to exactly the invoice this test creates.
+    let watermark = encode_cursor(Utc::now() - chrono::Duration::seconds(5), "");
+
+    let mut payload = base_sale_payload();
+    payload["items"] = json!([{
+        "productKey": product_key,
+        "quantity": 1,
+        "discountCents": 0,
+        "sourceType": "retail",
+    }]);
+    payload["payment"]["amountReceivedCents"] = json!(price);
+
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/billing/sales",
+        Some(payload),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    let invoice_key = body["data"]["invoice"]["key"].as_str().unwrap().to_string();
+
+    let (status, sync_body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/sync/changes?resources=invoices&since={watermark}"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {sync_body}");
+
+    let items = sync_body["data"]["changes"]["invoices"]["items"]
+        .as_array()
+        .expect("invoices items must be an array");
+    let item = items
+        .iter()
+        .find(|item| item["key"] == json!(invoice_key))
+        .expect("the invoice created via complete_sale must appear in the sync delta feed");
+    assert_eq!(item["status"], "paid");
+    assert_eq!(item["totalCents"], price);
 }
 
 #[tokio::test]

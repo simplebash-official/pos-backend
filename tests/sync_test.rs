@@ -13,10 +13,14 @@ use jana2u_pos_backend::{
         id::generate_id,
     },
     domain::{
-        inventory::Product, sequences::SequenceReservationResponse, sync::SyncChangesResponse,
+        billing::{Invoice, PaymentRecord},
+        inventory::Product,
+        sequences::SequenceReservationResponse,
+        sync::SyncChangesResponse,
         users::Role,
     },
     modules::{
+        billing::model::{InvoiceDocument, PaymentDocument},
         inventory::model::{CategoryDocument, ProductDocument, SubcategoryDocument},
         sync::cursor::encode_cursor,
     },
@@ -626,4 +630,143 @@ async fn sync_changes_items_match_the_rest_dto_shape() {
         json["data"]["changes"].get("subcategories").is_none(),
         "subcategories must not be a standalone syncable resource"
     );
+}
+
+/// Same DTO-parity guard as `sync_changes_items_match_the_rest_dto_shape`,
+/// covering `invoices`/`payments`. Unlike `sync_changes_cursor_and_tombstones`,
+/// there is deliberately no tombstone-path counterpart here: invoices and
+/// payments are append-only (no `deleted_at` field, no delete route — a
+/// cancelled invoice flips `status` rather than being removed), so a delta
+/// pull for either resource can never contain a `deleted` entry.
+#[tokio::test]
+async fn sync_changes_invoices_and_payments_match_the_rest_dto_shape() {
+    let app = common::spawn_app().await;
+    let token = admin_token(&app.config);
+
+    let watermark = encode_cursor(Utc::now() - chrono::Duration::seconds(5), "");
+
+    let invoice_key = generate_id(prefixes::INVOICE);
+    let now = BsonDateTime::now();
+    let invoice_number = format!("INV-{}", Uuid::new_v4());
+
+    app.db
+        .collection::<InvoiceDocument>("invoices")
+        .insert_one(InvoiceDocument {
+            id: None,
+            key: invoice_key.clone(),
+            invoice_number: invoice_number.clone(),
+            customer_key: None,
+            customer_name_snapshot: None,
+            customer_phone_snapshot: None,
+            customer_address_snapshot: None,
+            cashier_id: "usr_shape_test".to_string(),
+            cashier_name_snapshot: "Shape Test Cashier".to_string(),
+            items: vec![],
+            subtotal_cents: 5000,
+            discount_type: "fixed".to_string(),
+            discount_value: 0.0,
+            discount_cents: 0,
+            total_cents: 5000,
+            payment_method: "cash".to_string(),
+            split_payments: None,
+            is_credit: false,
+            amount_received_cents: Some(5000),
+            change_due_cents: Some(0),
+            due_date: None,
+            card_last4: None,
+            card_ref: None,
+            online_ref: None,
+            online_note: None,
+            status: "paid".to_string(),
+            notes: None,
+            shop_profile_snapshot: serde_json::json!({ "tradingName": "Shape Test Shop" }),
+            warranty_terms_snapshot: None,
+            document_selection: None,
+            cancelled_at: None,
+            cancelled_by: None,
+            cancellation_reason: None,
+            version: 1,
+            created_at: now,
+            updated_at: now,
+        })
+        .await
+        .unwrap();
+
+    let payment_key = generate_id(prefixes::PAYMENT);
+    app.db
+        .collection::<PaymentDocument>("payments")
+        .insert_one(PaymentDocument {
+            id: None,
+            key: payment_key.clone(),
+            invoice_key: invoice_key.clone(),
+            amount_cents: 5000,
+            payment_method: "cash".to_string(),
+            notes: None,
+            recorded_by_user_id: "usr_shape_test".to_string(),
+            recorded_by_name_snapshot: "Shape Test Cashier".to_string(),
+            recorded_at: now,
+            version: 1,
+            created_at: now,
+            updated_at: now,
+        })
+        .await
+        .unwrap();
+
+    let (status, _, json) = send_authed(
+        &app.router,
+        &token,
+        "GET",
+        &format!("/api/sync/changes?resources=invoices,payments&since={watermark}"),
+        None,
+        vec![],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "sync changes: {json}");
+
+    let invoices = json["data"]["changes"]["invoices"]["items"]
+        .as_array()
+        .expect("invoices items must be an array");
+    let invoice = invoices
+        .iter()
+        .find(|item| item["key"] == serde_json::json!(invoice_key))
+        .expect("the seeded invoice must appear in the delta feed");
+
+    let typed_invoice: Invoice = serde_json::from_value(invoice.clone())
+        .expect("a sync item must deserialize as the REST Invoice DTO");
+    assert_eq!(typed_invoice.total_cents, 5000);
+    assert_eq!(typed_invoice.status, "paid");
+    assert_eq!(typed_invoice.invoice_number, invoice_number);
+
+    // camelCase, and no BSON wrappers leaking through.
+    assert!(invoice["totalCents"].is_number());
+    assert!(invoice.get("total_cents").is_none());
+    assert!(invoice["invoiceNumber"].is_string());
+    assert!(invoice.get("invoice_number").is_none());
+    assert!(invoice["id"].is_string(), "_id must be a hex string");
+    assert!(invoice.get("_id").is_none());
+    assert!(
+        invoice["createdAt"].is_string(),
+        "dates must be ISO strings, not {{$date}}"
+    );
+
+    let payments = json["data"]["changes"]["payments"]["items"]
+        .as_array()
+        .expect("payments items must be an array");
+    let payment = payments
+        .iter()
+        .find(|item| item["key"] == serde_json::json!(payment_key))
+        .expect("the seeded payment must appear in the delta feed");
+
+    let typed_payment: PaymentRecord = serde_json::from_value(payment.clone())
+        .expect("a sync item must deserialize as the REST PaymentRecord DTO");
+    assert_eq!(typed_payment.amount_cents, 5000);
+    assert_eq!(typed_payment.invoice_key, invoice_key);
+
+    // camelCase, and no BSON wrappers leaking through.
+    assert!(payment["amountCents"].is_number());
+    assert!(payment.get("amount_cents").is_none());
+    assert!(payment["invoiceKey"].is_string());
+    assert!(payment.get("invoice_key").is_none());
+    assert!(payment["id"].is_string(), "_id must be a hex string");
+    assert!(payment.get("_id").is_none());
 }

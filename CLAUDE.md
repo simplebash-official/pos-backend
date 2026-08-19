@@ -174,6 +174,13 @@ dispatches to them. `tests/sync_test.rs::sync_changes_items_match_the_rest_dto_s
   learn it was removed and would resurrect it on the next push. Cursored reads deliberately
   include tombstoned rows (they become the `deleted` key list); cursorless snapshot reads exclude
   them, since the client has nothing to delete yet.
+- **Append-only resources are exempt from `deleted_at`.** `stock_movements`, `invoices`, and
+  `payments` have no delete route at all — a cancelled invoice flips `status`, it is never removed
+  — so their documents never populate `deleted_at` by design, not by oversight. This isn't a gap in
+  the rule above: the snapshot/delta filters already treat a permanently-absent field as "not
+  deleted," so these collections simply never produce a `deleted` entry. Don't add a tombstone path
+  for a resource in this category; add it to `SYNCABLE` and its `hydrate` arm the way `invoices`/
+  `payments` were, and leave `deleted_at` off the model entirely.
 - **`subcategories` is not a syncable resource.** It is folded into each `categories` item, because
   that is how the client's `Category` type is shaped.
 - **Indexes are ensured at startup** (`clients::indexes`). `(updated_at, key)` per syncable

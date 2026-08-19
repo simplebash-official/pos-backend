@@ -3,7 +3,7 @@
 // `deriveInvoiceStatus`). This is how a credit invoice gets paid off over
 // time, in one or more installments, independent of `sale::complete_sale`.
 
-use mongodb::bson::{DateTime as BsonDateTime, doc};
+use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
 
 use crate::{
     core::{
@@ -14,6 +14,17 @@ use crate::{
     domain::billing::{PaymentRecord, RecordPaymentRequest},
     modules::billing::{model::PaymentDocument, repository},
 };
+
+/// Payments are append-only, same posture as invoices — see
+/// `service::hydrate_sync_documents`'s doc comment.
+pub(crate) fn hydrate_sync_documents(documents: Vec<Document>) -> AppResult<Vec<PaymentRecord>> {
+    documents
+        .into_iter()
+        .map(|document| {
+            Ok(bson::deserialize_from_document::<PaymentDocument>(document)?.into_payment_record())
+        })
+        .collect()
+}
 
 pub async fn record_payment(
     db: &mongodb::Database,

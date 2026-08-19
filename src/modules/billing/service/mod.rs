@@ -22,8 +22,22 @@ use crate::{
         utils::{build_bson_regex, calculate_pagination},
     },
     domain::billing::{Invoice, InvoiceListQuery, InvoiceListResponse},
-    modules::billing::repository,
+    modules::billing::{model::InvoiceDocument, repository},
 };
+
+/// Invoices are append-only (no `deleted_at`, no edit/delete route — see
+/// `InvoiceDocument`'s doc comment), so unlike every other synced resource
+/// this hydrate never needs to worry about tombstones reaching the client.
+/// See `repairs::service::hydrate_sync_documents` for why delta and snapshot
+/// feeds must produce identical rows.
+pub(crate) fn hydrate_sync_documents(documents: Vec<Document>) -> AppResult<Vec<Invoice>> {
+    documents
+        .into_iter()
+        .map(|document| {
+            Ok(bson::deserialize_from_document::<InvoiceDocument>(document)?.into_invoice())
+        })
+        .collect()
+}
 
 pub async fn get_invoice(db: &Database, id_or_key: &str) -> AppResult<Invoice> {
     let document = repository::find_invoice_by_id_or_key(db, id_or_key)
