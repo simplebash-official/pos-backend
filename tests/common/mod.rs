@@ -35,6 +35,16 @@ pub async fn start_mock_document_server() -> String {
 
     let mock_app = Router::new()
         .route(
+            "/api/health",
+            get(|| async {
+                Json(json!({
+                    "success": true,
+                    "message": "Service is healthy",
+                    "data": { "status": "ok" }
+                }))
+            }),
+        )
+        .route(
             "/api/templates",
             get(|| async {
                 Json(json!({

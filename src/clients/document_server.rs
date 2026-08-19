@@ -50,6 +50,39 @@ impl DocumentServerClient {
         }
     }
 
+    /// Polls `GET {base_url}/api/health` until it responds successfully or
+    /// `max_attempts` is exhausted, sleeping `250ms * attempt` between tries
+    /// (mirrors `clients::mongo::connect`'s retry shape). Called once at
+    /// startup, before this client is handed to `AppState`, so a
+    /// document-server that's still booting doesn't look like a silently
+    /// broken one — the backend only starts serving once it can actually
+    /// reach it. Returns `Result<(), String>` rather than `AppResult` since
+    /// this is only ever called from `main.rs` startup logging, never from a
+    /// request handler, and `AppError` has no `Display` impl to log with.
+    pub async fn wait_until_ready(&self, max_attempts: u32) -> Result<(), String> {
+        let url = format!("{}/api/health", self.base_url);
+        let mut last_err = None;
+
+        for attempt in 0..max_attempts {
+            if attempt > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(250 * attempt as u64)).await;
+            }
+
+            match self.http.get(&url).send().await {
+                Ok(response) if response.status().is_success() => return Ok(()),
+                Ok(response) => last_err = Some(format!("status {}", response.status())),
+                Err(err) => last_err = Some(err.to_string()),
+            }
+        }
+
+        Err(format!(
+            "document-server did not become ready at {} after {} attempts: {}",
+            self.base_url,
+            max_attempts,
+            last_err.unwrap_or_else(|| "unknown error".to_string())
+        ))
+    }
+
     /// Resolves a template's stable name (e.g. `"a4-invoice"`) to the
     /// `templates.key` `POST /api/render/{templateKey}` expects. Unauthenticated
     /// on document-server's side (`templates` routes are deliberately left

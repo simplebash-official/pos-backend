@@ -48,6 +48,19 @@ async fn main() {
         config.document_server_api_key.clone(),
     );
 
+    tracing::info!(
+        "Checking document-server at {}...",
+        config.document_server_url
+    );
+    document_server
+        .wait_until_ready(5)
+        .await
+        .unwrap_or_else(|err| {
+            tracing::error!(%err, "document-server not reachable");
+            std::process::exit(1);
+        });
+    tracing::info!("Successfully connected to document-server");
+
     let state = AppState {
         config: Arc::new(config),
         db,

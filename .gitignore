@@ -5,3 +5,5 @@
 # modules::documents::service) — runtime artifacts, never committed. Only
 # their metadata (filename, invoice reference, timestamp) lives in Mongo.
 /generated_documents
+
+.DS_Store
