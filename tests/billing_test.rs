@@ -1102,24 +1102,29 @@ async fn get_invoice_document_returns_pdf_and_caches_by_paper_width() {
 }
 
 /// Inserts a minimal `InvoiceDocument` directly, bypassing `complete_sale`,
-/// so the stats test can control `created_at`/`is_credit`/`status`/
-/// `total_cents` precisely.
+/// with full control over the fields the list-filter tests need. Returns
+/// `(key, invoiceNumber)` — `invoiceNumber` is uuid-suffixed and unique per
+/// call, so it doubles as a search term to scope a query to just this row
+/// even against the shared test DB.
 #[allow(clippy::too_many_arguments)]
-async fn seed_invoice_with(
+async fn seed_invoice_full(
     db: &mongodb::Database,
     total_cents: i64,
     is_credit: bool,
     status: &str,
+    payment_method: &str,
+    customer_name: Option<&str>,
     created_at: BsonDateTime,
-) -> String {
+) -> (String, String) {
     let key = generate_id("inv");
+    let invoice_number = format!("INV-{}", Uuid::new_v4().simple());
     db.collection::<InvoiceDocument>("invoices")
         .insert_one(InvoiceDocument {
             id: None,
             key: key.clone(),
-            invoice_number: format!("INV-{}", Uuid::new_v4().simple()),
+            invoice_number: invoice_number.clone(),
             customer_key: None,
-            customer_name_snapshot: None,
+            customer_name_snapshot: customer_name.map(|s| s.to_string()),
             customer_phone_snapshot: None,
             customer_address_snapshot: None,
             cashier_id: "staff-1".to_string(),
@@ -1130,7 +1135,7 @@ async fn seed_invoice_with(
             discount_value: 0.0,
             discount_cents: 0,
             total_cents,
-            payment_method: if is_credit { "credit" } else { "cash" }.to_string(),
+            payment_method: payment_method.to_string(),
             split_payments: None,
             is_credit,
             amount_received_cents: None,
@@ -1154,6 +1159,27 @@ async fn seed_invoice_with(
         })
         .await
         .unwrap();
+    (key, invoice_number)
+}
+
+async fn seed_invoice_with(
+    db: &mongodb::Database,
+    total_cents: i64,
+    is_credit: bool,
+    status: &str,
+    created_at: BsonDateTime,
+) -> String {
+    let payment_method = if is_credit { "credit" } else { "cash" };
+    let (key, _) = seed_invoice_full(
+        db,
+        total_cents,
+        is_credit,
+        status,
+        payment_method,
+        None,
+        created_at,
+    )
+    .await;
     key
 }
 
@@ -1210,4 +1236,120 @@ async fn billing_stats_endpoint_returns_today_sales_invoice_count_outstanding_cr
     assert_eq!(stats.avg_basket_cents, (2000 + 500 + 300) / 3);
 
     db.drop().await.ok();
+}
+
+#[tokio::test]
+async fn list_invoices_filters_by_payment_status_and_payment_method() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let unique = uuid::Uuid::new_v4().to_string()[..8].to_string();
+    let name = format!("PayFilter-{unique}");
+    let now = BsonDateTime::now();
+
+    // Paid cash sale.
+    let (_, paid_number) =
+        seed_invoice_full(&app.db, 1000, false, "paid", "cash", Some(&name), now).await;
+    // Paid card sale — same customer name, different payment method.
+    let (_, card_number) =
+        seed_invoice_full(&app.db, 1500, false, "paid", "card", Some(&name), now).await;
+    // Credit sale (is_credit true, still "paid" status) — same customer name.
+    let (_, credit_number) =
+        seed_invoice_full(&app.db, 2000, true, "paid", "cash", Some(&name), now).await;
+
+    // paymentStatus=paid excludes the credit sale.
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/billing/invoices?search={name}&paymentStatus=paid"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    let numbers: Vec<String> = body["data"]["invoices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|inv| inv["invoiceNumber"].as_str().unwrap().to_string())
+        .collect();
+    assert!(numbers.contains(&paid_number));
+    assert!(numbers.contains(&card_number));
+    assert!(!numbers.contains(&credit_number));
+
+    // paymentStatus=credit returns only the credit sale.
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/billing/invoices?search={name}&paymentStatus=credit"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    let numbers: Vec<String> = body["data"]["invoices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|inv| inv["invoiceNumber"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(numbers, vec![credit_number]);
+
+    // paymentMethod=card returns only the card sale.
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/billing/invoices?search={name}&paymentMethod=card"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    let numbers: Vec<String> = body["data"]["invoices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|inv| inv["invoiceNumber"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(numbers, vec![card_number]);
+}
+
+#[tokio::test]
+async fn list_invoices_filters_by_date_preset() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let unique = uuid::Uuid::new_v4().to_string()[..8].to_string();
+    let name = format!("DatePreset-{unique}");
+    let now = BsonDateTime::now();
+    let yesterday = BsonDateTime::from_chrono(now.to_chrono() - chrono::Duration::days(1));
+    let (_, today_number) =
+        seed_invoice_full(&app.db, 1000, false, "paid", "cash", Some(&name), now).await;
+    seed_invoice_full(&app.db, 2000, false, "paid", "cash", Some(&name), yesterday).await;
+
+    // No datePreset — search alone finds both.
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/billing/invoices?search={name}"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    assert_eq!(body["data"]["invoices"].as_array().unwrap().len(), 2);
+
+    // datePreset=today narrows to just the one created "now".
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/billing/invoices?search={name}&datePreset=today"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    let invoices = body["data"]["invoices"].as_array().unwrap();
+    assert_eq!(invoices.len(), 1, "Body: {body}");
+    assert_eq!(invoices[0]["invoiceNumber"], today_number);
 }

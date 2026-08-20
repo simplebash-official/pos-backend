@@ -440,6 +440,16 @@ pub struct InvoiceListQuery {
     pub status: Option<String>,
     /// Filter by customer key.
     pub customer_key: Option<String>,
+    /// `"paid"` (status == "paid" AND NOT credit) or `"credit"` (is_credit OR
+    /// status == "pending") — the same compound rule `BillingStats.
+    /// outstandingCreditCents` uses, exposed here so the Sales & Invoices
+    /// History screen's Paid/Credit toggle can filter server-side.
+    pub payment_status: Option<String>,
+    /// Exact match on payment method ("cash", "card", "online", "split").
+    pub payment_method: Option<String>,
+    /// Only `"today"` is meaningful — scopes to `created_at` within
+    /// `today_utc_range()`. Any other value (or absence) means all time.
+    pub date_preset: Option<String>,
     /// Page number (1-indexed).
     pub page: Option<u64>,
     /// Page item limit.

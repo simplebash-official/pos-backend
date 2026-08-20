@@ -136,6 +136,15 @@ pub async fn list_repairs(db: &Database, query: RepairListQuery) -> AppResult<Re
     if let Some(status) = query.status.filter(|s| !s.trim().is_empty()) {
         and_clauses.push(doc! { "status": status.trim() });
     }
+    if query.date_preset.as_deref() == Some("today") {
+        let (today_start, today_end) = today_utc_range();
+        and_clauses.push(doc! {
+            "created_at": {
+                "$gte": BsonDateTime::from_chrono(today_start),
+                "$lt": BsonDateTime::from_chrono(today_end),
+            }
+        });
+    }
 
     let filter = if and_clauses.is_empty() {
         Document::new()

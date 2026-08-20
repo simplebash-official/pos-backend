@@ -12,7 +12,7 @@ pub mod sale;
 
 use mongodb::{
     Database,
-    bson::{Document, doc},
+    bson::{DateTime as BsonDateTime, Document, doc},
 };
 
 use crate::{
@@ -69,6 +69,27 @@ pub async fn list_invoices(
     }
     if let Some(customer_key) = query.customer_key.filter(|s| !s.trim().is_empty()) {
         and_clauses.push(doc! { "customer_key": customer_key.trim() });
+    }
+    if let Some(payment_status) = query.payment_status.filter(|s| !s.trim().is_empty()) {
+        match payment_status.trim() {
+            "paid" => and_clauses.push(doc! { "status": "paid", "is_credit": false }),
+            "credit" => {
+                and_clauses.push(doc! { "$or": [ { "is_credit": true }, { "status": "pending" } ] })
+            }
+            _ => {}
+        }
+    }
+    if let Some(payment_method) = query.payment_method.filter(|s| !s.trim().is_empty()) {
+        and_clauses.push(doc! { "payment_method": payment_method.trim() });
+    }
+    if query.date_preset.as_deref() == Some("today") {
+        let (today_start, today_end) = today_utc_range();
+        and_clauses.push(doc! {
+            "created_at": {
+                "$gte": BsonDateTime::from_chrono(today_start),
+                "$lt": BsonDateTime::from_chrono(today_end),
+            }
+        });
     }
 
     let filter = if and_clauses.is_empty() {

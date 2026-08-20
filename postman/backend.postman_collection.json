@@ -256,6 +256,24 @@
                   "disabled": true
                 },
                 {
+                  "key": "paymentStatus",
+                  "value": "credit",
+                  "description": "paid | credit \u2014 paid means status==paid AND not on credit; credit means isCredit OR status==pending",
+                  "disabled": true
+                },
+                {
+                  "key": "paymentMethod",
+                  "value": "cash",
+                  "description": "Exact match: cash | card | online | split",
+                  "disabled": true
+                },
+                {
+                  "key": "datePreset",
+                  "value": "today",
+                  "description": "Only \"today\" is meaningful \u2014 scopes to invoices created today",
+                  "disabled": true
+                },
+                {
                   "key": "page",
                   "value": "1",
                   "description": "1-based page number (default 1)"
@@ -1239,6 +1257,12 @@
                   "disabled": true
                 },
                 {
+                  "key": "datePreset",
+                  "value": "today",
+                  "description": "Only \"today\" is meaningful \u2014 scopes to jobs created today",
+                  "disabled": true
+                },
+                {
                   "key": "page",
                   "value": "1",
                   "description": "1-based page number (default 1)"
@@ -1427,6 +1451,12 @@
                   "key": "status",
                   "value": "received",
                   "description": "One exact status: received | diagnosing | in_repair | ready | delivered | cancelled",
+                  "disabled": true
+                },
+                {
+                  "key": "datePreset",
+                  "value": "today",
+                  "description": "Only \"today\" is meaningful \u2014 scopes to tickets created today",
                   "disabled": true
                 },
                 {

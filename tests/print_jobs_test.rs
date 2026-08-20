@@ -280,6 +280,45 @@ async fn list_print_jobs_filters_by_search_and_status() {
 }
 
 #[tokio::test]
+async fn list_print_jobs_filters_by_date_preset() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let unique = uuid::Uuid::new_v4().to_string()[..8].to_string();
+    let name = format!("DatePreset-{unique}");
+    let now = BsonDateTime::now();
+    let yesterday = BsonDateTime::from_chrono(now.to_chrono() - chrono::Duration::days(1));
+    seed_print_job_with_named(&app.db, &name, "received", 1000, now).await;
+    seed_print_job_with_named(&app.db, &name, "received", 2000, yesterday).await;
+
+    // No datePreset — search alone finds both.
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/print-jobs?search={name}"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    assert_eq!(body["data"]["printJobs"].as_array().unwrap().len(), 2);
+
+    // datePreset=today narrows to just the one created "now".
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/print-jobs?search={name}&datePreset=today"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    let print_jobs = body["data"]["printJobs"].as_array().unwrap();
+    assert_eq!(print_jobs.len(), 1, "Body: {body}");
+    assert_eq!(print_jobs[0]["estimatedCostCents"], 1000);
+}
+
+#[tokio::test]
 async fn delete_print_job_soft_deletes_and_excludes_from_lists() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);
@@ -407,8 +446,9 @@ async fn update_print_job_with_customer_key_resolves_name_and_phone_from_custome
 /// Inserts a minimal `PrintJobDocument` directly, bypassing
 /// `POST /print-jobs`, so the stats test can control `created_at`/`status`/
 /// `estimated_cost_cents` precisely.
-async fn seed_print_job_with(
+async fn seed_print_job_with_named(
     db: &mongodb::Database,
+    customer_name: &str,
     status: &str,
     estimated_cost_cents: i64,
     created_at: BsonDateTime,
@@ -420,7 +460,7 @@ async fn seed_print_job_with(
             key: key.clone(),
             ticket_number: format!("PRN-{}", &key[4..]),
             customer_key: None,
-            customer_name: "Stats Test Customer".to_string(),
+            customer_name: customer_name.to_string(),
             customer_phone: Some("0770000000".to_string()),
             job_type: "mug".to_string(),
             quantity: 1,
@@ -440,6 +480,22 @@ async fn seed_print_job_with(
         .await
         .unwrap();
     key
+}
+
+async fn seed_print_job_with(
+    db: &mongodb::Database,
+    status: &str,
+    estimated_cost_cents: i64,
+    created_at: BsonDateTime,
+) -> String {
+    seed_print_job_with_named(
+        db,
+        "Stats Test Customer",
+        status,
+        estimated_cost_cents,
+        created_at,
+    )
+    .await
 }
 
 #[tokio::test]
