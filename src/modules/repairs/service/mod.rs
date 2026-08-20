@@ -75,7 +75,7 @@ fn validate_required_fields(
     customer_phone: &str,
     device_model: &str,
     issue_description: &str,
-    estimated_cost_cents: i64,
+    estimated_cost_cents: Option<i64>,
 ) -> AppResult<()> {
     if customer_name.trim().is_empty() {
         return Err(AppError::validation("Customer name is required"));
@@ -87,8 +87,34 @@ fn validate_required_fields(
     if issue_description.trim().is_empty() {
         return Err(AppError::validation("Issue description is required"));
     }
-    if estimated_cost_cents < 0 {
+    if let Some(cost) = estimated_cost_cents
+        && cost < 0
+    {
         return Err(AppError::validation("Estimated cost cannot be negative"));
+    }
+    Ok(())
+}
+
+/// A ticket may sit priceless while `received`, `diagnosing`, `in_repair`
+/// or `cancelled`; diagnosis-first repairs often can't be quoted before or
+/// during repair work. Once it moves to `ready` or `delivered` a price must
+/// exist, since those statuses mean the ticket is headed to pickup/billing.
+/// Called on the *effective* post-write status/price so a single
+/// PATCH that sets both fields together is validated against the combined
+/// result.
+const STATUSES_REQUIRING_PRICE: &[&str] = &["ready", "delivered"];
+
+fn validate_price_required_for_status(
+    status: &str,
+    estimated_cost_cents: Option<i64>,
+) -> AppResult<()> {
+    if STATUSES_REQUIRING_PRICE.contains(&status) && estimated_cost_cents.is_none() {
+        return Err(AppError::validation_with_code(
+            format!(
+                "A repair price must be set before moving a ticket to '{status}'. Enter the repair price first."
+            ),
+            codes::REPAIR_PRICE_REQUIRED,
+        ));
     }
     Ok(())
 }
@@ -184,6 +210,7 @@ pub async fn create_repair(
         &body.issue_description,
         body.estimated_cost_cents,
     )?;
+    validate_price_required_for_status(&status, body.estimated_cost_cents)?;
 
     let assignment = body.assignment.unwrap_or_default();
     let RepairAssignment {
@@ -267,9 +294,7 @@ pub async fn update_repair(
     .await?;
     let device_model = body.device_model.unwrap_or(existing.device_model);
     let issue_description = body.issue_description.unwrap_or(existing.issue_description);
-    let estimated_cost_cents = body
-        .estimated_cost_cents
-        .unwrap_or(existing.estimated_cost_cents);
+    let estimated_cost_cents = body.estimated_cost_cents.or(existing.estimated_cost_cents);
     let status = body.status.unwrap_or(existing.status);
 
     validate_status(&status)?;
@@ -280,16 +305,24 @@ pub async fn update_repair(
         &issue_description,
         estimated_cost_cents,
     )?;
+    validate_price_required_for_status(&status, estimated_cost_cents)?;
 
     let mut set_doc = doc! {
         "customer_name": &customer_name,
         "customer_phone": &customer_phone,
         "device_model": &device_model,
         "issue_description": &issue_description,
-        "estimated_cost_cents": estimated_cost_cents,
         "status": &status,
         "updated_at": BsonDateTime::now(),
     };
+    match estimated_cost_cents {
+        Some(cost) => {
+            set_doc.insert("estimated_cost_cents", cost);
+        }
+        None => {
+            set_doc.insert("estimated_cost_cents", mongodb::bson::Bson::Null);
+        }
+    }
     if let Some(key) = effective_customer_key {
         set_doc.insert("customer_key", key);
     }

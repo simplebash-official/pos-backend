@@ -87,6 +87,17 @@ fn sample_repair_payload(phone_suffix: &str) -> Value {
     })
 }
 
+fn sample_repair_payload_without_price(phone_suffix: &str) -> Value {
+    json!({
+        "customer": {
+            "customerName": "Kasun Silva",
+            "customerPhone": format!("077{phone_suffix}"),
+        },
+        "deviceModel": "iPhone 14",
+        "issueDescription": "Cracked screen",
+    })
+}
+
 #[tokio::test]
 async fn unauthenticated_requests_are_rejected() {
     let app = common::spawn_app().await;
@@ -165,6 +176,94 @@ async fn create_repair_rejects_invalid_status_and_negative_cost() {
     let (status, body) =
         send_authed(&app.router, "POST", "/api/repairs", Some(payload), &token).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "Body: {body}");
+}
+
+#[tokio::test]
+async fn create_repair_without_price_succeeds_while_received_or_diagnosing() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/repairs",
+        Some(sample_repair_payload_without_price("9111111")),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    let data = &body["data"];
+    assert_eq!(data["status"], "received");
+    assert!(
+        data.get("estimatedCostCents").is_none(),
+        "estimatedCostCents must be absent, not null/0, got: {body}"
+    );
+
+    let mut payload = sample_repair_payload_without_price("9111112");
+    payload["status"] = json!("diagnosing");
+    let (status, body) =
+        send_authed(&app.router, "POST", "/api/repairs", Some(payload), &token).await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    assert_eq!(body["data"]["status"], "diagnosing");
+}
+
+#[tokio::test]
+async fn create_repair_without_price_rejects_advanced_status() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let mut payload = sample_repair_payload_without_price("9111113");
+    payload["status"] = json!("ready");
+    let (status, body) =
+        send_authed(&app.router, "POST", "/api/repairs", Some(payload), &token).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "Body: {body}");
+    assert_eq!(body["code"], "REPAIR_PRICE_REQUIRED");
+
+    let mut payload = sample_repair_payload_without_price("9111114");
+    payload["status"] = json!("delivered");
+    let (status, body) =
+        send_authed(&app.router, "POST", "/api/repairs", Some(payload), &token).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "Body: {body}");
+    assert_eq!(body["code"], "REPAIR_PRICE_REQUIRED");
+}
+
+#[tokio::test]
+async fn update_repair_rejects_status_transition_to_ready_without_price() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let (_, created) = send_authed(
+        &app.router,
+        "POST",
+        "/api/repairs",
+        Some(sample_repair_payload_without_price("9111115")),
+        &token,
+    )
+    .await;
+    let key = created["data"]["key"].as_str().unwrap();
+
+    let (status, body) = send_authed(
+        &app.router,
+        "PATCH",
+        &format!("/api/repairs/{key}"),
+        Some(json!({ "status": "ready" })),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "Body: {body}");
+    assert_eq!(body["code"], "REPAIR_PRICE_REQUIRED");
+
+    let (status, body) = send_authed(
+        &app.router,
+        "PATCH",
+        &format!("/api/repairs/{key}"),
+        Some(json!({ "status": "ready", "estimatedCostCents": 50000 })),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    assert_eq!(body["data"]["status"], "ready");
+    assert_eq!(body["data"]["estimatedCostCents"], 50000);
 }
 
 #[tokio::test]

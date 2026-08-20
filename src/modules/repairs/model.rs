@@ -37,8 +37,9 @@ pub struct RepairDocument {
     pub issue_description: String,
     /// Lifecycle status ("received", "in_progress", "completed", "delivered", "cancelled").
     pub status: String,
-    /// Estimated or final charge to customer in cents.
-    pub estimated_cost_cents: i64,
+    /// Estimated or final charge to customer in cents. Absent until quoted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimated_cost_cents: Option<i64>,
     /// Direct cost of replacement parts/materials used in cents.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub material_cost_cents: Option<i64>,

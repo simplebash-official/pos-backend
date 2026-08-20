@@ -221,6 +221,27 @@ async fn seed_repair(app: &common::TestApp) -> String {
     body["data"]["key"].as_str().unwrap().to_string()
 }
 
+async fn seed_repair_without_price(app: &common::TestApp) -> String {
+    let token = staff_token(&app.config);
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/repairs",
+        Some(json!({
+            "customer": {
+                "customerName": "Kasun Silva",
+                "customerPhone": "0771234599",
+            },
+            "deviceModel": "iPhone 14",
+            "issueDescription": "Cracked screen",
+        })),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    body["data"]["key"].as_str().unwrap().to_string()
+}
+
 /// Nested request shape: `staff{cashierName}`, `customer{}` (omitted here —
 /// a walk-in with no linked account), `items[]`, `pricingAdjustments{}`
 /// (omitted — no discount), `payment{paymentMethod, isCredit, ...}`, and
@@ -599,6 +620,37 @@ async fn complete_sale_with_repair_line_marks_ticket_delivered() {
         item["sourceTicketNumber"],
         repair_body["data"]["ticketNumber"]
     );
+}
+
+#[tokio::test]
+async fn complete_sale_with_priceless_repair_line_is_rejected() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+    let ticket_key = seed_repair_without_price(&app).await;
+
+    let mut payload = base_sale_payload();
+    payload["items"] = json!([{
+        "name": "Screen Replacement",
+        "quantity": 1,
+        "discountCents": 0,
+        "sourceType": "repair",
+        "sourceTicketKey": ticket_key,
+    }]);
+
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/billing/sales",
+        Some(payload),
+        &token,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "a priceless repair ticket must reject the whole request before any write: {body}"
+    );
+    assert_eq!(body["code"], "REPAIR_PRICE_REQUIRED");
 }
 
 #[tokio::test]

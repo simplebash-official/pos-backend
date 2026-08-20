@@ -226,12 +226,21 @@ async fn resolve_sale_item(
         "repair" => match &item.source_ticket_key {
             Some(ticket_key) => {
                 let ticket = repairs::service::get_repair(db, ticket_key).await?;
+                let estimated_cost_cents = ticket.estimated_cost_cents.ok_or_else(|| {
+                    AppError::validation_with_code(
+                        format!(
+                            "Repair ticket {} has no price yet, set a repair price before billing it",
+                            ticket.ticket_number
+                        ),
+                        codes::REPAIR_PRICE_REQUIRED,
+                    )
+                })?;
                 (
                     item.name
                         .clone()
                         .unwrap_or_else(|| ticket.device_model.clone()),
                     None,
-                    ticket.estimated_cost_cents + ticket.material_cost_cents.unwrap_or(0),
+                    estimated_cost_cents + ticket.material_cost_cents.unwrap_or(0),
                     Some(ticket.ticket_number),
                     ticket.assigned_employee_name,
                 )

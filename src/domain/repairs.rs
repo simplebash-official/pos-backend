@@ -43,8 +43,11 @@ pub struct Repair {
     pub issue_description: String,
     /// Lifecycle status ("received", "in_progress", "completed", "delivered", "cancelled").
     pub status: String,
-    /// Quoted or final repair price in cents.
-    pub estimated_cost_cents: i64,
+    /// Quoted or final repair price in cents. Absent until a technician has
+    /// diagnosed the device and quoted a price; see `service::
+    /// validate_price_required_for_status` for which statuses require it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub estimated_cost_cents: Option<i64>,
     /// Direct cost of parts/materials in cents.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub material_cost_cents: Option<i64>,
@@ -143,8 +146,11 @@ pub struct CreateRepairRequest {
     /// Initial status (defaults to "received").
     #[serde(default)]
     pub status: Option<String>,
-    /// Estimated charge to customer in cents.
-    pub estimated_cost_cents: i64,
+    /// Estimated charge to customer in cents. Optional: a ticket can be
+    /// created before a technician has diagnosed the device and quoted a
+    /// price; see `service::validate_price_required_for_status`.
+    #[serde(default)]
+    pub estimated_cost_cents: Option<i64>,
     /// Optional cost of parts/materials in cents.
     #[serde(default)]
     pub material_cost_cents: Option<i64>,
@@ -170,7 +176,9 @@ pub struct UpdateRepairRequest {
     pub issue_description: Option<String>,
     /// Updated status.
     pub status: Option<String>,
-    /// Updated customer price estimate in cents.
+    /// Updated customer price estimate in cents. Omit the key to leave the
+    /// existing price untouched; there is no way to explicitly clear a price
+    /// back to unset via this endpoint; nothing in the workflow needs that.
     pub estimated_cost_cents: Option<i64>,
     /// Updated material cost in cents.
     pub material_cost_cents: Option<i64>,

@@ -40,6 +40,7 @@ pub const REPAIR_NOT_FOUND: &str = "REPAIR_NOT_FOUND";
 pub const PRINT_JOB_NOT_FOUND: &str = "PRINT_JOB_NOT_FOUND";
 pub const INVALID_JOB_STATUS: &str = "INVALID_JOB_STATUS";
 pub const INVALID_JOB_TYPE: &str = "INVALID_JOB_TYPE";
+pub const REPAIR_PRICE_REQUIRED: &str = "REPAIR_PRICE_REQUIRED";
 
 // Billing Status Codes
 pub const INVOICE_NOT_FOUND: &str = "INVOICE_NOT_FOUND";

@@ -6,4 +6,8 @@
 # their metadata (filename, invoice reference, timestamp) lives in Mongo.
 /generated_documents
 
+# OS files
 .DS_Store
+.DS_Store?
+._*
+Thumbs.db
