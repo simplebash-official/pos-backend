@@ -1,3 +1,4 @@
+use chrono::{DateTime, Duration, Utc};
 use mongodb::bson::{oid::ObjectId, raw::CString as BsonCString};
 
 use crate::core::error::{AppError, AppResult};
@@ -45,6 +46,24 @@ pub fn calculate_pagination(
     let limit = limit.unwrap_or(default_limit).clamp(1, max_limit);
     let skip = (page - 1) * limit;
     (page, limit, skip)
+}
+
+/// Returns the `[start, end)` UTC bounds of "today", for dashboard "today's
+/// X" stats endpoints (billing/repairs/print-jobs). No per-shop timezone is
+/// configured anywhere in this app (single-deployment POS), so this
+/// intentionally uses UTC-midnight-to-UTC-midnight — the same boundary every
+/// `created_at` is already stored against. This can disagree with a
+/// browser's *local* "today" near midnight; that's an accepted limitation,
+/// not an oversight.
+pub fn today_utc_range() -> (DateTime<Utc>, DateTime<Utc>) {
+    let now = Utc::now();
+    let start = now
+        .date_naive()
+        .and_hms_opt(0, 0, 0)
+        .expect("00:00:00 is always a valid time")
+        .and_utc();
+    let end = start + Duration::days(1);
+    (start, end)
 }
 
 /// Creates a standard success response for a feature module's status endpoint.

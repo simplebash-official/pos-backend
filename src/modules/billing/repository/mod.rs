@@ -2,10 +2,11 @@
 // never-interpret-a-miss-as-an-error convention as every other repository
 // in this codebase — `service` decides what a missing row means.
 
+use chrono::{DateTime, Utc};
 use futures_util::TryStreamExt;
 use mongodb::{
     Collection, Database,
-    bson::{Document, doc, oid::ObjectId},
+    bson::{DateTime as BsonDateTime, Document, doc, oid::ObjectId},
 };
 
 use crate::{
@@ -136,4 +137,81 @@ pub(crate) async fn count_payments_for_invoice(db: &Database, invoice_key: &str)
     Ok(payments(db)
         .count_documents(doc! { "invoice_key": invoice_key })
         .await?)
+}
+
+/// Everything `service::get_billing_stats` needs from `invoices`, computed in
+/// one aggregation round-trip.
+pub(crate) struct StatsAggregateResult {
+    /// Sum of `total_cents` for invoices created in `[today_start, today_end)`.
+    pub today_sales_cents: i64,
+    /// Count of invoices created in that same window.
+    pub today_invoice_count: u64,
+    /// Sum of `total_cents` across ALL invoices, unscoped by date, where
+    /// `is_credit == true` or `status == "pending"`.
+    pub outstanding_credit_cents: i64,
+}
+
+/// Extracts a scalar `i64` field pushed by a `$group` facet branch, out of
+/// that branch's array-of-one-document shape (`[{ "_id": null, field: N }]`,
+/// empty array if the branch matched nothing).
+fn i64_from_facet_branch(result: &Document, branch: &str, field: &str) -> i64 {
+    result
+        .get_array(branch)
+        .ok()
+        .and_then(|arr| arr.first())
+        .and_then(|val| val.as_document())
+        .and_then(|doc| {
+            doc.get_i64(field)
+                .ok()
+                .or_else(|| doc.get_i32(field).ok().map(i64::from))
+        })
+        .unwrap_or(0)
+}
+
+/// Runs a single `$facet` aggregation over `invoices` to compute the Sales &
+/// Invoices History screen's 4 KPI cards in one database round-trip:
+/// today's sales sum + count, and the all-time outstanding-credit sum.
+pub(crate) async fn aggregate_stats(
+    db: &Database,
+    today_start: DateTime<Utc>,
+    today_end: DateTime<Utc>,
+) -> AppResult<StatsAggregateResult> {
+    let pipeline = vec![doc! {
+        "$facet": {
+            "today": [
+                {
+                    "$match": {
+                        "created_at": {
+                            "$gte": BsonDateTime::from_chrono(today_start),
+                            "$lt": BsonDateTime::from_chrono(today_end),
+                        }
+                    }
+                },
+                { "$group": { "_id": null, "sum": { "$sum": "$total_cents" }, "count": { "$sum": 1 } } }
+            ],
+            "outstanding": [
+                { "$match": { "$or": [ { "is_credit": true }, { "status": "pending" } ] } },
+                { "$group": { "_id": null, "sum": { "$sum": "$total_cents" } } }
+            ],
+        }
+    }];
+
+    let mut cursor = invoices(db).aggregate(pipeline).await?;
+    let Some(result) = cursor.try_next().await? else {
+        return Ok(StatsAggregateResult {
+            today_sales_cents: 0,
+            today_invoice_count: 0,
+            outstanding_credit_cents: 0,
+        });
+    };
+
+    let today_sales_cents = i64_from_facet_branch(&result, "today", "sum");
+    let today_invoice_count = i64_from_facet_branch(&result, "today", "count") as u64;
+    let outstanding_credit_cents = i64_from_facet_branch(&result, "outstanding", "sum");
+
+    Ok(StatsAggregateResult {
+        today_sales_cents,
+        today_invoice_count,
+        outstanding_credit_cents,
+    })
 }

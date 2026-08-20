@@ -13,12 +13,12 @@ use crate::{
         constants::{codes, prefixes},
         error::{AppError, AppResult},
         id::generate_id,
-        utils::{build_bson_regex, calculate_pagination},
+        utils::{build_bson_regex, calculate_pagination, today_utc_range},
     },
     domain::{
         print_jobs::{
             CreatePrintJobRequest, PrintJob, PrintJobAssignment, PrintJobListQuery,
-            PrintJobListResponse, UpdatePrintJobRequest,
+            PrintJobListResponse, PrintJobStats, UpdatePrintJobRequest,
         },
         sequences::ReserveSequenceRequest,
     },
@@ -125,6 +125,26 @@ pub async fn list_print_jobs(
         page,
         limit,
         total_pages,
+    })
+}
+
+/// Computes the KPI cards for the Print Jobs screen. See `today_utc_range`
+/// for how "today" is bounded.
+pub async fn get_print_job_stats(db: &Database) -> AppResult<PrintJobStats> {
+    let (today_start, today_end) = today_utc_range();
+    let agg = repository::aggregate_stats(db, today_start, today_end).await?;
+
+    let avg_job_value_cents = if agg.today_job_count > 0 {
+        (agg.today_revenue_cents as f64 / agg.today_job_count as f64).round() as i64
+    } else {
+        0
+    };
+
+    Ok(PrintJobStats {
+        today_job_count: agg.today_job_count,
+        today_revenue_cents: agg.today_revenue_cents,
+        pending_job_count: agg.pending_job_count,
+        avg_job_value_cents,
     })
 }
 

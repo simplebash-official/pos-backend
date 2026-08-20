@@ -132,6 +132,9 @@ Within those rules, only reach for a pipeline where it's a *real* win:
   `repository::product::aggregate_overview`, which computes the Inventory & Stock overview page's
   dashboard metrics, per-category counts, and per-subcategory paginated product pages in a single
   `$facet` pipeline (replacing what used to be a query issued once per subcategory in a loop).
+  `billing::repository::aggregate_stats`, `repairs::repository::aggregate_stats` and
+  `print_jobs::repository::aggregate_stats` are the same pattern applied to a plain dashboard-KPI
+  endpoint (no pagination/hierarchy involved) — see **Dashboard stats endpoints** below.
 - **Don't** wrap a trivial single-document `find_one` (`find_product_by_id`,
   `find_supplier_by_key`, `find_category_by_name`, etc.) in `aggregate([{ "$match": ... }])` —
   that's pipeline ceremony for something `find_one` already does in one line.
@@ -143,6 +146,32 @@ Within those rules, only reach for a pipeline where it's a *real* win:
   through its `service`, never its `repository`" rule this codebase enforces everywhere. That
   boundary is what lets e.g. `inventory::service::product::get_product_by_key` apply its own
   not-found/validation logic consistently to every caller — `$lookup` would bypass it.
+
+## Dashboard stats endpoints
+
+A screen's top-of-page KPI strip (e.g. the frontend's Sales & Invoices History, Repair Jobs, Print
+Jobs screens) is always computed server-side, never left for the frontend to derive from its Dexie
+mirror — `GET /billing/invoices/stats`, `GET /repairs/stats`, `GET /print-jobs/stats` are the
+precedent, alongside `GET /inventory/overview`. Each follows the same shape: a `<Module>Stats` DTO
+in `domain/<module>.rs`, a `repository::aggregate_stats` `$facet` pipeline computing every branch
+in one round trip, a thin `service::get_<module>_stats` wrapping it, and a `CurrentUser`-only
+handler at a static `/stats` path registered in its own `routes!()` call (so it doesn't collide
+with a sibling `/{id}` dynamic route).
+
+"Today" is `core::utils::today_utc_range()` — `[start, end)` UTC-midnight bounds. There is no
+per-shop timezone configured anywhere in this app, so this is deliberately UTC-based, matching how
+every `created_at` is already stored; it will disagree with a browser's *local* "today" near
+midnight, which is an accepted limitation, not an oversight. Reuse this helper for any future
+"today's X" metric rather than reimplementing a date-boundary calculation.
+
+Because the shared test database (`tests/common::spawn_app`) has no per-test isolation and these
+endpoints aggregate a whole collection with no filter, `billing_test.rs`/`repairs_test.rs`/
+`print_jobs_test.rs`'s stats tests don't assert against the shared DB at all — they open their own
+throwaway database (`clients::mongo::connect` with a fresh uuid-suffixed name, kept under Atlas's
+38-byte database-name cap) and call the `service::get_*_stats` function directly, bypassing
+HTTP/the shared fixture entirely. Follow that pattern for any test that needs an exact,
+uncontaminated aggregate — the `>=` bounds `inventory_test.rs`'s overview test uses are only
+appropriate when an inequality can't hide a real bug (see that test for the contrast).
 
 ## Offline sync
 

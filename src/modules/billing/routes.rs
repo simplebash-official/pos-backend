@@ -28,7 +28,7 @@ use crate::{
     domain::{
         ModuleStatusResponse,
         billing::{
-            CancelInvoiceRequest, CompleteSaleResponse, CreateSaleRequest, Invoice,
+            BillingStats, CancelInvoiceRequest, CompleteSaleResponse, CreateSaleRequest, Invoice,
             InvoiceListQuery, InvoiceListResponse, PaymentListResponse, PaymentRecord,
             RecordPaymentRequest,
         },
@@ -44,6 +44,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(status))
         .routes(routes!(complete_sale))
         .routes(routes!(list_invoices))
+        .routes(routes!(get_invoice_stats))
         .routes(routes!(get_invoice))
         .routes(routes!(cancel_invoice))
         .routes(routes!(get_invoice_document))
@@ -97,6 +98,24 @@ async fn list_invoices(
     Ok(Json(ApiResponse::success(
         response,
         "Invoices retrieved successfully",
+    )))
+}
+
+#[utoipa::path(get, path = "/invoices/stats", tag = modules::BILLING,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Sales & Invoices History KPI cards: today's sales, today's invoice count, outstanding credit, and average basket value", body = ApiResponse<BillingStats>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+    )
+)]
+async fn get_invoice_stats(
+    _user: CurrentUser,
+    State(state): State<AppState>,
+) -> AppResult<Json<ApiResponse<BillingStats>>> {
+    let stats = service::get_billing_stats(&state.db).await?;
+    Ok(Json(ApiResponse::success(
+        stats,
+        "Billing stats retrieved successfully",
     )))
 }
 

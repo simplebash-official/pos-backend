@@ -7,7 +7,12 @@ use axum::{
         header::{AUTHORIZATION, CONTENT_TYPE},
     },
 };
-use jana2u_pos_backend::{core::constants::roles, domain::users::Role};
+use jana2u_pos_backend::{
+    core::{constants::roles, id::generate_id},
+    domain::users::Role,
+    modules::print_jobs::model::PrintJobDocument,
+};
+use mongodb::bson::DateTime as BsonDateTime;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -397,4 +402,96 @@ async fn update_print_job_with_customer_key_resolves_name_and_phone_from_custome
     assert_eq!(status, StatusCode::OK, "Body: {updated}");
     assert_eq!(updated["data"]["customerName"], "Real Customer Name");
     assert_eq!(updated["data"]["customerPhone"], customer_phone);
+}
+
+/// Inserts a minimal `PrintJobDocument` directly, bypassing
+/// `POST /print-jobs`, so the stats test can control `created_at`/`status`/
+/// `estimated_cost_cents` precisely.
+async fn seed_print_job_with(
+    db: &mongodb::Database,
+    status: &str,
+    estimated_cost_cents: i64,
+    created_at: BsonDateTime,
+) -> String {
+    let key = generate_id("prj");
+    db.collection::<PrintJobDocument>("print_jobs")
+        .insert_one(PrintJobDocument {
+            id: None,
+            key: key.clone(),
+            ticket_number: format!("PRN-{}", &key[4..]),
+            customer_key: None,
+            customer_name: "Stats Test Customer".to_string(),
+            customer_phone: Some("0770000000".to_string()),
+            job_type: "mug".to_string(),
+            quantity: 1,
+            status: status.to_string(),
+            estimated_cost_cents,
+            material_cost_cents: None,
+            assigned_employee_id: None,
+            assigned_employee_name: None,
+            split_type: None,
+            split_value: None,
+            version: 1,
+            created_at,
+            updated_at: created_at,
+            deleted_at: None,
+            updated_by_device: None,
+        })
+        .await
+        .unwrap();
+    key
+}
+
+#[tokio::test]
+async fn print_jobs_stats_endpoint_requires_auth() {
+    let app = common::spawn_app().await;
+    let (status, _) = send(&app.router, "GET", "/api/print-jobs/stats", None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn print_jobs_stats_endpoint_returns_today_job_count_revenue_pending_count_and_avg_value() {
+    // `spawn_app`'s DB is shared across the suite, which every other test
+    // tolerates by scoping its own queries — not possible here since the
+    // stats endpoint aggregates the WHOLE collection with no filter. So
+    // this test connects its own throwaway database, seeds only into that,
+    // and calls the service function directly (bypassing HTTP/router
+    // entirely) to get exact, uncontaminated numbers.
+    let app = common::spawn_app().await;
+    // Atlas caps database names at 38 bytes.
+    let db_name = format!(
+        "jtstats_{}",
+        &uuid::Uuid::new_v4().simple().to_string()[..24]
+    );
+    let db = jana2u_pos_backend::clients::mongo::connect(&app.config.mongodb_uri, &db_name)
+        .await
+        .expect("failed to connect to isolated stats test database");
+
+    let now = BsonDateTime::now();
+    let yesterday = BsonDateTime::from_chrono(now.to_chrono() - chrono::Duration::days(1));
+
+    // Today: 2 open jobs (received, in_repair) + 1 delivered (still counts
+    // toward today's job count/revenue, but not pending).
+    seed_print_job_with(&db, "received", 5000, now).await;
+    seed_print_job_with(&db, "in_repair", 4000, now).await;
+    seed_print_job_with(&db, "delivered", 3000, now).await;
+    // Backdated open job — must NOT count toward today's job
+    // count/revenue, but DOES count toward the all-time pending count.
+    seed_print_job_with(&db, "diagnosing", 2000, yesterday).await;
+    // Backdated cancelled job — excluded from pending entirely.
+    seed_print_job_with(&db, "cancelled", 1000, yesterday).await;
+
+    let stats = jana2u_pos_backend::modules::print_jobs::service::get_print_job_stats(&db)
+        .await
+        .expect("get_print_job_stats should succeed");
+
+    // today_job_count includes all 3 jobs created "now", regardless of status.
+    assert_eq!(stats.today_job_count, 3);
+    assert_eq!(stats.today_revenue_cents, 5000 + 4000 + 3000);
+    // pending_job_count = all non-delivered/cancelled jobs, any date:
+    // "received" + "in_repair" (today) + "diagnosing" (yesterday) = 3.
+    assert_eq!(stats.pending_job_count, 3);
+    assert_eq!(stats.avg_job_value_cents, (5000 + 4000 + 3000) / 3);
+
+    db.drop().await.ok();
 }

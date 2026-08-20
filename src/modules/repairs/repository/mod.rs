@@ -2,6 +2,7 @@
 // miss-as-an-error convention as every other repository in this codebase —
 // `service` decides what a missing row means.
 
+use chrono::{DateTime, Utc};
 use futures_util::TryStreamExt;
 use mongodb::{
     Collection, Database,
@@ -135,4 +136,93 @@ pub(crate) async fn list(
         items.push(document);
     }
     Ok((items, total))
+}
+
+/// Everything `service::get_repair_stats` needs from `repairs`, computed in
+/// one aggregation round-trip.
+pub(crate) struct StatsAggregateResult {
+    /// Count of non-deleted tickets created in `[today_start, today_end)`.
+    pub today_job_count: u64,
+    /// Sum of `estimated_cost_cents` (0 where unset) for those same tickets.
+    pub today_revenue_cents: i64,
+    /// Count of ALL non-deleted tickets (any date) whose status is neither
+    /// "delivered" nor "cancelled".
+    pub pending_job_count: u64,
+}
+
+/// Extracts a scalar `i64` field pushed by a `$group` facet branch, out of
+/// that branch's array-of-one-document shape (`[{ "_id": null, field: N }]`,
+/// empty array if the branch matched nothing).
+fn i64_from_facet_branch(result: &Document, branch: &str, field: &str) -> i64 {
+    result
+        .get_array(branch)
+        .ok()
+        .and_then(|arr| arr.first())
+        .and_then(|val| val.as_document())
+        .and_then(|doc| {
+            doc.get_i64(field)
+                .ok()
+                .or_else(|| doc.get_i32(field).ok().map(i64::from))
+        })
+        .unwrap_or(0)
+}
+
+/// Runs a single `$facet` aggregation over `repairs` to compute the Repair
+/// Jobs screen's KPI cards in one database round-trip: today's ticket count
+/// + revenue sum, and the all-time open-ticket count.
+pub(crate) async fn aggregate_stats(
+    db: &Database,
+    today_start: DateTime<Utc>,
+    today_end: DateTime<Utc>,
+) -> AppResult<StatsAggregateResult> {
+    let pipeline = vec![doc! {
+        "$facet": {
+            "today": [
+                {
+                    "$match": {
+                        "deleted_at": { "$exists": false },
+                        "created_at": {
+                            "$gte": BsonDateTime::from_chrono(today_start),
+                            "$lt": BsonDateTime::from_chrono(today_end),
+                        }
+                    }
+                },
+                {
+                    "$group": {
+                        "_id": null,
+                        "sum": { "$sum": { "$ifNull": ["$estimated_cost_cents", 0] } },
+                        "count": { "$sum": 1 },
+                    }
+                }
+            ],
+            "pending": [
+                {
+                    "$match": {
+                        "deleted_at": { "$exists": false },
+                        "status": { "$nin": ["delivered", "cancelled"] },
+                    }
+                },
+                { "$count": "count" }
+            ],
+        }
+    }];
+
+    let mut cursor = repairs(db).aggregate(pipeline).await?;
+    let Some(result) = cursor.try_next().await? else {
+        return Ok(StatsAggregateResult {
+            today_job_count: 0,
+            today_revenue_cents: 0,
+            pending_job_count: 0,
+        });
+    };
+
+    let today_job_count = i64_from_facet_branch(&result, "today", "count") as u64;
+    let today_revenue_cents = i64_from_facet_branch(&result, "today", "sum");
+    let pending_job_count = i64_from_facet_branch(&result, "pending", "count") as u64;
+
+    Ok(StatsAggregateResult {
+        today_job_count,
+        today_revenue_cents,
+        pending_job_count,
+    })
 }

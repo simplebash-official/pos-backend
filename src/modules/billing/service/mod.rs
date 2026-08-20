@@ -19,9 +19,9 @@ use crate::{
     core::{
         constants::codes,
         error::{AppError, AppResult},
-        utils::{build_bson_regex, calculate_pagination},
+        utils::{build_bson_regex, calculate_pagination, today_utc_range},
     },
-    domain::billing::{Invoice, InvoiceListQuery, InvoiceListResponse},
+    domain::billing::{BillingStats, Invoice, InvoiceListQuery, InvoiceListResponse},
     modules::billing::{model::InvoiceDocument, repository},
 };
 
@@ -88,5 +88,25 @@ pub async fn list_invoices(
         page,
         limit,
         total_pages,
+    })
+}
+
+/// Computes the 4 dashboard KPI cards for the Sales & Invoices History
+/// screen. See `today_utc_range` for how "today" is bounded.
+pub async fn get_billing_stats(db: &Database) -> AppResult<BillingStats> {
+    let (today_start, today_end) = today_utc_range();
+    let agg = repository::aggregate_stats(db, today_start, today_end).await?;
+
+    let avg_basket_cents = if agg.today_invoice_count > 0 {
+        (agg.today_sales_cents as f64 / agg.today_invoice_count as f64).round() as i64
+    } else {
+        0
+    };
+
+    Ok(BillingStats {
+        today_sales_cents: agg.today_sales_cents,
+        today_invoice_count: agg.today_invoice_count,
+        outstanding_credit_cents: agg.outstanding_credit_cents,
+        avg_basket_cents,
     })
 }

@@ -272,6 +272,27 @@
           "response": []
         },
         {
+          "name": "Get Billing Stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/billing/invoices/stats",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "billing",
+                "invoices",
+                "stats"
+              ]
+            },
+            "description": "Sales & Invoices History KPI cards: today's sales, today's invoice count, outstanding credit, and average basket value.\n\n**Requires a valid Bearer token** (any role \u2014 `CurrentUser`, no specific permission) or the API returns 401."
+          },
+          "response": []
+        },
+        {
           "name": "Get Invoice",
           "request": {
             "method": "GET",
@@ -1234,6 +1255,26 @@
           "response": []
         },
         {
+          "name": "Get Print Job Stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/print-jobs/stats",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "print-jobs",
+                "stats"
+              ]
+            },
+            "description": "Print Jobs screen KPI cards: today's job count, today's revenue, open job count, and average job value.\n\n**Requires a valid Bearer token** (any role \u2014 `CurrentUser`, no specific permission) or the API returns 401."
+          },
+          "response": []
+        },
+        {
           "name": "Create Print Job",
           "event": [
             {
@@ -1401,6 +1442,26 @@
               ]
             },
             "description": "List repair tickets with search, status filtering, and pagination. `GET /` used to be a static module-status placeholder \u2014 it is now this real, authenticated list endpoint (see CLAUDE.md's `app::build_router` public-routes note).\n\n**Requires a valid Bearer token** (any role \u2014 `CurrentUser`, no specific permission) or the API returns 401."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Repair Stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/repairs/stats",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "repairs",
+                "stats"
+              ]
+            },
+            "description": "Repair Jobs screen KPI cards: today's job count, today's revenue, open ticket count, and average job value.\n\n**Requires a valid Bearer token** (any role \u2014 `CurrentUser`, no specific permission) or the API returns 401."
           },
           "response": []
         },

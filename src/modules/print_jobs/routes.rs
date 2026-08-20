@@ -15,7 +15,7 @@ use crate::{
         response::{ApiResponse, ErrorResponse},
     },
     domain::print_jobs::{
-        CreatePrintJobRequest, PrintJob, PrintJobListQuery, PrintJobListResponse,
+        CreatePrintJobRequest, PrintJob, PrintJobListQuery, PrintJobListResponse, PrintJobStats,
         UpdatePrintJobRequest,
     },
     modules::print_jobs::service,
@@ -24,6 +24,7 @@ use crate::{
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(list_print_jobs, create_print_job))
+        .routes(routes!(get_print_job_stats))
         .routes(routes!(get_print_job, update_print_job, delete_print_job))
 }
 
@@ -43,6 +44,24 @@ async fn list_print_jobs(
     Ok(Json(ApiResponse::success(
         response,
         "Print jobs retrieved successfully",
+    )))
+}
+
+#[utoipa::path(get, path = "/stats", tag = modules::PRINT_JOBS,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Print Jobs KPI cards: today's job count, today's revenue, open job count, and average job value", body = ApiResponse<PrintJobStats>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+    )
+)]
+async fn get_print_job_stats(
+    _user: CurrentUser,
+    State(state): State<AppState>,
+) -> AppResult<Json<ApiResponse<PrintJobStats>>> {
+    let stats = service::get_print_job_stats(&state.db).await?;
+    Ok(Json(ApiResponse::success(
+        stats,
+        "Print job stats retrieved successfully",
     )))
 }
 

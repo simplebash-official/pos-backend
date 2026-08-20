@@ -18,7 +18,8 @@ use crate::{
         response::{ApiResponse, ErrorResponse},
     },
     domain::repairs::{
-        CreateRepairRequest, Repair, RepairListQuery, RepairListResponse, UpdateRepairRequest,
+        CreateRepairRequest, Repair, RepairListQuery, RepairListResponse, RepairStats,
+        UpdateRepairRequest,
     },
     modules::repairs::service,
 };
@@ -26,6 +27,7 @@ use crate::{
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(list_repairs, create_repair))
+        .routes(routes!(get_repair_stats))
         .routes(routes!(get_repair, update_repair, delete_repair))
 }
 
@@ -45,6 +47,24 @@ async fn list_repairs(
     Ok(Json(ApiResponse::success(
         response,
         "Repair tickets retrieved successfully",
+    )))
+}
+
+#[utoipa::path(get, path = "/stats", tag = modules::REPAIRS,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Repair Jobs KPI cards: today's job count, today's revenue, open ticket count, and average job value", body = ApiResponse<RepairStats>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+    )
+)]
+async fn get_repair_stats(
+    _user: CurrentUser,
+    State(state): State<AppState>,
+) -> AppResult<Json<ApiResponse<RepairStats>>> {
+    let stats = service::get_repair_stats(&state.db).await?;
+    Ok(Json(ApiResponse::success(
+        stats,
+        "Repair stats retrieved successfully",
     )))
 }
 

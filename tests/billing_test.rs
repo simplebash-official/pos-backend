@@ -12,6 +12,7 @@ use jana2u_pos_backend::{
     core::{config::Config, constants::roles, id::generate_id},
     domain::users::Role,
     modules::{
+        billing::model::InvoiceDocument,
         inventory::model::{CategoryDocument, SubcategoryDocument},
         sync::cursor::encode_cursor,
     },
@@ -1098,4 +1099,115 @@ async fn get_invoice_document_returns_pdf_and_caches_by_paper_width() {
             .and_then(|v| v.to_str().ok()),
         Some("application/pdf")
     );
+}
+
+/// Inserts a minimal `InvoiceDocument` directly, bypassing `complete_sale`,
+/// so the stats test can control `created_at`/`is_credit`/`status`/
+/// `total_cents` precisely.
+#[allow(clippy::too_many_arguments)]
+async fn seed_invoice_with(
+    db: &mongodb::Database,
+    total_cents: i64,
+    is_credit: bool,
+    status: &str,
+    created_at: BsonDateTime,
+) -> String {
+    let key = generate_id("inv");
+    db.collection::<InvoiceDocument>("invoices")
+        .insert_one(InvoiceDocument {
+            id: None,
+            key: key.clone(),
+            invoice_number: format!("INV-{}", Uuid::new_v4().simple()),
+            customer_key: None,
+            customer_name_snapshot: None,
+            customer_phone_snapshot: None,
+            customer_address_snapshot: None,
+            cashier_id: "staff-1".to_string(),
+            cashier_name_snapshot: "Test Cashier".to_string(),
+            items: vec![],
+            subtotal_cents: total_cents,
+            discount_type: "fixed".to_string(),
+            discount_value: 0.0,
+            discount_cents: 0,
+            total_cents,
+            payment_method: if is_credit { "credit" } else { "cash" }.to_string(),
+            split_payments: None,
+            is_credit,
+            amount_received_cents: None,
+            change_due_cents: None,
+            due_date: None,
+            card_last4: None,
+            card_ref: None,
+            online_ref: None,
+            online_note: None,
+            status: status.to_string(),
+            notes: None,
+            shop_profile_snapshot: json!({}),
+            warranty_terms_snapshot: None,
+            document_selection: None,
+            cancelled_at: None,
+            cancelled_by: None,
+            cancellation_reason: None,
+            version: 1,
+            created_at,
+            updated_at: created_at,
+        })
+        .await
+        .unwrap();
+    key
+}
+
+#[tokio::test]
+async fn billing_stats_endpoint_requires_auth() {
+    let app = common::spawn_app().await;
+    let (status, _) = send_anon(&app.router, "GET", "/api/billing/invoices/stats", None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn billing_stats_endpoint_returns_today_sales_invoice_count_outstanding_credit_and_avg_basket()
+ {
+    // `spawn_app`'s DB (`MONGODB_TEST_DB_NAME`) is shared across the whole
+    // suite, which every other test tolerates by scoping its own queries
+    // (a unique search substring, a specific key) — not possible here since
+    // the stats endpoint aggregates the WHOLE collection with no filter.
+    // So this test connects its own throwaway database, seeds only into
+    // that, and calls the service function directly (bypassing HTTP/router
+    // entirely) to get exact, uncontaminated numbers.
+    let app = common::spawn_app().await;
+    // Atlas caps database names at 38 bytes.
+    let db_name = format!("jtstats_{}", &Uuid::new_v4().simple().to_string()[..24]);
+    let db = jana2u_pos_backend::clients::mongo::connect(&app.config.mongodb_uri, &db_name)
+        .await
+        .expect("failed to connect to isolated stats test database");
+
+    let now = BsonDateTime::now();
+    let yesterday = BsonDateTime::from_chrono(now.to_chrono() - chrono::Duration::days(1));
+
+    // Today: one paid cash sale (2000), one paid credit sale (500, also
+    // counts toward outstanding credit since is_credit is true).
+    seed_invoice_with(&db, 2000, false, "paid", now).await;
+    seed_invoice_with(&db, 500, true, "paid", now).await;
+    // Today but pending (not credit) — also counts toward outstanding.
+    seed_invoice_with(&db, 300, false, "pending", now).await;
+    // Backdated (outside "today") paid invoice — must NOT count toward
+    // today's sales/count, but a backdated pending one still counts toward
+    // the all-time outstanding-credit sum.
+    seed_invoice_with(&db, 10_000, false, "paid", yesterday).await;
+    seed_invoice_with(&db, 700, false, "pending", yesterday).await;
+
+    let stats = jana2u_pos_backend::modules::billing::service::get_billing_stats(&db)
+        .await
+        .expect("get_billing_stats should succeed");
+
+    // today_sales/count only include the 3 invoices created "now".
+    assert_eq!(stats.today_sales_cents, 2000 + 500 + 300);
+    assert_eq!(stats.today_invoice_count, 3);
+    // outstanding credit = all is_credit OR pending invoices, any date:
+    // 500 (today, credit) + 300 (today, pending) + 700 (yesterday, pending).
+    assert_eq!(stats.outstanding_credit_cents, 500 + 300 + 700);
+    // avg basket = today's sales / today's count, rounded.
+    assert_eq!(stats.avg_basket_cents, (2000 + 500 + 300) / 3);
+
+    db.drop().await.ok();
 }
