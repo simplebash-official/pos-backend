@@ -685,6 +685,7 @@ async fn sync_changes_invoices_and_payments_match_the_rest_dto_shape() {
             cancelled_at: None,
             cancelled_by: None,
             cancellation_reason: None,
+            refunded_cents: 0,
             version: 1,
             created_at: now,
             updated_at: now,

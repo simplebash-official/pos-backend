@@ -8,6 +8,7 @@
 
 pub mod payments;
 pub(crate) mod print_payload;
+pub mod returns;
 pub mod sale;
 
 use mongodb::{

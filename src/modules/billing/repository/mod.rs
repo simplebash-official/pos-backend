@@ -1,6 +1,9 @@
-// Mongo access for the `invoices` and `payments` collections. Same
+// Mongo access for the `invoices`, `payments`, and `returns` collections. Same
 // never-interpret-a-miss-as-an-error convention as every other repository
 // in this codebase — `service` decides what a missing row means.
+
+pub(crate) mod invoice;
+pub(crate) mod returns;
 
 use chrono::{DateTime, Utc};
 use futures_util::TryStreamExt;

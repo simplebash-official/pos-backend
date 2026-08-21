@@ -31,6 +31,7 @@ const SYNCED_COLLECTIONS: &[&str] = &[
     "print_jobs",
     "invoices",
     "payments",
+    "returns",
 ];
 
 /// How long a completed idempotency record is replayable. Matches the

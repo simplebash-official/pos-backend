@@ -10,7 +10,10 @@ use crate::{
         SyncStatusResponse,
     },
     modules::{
-        billing::service::{self as billing_service, payments as billing_payments_service},
+        billing::service::{
+            self as billing_service, payments as billing_payments_service,
+            returns as billing_returns_service,
+        },
         customers::service as customers_service,
         inventory::service::{
             category as inventory_category, product as inventory_product, stock as inventory_stock,
@@ -47,6 +50,7 @@ const SYNCABLE: &[(&str, &str)] = &[
     ("printJobs", "print_jobs"),
     ("invoices", "invoices"),
     ("payments", "payments"),
+    ("returns", "returns"),
 ];
 
 /// Maps a caller-supplied resource name to its collection, accepting the
@@ -125,6 +129,7 @@ async fn hydrate(db: &Database, resource: &str, documents: Vec<Document>) -> App
         }
         "invoices" => to_values(billing_service::hydrate_sync_documents(documents)?)?,
         "payments" => to_values(billing_payments_service::hydrate_sync_documents(documents)?)?,
+        "returns" => to_values(billing_returns_service::hydrate_sync_documents(documents)?)?,
         _ => Vec::new(),
     };
     Ok(values)

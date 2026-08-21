@@ -51,6 +51,9 @@ pub struct InvoiceItem {
     /// Display name of technician or operator who handled this ticket.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assigned_employee_name: Option<String>,
+    /// Quantity of items already returned from this line item.
+    #[serde(default)]
+    pub returned_quantity: i64,
 }
 
 /// One line of a `POST /billing/sales` request. Deliberately leaner than
@@ -284,6 +287,9 @@ pub struct Invoice {
     /// Reason provided for invoice cancellation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cancellation_reason: Option<String>,
+    /// Total amount in cents refunded against this invoice from returns.
+    #[serde(default)]
+    pub refunded_cents: i64,
     /// Timestamp when invoice was created.
     pub created_at: DateTime<Utc>,
     /// Timestamp when invoice was last updated.
@@ -488,4 +494,203 @@ pub struct BillingStats {
     /// `todaySalesCents / todayInvoiceCount`, rounded; 0 when there were no
     /// invoices today.
     pub avg_basket_cents: i64,
+}
+
+/// Reason why an item was returned by a customer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ReturnReason {
+    #[serde(alias = "defective")]
+    Defective,
+    #[serde(alias = "wrong_item", alias = "wrongItem")]
+    WrongItem,
+    #[serde(alias = "customer_changed_mind", alias = "customerChangedMind")]
+    CustomerChangedMind,
+    #[serde(alias = "warranty_claim", alias = "warrantyClaim")]
+    WarrantyClaim,
+    #[serde(alias = "other")]
+    Other,
+}
+
+/// Restock action specifying whether a returned item should be returned to inventory or discarded as damaged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ItemRestockAction {
+    #[serde(alias = "restock_to_inventory", alias = "restockToInventory")]
+    RestockToInventory,
+    #[serde(alias = "damaged_discard", alias = "damagedDiscard")]
+    DamagedDiscard,
+}
+
+/// A line item in a return record representing a returned product or service.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReturnItem {
+    /// Foreign key referencing the catalog product, if this is a retail item.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub product_key: Option<String>,
+    /// Display name or description of the returned item.
+    pub name: String,
+    /// Stock Keeping Unit (SKU) barcode identifier, if available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sku: Option<String>,
+    /// Number of units returned.
+    pub quantity: i64,
+    /// Price per unit in cents refunded.
+    pub unit_price_cents: i64,
+    /// Total price for this line item in cents refunded.
+    pub total_cents: i64,
+    /// Reason why the item was returned.
+    pub reason: ReturnReason,
+    /// Whether the item was restocked to inventory or discarded as damaged.
+    pub restock_action: ItemRestockAction,
+    /// Optional notes or defect details.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    /// Source category: `"retail"`, `"repair"`, or `"print"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_type: Option<String>,
+    /// Key of linked repair or print job ticket, if applicable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_ticket_key: Option<String>,
+    /// Formatted ticket number of linked repair or print job.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_ticket_number: Option<String>,
+}
+
+/// One item in a `POST /billing/returns` request.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateReturnItemRequest {
+    /// Product key for standard retail inventory items.
+    #[serde(default)]
+    pub product_key: Option<String>,
+    /// Item name matching the invoice line if no product key.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Quantity of items being returned.
+    pub quantity: i64,
+    /// Reason for return.
+    pub reason: ReturnReason,
+    /// Restock action: restock to inventory or discard damaged.
+    pub restock_action: ItemRestockAction,
+    /// Optional notes or reason description.
+    #[serde(default)]
+    pub notes: Option<String>,
+    /// Unit price in cents for custom/ad-hoc lines.
+    #[serde(default)]
+    pub unit_price_cents: Option<i64>,
+    /// Source ticket key if returning a repair/print line.
+    #[serde(default)]
+    pub source_ticket_key: Option<String>,
+}
+
+/// Body for `POST /billing/returns` — initiates a return, refund (cashback), or exchange/replacement.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateReturnRequest {
+    /// Unique business key of the invoice being returned against (e.g. inv_...).
+    pub invoice_key: String,
+    /// List of items being returned from the invoice.
+    pub returned_items: Vec<CreateReturnItemRequest>,
+    /// Optional replacement/exchange items the customer is taking.
+    #[serde(default)]
+    pub exchange_items: Option<Vec<CreateSaleItemRequest>>,
+    /// Payment method used for cashback payout or customer extra payment ("cash", "card", "online").
+    #[serde(default)]
+    pub payment_method: Option<String>,
+    /// General notes or remarks for this return.
+    #[serde(default)]
+    pub notes: Option<String>,
+    /// Optional client-supplied refund amount in cents.
+    #[serde(default)]
+    pub refund_amount_cents: Option<i64>,
+}
+
+/// A return and refund/exchange transaction record.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReturnRecord {
+    /// MongoDB internal hex ID.
+    pub id: String,
+    /// Unique business key of the return record (e.g. ret_...).
+    pub key: String,
+    /// Human-friendly sequential return number (e.g. RET-000001).
+    pub return_number: String,
+    /// Unique business key of the associated invoice.
+    pub invoice_key: String,
+    /// Human-friendly invoice number (e.g. INV-000001).
+    pub invoice_number: String,
+    /// Key of the customer linked to this invoice, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub customer_key: Option<String>,
+    /// Customer's name at the time of sale.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub customer_name_snapshot: Option<String>,
+    /// Staff ID of cashier who processed the return.
+    pub cashier_id: String,
+    /// Cashier's display name at the time of return.
+    pub cashier_name_snapshot: String,
+    /// List of returned items.
+    pub returned_items: Vec<ReturnItem>,
+    /// List of replacement or exchange items provided, if any.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exchange_items: Vec<InvoiceItem>,
+    /// Total monetary value of returned items in cents.
+    pub return_subtotal_cents: i64,
+    /// Total monetary value of replacement/exchange items in cents.
+    pub exchange_subtotal_cents: i64,
+    /// Net refund amount in cents (positive = cashback to customer, negative = customer pays extra).
+    pub net_refund_cents: i64,
+    /// Payment method used for cashback refund or difference payment.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payment_method: Option<String>,
+    /// Key of payment record created for the refund or extra payment, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refund_payment_key: Option<String>,
+    /// General notes or remarks for this return.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    /// Timestamp when return was recorded.
+    pub created_at: DateTime<Utc>,
+    /// Timestamp when return was last updated.
+    pub updated_at: DateTime<Utc>,
+    /// Optimistic locking version number.
+    #[serde(default = "default_version")]
+    pub version: i64,
+}
+
+/// Query parameters for listing and filtering return records.
+#[derive(Debug, Clone, Default, Deserialize, IntoParams)]
+#[serde(rename_all = "camelCase")]
+#[into_params(parameter_in = Query)]
+pub struct ReturnListQuery {
+    /// Search term matching return number, invoice number, or customer name.
+    pub search: Option<String>,
+    /// Filter by original invoice key.
+    pub invoice_key: Option<String>,
+    /// Filter by customer key.
+    pub customer_key: Option<String>,
+    /// Scopes to returns created today when set to `"today"`.
+    pub date_preset: Option<String>,
+    /// Page number (1-indexed).
+    pub page: Option<u64>,
+    /// Page item limit.
+    pub limit: Option<u64>,
+}
+
+/// Paginated response payload containing list of returns.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReturnListResponse {
+    /// List of returns for the requested page.
+    pub returns: Vec<ReturnRecord>,
+    /// Total count of matching returns.
+    pub total: u64,
+    /// Current page number.
+    pub page: u64,
+    /// Maximum items per page.
+    pub limit: u64,
+    /// Total number of pages available.
+    pub total_pages: u64,
 }

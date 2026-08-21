@@ -307,6 +307,7 @@ async fn resolve_sale_item(
         source_ticket_key: item.source_ticket_key.clone(),
         source_ticket_number,
         assigned_employee_name,
+        returned_quantity: 0,
     })
 }
 
@@ -511,6 +512,7 @@ pub async fn complete_sale(
         cancelled_at: None,
         cancelled_by: None,
         cancellation_reason: None,
+        refunded_cents: 0,
         version: 1,
         created_at: now,
         updated_at: now,

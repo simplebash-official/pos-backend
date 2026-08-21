@@ -17,3 +17,4 @@ pub const INVOICE: &str = "inv";
 pub const PAYMENT: &str = "pay";
 pub const REPAIR: &str = "rep";
 pub const PRINT_JOB: &str = "prn";
+pub const RETURN: &str = "ret";

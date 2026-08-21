@@ -475,7 +475,135 @@
                 "payments"
               ]
             },
-            "description": "List every payment recorded against an invoice.\n\n**Requires a valid Bearer token** (any role \u2014 `CurrentUser`, no specific permission) or the API returns 401."
+            "description": "List every payment recorded against an invoice.\n\n**Requires a valid Bearer token** (any role — `CurrentUser`, no specific permission) or the API returns 401."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Return",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const data = pm.response.json().data;",
+                  "    pm.environment.set(\"returnKey\", data.key);",
+                  "    console.log(`returnKey (${data.key}) saved`);",
+                  "}"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"invoiceKey\": \"{{invoiceKey}}\",\n  \"returnedItems\": [\n    {\n      \"productKey\": \"{{productKey}}\",\n      \"quantity\": 1,\n      \"reason\": \"defective\",\n      \"restockAction\": \"restock_to_inventory\",\n      \"notes\": \"Item returned in original box\"\n    }\n  ],\n  \"paymentMethod\": \"cash\",\n  \"notes\": \"Customer returned defective product\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/billing/returns",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "billing",
+                "returns"
+              ]
+            },
+            "description": "Processes a return against an existing invoice: adjusts stock for returned (restocked) items and exchange items, calculates net cashback or extra amount due, updates customer financials, and updates invoice returned quantity.\n\n**Requires the `billing:write` permission** in the token's `permissions` claim. Returns 401 without token, 403 `PERMISSION_DENIED` if missing permission, 400 if return quantity exceeds purchased quantity, 404 if invoice/product not found, 409 if invoice is cancelled."
+          },
+          "response": []
+        },
+        {
+          "name": "List Returns",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/billing/returns?page=1&limit=20",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "billing",
+                "returns"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "RET-000001",
+                  "description": "Search return number, invoice number, or customer name",
+                  "disabled": true
+                },
+                {
+                  "key": "invoiceKey",
+                  "value": "{{invoiceKey}}",
+                  "description": "Filter by original invoice key",
+                  "disabled": true
+                },
+                {
+                  "key": "customerKey",
+                  "value": "{{customerKey}}",
+                  "description": "Filter by customer key",
+                  "disabled": true
+                },
+                {
+                  "key": "datePreset",
+                  "value": "today",
+                  "description": "Filter returns recorded today",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "1-based page number (default 1)"
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Page size (default 20)"
+                }
+              ]
+            },
+            "description": "List return records with search, date/invoice/customer filtering, and pagination.\n\n**Requires a valid Bearer token** (any role — `CurrentUser`, no specific permission) or the API returns 401."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Return",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/billing/returns/{{returnKey}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "billing",
+                "returns",
+                "{{returnKey}}"
+              ]
+            },
+            "description": "Fetch a single return record by its Mongo ObjectId or prefixed `key` (`ret_...`).\n\n**Requires a valid Bearer token** (any role — `CurrentUser`, no specific permission) or the API returns 401."
           },
           "response": []
         }
@@ -2477,7 +2605,12 @@
     {
       "key": "repairKey",
       "value": "rep_xxxxxxxxxxxxxxxx",
-      "description": "A repair ticket's system-generated `key` (from List/Get/Create Repair) \u2014 used by Get/Update/Delete Repair."
+      "description": "A repair ticket's system-generated `key` (from List/Get/Create Repair) — used by Get/Update/Delete Repair."
+    },
+    {
+      "key": "returnKey",
+      "value": "ret_xxxxxxxxxxxxxxxx",
+      "description": "A return record's system-generated `key` (from Create Return / List Returns) — used by Get Return."
     }
   ]
 }

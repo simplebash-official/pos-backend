@@ -1153,6 +1153,7 @@ async fn seed_invoice_full(
             cancelled_at: None,
             cancelled_by: None,
             cancellation_reason: None,
+            refunded_cents: 0,
             version: 1,
             created_at,
             updated_at: created_at,

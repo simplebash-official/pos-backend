@@ -18,6 +18,7 @@ pub async fn reserve_sequence(
 ) -> AppResult<SequenceReservationResponse> {
     let (prefix, padding) = match name.to_lowercase().as_str() {
         "invoice" | "invoices" => ("INV-", 6),
+        "return" | "returns" => ("RET-", 6),
         "repair" | "repairs" => ("REP-", 6),
         "printjob" | "printjobs" | "print_job" | "print_jobs" => ("PRN-", 6),
         "purchase" | "purchases" => ("PUR-", 6),

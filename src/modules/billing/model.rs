@@ -11,7 +11,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     core::{constants::prefixes, id::generate_id},
-    domain::billing::{Invoice, InvoiceItem, PaymentRecord, SplitPayment},
+    domain::billing::{
+        Invoice, InvoiceItem, PaymentRecord, ReturnItem, ReturnRecord, SplitPayment,
+    },
 };
 
 /// Invoices are append-only (see `domain::billing::Invoice`'s module
@@ -107,6 +109,9 @@ pub struct InvoiceDocument {
     /// Explanation why this invoice was cancelled.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cancellation_reason: Option<String>,
+    /// Total amount in cents refunded against this invoice.
+    #[serde(default)]
+    pub refunded_cents: i64,
     /// Concurrency version number for optimistic locking.
     #[serde(default = "default_version")]
     pub version: i64,
@@ -170,6 +175,7 @@ impl InvoiceDocument {
             cancelled_at: self.cancelled_at.map(|d| d.to_chrono()),
             cancelled_by: self.cancelled_by,
             cancellation_reason: self.cancellation_reason,
+            refunded_cents: self.refunded_cents,
             created_at: self.created_at.to_chrono(),
             updated_at: self.updated_at.to_chrono(),
             version: self.version,
@@ -232,6 +238,100 @@ impl PaymentDocument {
             recorded_by_user_id: self.recorded_by_user_id,
             recorded_by_name_snapshot: self.recorded_by_name_snapshot,
             recorded_at: self.recorded_at.to_chrono(),
+            created_at: self.created_at.to_chrono(),
+            updated_at: self.updated_at.to_chrono(),
+            version: self.version,
+        }
+    }
+}
+
+/// Type alias for return items embedded in return documents.
+pub type ReturnItemDocument = ReturnItem;
+
+/// Returns are append-only: every field is written once at insert.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReturnDocument {
+    /// MongoDB internal document identifier.
+    #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
+    pub id: Option<ObjectId>,
+    /// Unique business key for this return record (e.g. ret_...).
+    #[serde(default)]
+    pub key: String,
+    /// Human-friendly sequential return number (e.g. RET-000001).
+    pub return_number: String,
+    /// Key of the invoice this return is applied to.
+    pub invoice_key: String,
+    /// Sequential number of the invoice returned against.
+    pub invoice_number: String,
+    /// Key of the customer linked to the original invoice, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub customer_key: Option<String>,
+    /// Snapshot of customer's name at the time of sale.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub customer_name_snapshot: Option<String>,
+    /// User ID of staff member who processed the return.
+    pub cashier_id: String,
+    /// Name snapshot of staff member who processed the return.
+    pub cashier_name_snapshot: String,
+    /// List of returned items.
+    pub returned_items: Vec<ReturnItemDocument>,
+    /// List of replacement or exchange items provided, if any.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exchange_items: Vec<InvoiceItem>,
+    /// Total monetary value of returned items in cents.
+    pub return_subtotal_cents: i64,
+    /// Total monetary value of replacement/exchange items in cents.
+    pub exchange_subtotal_cents: i64,
+    /// Net refund amount in cents (positive = cashback, negative = customer extra payment).
+    pub net_refund_cents: i64,
+    /// Payment method used for refund payout or difference collection.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payment_method: Option<String>,
+    /// Key of payment record created for the refund or extra payment, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refund_payment_key: Option<String>,
+    /// General notes or remarks for this return.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    /// Concurrency version number for optimistic locking.
+    #[serde(default = "default_version")]
+    pub version: i64,
+    /// Timestamp when return document was created.
+    #[serde(default = "BsonDateTime::now")]
+    pub created_at: BsonDateTime,
+    /// Timestamp when return document was last updated.
+    #[serde(default = "BsonDateTime::now")]
+    pub updated_at: BsonDateTime,
+}
+
+impl ReturnDocument {
+    pub fn into_return_record(self) -> ReturnRecord {
+        let key = if self.key.is_empty() {
+            generate_id(prefixes::RETURN)
+        } else {
+            self.key
+        };
+        ReturnRecord {
+            id: self
+                .id
+                .expect("persisted return document must have an id")
+                .to_hex(),
+            key,
+            return_number: self.return_number,
+            invoice_key: self.invoice_key,
+            invoice_number: self.invoice_number,
+            customer_key: self.customer_key,
+            customer_name_snapshot: self.customer_name_snapshot,
+            cashier_id: self.cashier_id,
+            cashier_name_snapshot: self.cashier_name_snapshot,
+            returned_items: self.returned_items,
+            exchange_items: self.exchange_items,
+            return_subtotal_cents: self.return_subtotal_cents,
+            exchange_subtotal_cents: self.exchange_subtotal_cents,
+            net_refund_cents: self.net_refund_cents,
+            payment_method: self.payment_method,
+            refund_payment_key: self.refund_payment_key,
+            notes: self.notes,
             created_at: self.created_at.to_chrono(),
             updated_at: self.updated_at.to_chrono(),
             version: self.version,

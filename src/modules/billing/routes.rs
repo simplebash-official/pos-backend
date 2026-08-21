@@ -28,9 +28,9 @@ use crate::{
     domain::{
         ModuleStatusResponse,
         billing::{
-            BillingStats, CancelInvoiceRequest, CompleteSaleResponse, CreateSaleRequest, Invoice,
-            InvoiceListQuery, InvoiceListResponse, PaymentListResponse, PaymentRecord,
-            RecordPaymentRequest,
+            BillingStats, CancelInvoiceRequest, CompleteSaleResponse, CreateReturnRequest,
+            CreateSaleRequest, Invoice, InvoiceListQuery, InvoiceListResponse, PaymentListResponse,
+            PaymentRecord, RecordPaymentRequest, ReturnListQuery, ReturnListResponse, ReturnRecord,
         },
     },
     modules::{
@@ -49,6 +49,8 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(cancel_invoice))
         .routes(routes!(get_invoice_document))
         .routes(routes!(record_payment, list_payments))
+        .routes(routes!(create_return, list_returns))
+        .routes(routes!(get_return))
 }
 
 #[utoipa::path(get, path = "/", tag = modules::BILLING, responses(
@@ -300,5 +302,79 @@ async fn list_payments(
     Ok(Json(ApiResponse::success(
         PaymentListResponse { payments },
         "Payments retrieved successfully",
+    )))
+}
+
+#[utoipa::path(post, path = "/returns", tag = modules::BILLING, request_body = CreateReturnRequest,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Return created — stock adjusted, refund/payment and customer balance updated", body = ApiResponse<ReturnRecord>),
+        (status = 400, description = "Validation error or return quantity exceeded", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+        (status = 404, description = "Invoice or product not found", body = ErrorResponse),
+        (status = 409, description = "Invoice not returnable", body = ErrorResponse),
+    )
+)]
+async fn create_return(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    device_id: crate::core::middleware::sync_headers::DeviceId,
+    Json(body): Json<CreateReturnRequest>,
+) -> AppResult<Json<ApiResponse<ReturnRecord>>> {
+    user.require_permission(perm::BILLING_WRITE)?;
+    let cashier_name = match mongodb::bson::oid::ObjectId::parse_str(&user.user_id) {
+        Ok(object_id) => users::service::get_user(&state.db, object_id)
+            .await
+            .map(|u| u.name)
+            .unwrap_or_else(|_| "Unknown".to_string()),
+        Err(_) => "Unknown".to_string(),
+    };
+    let response =
+        service::returns::create_return(&state.db, body, user.user_id, cashier_name, device_id.0)
+            .await?;
+    Ok(Json(ApiResponse::success(
+        response,
+        "Return processed successfully",
+    )))
+}
+
+#[utoipa::path(get, path = "/returns", tag = modules::BILLING, params(ReturnListQuery),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "List return records with search, date/invoice/customer filtering, and pagination", body = ApiResponse<ReturnListResponse>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+    )
+)]
+async fn list_returns(
+    _user: CurrentUser,
+    State(state): State<AppState>,
+    Query(query): Query<ReturnListQuery>,
+) -> AppResult<Json<ApiResponse<ReturnListResponse>>> {
+    let response = service::returns::list_returns(&state.db, query).await?;
+    Ok(Json(ApiResponse::success(
+        response,
+        "Returns retrieved successfully",
+    )))
+}
+
+#[utoipa::path(get, path = "/returns/{id}", tag = modules::BILLING,
+    params(("id" = String, Path, description = "Return ID or prefixed key")),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Get a return record", body = ApiResponse<ReturnRecord>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 404, description = "Return record not found", body = ErrorResponse),
+    )
+)]
+async fn get_return(
+    _user: CurrentUser,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> AppResult<Json<ApiResponse<ReturnRecord>>> {
+    let return_record = service::returns::get_return(&state.db, &id).await?;
+    Ok(Json(ApiResponse::success(
+        return_record,
+        "Return retrieved successfully",
     )))
 }
