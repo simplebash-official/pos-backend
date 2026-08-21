@@ -37,6 +37,21 @@ pub struct IdempotencyDocument {
     pub created_at: BsonDateTime,
 }
 
+/// How long an `in_progress` record blocks a retry with the same key before
+/// this middleware treats it as abandoned and lets a new attempt take over.
+///
+/// The normal cleanup path (delete-on-5xx, a few lines below) only runs when
+/// `next.run()` actually returns a `Response` — a client disconnecting
+/// mid-request (exactly the scenario the frontend's offline outbox is built
+/// around: a cashier's connection drops mid-checkout, and the same
+/// `Idempotency-Key` is retried once it returns) or the handler task dying
+/// outright never produces one, so without this escape hatch the record
+/// blocks every future retry with a 409 forever — the offline engine never
+/// mints a new key for the same queued operation. 30s is comfortably longer
+/// than `complete_sale`'s several sequential Mongo writes, the slowest
+/// request this middleware guards.
+const IN_PROGRESS_STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(30);
+
 fn compute_request_hash(method: &Method, uri: &str, body: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(method.as_str().as_bytes());
@@ -193,16 +208,24 @@ pub async fn handle_idempotency(
 
             return response;
         } else if record.status == "in_progress" {
-            let err_resp = ErrorResponse::new(
-                StatusCode::CONFLICT,
-                codes::IDEMPOTENCY_IN_PROGRESS,
-                "A request with this Idempotency-Key is currently in progress. Please retry with backoff.",
-            );
-            let mut response = (StatusCode::CONFLICT, axum::Json(err_resp)).into_response();
-            response
-                .headers_mut()
-                .insert(header::RETRY_AFTER, HeaderValue::from_static("1"));
-            return response;
+            let age = BsonDateTime::now().saturating_duration_since(record.created_at);
+            if age < IN_PROGRESS_STALE_AFTER {
+                let err_resp = ErrorResponse::new(
+                    StatusCode::CONFLICT,
+                    codes::IDEMPOTENCY_IN_PROGRESS,
+                    "A request with this Idempotency-Key is currently in progress. Please retry with backoff.",
+                );
+                let mut response = (StatusCode::CONFLICT, axum::Json(err_resp)).into_response();
+                response
+                    .headers_mut()
+                    .insert(header::RETRY_AFTER, HeaderValue::from_static("1"));
+                return response;
+            }
+            // Abandoned — clear it and fall through to the insert below, the
+            // same path a first-ever request with this key takes.
+            let _ = collection
+                .delete_one(doc! { "key": &key, "user_id": &user_id, "status": "in_progress" })
+                .await;
         }
     }
 

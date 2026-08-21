@@ -4,7 +4,9 @@ use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
+use jana2u_pos_backend::core::middleware::idempotency::IdempotencyDocument;
 use jana2u_pos_backend::domain::users::Role;
+use mongodb::bson::DateTime as BsonDateTime;
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -158,6 +160,90 @@ async fn login_responses_are_never_captured_into_the_idempotency_store() {
         stored.is_none(),
         "auth routes must not be recorded at all, found: {stored:?}"
     );
+}
+
+#[tokio::test]
+async fn a_fresh_in_progress_record_blocks_a_concurrent_retry() {
+    let app = common::spawn_app().await;
+    let token = common::mint_token(&app.config, Some(Role::Admin), &[]);
+    let idem_key = format!("idem-inprogress-{}", Uuid::new_v4());
+
+    // Simulates a request that is genuinely still being handled: an
+    // `in_progress` record less than the staleness window old must still
+    // reject a same-key retry with 409, not let it race ahead.
+    let collection = app.db.collection::<IdempotencyDocument>("idempotency_keys");
+    collection
+        .insert_one(IdempotencyDocument {
+            id: None,
+            key: idem_key.clone(),
+            user_id: "test-user".to_string(),
+            request_hash: "irrelevant".to_string(),
+            status: "in_progress".to_string(),
+            response_status: None,
+            response_body: None,
+            created_at: BsonDateTime::now(),
+        })
+        .await
+        .expect("seed in-progress idempotency record");
+
+    let (status, _, json) = send_with_headers(
+        &app.router,
+        &token,
+        "POST",
+        "/api/sequences/repair/reserve",
+        Some(serde_json::json!({ "blockSize": 10 })),
+        vec![("idempotency-key", &idem_key)],
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::CONFLICT, "fresh in-progress: {json}");
+    assert_eq!(json["code"], "IDEMPOTENCY_IN_PROGRESS");
+}
+
+#[tokio::test]
+async fn a_stale_in_progress_record_is_treated_as_abandoned() {
+    let app = common::spawn_app().await;
+    let token = common::mint_token(&app.config, Some(Role::Admin), &[]);
+    let idem_key = format!("idem-stale-{}", Uuid::new_v4());
+
+    // A client can disconnect mid-request (the exact scenario the frontend's
+    // offline outbox retries into — see `core::middleware::idempotency`'s
+    // `IN_PROGRESS_STALE_AFTER` doc comment), leaving the record stuck
+    // `in_progress` forever with no 5xx response for the normal cleanup path
+    // to see. Backdating `created_at` past the staleness window simulates
+    // that abandonment; the retry must be let through rather than 409
+    // forever.
+    let stale_created_at = BsonDateTime::from_millis(
+        BsonDateTime::now().timestamp_millis()
+            - std::time::Duration::from_secs(90).as_millis() as i64,
+    );
+    let collection = app.db.collection::<IdempotencyDocument>("idempotency_keys");
+    collection
+        .insert_one(IdempotencyDocument {
+            id: None,
+            key: idem_key.clone(),
+            user_id: "test-user".to_string(),
+            request_hash: "irrelevant".to_string(),
+            status: "in_progress".to_string(),
+            response_status: None,
+            response_body: None,
+            created_at: stale_created_at,
+        })
+        .await
+        .expect("seed stale in-progress idempotency record");
+
+    let (status, _, json) = send_with_headers(
+        &app.router,
+        &token,
+        "POST",
+        "/api/sequences/repair/reserve",
+        Some(serde_json::json!({ "blockSize": 10 })),
+        vec![("idempotency-key", &idem_key)],
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "stale in-progress: {json}");
+    assert!(json["data"]["start"].is_i64());
 }
 
 #[tokio::test]
