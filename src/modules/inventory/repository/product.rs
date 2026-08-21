@@ -357,6 +357,25 @@ pub(crate) struct OverviewAggregateResult {
     pub subcategory_data: HashMap<String, (u64, Vec<ProductDocument>)>,
 }
 
+/// Counts non-deleted products, and how many of those are at/below their
+/// `min_stock_threshold`, for `GET /inventory/stats`. Unlike
+/// `aggregate_overview`'s `total_items`/`low_stock_alerts` branches (which
+/// intentionally mirror the dashboard's existing unfiltered-count behavior),
+/// this excludes soft-deleted rows — the correct count for a fresh stats
+/// endpoint with no prior behavior to preserve.
+pub(crate) async fn count_stats(db: &Database) -> AppResult<(u64, u64)> {
+    let total_items = products(db)
+        .count_documents(doc! { "deleted_at": { "$exists": false } })
+        .await?;
+    let low_stock_alerts = products(db)
+        .count_documents(doc! {
+            "deleted_at": { "$exists": false },
+            "$expr": { "$lte": ["$stock_quantity", "$min_stock_threshold"] }
+        })
+        .await?;
+    Ok((total_items, low_stock_alerts))
+}
+
 /// Runs a single Mongo `$facet` aggregation pipeline over `products` to compute
 /// everything the overview endpoint needs in one database round-trip: unfiltered
 /// dashboard metrics (`total_items`/`low_stock_alerts`), filtered per-category

@@ -7,4 +7,5 @@ pub mod category;
 pub mod overview;
 pub mod product;
 pub mod sku;
+pub mod stats;
 pub mod stock;

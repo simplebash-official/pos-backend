@@ -503,6 +503,26 @@
             "description": "Placeholder status route for the customers module. Real endpoints are not implemented yet."
           },
           "response": []
+        },
+        {
+          "name": "Get Customer Stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/customers/stats",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                "stats"
+              ]
+            },
+            "description": "Customers screen KPI cards: total customers, total balance due, and active-debtor count.\n\n**Requires a valid Bearer token** (any role \u2014 `CurrentUser`, no specific permission) or the API returns 401."
+          },
+          "response": []
         }
       ]
     },
@@ -1222,6 +1242,31 @@
               "response": []
             }
           ]
+        },
+        {
+          "name": "Stats",
+          "item": [
+            {
+              "name": "Get Inventory Stats",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{backendBaseUrl}}/api/inventory/stats",
+                  "host": [
+                    "{{backendBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory",
+                    "stats"
+                  ]
+                },
+                "description": "Inventory & Stock KPI cards: total items, category/subcategory counts, and low-stock alert count.\n\n**Requires a valid Bearer token with `inventory:read`** or the API returns 401/403."
+              },
+              "response": []
+            }
+          ]
         }
       ],
       "description": "Reference module \u2014 full product CRUD, stock adjustment/movements, and category/subcategory management."
@@ -1888,6 +1933,26 @@
               ]
             },
             "description": "Every distinct `suppliedCategories` tag currently in use across all suppliers, for autocomplete.\n\n**Requires Admin JWT** (`role: admin` claim) \u2014 every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Supplier Stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/suppliers/stats",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "suppliers",
+                "stats"
+              ]
+            },
+            "description": "Suppliers screen KPI cards: total suppliers, supply category count, and direct-contact count.\n\n**Requires a valid Bearer token with the Admin role** or the API returns 401/403."
           },
           "response": []
         }

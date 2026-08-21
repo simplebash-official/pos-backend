@@ -18,7 +18,7 @@ use crate::{
     },
     domain::suppliers::{
         CreateSupplierRequest, Supplier, SupplierCategoriesResponse, SupplierListQuery,
-        SuppliersResponse, UpdateSupplierRequest,
+        SupplierStats, SuppliersResponse, UpdateSupplierRequest,
     },
     modules::suppliers::{model::SupplierDocument, repository},
 };
@@ -514,6 +514,18 @@ pub(crate) async fn get_supplier_categories(
     categories.sort();
     categories.dedup();
     Ok(SupplierCategoriesResponse { categories })
+}
+
+/// Computes the KPI cards for the Suppliers screen.
+pub async fn get_supplier_stats(db: &Database) -> AppResult<SupplierStats> {
+    let (total_suppliers, direct_contacts_count) = repository::count_stats(db).await?;
+    let supply_categories_count = repository::distinct_supplied_categories(db).await?.len() as u64;
+
+    Ok(SupplierStats {
+        total_suppliers,
+        supply_categories_count,
+        direct_contacts_count,
+    })
 }
 
 /// Converts a page of raw `suppliers` documents — as read by the sync

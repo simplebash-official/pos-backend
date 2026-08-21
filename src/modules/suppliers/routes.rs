@@ -28,7 +28,8 @@ use crate::{
     },
     domain::suppliers::{
         CreateSupplierRequest, DeleteSuppliersRequest, DeleteSuppliersResponse, Supplier,
-        SupplierCategoriesResponse, SupplierListQuery, SuppliersResponse, UpdateSupplierRequest,
+        SupplierCategoriesResponse, SupplierListQuery, SupplierStats, SuppliersResponse,
+        UpdateSupplierRequest,
     },
     modules::suppliers::service,
 };
@@ -49,6 +50,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         ))
         .routes(routes!(delete_suppliers_batch))
         .routes(routes!(get_supplier_categories))
+        .routes(routes!(get_supplier_stats))
 }
 
 // ============================================================================
@@ -263,5 +265,24 @@ async fn get_supplier_categories(
     Ok(Json(ApiResponse::success(
         response,
         "Supplier categories retrieved successfully",
+    )))
+}
+
+#[utoipa::path(get, path = "/stats", tag = modules::SUPPLIERS,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Suppliers screen KPI cards: total suppliers, supply category count, and direct-contact count", body = ApiResponse<SupplierStats>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Admin access required", body = ErrorResponse),
+    )
+)]
+async fn get_supplier_stats(
+    _admin: AdminUser,
+    State(state): State<AppState>,
+) -> AppResult<Json<ApiResponse<SupplierStats>>> {
+    let stats = service::get_supplier_stats(&state.db).await?;
+    Ok(Json(ApiResponse::success(
+        stats,
+        "Supplier stats retrieved successfully",
     )))
 }

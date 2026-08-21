@@ -11,9 +11,12 @@ use jana2u_pos_backend::{
     core::{
         config::Config,
         constants::{codes, roles},
+        id::generate_id,
     },
     domain::users::Role,
+    modules::customers::model::CustomerDocument,
 };
+use mongodb::bson::DateTime as BsonDateTime;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -576,4 +579,72 @@ async fn distinct_tags_autocomplete_endpoint_works() {
     let tag_strings: Vec<&str> = tags.iter().filter_map(|t| t.as_str()).collect();
     assert!(tag_strings.contains(&tag_a.as_str()));
     assert!(tag_strings.contains(&tag_b.as_str()));
+}
+
+#[tokio::test]
+async fn customers_stats_endpoint_requires_auth() {
+    let app = common::spawn_app().await;
+    let (status, _) = send(&app.router, "GET", "/api/customers/stats", None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+/// Inserts a minimal `CustomerDocument` directly, so the stats test can
+/// control `outstandingBalanceCents`/`deletedAt` precisely.
+async fn seed_customer_with(db: &mongodb::Database, outstanding_balance_cents: i64, deleted: bool) {
+    let key = generate_id("cus");
+    let now = BsonDateTime::now();
+    db.collection::<CustomerDocument>("customers")
+        .insert_one(CustomerDocument {
+            id: None,
+            key,
+            name: format!("Stats Test Customer {}", Uuid::new_v4()),
+            contact_person: None,
+            primary_phone: "0770000000".to_string(),
+            secondary_phone: None,
+            email: None,
+            address: None,
+            tags: vec![],
+            notes: None,
+            outstanding_balance_cents,
+            total_purchases_cents: 0,
+            version: 1,
+            created_at: now,
+            updated_at: now,
+            deleted_at: if deleted { Some(now) } else { None },
+            updated_by_device: None,
+        })
+        .await
+        .expect("failed to seed customer");
+}
+
+#[tokio::test]
+async fn customers_stats_endpoint_returns_totals_balance_and_debtor_count() {
+    // `spawn_app`'s DB is shared across the suite, and `/customers/stats`
+    // aggregates the WHOLE collection with no filter — connect an isolated
+    // throwaway database instead, same as the billing/repairs/print-jobs
+    // stats tests.
+    let app = common::spawn_app().await;
+    let db_name = format!("jtstats_{}", &Uuid::new_v4().simple().to_string()[..24]);
+    let db = jana2u_pos_backend::clients::mongo::connect(&app.config.mongodb_uri, &db_name)
+        .await
+        .expect("failed to connect to isolated stats test database");
+
+    seed_customer_with(&db, 5000, false).await;
+    seed_customer_with(&db, 3000, false).await;
+    seed_customer_with(&db, 0, false).await;
+    // Soft-deleted with a balance — must be excluded entirely.
+    seed_customer_with(&db, 9000, true).await;
+
+    let stats = jana2u_pos_backend::modules::customers::service::get_customer_stats(&db)
+        .await
+        .expect("get_customer_stats should succeed");
+
+    assert_eq!(
+        stats.total_customers, 3,
+        "the soft-deleted customer must be excluded"
+    );
+    assert_eq!(stats.total_balance_due_cents, 5000 + 3000);
+    assert_eq!(stats.active_debtors_count, 2);
+
+    db.drop().await.ok();
 }

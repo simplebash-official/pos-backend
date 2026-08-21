@@ -21,6 +21,12 @@ fn categories(db: &Database) -> Collection<CategoryDocument> {
     db.collection("categories")
 }
 
+/// For `GET /inventory/stats`. Categories are hard-deleted (`delete_category`
+/// below), not soft-deleted, so a plain count is the live total.
+pub(crate) async fn count_categories(db: &Database) -> AppResult<u64> {
+    Ok(categories(db).count_documents(doc! {}).await?)
+}
+
 /// Only used for the create-time name-uniqueness check
 /// (`service::category::create_category`/`update_category`) — every other
 /// lookup goes by `key` (see `find_category_by_key`).

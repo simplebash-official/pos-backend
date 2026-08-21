@@ -14,7 +14,7 @@ use jana2u_pos_backend::{
         id::generate_id,
     },
     domain::users::Role,
-    modules::inventory::model::{CategoryDocument, SubcategoryDocument},
+    modules::inventory::model::{CategoryDocument, ProductDocument, SubcategoryDocument},
 };
 use serde_json::{Value, json};
 use tower::ServiceExt;
@@ -1618,4 +1618,85 @@ async fn module_status_stub_stays_public() {
     let (status, json) = send_anon(&app.router, "GET", "/api/inventory", None).await;
     assert_eq!(status, StatusCode::OK, "{json}");
     assert_eq!(json["success"], true);
+}
+
+#[tokio::test]
+async fn inventory_stats_endpoint_requires_auth() {
+    let app = common::spawn_app().await;
+    let (status, _) = send_anon(&app.router, "GET", "/api/inventory/stats", None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+/// Inserts a minimal `ProductDocument` directly, so the stats test can
+/// control `stock_quantity`/`min_stock_threshold`/`deleted_at` precisely.
+async fn seed_product_with(
+    db: &mongodb::Database,
+    category_key: &str,
+    subcategory_key: &str,
+    stock_quantity: i64,
+    min_stock_threshold: i64,
+    deleted: bool,
+) {
+    let key = generate_id("prd");
+    let now = BsonDateTime::now();
+    db.collection::<ProductDocument>("products")
+        .insert_one(ProductDocument {
+            id: None,
+            key,
+            sku: format!("SKU-{}", Uuid::new_v4().simple()),
+            barcode: None,
+            barcode_source: None,
+            name: "Stats Test Product".to_string(),
+            category_key: category_key.to_string(),
+            subcategory_key: subcategory_key.to_string(),
+            cost_price_cents: 500,
+            selling_price_cents: 1000,
+            stock_quantity,
+            min_stock_threshold,
+            version: 1,
+            created_at: now,
+            updated_at: now,
+            deleted_at: if deleted { Some(now) } else { None },
+            updated_by_device: None,
+        })
+        .await
+        .expect("failed to seed product");
+}
+
+#[tokio::test]
+async fn inventory_stats_endpoint_returns_totals_and_low_stock_alerts() {
+    // `spawn_app`'s DB is shared across the suite, and `/inventory/stats`
+    // aggregates the WHOLE products/categories/subcategories collections
+    // with no filter — connect an isolated throwaway database instead, same
+    // as the billing/repairs/print-jobs stats tests.
+    let app = common::spawn_app().await;
+    let db_name = format!("jtstats_{}", &Uuid::new_v4().simple().to_string()[..24]);
+    let db = jana2u_pos_backend::clients::mongo::connect(&app.config.mongodb_uri, &db_name)
+        .await
+        .expect("failed to connect to isolated stats test database");
+
+    let (category_key, subcategory_key) = seed_category_with_subcategory(&db, "Widgets").await;
+    seed_subcategory(&db, &category_key, "Gadgets").await;
+    let (category_key_2, subcategory_key_2) = seed_category_with_subcategory(&db, "Parts").await;
+
+    // 2 products at/below threshold (low stock), 1 comfortably above, 1
+    // soft-deleted (must be excluded entirely from both counts).
+    seed_product_with(&db, &category_key, &subcategory_key, 2, 5, false).await;
+    seed_product_with(&db, &category_key, &subcategory_key, 5, 5, false).await;
+    seed_product_with(&db, &category_key_2, &subcategory_key_2, 50, 5, false).await;
+    seed_product_with(&db, &category_key_2, &subcategory_key_2, 1, 5, true).await;
+
+    let stats = jana2u_pos_backend::modules::inventory::service::stats::get_inventory_stats(&db)
+        .await
+        .expect("get_inventory_stats should succeed");
+
+    assert_eq!(
+        stats.total_items, 3,
+        "the soft-deleted product must be excluded"
+    );
+    assert_eq!(stats.low_stock_alerts, 2);
+    assert_eq!(stats.total_categories, 2);
+    assert_eq!(stats.total_subcategories, 3);
+
+    db.drop().await.ok();
 }

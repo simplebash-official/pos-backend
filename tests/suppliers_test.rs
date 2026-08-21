@@ -11,6 +11,7 @@ use jana2u_pos_backend::{
     core::{config::Config, constants::roles, id::generate_id},
     domain::users::Role,
     modules::inventory::model::{CategoryDocument, SubcategoryDocument},
+    modules::suppliers::model::SupplierDocument,
 };
 use mongodb::bson::DateTime as BsonDateTime;
 use serde_json::{Value, json};
@@ -835,4 +836,88 @@ async fn deleting_a_supplier_with_purchase_history_is_blocked() {
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_eq!(body["code"], "SUPPLIER_HAS_PURCHASES");
+}
+
+#[tokio::test]
+async fn suppliers_stats_endpoint_requires_auth() {
+    let app = common::spawn_app().await;
+    let (status, _) = send(&app.router, "GET", "/api/suppliers/stats", None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+/// Inserts a minimal `SupplierDocument` directly, so the stats test can
+/// control `contact_person`/`supplied_categories`/`deleted_at` precisely.
+async fn seed_supplier_with(
+    db: &mongodb::Database,
+    contact_person: &str,
+    supplied_categories: Vec<String>,
+    deleted: bool,
+) {
+    let key = generate_id("sup");
+    let now = BsonDateTime::now();
+    db.collection::<SupplierDocument>("suppliers")
+        .insert_one(SupplierDocument {
+            id: None,
+            key,
+            name: format!("Stats Test Supplier {}", Uuid::new_v4()),
+            contact_person: contact_person.to_string(),
+            primary_phone: "0770000000".to_string(),
+            secondary_phone: None,
+            address: "123 Test St".to_string(),
+            supplied_categories,
+            email: None,
+            notes: None,
+            version: 1,
+            created_at: now,
+            updated_at: now,
+            deleted_at: if deleted { Some(now) } else { None },
+            updated_by_device: None,
+        })
+        .await
+        .expect("failed to seed supplier");
+}
+
+#[tokio::test]
+async fn suppliers_stats_endpoint_returns_totals_categories_and_direct_contacts() {
+    // `spawn_app`'s DB is shared across the suite, and `/suppliers/stats`
+    // aggregates the WHOLE collection with no filter — connect an isolated
+    // throwaway database instead, same as the billing/repairs/print-jobs
+    // stats tests.
+    let app = common::spawn_app().await;
+    let db_name = format!("jtstats_{}", &Uuid::new_v4().simple().to_string()[..24]);
+    let db = jana2u_pos_backend::clients::mongo::connect(&app.config.mongodb_uri, &db_name)
+        .await
+        .expect("failed to connect to isolated stats test database");
+
+    seed_supplier_with(
+        &db,
+        "Kasun Silva",
+        vec!["Phone Parts".to_string(), "Cables".to_string()],
+        false,
+    )
+    .await;
+    seed_supplier_with(&db, "", vec!["Phone Parts".to_string()], false).await;
+    seed_supplier_with(&db, "Nadeesha Perera", vec!["Screens".to_string()], false).await;
+    // Soft-deleted — must be excluded from both counts.
+    seed_supplier_with(&db, "Deleted Contact", vec!["Batteries".to_string()], true).await;
+
+    let stats = jana2u_pos_backend::modules::suppliers::service::get_supplier_stats(&db)
+        .await
+        .expect("get_supplier_stats should succeed");
+
+    assert_eq!(
+        stats.total_suppliers, 3,
+        "the soft-deleted supplier must be excluded"
+    );
+    assert_eq!(stats.direct_contacts_count, 2);
+    // `supply_categories_count` reuses `distinct_supplied_categories`, the
+    // same repository fn `GET /suppliers/categories` already uses — like
+    // that endpoint, it's unfiltered by `deleted_at`, so the deleted
+    // supplier's "Batteries" tag still counts here.
+    assert_eq!(
+        stats.supply_categories_count, 4,
+        "Phone Parts, Cables, Screens, Batteries"
+    );
+
+    db.drop().await.ok();
 }

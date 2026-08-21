@@ -21,7 +21,7 @@ use crate::{
         response::{ApiResponse, ErrorResponse},
     },
     domain::customers::{
-        CreateCustomerRequest, Customer, CustomerListQuery, CustomerListResponse,
+        CreateCustomerRequest, Customer, CustomerListQuery, CustomerListResponse, CustomerStats,
         CustomerTagsResponse, DeleteCustomersRequest, DeleteCustomersResponse,
         UpdateCustomerRequest,
     },
@@ -38,6 +38,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(list_customers, create_customer))
         .routes(routes!(delete_customers_batch))
         .routes(routes!(get_customer_tags))
+        .routes(routes!(get_customer_stats))
         .routes(routes!(
             get_customer,
             replace_customer,
@@ -84,6 +85,24 @@ async fn get_customer_tags(
     Ok(Json(ApiResponse::success(
         response,
         "Customer tags retrieved successfully",
+    )))
+}
+
+#[utoipa::path(get, path = "/stats", tag = modules::CUSTOMERS,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Customers screen KPI cards: total customers, total balance due, and active-debtor count", body = ApiResponse<CustomerStats>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+    )
+)]
+async fn get_customer_stats(
+    _user: CurrentUser,
+    State(state): State<AppState>,
+) -> AppResult<Json<ApiResponse<CustomerStats>>> {
+    let stats = service::get_customer_stats(&state.db).await?;
+    Ok(Json(ApiResponse::success(
+        stats,
+        "Customer stats retrieved successfully",
     )))
 }
 

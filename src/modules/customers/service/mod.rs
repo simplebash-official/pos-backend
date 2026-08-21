@@ -17,7 +17,7 @@ use crate::{
         utils::{build_bson_regex, calculate_pagination},
     },
     domain::customers::{
-        CreateCustomerRequest, Customer, CustomerListQuery, CustomerListResponse,
+        CreateCustomerRequest, Customer, CustomerListQuery, CustomerListResponse, CustomerStats,
         CustomerTagsResponse, UpdateCustomerRequest,
     },
     modules::customers::{model::CustomerDocument, repository},
@@ -564,4 +564,14 @@ pub(crate) fn hydrate_sync_documents(documents: Vec<Document>) -> AppResult<Vec<
             Ok(bson::deserialize_from_document::<CustomerDocument>(document)?.into_customer())
         })
         .collect()
+}
+
+/// Computes the KPI cards for the Customers screen.
+pub async fn get_customer_stats(db: &Database) -> AppResult<CustomerStats> {
+    let agg = repository::aggregate_stats(db).await?;
+    Ok(CustomerStats {
+        total_customers: agg.total_customers,
+        total_balance_due_cents: agg.total_balance_due_cents,
+        active_debtors_count: agg.active_debtors_count,
+    })
 }

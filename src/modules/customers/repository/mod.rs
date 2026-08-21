@@ -186,3 +186,72 @@ pub(crate) async fn adjust_customer_financials(
         .return_document(ReturnDocument::After)
         .await?)
 }
+
+/// Everything `service::get_customer_stats` needs from `customers`, computed
+/// in one aggregation round-trip.
+pub(crate) struct StatsAggregateResult {
+    /// Count of non-deleted customers.
+    pub total_customers: u64,
+    /// Sum of `outstanding_balance_cents` across non-deleted customers with
+    /// a positive balance.
+    pub total_balance_due_cents: i64,
+    /// Count of those same customers.
+    pub active_debtors_count: u64,
+}
+
+/// Extracts a scalar `i64` field pushed by a `$group`/`$count` facet branch,
+/// out of that branch's array-of-one-document shape, empty array if the
+/// branch matched nothing.
+fn i64_from_facet_branch(result: &Document, branch: &str, field: &str) -> i64 {
+    result
+        .get_array(branch)
+        .ok()
+        .and_then(|arr| arr.first())
+        .and_then(|val| val.as_document())
+        .and_then(|doc| {
+            doc.get_i64(field)
+                .ok()
+                .or_else(|| doc.get_i32(field).ok().map(i64::from))
+        })
+        .unwrap_or(0)
+}
+
+/// Runs a single `$facet` aggregation over `customers` to compute the
+/// Customers screen's KPI cards in one database round-trip: total count, and
+/// the debtors sum + count.
+pub(crate) async fn aggregate_stats(db: &Database) -> AppResult<StatsAggregateResult> {
+    let not_deleted = doc! { "deleted_at": { "$exists": false } };
+    let pipeline = vec![doc! {
+        "$facet": {
+            "total": [
+                { "$match": not_deleted.clone() },
+                { "$count": "count" }
+            ],
+            "debtors": [
+                { "$match": { "$and": [not_deleted, { "outstanding_balance_cents": { "$gt": 0 } }] } },
+                { "$group": { "_id": null, "sum": { "$sum": "$outstanding_balance_cents" }, "count": { "$sum": 1 } } }
+            ],
+        }
+    }];
+
+    let mut cursor = customers(db).aggregate(pipeline).await?;
+    let Some(result) = cursor.try_next().await? else {
+        return Ok(StatsAggregateResult {
+            total_customers: 0,
+            total_balance_due_cents: 0,
+            active_debtors_count: 0,
+        });
+    };
+
+    // "total"'s single branch uses `$count`, whose result doc has a "count"
+    // field but no "_id" — same shape `i64_from_facet_branch` already reads.
+    let total_customers = i64_from_facet_branch(&result, "total", "count") as u64;
+    let total_balance_due_cents = i64_from_facet_branch(&result, "debtors", "sum");
+    let active_debtors_count = i64_from_facet_branch(&result, "debtors", "count") as u64;
+
+    Ok(StatsAggregateResult {
+        total_customers,
+        total_balance_due_cents,
+        active_debtors_count,
+    })
+}

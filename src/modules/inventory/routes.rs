@@ -26,7 +26,7 @@ use crate::{
         ModuleStatusResponse,
         inventory::{
             AddSubcategoryRequest, CategoriesResponse, CategoryInfo, CreateCategoryRequest,
-            CreateProductRequest, DeleteProductsRequest, DeleteProductsResponse,
+            CreateProductRequest, DeleteProductsRequest, DeleteProductsResponse, InventoryMetrics,
             InventoryOverviewQuery, InventoryOverviewResponse, LowStockResponse, Product,
             ProductListQuery, ProductListResponse, StockAdjustmentRequest, StockAdjustmentResponse,
             StockMovementListQuery, StockMovementListResponse, StockMovementsResponse,
@@ -52,6 +52,8 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(status))
         // Overview
         .routes(routes!(inventory_overview))
+        // Stats
+        .routes(routes!(inventory_stats))
         // Products
         .routes(routes!(list_products, create_product, delete_products))
         .routes(routes!(get_product, update_product, delete_product))
@@ -114,6 +116,30 @@ async fn inventory_overview(
     Ok(Json(ApiResponse::success(
         response,
         "Inventory overview retrieved successfully",
+    )))
+}
+
+// ============================================================================
+// Stats
+// ============================================================================
+
+#[utoipa::path(get, path = "/stats", tag = modules::INVENTORY,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Inventory & Stock KPI cards: total items, category/subcategory counts, and low-stock alert count", body = ApiResponse<InventoryMetrics>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+    )
+)]
+async fn inventory_stats(
+    user: CurrentUser,
+    State(state): State<AppState>,
+) -> AppResult<Json<ApiResponse<InventoryMetrics>>> {
+    user.require_permission(perm::INVENTORY_READ)?;
+    let stats = service::stats::get_inventory_stats(&state.db).await?;
+    Ok(Json(ApiResponse::success(
+        stats,
+        "Inventory stats retrieved successfully",
     )))
 }
 

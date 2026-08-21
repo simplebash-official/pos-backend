@@ -147,3 +147,18 @@ pub(crate) async fn distinct_supplied_categories(db: &Database) -> AppResult<Vec
         .filter_map(|value| value.as_str().map(str::to_string))
         .collect())
 }
+
+/// Counts for `GET /suppliers/stats`: non-deleted suppliers, and how many of
+/// those have a non-empty `contact_person`.
+pub(crate) async fn count_stats(db: &Database) -> AppResult<(u64, u64)> {
+    let total_suppliers = suppliers(db)
+        .count_documents(doc! { "deleted_at": { "$exists": false } })
+        .await?;
+    let direct_contacts_count = suppliers(db)
+        .count_documents(doc! {
+            "deleted_at": { "$exists": false },
+            "contact_person": { "$ne": "" }
+        })
+        .await?;
+    Ok((total_suppliers, direct_contacts_count))
+}

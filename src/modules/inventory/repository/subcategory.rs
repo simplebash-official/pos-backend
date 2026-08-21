@@ -12,6 +12,12 @@ fn subcategories(db: &Database) -> Collection<SubcategoryDocument> {
     db.collection("subcategories")
 }
 
+/// For `GET /inventory/stats`. Subcategories are hard-deleted, not
+/// soft-deleted, so a plain count is the live total.
+pub(crate) async fn count_subcategories(db: &Database) -> AppResult<u64> {
+    Ok(subcategories(db).count_documents(doc! {}).await?)
+}
+
 pub(crate) async fn find_subcategory_by_key(
     db: &Database,
     key: &str,
