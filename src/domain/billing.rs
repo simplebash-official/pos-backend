@@ -558,12 +558,25 @@ pub struct ReturnItem {
     pub source_ticket_number: Option<String>,
 }
 
+fn default_return_reason() -> ReturnReason {
+    ReturnReason::Other
+}
+
+fn default_restock_action() -> ItemRestockAction {
+    ItemRestockAction::RestockToInventory
+}
+
 /// One item in a `POST /billing/returns` request.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateReturnItemRequest {
     /// Product key for standard retail inventory items.
-    #[serde(default)]
+    #[serde(
+        default,
+        alias = "productId",
+        alias = "product_id",
+        alias = "product_key"
+    )]
     pub product_key: Option<String>,
     /// Item name matching the invoice line if no product key.
     #[serde(default)]
@@ -571,17 +584,22 @@ pub struct CreateReturnItemRequest {
     /// Quantity of items being returned.
     pub quantity: i64,
     /// Reason for return.
+    #[serde(default = "default_return_reason")]
     pub reason: ReturnReason,
     /// Restock action: restock to inventory or discard damaged.
+    #[serde(default = "default_restock_action", alias = "restockAction")]
     pub restock_action: ItemRestockAction,
+    /// Boolean alternative for restock from frontend.
+    #[serde(default, alias = "restockInventory")]
+    pub restock_inventory: Option<bool>,
     /// Optional notes or reason description.
     #[serde(default)]
     pub notes: Option<String>,
     /// Unit price in cents for custom/ad-hoc lines.
-    #[serde(default)]
+    #[serde(default, alias = "unit_price_cents")]
     pub unit_price_cents: Option<i64>,
     /// Source ticket key if returning a repair/print line.
-    #[serde(default)]
+    #[serde(default, alias = "source_ticket_key")]
     pub source_ticket_key: Option<String>,
 }
 
@@ -590,20 +608,37 @@ pub struct CreateReturnItemRequest {
 #[serde(rename_all = "camelCase")]
 pub struct CreateReturnRequest {
     /// Unique business key of the invoice being returned against (e.g. inv_...).
+    #[serde(
+        alias = "originalInvoiceId",
+        alias = "original_invoice_id",
+        alias = "invoice_id",
+        alias = "invoiceId"
+    )]
     pub invoice_key: String,
     /// List of items being returned from the invoice.
+    #[serde(alias = "items", alias = "returned_items")]
     pub returned_items: Vec<CreateReturnItemRequest>,
     /// Optional replacement/exchange items the customer is taking.
-    #[serde(default)]
+    #[serde(default, alias = "exchange_items")]
     pub exchange_items: Option<Vec<CreateSaleItemRequest>>,
     /// Payment method used for cashback payout or customer extra payment ("cash", "card", "online").
-    #[serde(default)]
+    #[serde(
+        default,
+        alias = "payoutMethod",
+        alias = "payout_method",
+        alias = "payment_method"
+    )]
     pub payment_method: Option<String>,
     /// General notes or remarks for this return.
     #[serde(default)]
     pub notes: Option<String>,
     /// Optional client-supplied refund amount in cents.
-    #[serde(default)]
+    #[serde(
+        default,
+        alias = "totalRefundCents",
+        alias = "total_refund_cents",
+        alias = "refund_amount_cents"
+    )]
     pub refund_amount_cents: Option<i64>,
 }
 

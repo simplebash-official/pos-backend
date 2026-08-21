@@ -222,21 +222,37 @@ pub async fn create_return(
     let mut return_subtotal_cents: i64 = 0;
 
     for item_req in &body.returned_items {
+        let restock_action = match item_req.restock_inventory {
+            Some(true) => ItemRestockAction::RestockToInventory,
+            Some(false) => ItemRestockAction::DamagedDiscard,
+            None => item_req.restock_action,
+        };
+
         // Find matching item on invoice
         let matched_idx = updated_invoice_items
             .iter()
             .position(|item| {
-                if let (Some(req_pk), Some(item_pk)) = (&item_req.product_key, &item.product_key) {
-                    req_pk == item_pk
-                } else if let (Some(req_stk), Some(item_stk)) =
-                    (&item_req.source_ticket_key, &item.source_ticket_key)
+                if let (Some(req_pk), Some(item_pk)) = (&item_req.product_key, &item.product_key)
+                    && req_pk == item_pk
                 {
-                    req_stk == item_stk
-                } else if let Some(req_name) = &item_req.name {
-                    &item.name == req_name
-                } else {
-                    false
+                    return true;
                 }
+                if let (Some(req_stk), Some(item_stk)) =
+                    (&item_req.source_ticket_key, &item.source_ticket_key)
+                    && req_stk == item_stk
+                {
+                    return true;
+                }
+                if let Some(req_name) = &item_req.name
+                    && req_name.eq_ignore_ascii_case(&item.name)
+                {
+                    return true;
+                }
+                // If the invoice has only one item and the return has only one item, match it
+                if updated_invoice_items.len() == 1 && body.returned_items.len() == 1 {
+                    return true;
+                }
+                false
             })
             .ok_or_else(|| {
                 AppError::validation_with_code(
@@ -282,7 +298,7 @@ pub async fn create_return(
             unit_price_cents,
             total_cents: line_total_cents,
             reason: item_req.reason,
-            restock_action: item_req.restock_action,
+            restock_action,
             notes: item_req.notes.clone(),
             source_type: Some(inv_item.source_type.clone()),
             source_ticket_key: inv_item.source_ticket_key.clone(),
