@@ -8,6 +8,7 @@
 
 pub(crate) mod category;
 pub(crate) mod product;
+pub(crate) mod product_serial;
 pub(crate) mod sku_counter;
 pub(crate) mod stock;
 pub(crate) mod subcategory;

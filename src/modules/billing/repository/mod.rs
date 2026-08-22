@@ -1,9 +1,10 @@
-// Mongo access for the `invoices`, `payments`, and `returns` collections. Same
-// never-interpret-a-miss-as-an-error convention as every other repository
-// in this codebase — `service` decides what a missing row means.
+// Mongo access for the `invoices`, `payments`, and `credit_notes`
+// collections. Same never-interpret-a-miss-as-an-error convention as every
+// other repository in this codebase — `service` decides what a missing row
+// means.
 
+pub(crate) mod credit_notes;
 pub(crate) mod invoice;
-pub(crate) mod returns;
 
 use chrono::{DateTime, Utc};
 use futures_util::TryStreamExt;
@@ -88,8 +89,8 @@ pub(crate) async fn list_invoices(
 }
 
 /// The one narrow mutator invoices ever get after creation — flips
-/// `status` (and, for a cancellation, the `cancelled_*` fields) via `$set`.
-/// No general "update an invoice" repository function exists (D3).
+/// `status` (and, for a void/close, the `voided_*`/`closed_*` fields) via
+/// `$set`. No general "update an invoice" repository function exists (D3).
 pub(crate) async fn update_invoice_status(
     db: &Database,
     id: ObjectId,
@@ -134,6 +135,16 @@ pub(crate) async fn list_payments_for_invoice(
     Ok(items)
 }
 
+/// Looks up a single payment by its unique model key (`pay_...`) — used by
+/// `service::credit_notes::void_credit_note` to read back the original
+/// amount/method of a refund leg it's about to reverse.
+pub(crate) async fn find_payment_by_key(
+    db: &Database,
+    key: &str,
+) -> AppResult<Option<PaymentDocument>> {
+    Ok(payments(db).find_one(doc! { "key": key }).await?)
+}
+
 /// Used by `service::sale::cancel_invoice`'s guard (D8): cancellation is
 /// blocked once more than the original sale-time payment(s) exist.
 pub(crate) async fn count_payments_for_invoice(db: &Database, invoice_key: &str) -> AppResult<u64> {
@@ -150,7 +161,7 @@ pub(crate) struct StatsAggregateResult {
     /// Count of invoices created in that same window.
     pub today_invoice_count: u64,
     /// Sum of `total_cents` across ALL invoices, unscoped by date, where
-    /// `is_credit == true` or `status == "pending"`.
+    /// `is_credit == true` or `status` is `pending`/`partially_paid`.
     pub outstanding_credit_cents: i64,
 }
 
@@ -193,7 +204,7 @@ pub(crate) async fn aggregate_stats(
                 { "$group": { "_id": null, "sum": { "$sum": "$total_cents" }, "count": { "$sum": 1 } } }
             ],
             "outstanding": [
-                { "$match": { "$or": [ { "is_credit": true }, { "status": "pending" } ] } },
+                { "$match": { "$or": [ { "is_credit": true }, { "status": { "$in": ["pending", "partially_paid"] } } ] } },
                 { "$group": { "_id": null, "sum": { "$sum": "$total_cents" } } }
             ],
         }

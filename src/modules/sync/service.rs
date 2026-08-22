@@ -11,12 +11,13 @@ use crate::{
     },
     modules::{
         billing::service::{
-            self as billing_service, payments as billing_payments_service,
-            returns as billing_returns_service,
+            self as billing_service, credit_notes as billing_credit_notes_service,
+            payments as billing_payments_service,
         },
         customers::service as customers_service,
         inventory::service::{
-            category as inventory_category, product as inventory_product, stock as inventory_stock,
+            category as inventory_category, product as inventory_product,
+            product_serial as inventory_product_serial, stock as inventory_stock,
         },
         print_jobs::service as print_jobs_service,
         purchases::service::purchase as purchases_service,
@@ -50,7 +51,8 @@ const SYNCABLE: &[(&str, &str)] = &[
     ("printJobs", "print_jobs"),
     ("invoices", "invoices"),
     ("payments", "payments"),
-    ("returns", "returns"),
+    ("creditNotes", "credit_notes"),
+    ("productSerials", "product_serials"),
 ];
 
 /// Maps a caller-supplied resource name to its collection, accepting the
@@ -129,7 +131,12 @@ async fn hydrate(db: &Database, resource: &str, documents: Vec<Document>) -> App
         }
         "invoices" => to_values(billing_service::hydrate_sync_documents(documents)?)?,
         "payments" => to_values(billing_payments_service::hydrate_sync_documents(documents)?)?,
-        "returns" => to_values(billing_returns_service::hydrate_sync_documents(documents)?)?,
+        "creditNotes" => to_values(billing_credit_notes_service::hydrate_sync_documents(
+            documents,
+        )?)?,
+        "productSerials" => {
+            to_values(inventory_product_serial::hydrate_sync_documents(documents)?)?
+        }
         _ => Vec::new(),
     };
     Ok(values)

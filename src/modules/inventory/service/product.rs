@@ -403,6 +403,8 @@ pub async fn create_product(db: &Database, body: CreateProductRequest) -> AppRes
         selling_price_cents: body.selling_price_cents,
         stock_quantity: initial_stock,
         min_stock_threshold: body.min_stock_threshold,
+        is_serialized: body.is_serialized,
+        warranty_months: body.warranty_months,
         version: 1,
         created_at: now,
         updated_at: now,
@@ -436,6 +438,12 @@ pub async fn create_product(db: &Database, body: CreateProductRequest) -> AppRes
                 date: chrono::Utc::now(),
                 reference_no: intake.reference_no,
                 notes: intake.notes,
+                // A brand-new serialized product's initial supplier intake
+                // has no UI/field for supplying serials yet — creating a
+                // serialized product with bundled initial stock through
+                // this path is out of scope; use a separate purchase-intake
+                // call afterward for a serialized product's first stock.
+                serial_numbers: None,
             },
         )
         .await?;
@@ -560,6 +568,12 @@ pub(crate) async fn update_product(
     };
     if let Some(name) = body.name {
         set_doc.insert("name", name);
+    }
+    if let Some(is_serialized) = body.is_serialized {
+        set_doc.insert("is_serialized", is_serialized);
+    }
+    if let Some(warranty_months) = body.warranty_months {
+        set_doc.insert("warranty_months", warranty_months);
     }
     if let Some(device) = device_id {
         set_doc.insert("updated_by_device", device);

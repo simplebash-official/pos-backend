@@ -5,17 +5,15 @@
 //
 // Invoices and payments are append-only (see D3 in the migration plan): no
 // general edit endpoint exists. `Invoice`/`PaymentRecord` are returned from
-// create/list/get/cancel/record-payment only.
+// create/list/get/void/close/record-payment only. Credit notes follow the
+// same append-only posture: a credit note is created once as a single
+// atomic write (never edited), with `void_credit_note` as the only
+// after-the-fact reversal.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
-/// One line of a sale, embedded in both the complete-sale request and the
-/// persisted/returned `Invoice`. `source_ticket_key` (the repair/print-job's
-/// Mongo-independent `key`, e.g. `rep_...`) is what `complete_sale` uses to
-/// mark a ticket delivered — `source_ticket_number` (`REP-000001`) is
-/// display-only, shown on receipts/invoices and in the cart.
 /// One line of a sale, embedded in both the complete-sale request and the
 /// persisted/returned `Invoice`. `source_ticket_key` (the repair/print-job's
 /// Mongo-independent `key`, e.g. `rep_...`) is what `complete_sale` uses to
@@ -54,6 +52,12 @@ pub struct InvoiceItem {
     /// Quantity of items already returned from this line item.
     #[serde(default)]
     pub returned_quantity: i64,
+    /// The specific serialized units sold on this line, if the product is
+    /// serialized (see `Product.is_serialized`) — one entry per unit,
+    /// `quantity` long. Empty for a non-serialized retail line and for
+    /// repair/print lines.
+    #[serde(default)]
+    pub serial_numbers: Vec<String>,
 }
 
 /// One line of a `POST /billing/sales` request. Deliberately leaner than
@@ -89,6 +93,12 @@ pub struct CreateSaleItemRequest {
     /// Employee assigned to the job if applicable.
     #[serde(default)]
     pub assigned_employee_name: Option<String>,
+    /// The specific serialized units being sold, required (exact-count
+    /// validated against `quantity`) when the resolved product is
+    /// serialized; omitted for non-serialized retail lines and for
+    /// repair/print lines.
+    #[serde(default)]
+    pub serial_numbers: Option<Vec<String>>,
 }
 
 /// One leg of a split payment. `method` is `"cash"` | `"card"` | `"online"`
@@ -191,6 +201,66 @@ pub struct PaymentDetails {
     pub due_date: Option<String>,
 }
 
+/// An invoice's lifecycle state. There is deliberately no `Draft` variant —
+/// this backend finalizes a sale as one atomic write (`complete_sale`),
+/// there is no persisted pre-payment invoice for a "draft" to describe (the
+/// cart / Held-Sales drawer plays that role client-side). `Cancelled` and
+/// `Voided` are likewise collapsed into one action/status (`Voided`): stock
+/// always decrements at sale time regardless of payment status, so there is
+/// no zero-impact "called off before fulfillment" case to distinguish —
+/// every void reverses stock/payment effects and carries an audit trail.
+/// `Overdue` is deliberately not a variant either — it's a derived flag
+/// (`Invoice.is_overdue`, computed at read time from `status`/`due_date`),
+/// since a due date passing doesn't change what actually happened to the
+/// invoice, just how it should be flagged in a list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum InvoiceStatus {
+    /// Credit sale awaiting payment; nothing paid yet.
+    Pending,
+    /// A credit sale with some, but not all, of the total paid.
+    PartiallyPaid,
+    /// Fully paid — either at sale time or via installments.
+    Paid,
+    /// Invalidated after the fact — stock and payment effects reversed,
+    /// with a mandatory reason and audit trail (`voided_at/by/reason`).
+    Voided,
+    /// Manually marked done: Paid, with no further activity expected.
+    Closed,
+}
+
+impl InvoiceStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            InvoiceStatus::Pending => "pending",
+            InvoiceStatus::PartiallyPaid => "partially_paid",
+            InvoiceStatus::Paid => "paid",
+            InvoiceStatus::Voided => "voided",
+            InvoiceStatus::Closed => "closed",
+        }
+    }
+}
+
+/// Whether an invoice should be flagged overdue: still awaiting (full)
+/// payment and its `due_date` has passed. Computed fresh on every read
+/// (`InvoiceDocument::into_invoice`) rather than stored, since it's a pure
+/// function of two fields that are already persisted.
+pub fn compute_is_overdue(status: InvoiceStatus, due_date: Option<&str>) -> bool {
+    if !matches!(
+        status,
+        InvoiceStatus::Pending | InvoiceStatus::PartiallyPaid
+    ) {
+        return false;
+    }
+    let Some(due_date) = due_date else {
+        return false;
+    };
+    match NaiveDate::parse_from_str(due_date, "%Y-%m-%d") {
+        Ok(due) => due < Utc::now().date_naive(),
+        Err(_) => false,
+    }
+}
+
 /// A completed or pending sale as returned to API clients. `id` is the
 /// Mongo `ObjectId` hex string; `key` (`inv_...`) is the prefixed id other
 /// modules/the frontend reference this invoice by. `shop_profile_snapshot`
@@ -265,8 +335,11 @@ pub struct Invoice {
     /// Online payment note or bank reference.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub online_note: Option<String>,
-    /// `"paid"` | `"pending"` | `"cancelled"`.
-    pub status: String,
+    /// The invoice's current lifecycle state.
+    pub status: InvoiceStatus,
+    /// Whether `status`'s due date has passed while still `Pending`/
+    /// `PartiallyPaid` — computed at read time, never stored.
+    pub is_overdue: bool,
     /// Customer-facing or internal invoice notes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
@@ -278,18 +351,29 @@ pub struct Invoice {
     /// Receipt layout or document template format selected.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub document_selection: Option<String>,
-    /// Time when the invoice was cancelled, if cancelled.
+    /// Time when the invoice was voided, if voided.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub cancelled_at: Option<DateTime<Utc>>,
-    /// ID of the user who cancelled the invoice.
+    pub voided_at: Option<DateTime<Utc>>,
+    /// ID of the user who voided the invoice.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub cancelled_by: Option<String>,
-    /// Reason provided for invoice cancellation.
+    pub voided_by: Option<String>,
+    /// Mandatory reason the invoice was voided.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub cancellation_reason: Option<String>,
-    /// Total amount in cents refunded against this invoice from returns.
+    pub voided_reason: Option<String>,
+    /// Time when the invoice was closed, if closed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub closed_at: Option<DateTime<Utc>>,
+    /// ID of the user who closed the invoice.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub closed_by: Option<String>,
+    /// Total amount in cents refunded against this invoice from credit notes.
     #[serde(default)]
     pub refunded_cents: i64,
+    /// Count of credit notes (any status) recorded against this invoice —
+    /// display-only; `Closed`'s "no open credit note" guard re-queries the
+    /// `credit_notes` collection rather than trusting this count alone.
+    #[serde(default)]
+    pub credit_note_count: i64,
     /// Timestamp when invoice was created.
     pub created_at: DateTime<Utc>,
     /// Timestamp when invoice was last updated.
@@ -371,7 +455,7 @@ pub struct CompleteSaleResponse {
 
 /// A payment applied against an invoice — either recorded at sale-completion
 /// time or later via `POST /billing/invoices/{key}/payments` (partial
-/// credit repayment).
+/// credit repayment), or as a credit-note refund/extra-payment leg.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PaymentRecord {
@@ -381,7 +465,7 @@ pub struct PaymentRecord {
     pub key: String,
     /// Key of the invoice this payment was credited towards.
     pub invoice_key: String,
-    /// Payment amount in cents.
+    /// Payment amount in cents. Negative for a credit-note cash refund.
     pub amount_cents: i64,
     /// Payment method used ("cash", "card", "online").
     pub payment_method: String,
@@ -424,15 +508,15 @@ pub struct PaymentListResponse {
     pub payments: Vec<PaymentRecord>,
 }
 
-/// Body for `POST /billing/invoices/{key}/cancel` — see D8 in the migration
-/// plan for the basic version's guard (blocked once any payment beyond the
-/// original sale-time one has been recorded).
-#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+/// Body for `POST /billing/invoices/{key}/void`. Unlike the old
+/// cancel flow this collapsed from, `reason` is mandatory — a void always
+/// reverses stock/payment effects that already happened, so it needs an
+/// audit trail of why (see `InvoiceStatus::Voided`'s doc comment).
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct CancelInvoiceRequest {
-    /// Reason explaining why the invoice is being cancelled.
-    #[serde(default)]
-    pub reason: Option<String>,
+pub struct VoidInvoiceRequest {
+    /// Mandatory reason explaining why the invoice is being voided.
+    pub reason: String,
 }
 
 /// Query parameters for listing and filtering invoices.
@@ -442,14 +526,17 @@ pub struct CancelInvoiceRequest {
 pub struct InvoiceListQuery {
     /// Search term matching invoice number or customer name/phone.
     pub search: Option<String>,
-    /// Filter by status ("paid", "pending", "cancelled").
+    /// Filter by status ("pending", "partially_paid", "paid", "voided",
+    /// "closed"), or the synthetic value "overdue" (translated server-side
+    /// to `status in (pending, partially_paid) AND due_date < today`).
     pub status: Option<String>,
     /// Filter by customer key.
     pub customer_key: Option<String>,
-    /// `"paid"` (status == "paid" AND NOT credit) or `"credit"` (is_credit OR
-    /// status == "pending") — the same compound rule `BillingStats.
-    /// outstandingCreditCents` uses, exposed here so the Sales & Invoices
-    /// History screen's Paid/Credit toggle can filter server-side.
+    /// `"paid"` (status == "paid" AND NOT credit) or `"credit"` (is_credit
+    /// OR status in (pending, partially_paid)) — the same compound rule
+    /// `BillingStats.outstandingCreditCents` uses, exposed here so the
+    /// Sales & Invoices History screen's Paid/Credit toggle can filter
+    /// server-side.
     pub payment_status: Option<String>,
     /// Exact match on payment method ("cash", "card", "online", "split").
     pub payment_method: Option<String>,
@@ -489,14 +576,17 @@ pub struct BillingStats {
     /// Count of invoices created today.
     pub today_invoice_count: u64,
     /// Sum of `totalCents` across ALL invoices (any date) that are either
-    /// on credit (`isCredit == true`) or still `status == "pending"`.
+    /// on credit (`isCredit == true`) or still `status` in (pending,
+    /// partially_paid).
     pub outstanding_credit_cents: i64,
     /// `todaySalesCents / todayInvoiceCount`, rounded; 0 when there were no
     /// invoices today.
     pub avg_basket_cents: i64,
 }
 
-/// Reason why an item was returned by a customer.
+/// Reason why an item was returned by a customer — independent of its
+/// physical `ItemCondition`; a customer can return a `Resalable` item for
+/// `WarrantyClaim`, or a `Damaged` one for `Other`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ReturnReason {
@@ -512,20 +602,74 @@ pub enum ReturnReason {
     Other,
 }
 
-/// Restock action specifying whether a returned item should be returned to inventory or discarded as damaged.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ItemRestockAction {
-    #[serde(alias = "restock_to_inventory", alias = "restockToInventory")]
-    RestockToInventory,
-    #[serde(alias = "damaged_discard", alias = "damagedDiscard")]
-    DamagedDiscard,
+fn default_return_reason() -> ReturnReason {
+    ReturnReason::Other
 }
 
-/// A line item in a return record representing a returned product or service.
+/// The physical/sellable condition of a returned item, independent of why
+/// it was returned. Drives which `StockMovementType` (if any)
+/// `service::credit_notes::create_credit_note` writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ItemCondition {
+    /// Unopened/undamaged — goes straight back into sellable stock.
+    Resalable,
+    /// Broken, faulty, or otherwise unsellable as new — requires an
+    /// `ItemDisposition`.
+    Damaged,
+    /// Works, but opened/used — optionally restocked at a discount.
+    OpenBoxDiscount,
+    /// Returned but not yet checked — no stock movement happens until this
+    /// is resolved to one of the other conditions (out of scope for this
+    /// pass, see `CreditNoteStatus::AwaitingResolution`).
+    PendingInspection,
+}
+
+/// What happens to a `Damaged` item. Required whenever `condition ==
+/// Damaged`, forbidden otherwise — validated in
+/// `service::credit_notes::create_credit_note`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ItemDisposition {
+    /// Logged for a supplier RMA/replacement claim — no stock quantity change.
+    ReturnToSupplier,
+    /// Discarded as inventory loss/shrinkage — no stock quantity change.
+    WriteOffScrap,
+    /// Held for repair; out of scope for this pass what happens once
+    /// repaired (no stock movement is written).
+    RepairPending,
+}
+
+/// A credit note's overall resolution state. `AwaitingResolution` is set
+/// only when at least one line is `ItemCondition::PendingInspection` — this
+/// codebase has no edit-in-place endpoint for any billing document, so
+/// there is deliberately no way to move a credit note out of
+/// `AwaitingResolution` other than `Voided` in this pass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CreditNoteStatus {
+    Resolved,
+    AwaitingResolution,
+    Voided,
+}
+
+/// One method/amount leg of a credit note's cash refund payout — plural
+/// because a credit note against a split-paid invoice must refund across
+/// the same methods (for till/card-settlement reconciliation), not as one
+/// lump sum.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ReturnItem {
+pub struct RefundBreakdownLeg {
+    /// Payment method this leg refunds ("cash", "card", "online").
+    pub method: String,
+    /// Amount refunded via this method in cents.
+    pub amount_cents: i64,
+}
+
+/// A line item in a credit note representing a returned product or service.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreditNoteItem {
     /// Foreign key referencing the catalog product, if this is a retail item.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub product_key: Option<String>,
@@ -542,8 +686,20 @@ pub struct ReturnItem {
     pub total_cents: i64,
     /// Reason why the item was returned.
     pub reason: ReturnReason,
-    /// Whether the item was restocked to inventory or discarded as damaged.
-    pub restock_action: ItemRestockAction,
+    /// The item's physical/sellable condition.
+    pub condition: ItemCondition,
+    /// What happens to the item — required iff `condition == Damaged`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disposition: Option<ItemDisposition>,
+    /// The specific serialized unit returned, if the original line was for
+    /// a serialized product.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub serial_number: Option<String>,
+    /// Whether the returned serial was still within its warranty period at
+    /// the time of return. Response-only, computed from the matched
+    /// `ProductSerial`; absent for non-serialized items.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub within_warranty: Option<bool>,
     /// Optional notes or defect details.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
@@ -558,18 +714,10 @@ pub struct ReturnItem {
     pub source_ticket_number: Option<String>,
 }
 
-fn default_return_reason() -> ReturnReason {
-    ReturnReason::Other
-}
-
-fn default_restock_action() -> ItemRestockAction {
-    ItemRestockAction::RestockToInventory
-}
-
-/// One item in a `POST /billing/returns` request.
+/// One item in a `POST /billing/credit-notes` request.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct CreateReturnItemRequest {
+pub struct CreateCreditNoteItemRequest {
     /// Product key for standard retail inventory items.
     #[serde(
         default,
@@ -578,7 +726,8 @@ pub struct CreateReturnItemRequest {
         alias = "product_key"
     )]
     pub product_key: Option<String>,
-    /// Item name matching the invoice line if no product key.
+    /// Item name matching the invoice line if no product key (required for
+    /// a no-receipt line, which has no invoice line to match against).
     #[serde(default)]
     pub name: Option<String>,
     /// Quantity of items being returned.
@@ -586,12 +735,15 @@ pub struct CreateReturnItemRequest {
     /// Reason for return.
     #[serde(default = "default_return_reason")]
     pub reason: ReturnReason,
-    /// Restock action: restock to inventory or discard damaged.
-    #[serde(default = "default_restock_action", alias = "restockAction")]
-    pub restock_action: ItemRestockAction,
-    /// Boolean alternative for restock from frontend.
-    #[serde(default, alias = "restockInventory")]
-    pub restock_inventory: Option<bool>,
+    /// The item's physical/sellable condition.
+    #[serde(alias = "itemCondition")]
+    pub condition: ItemCondition,
+    /// What happens to the item — required iff `condition == "damaged"`.
+    #[serde(default)]
+    pub disposition: Option<ItemDisposition>,
+    /// The specific serialized unit being returned, if applicable.
+    #[serde(default)]
+    pub serial_number: Option<String>,
     /// Optional notes or reason description.
     #[serde(default)]
     pub notes: Option<String>,
@@ -603,25 +755,34 @@ pub struct CreateReturnItemRequest {
     pub source_ticket_key: Option<String>,
 }
 
-/// Body for `POST /billing/returns` — initiates a return, refund (cashback), or exchange/replacement.
+/// Body for `POST /billing/credit-notes` — initiates a return, refund
+/// (cashback), or exchange/replacement.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct CreateReturnRequest {
-    /// Unique business key of the invoice being returned against (e.g. inv_...).
+pub struct CreateCreditNoteRequest {
+    /// Unique business key of the invoice being returned against (e.g.
+    /// inv_...). Omit (and set `noReceipt: true`) for a no-receipt return.
     #[serde(
+        default,
         alias = "originalInvoiceId",
         alias = "original_invoice_id",
         alias = "invoice_id",
         alias = "invoiceId"
     )]
-    pub invoice_key: String,
-    /// List of items being returned from the invoice.
+    pub invoice_key: Option<String>,
+    /// Set when the customer has no invoice reference at all — items are
+    /// valued at current selling price and this requires manager approval
+    /// (`overrideReason` + an Admin caller).
+    #[serde(default)]
+    pub no_receipt: bool,
+    /// List of items being returned.
     #[serde(alias = "items", alias = "returned_items")]
-    pub returned_items: Vec<CreateReturnItemRequest>,
+    pub returned_items: Vec<CreateCreditNoteItemRequest>,
     /// Optional replacement/exchange items the customer is taking.
     #[serde(default, alias = "exchange_items")]
     pub exchange_items: Option<Vec<CreateSaleItemRequest>>,
-    /// Payment method used for cashback payout or customer extra payment ("cash", "card", "online").
+    /// Payment method used for cashback payout or customer extra payment
+    /// ("cash", "card", "online"). Ignored when `refundBreakdown` is given.
     #[serde(
         default,
         alias = "payoutMethod",
@@ -629,84 +790,136 @@ pub struct CreateReturnRequest {
         alias = "payment_method"
     )]
     pub payment_method: Option<String>,
-    /// General notes or remarks for this return.
+    /// Explicit refund allocation across payment methods — required only
+    /// when the original invoice was split-paid and the default
+    /// proportional split isn't what's wanted; must sum to exactly the
+    /// capped cash-refund amount.
+    #[serde(default)]
+    pub refund_breakdown: Option<Vec<RefundBreakdownLeg>>,
+    /// Reason a manager is approving this credit note outside the normal
+    /// return window, or without a receipt. Required for either case;
+    /// the caller must hold the Admin role.
+    #[serde(default)]
+    pub override_reason: Option<String>,
+    /// General notes or remarks for this credit note.
     #[serde(default)]
     pub notes: Option<String>,
-    /// Optional client-supplied refund amount in cents.
-    #[serde(
-        default,
-        alias = "totalRefundCents",
-        alias = "total_refund_cents",
-        alias = "refund_amount_cents"
-    )]
-    pub refund_amount_cents: Option<i64>,
 }
 
-/// A return and refund/exchange transaction record.
+/// A return/refund/exchange transaction record.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ReturnRecord {
+pub struct CreditNote {
     /// MongoDB internal hex ID.
     pub id: String,
-    /// Unique business key of the return record (e.g. ret_...).
+    /// Unique business key of the credit note (e.g. cn_...).
     pub key: String,
-    /// Human-friendly sequential return number (e.g. RET-000001).
-    pub return_number: String,
-    /// Unique business key of the associated invoice.
-    pub invoice_key: String,
-    /// Human-friendly invoice number (e.g. INV-000001).
-    pub invoice_number: String,
-    /// Key of the customer linked to this invoice, if any.
+    /// Human-friendly sequential credit note number (e.g. CN-000001).
+    pub credit_note_number: String,
+    /// Unique business key of the associated invoice, if any (absent for a
+    /// no-receipt credit note).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invoice_key: Option<String>,
+    /// Human-friendly invoice number, if `invoiceKey` is set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invoice_number: Option<String>,
+    /// True if this credit note has no linked invoice.
+    pub no_receipt: bool,
+    /// Key of the customer linked to the original invoice, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub customer_key: Option<String>,
     /// Customer's name at the time of sale.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub customer_name_snapshot: Option<String>,
-    /// Staff ID of cashier who processed the return.
+    /// Staff ID of cashier who processed the credit note.
     pub cashier_id: String,
-    /// Cashier's display name at the time of return.
+    /// Cashier's display name at the time of the credit note.
     pub cashier_name_snapshot: String,
     /// List of returned items.
-    pub returned_items: Vec<ReturnItem>,
+    pub returned_items: Vec<CreditNoteItem>,
     /// List of replacement or exchange items provided, if any.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exchange_items: Vec<InvoiceItem>,
+    /// Set whenever `exchangeItems` is non-empty — lets reporting
+    /// distinguish a genuine return (money leaving, nothing replacing it)
+    /// from an exchange (product swapped, net-neutral or near-neutral).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exchange_reference: Option<String>,
     /// Total monetary value of returned items in cents.
     pub return_subtotal_cents: i64,
     /// Total monetary value of replacement/exchange items in cents.
     pub exchange_subtotal_cents: i64,
-    /// Net refund amount in cents (positive = cashback to customer, negative = customer pays extra).
+    /// Net refund amount in cents (positive = cashback to customer,
+    /// negative = customer pays extra) before the partial-payment cap.
     pub net_refund_cents: i64,
-    /// Payment method used for cashback refund or difference payment.
+    /// The portion of `netRefundCents` actually paid out (or collected, if
+    /// negative) in cash/card/online — capped at what was actually paid on
+    /// the invoice so far. Equal to `netRefundCents` whenever no cap
+    /// applies (no invoice, or the invoice was fully paid).
+    pub refund_cash_cents: i64,
+    /// The remainder of a positive `netRefundCents` that couldn't be paid
+    /// out in cash because the invoice hadn't been paid that much yet —
+    /// reduces what the invoice still owes instead of being handed over as
+    /// cash the shop never received.
+    pub balance_reduction_cents: i64,
+    /// How `refundCashCents` was allocated across payment methods.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub refund_breakdown: Vec<RefundBreakdownLeg>,
+    /// Keys of payment record(s) created for the refund or extra payment, if any.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub refund_payment_keys: Vec<String>,
+    /// This credit note's resolution state.
+    pub status: CreditNoteStatus,
+    /// True when this credit note was approved past the normal return
+    /// window, or as a no-receipt return.
+    pub is_manager_override: bool,
+    /// User ID of the Admin who approved the override, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub payment_method: Option<String>,
-    /// Key of payment record created for the refund or extra payment, if any.
+    pub override_approved_by: Option<String>,
+    /// The reason given for the override, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub refund_payment_key: Option<String>,
-    /// General notes or remarks for this return.
+    pub override_reason: Option<String>,
+    /// General notes or remarks for this credit note.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
-    /// Timestamp when return was recorded.
+    /// Time when this credit note was voided, if voided.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub voided_at: Option<DateTime<Utc>>,
+    /// ID of the user who voided this credit note.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub voided_by: Option<String>,
+    /// Mandatory reason this credit note was voided.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub voided_reason: Option<String>,
+    /// Timestamp when the credit note was recorded.
     pub created_at: DateTime<Utc>,
-    /// Timestamp when return was last updated.
+    /// Timestamp when the credit note was last updated.
     pub updated_at: DateTime<Utc>,
     /// Optimistic locking version number.
     #[serde(default = "default_version")]
     pub version: i64,
 }
 
-/// Query parameters for listing and filtering return records.
+/// Body for `POST /billing/credit-notes/{id}/void`.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VoidCreditNoteRequest {
+    /// Mandatory reason explaining why the credit note is being voided.
+    pub reason: String,
+}
+
+/// Query parameters for listing and filtering credit note records.
 #[derive(Debug, Clone, Default, Deserialize, IntoParams)]
 #[serde(rename_all = "camelCase")]
 #[into_params(parameter_in = Query)]
-pub struct ReturnListQuery {
-    /// Search term matching return number, invoice number, or customer name.
+pub struct CreditNoteListQuery {
+    /// Search term matching credit note number, invoice number, or customer name.
     pub search: Option<String>,
     /// Filter by original invoice key.
     pub invoice_key: Option<String>,
     /// Filter by customer key.
     pub customer_key: Option<String>,
-    /// Scopes to returns created today when set to `"today"`.
+    /// Scopes to credit notes created today when set to `"today"`.
     pub date_preset: Option<String>,
     /// Page number (1-indexed).
     pub page: Option<u64>,
@@ -714,13 +927,13 @@ pub struct ReturnListQuery {
     pub limit: Option<u64>,
 }
 
-/// Paginated response payload containing list of returns.
+/// Paginated response payload containing list of credit notes.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ReturnListResponse {
-    /// List of returns for the requested page.
-    pub returns: Vec<ReturnRecord>,
-    /// Total count of matching returns.
+pub struct CreditNoteListResponse {
+    /// List of credit notes for the requested page.
+    pub credit_notes: Vec<CreditNote>,
+    /// Total count of matching credit notes.
     pub total: u64,
     /// Current page number.
     pub page: u64,

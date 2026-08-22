@@ -54,6 +54,7 @@ pub async fn start_mock_document_server() -> String {
                         "templates": [
                             { "key": "tpl_a4_invoice", "name": "a4-invoice" },
                             { "key": "tpl_thermal_receipt", "name": "thermal-receipt" },
+                            { "key": "tpl_credit_note", "name": "credit-note" },
                         ]
                     }
                 }))

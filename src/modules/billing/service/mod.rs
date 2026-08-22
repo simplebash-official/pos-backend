@@ -1,14 +1,15 @@
 // Business rules and orchestration for the billing module. `sale` owns
-// complete-sale and cancel (the money-moving flows, D3/D4/D8 in the
+// complete-sale, void, and close (the money-moving flows, D3/D4/D8 in the
 // migration plan); `payments` owns standalone payment recording (partial
-// credit repayments); `print_payload` builds the Typst data contract
-// consumed by `modules::documents::service`. Read paths (`get_invoice`/
-// `list_invoices`) live directly here since they're straightforward
-// lookups, not orchestration.
+// credit repayments); `credit_notes` owns returns/refunds/exchanges;
+// `print_payload` builds the Typst data contract consumed by
+// `modules::documents::service`. Read paths (`get_invoice`/`list_invoices`)
+// live directly here since they're straightforward lookups, not
+// orchestration.
 
+pub mod credit_notes;
 pub mod payments;
 pub(crate) mod print_payload;
-pub mod returns;
 pub mod sale;
 
 use mongodb::{

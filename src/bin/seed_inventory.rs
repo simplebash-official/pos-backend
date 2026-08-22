@@ -171,6 +171,8 @@ async fn main() {
                     stock_quantity: p.stock_quantity,
                     min_stock_threshold: p.min_stock_threshold,
                     suppliers: Vec::new(),
+                    is_serialized: false,
+                    warranty_months: None,
                 };
 
                 let created_product = product::create_product(&db, req)

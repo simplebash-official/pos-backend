@@ -11,7 +11,7 @@ use crate::{
         error::{AppError, AppResult},
         id::generate_id,
     },
-    domain::billing::{PaymentRecord, RecordPaymentRequest},
+    domain::billing::{InvoiceStatus, PaymentRecord, RecordPaymentRequest},
     modules::billing::{model::PaymentDocument, repository},
 };
 
@@ -43,10 +43,10 @@ pub async fn record_payment(
             AppError::not_found_with_code("Invoice not found", codes::INVOICE_NOT_FOUND)
         })?;
 
-    if invoice.status == "cancelled" {
+    if invoice.status == InvoiceStatus::Voided {
         return Err(AppError::conflict(
-            codes::INVOICE_ALREADY_CANCELLED,
-            "Cannot record a payment against a cancelled invoice",
+            codes::INVOICE_ALREADY_VOIDED,
+            "Cannot record a payment against a voided invoice",
         ));
     }
 
@@ -83,20 +83,22 @@ pub async fn record_payment(
 
     let new_total_paid = already_paid + inserted.amount_cents;
     let new_status = if new_total_paid >= invoice.total_cents {
-        "paid"
+        InvoiceStatus::Paid
+    } else if new_total_paid > 0 {
+        InvoiceStatus::PartiallyPaid
     } else {
-        "pending"
+        InvoiceStatus::Pending
     };
     if new_status != invoice.status
         && let Some(invoice_id) = invoice.id
         && let Err(err) = repository::update_invoice_status(
             db,
             invoice_id,
-            doc! { "status": new_status, "updated_at": BsonDateTime::now() },
+            doc! { "status": new_status.as_str(), "updated_at": BsonDateTime::now() },
         )
         .await
     {
-        tracing::error!(invoice_key, new_status, error = %err, "payment recorded but invoice status update failed");
+        tracing::error!(invoice_key, new_status = new_status.as_str(), error = %err, "payment recorded but invoice status update failed");
     }
 
     if let Some(customer_key) = &invoice.customer_key

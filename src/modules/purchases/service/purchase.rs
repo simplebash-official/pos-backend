@@ -26,7 +26,10 @@ use crate::{
         },
     },
     modules::{
-        inventory::service::{product as inventory_product, stock as inventory_stock},
+        inventory::service::{
+            product as inventory_product, product_serial as inventory_product_serial,
+            stock as inventory_stock,
+        },
         purchases::{model::PurchaseDocument, repository},
         suppliers::service as supplier_service,
     },
@@ -47,6 +50,15 @@ pub async fn record_purchase(db: &Database, body: CreatePurchaseRequest) -> AppR
 
     let supplier = supplier_service::get_supplier_by_key(db, &body.supplier_key).await?;
     let product = inventory_product::get_product_by_key(db, &body.product_key).await?;
+
+    let serial_numbers = body.serial_numbers.clone().unwrap_or_default();
+    if product.is_serialized && serial_numbers.len() as i64 != body.quantity {
+        return Err(AppError::validation(format!(
+            "This product is serialized — provide exactly {} serial number(s), got {}",
+            body.quantity,
+            serial_numbers.len()
+        )));
+    }
 
     let now = BsonDateTime::now();
     let key = generate_id(prefixes::PURCHASE);
@@ -81,6 +93,11 @@ pub async fn record_purchase(db: &Database, body: CreatePurchaseRequest) -> AppR
         body.reference_no,
     )
     .await?;
+
+    if product.is_serialized {
+        inventory_product_serial::create_serials_for_purchase(db, &product.key, &serial_numbers)
+            .await?;
+    }
 
     let supplier_summary = SupplierSummary {
         id: supplier.id,

@@ -1653,6 +1653,8 @@ async fn seed_product_with(
             selling_price_cents: 1000,
             stock_quantity,
             min_stock_threshold,
+            is_serialized: false,
+            warranty_months: None,
             version: 1,
             created_at: now,
             updated_at: now,

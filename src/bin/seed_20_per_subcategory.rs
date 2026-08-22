@@ -5222,6 +5222,8 @@ async fn main() {
                     barcode: None,
                     auto_generate_barcode: true,
                     suppliers: Vec::new(),
+                    is_serialized: false,
+                    warranty_months: None,
                 };
 
                 match product::create_product(&db, req).await {

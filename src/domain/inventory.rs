@@ -49,6 +49,17 @@ pub struct Product {
     pub stock_quantity: i64,
     /// Threshold count for low stock warnings.
     pub min_stock_threshold: i64,
+    /// True when individual units of this product are tracked by serial
+    /// number (see `ProductSerial`) rather than only as an aggregate
+    /// `stock_quantity` count.
+    #[serde(default)]
+    pub is_serialized: bool,
+    /// Warranty length in months, snapshotted onto each `ProductSerial.
+    /// warranty_months` at the moment a unit is sold (see
+    /// `billing::service::sale::resolve_sale_item`). `None` means no
+    /// warranty is offered on this product.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warranty_months: Option<i64>,
     /// Timestamp when product was created.
     pub created_at: DateTime<Utc>,
     /// Timestamp when product was last modified.
@@ -126,6 +137,14 @@ pub struct CreateProductRequest {
     /// Optional initial purchase deliveries from suppliers.
     #[serde(default)]
     pub suppliers: Vec<ProductSupplierIntake>,
+    /// Whether this product's units are tracked individually by serial
+    /// number. Once set, every purchase receipt and sale of this product
+    /// must supply exact-count serial numbers (see `ProductSerial`).
+    #[serde(default)]
+    pub is_serialized: bool,
+    /// Warranty length in months for units of this product, if any.
+    #[serde(default)]
+    pub warranty_months: Option<i64>,
 }
 
 /// Body for `PUT /products/{id}`. Every field is optional so a client can
@@ -152,6 +171,10 @@ pub struct UpdateProductRequest {
     pub stock_quantity: Option<i64>,
     /// Updated low-stock warning threshold.
     pub min_stock_threshold: Option<i64>,
+    /// Updated serialized-tracking flag.
+    pub is_serialized: Option<bool>,
+    /// Updated warranty length in months.
+    pub warranty_months: Option<i64>,
 }
 
 /// Query params for `GET /products`. `sort_by` is whitelisted against a
@@ -388,9 +411,12 @@ pub enum BarcodeSource {
 /// Why a stock movement happened. Every adjustment (manual or automated)
 /// gets recorded as a `StockMovement` tagged with one of these, so the
 /// movement history stays auditable even once the originating request is
-/// long gone. Only `ManualAdjustment` is produced by the API today (via
-/// `PATCH /products/{id}/stock`); the others are reserved for when
-/// billing/repairs start writing movements directly.
+/// long gone. `Sale`/`PurchaseReceipt`/`ManualAdjustment` are in active use;
+/// `RepairPartConsumption` is reserved for when repairs start consuming
+/// parts directly. `InvoiceVoidReversal` and the three `Return*` variants
+/// used to be a single overloaded `Return` variant — split apart so an
+/// invoice-void stock restoration is distinguishable in the audit trail
+/// from a credit-note-driven restock/write-off/supplier-RMA.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum StockMovementType {
@@ -398,7 +424,14 @@ pub enum StockMovementType {
     PurchaseReceipt,
     RepairPartConsumption,
     ManualAdjustment,
-    Return,
+    /// Stock restored because an invoice was voided (`billing::service::sale::void_invoice`).
+    InvoiceVoidReversal,
+    /// A credit-note line in `Resalable`/`OpenBoxDiscount` condition put back into sellable stock.
+    ReturnRestock,
+    /// A credit-note line in `Damaged` condition with disposition `WriteOffScrap` — audit-only, no quantity change.
+    ReturnWriteOff,
+    /// A credit-note line in `Damaged` condition with disposition `ReturnToSupplier` — audit-only, no quantity change.
+    ReturnSupplierRma,
 }
 
 /// A single recorded stock change (the audit trail entry behind a
@@ -620,4 +653,79 @@ pub struct UpdateCategoryRequest {
 pub struct AddSubcategoryRequest {
     /// Name of the new subcategory to add.
     pub name: String,
+}
+
+/// Lifecycle of one physical serialized unit of a product. A unit starts
+/// `InStock` when received on a purchase, becomes `Sold` at checkout, and
+/// on a later credit-note return moves to exactly one of `ReturnedResalable`
+/// / `ReturnedFaulty` / `UnderWarrantyClaim` / `WrittenOff` depending on the
+/// return line's `condition`/`disposition` (see
+/// `billing::service::credit_notes::create_credit_note`) — this is
+/// per-unit history, kept separate from the product's aggregate
+/// `stock_quantity` so an individual unit can be traced end to end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SerialStatus {
+    InStock,
+    Sold,
+    ReturnedResalable,
+    ReturnedFaulty,
+    UnderWarrantyClaim,
+    WrittenOff,
+}
+
+/// One physical serialized unit of a serialized product.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductSerial {
+    /// MongoDB internal hex ID.
+    pub id: String,
+    /// Unique business key of this serial record (e.g. psn_...).
+    pub key: String,
+    /// Key of the product this unit belongs to.
+    pub product_key: String,
+    /// The manufacturer/shop serial number, unique across all products.
+    pub serial_number: String,
+    /// Current lifecycle status of this unit.
+    pub status: SerialStatus,
+    /// Key of the invoice this unit was sold on, once `Sold`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invoice_key: Option<String>,
+    /// When this unit was sold, once `Sold`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sold_at: Option<DateTime<Utc>>,
+    /// Warranty length snapshotted from the product at the moment of sale.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warranty_months: Option<i64>,
+    /// Computed `sold_at + warranty_months`, used to decide `within_warranty`
+    /// on a later credit-note return.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warranty_expires_at: Option<DateTime<Utc>>,
+    /// Key of the credit note that most recently returned this unit, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub credit_note_key: Option<String>,
+    /// Timestamp when this serial record was created.
+    pub created_at: DateTime<Utc>,
+    /// Timestamp when this serial record was last updated.
+    pub updated_at: DateTime<Utc>,
+    /// Optimistic locking version.
+    #[serde(default = "default_version")]
+    pub version: i64,
+}
+
+/// Query params for `GET /products/{key}/serials`.
+#[derive(Debug, Clone, Default, Deserialize, IntoParams)]
+#[serde(rename_all = "camelCase")]
+#[into_params(parameter_in = Query)]
+pub struct ProductSerialListQuery {
+    /// Filter by lifecycle status (e.g. `in_stock` for a sale-time picker).
+    pub status: Option<SerialStatus>,
+}
+
+/// Response for `GET /products/{key}/serials`.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductSerialListResponse {
+    /// Matching serial units for the requested product.
+    pub items: Vec<ProductSerial>,
 }

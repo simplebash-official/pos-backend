@@ -28,7 +28,8 @@ use crate::{
             AddSubcategoryRequest, CategoriesResponse, CategoryInfo, CreateCategoryRequest,
             CreateProductRequest, DeleteProductsRequest, DeleteProductsResponse, InventoryMetrics,
             InventoryOverviewQuery, InventoryOverviewResponse, LowStockResponse, Product,
-            ProductListQuery, ProductListResponse, StockAdjustmentRequest, StockAdjustmentResponse,
+            ProductListQuery, ProductListResponse, ProductSerialListQuery,
+            ProductSerialListResponse, StockAdjustmentRequest, StockAdjustmentResponse,
             StockMovementListQuery, StockMovementListResponse, StockMovementsResponse,
             SubcategoriesResponse, UpdateCategoryRequest, UpdateProductRequest,
             ValidCategoriesResponse,
@@ -62,6 +63,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(adjust_stock))
         .routes(routes!(low_stock))
         .routes(routes!(product_movements))
+        .routes(routes!(product_serials))
         // Categories
         .routes(routes!(list_categories, create_category))
         .routes(routes!(update_category, delete_category))
@@ -355,6 +357,34 @@ async fn low_stock(
     Ok(Json(ApiResponse::success(
         response,
         "Low stock products retrieved successfully",
+    )))
+}
+
+#[utoipa::path(get, path = "/products/{key}/serials", tag = modules::INVENTORY,
+    params(
+        ("key" = String, Path, description = "Product key"),
+        ProductSerialListQuery,
+    ),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Serialized units for a product, optionally filtered by status", body = ApiResponse<ProductSerialListResponse>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+    )
+)]
+async fn product_serials(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Query(query): Query<ProductSerialListQuery>,
+) -> AppResult<Json<ApiResponse<ProductSerialListResponse>>> {
+    user.require_permission(perm::INVENTORY_READ)?;
+    let items =
+        service::product_serial::list_serials_for_product(&state.db, &key, query.status).await?;
+
+    Ok(Json(ApiResponse::success(
+        ProductSerialListResponse { items },
+        "Product serials retrieved successfully",
     )))
 }
 

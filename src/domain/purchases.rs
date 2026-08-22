@@ -122,6 +122,11 @@ pub struct CreatePurchaseRequest {
     /// Optional remarks.
     #[serde(default)]
     pub notes: Option<String>,
+    /// Serial numbers for each unit received, required (and exact-count
+    /// validated against `quantity`) when the target product is serialized
+    /// (see `Product.is_serialized`); omitted for non-serialized products.
+    #[serde(default)]
+    pub serial_numbers: Option<Vec<String>>,
 }
 
 /// Paginated response for `GET /purchases`. `items` and `purchases` carry the

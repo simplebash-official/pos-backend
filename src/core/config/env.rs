@@ -22,6 +22,11 @@ pub struct Config {
     /// under — see `modules::documents::service`. Defaulted, unlike the two
     /// fields above, since a sensible relative default is safe either way.
     pub generated_documents_dir: String,
+    /// How many days after an invoice's `created_at` a credit note may
+    /// still be created against it without a manager override. Defaulted
+    /// (unlike `mongodb_uri`/`jwt_secret`) since it's a business-tunable
+    /// policy value, not a startup-integrity concern.
+    pub return_window_days: i64,
 }
 
 /// Why startup configuration failed to load. `main.rs` logs this and exits
@@ -59,6 +64,10 @@ impl Config {
         let document_server_api_key = required("DOCUMENT_SERVER_API_KEY")?;
         let generated_documents_dir = env::var("GENERATED_DOCUMENTS_DIR")
             .unwrap_or_else(|_| "generated_documents".to_string());
+        let return_window_days = env::var("RETURN_WINDOW_DAYS")
+            .ok()
+            .and_then(|v| v.parse::<i64>().ok())
+            .unwrap_or(30);
 
         Ok(Self {
             mongodb_uri,
@@ -69,6 +78,7 @@ impl Config {
             document_server_url,
             document_server_api_key,
             generated_documents_dir,
+            return_window_days,
         })
     }
 }

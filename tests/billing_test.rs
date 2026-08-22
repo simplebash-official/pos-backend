@@ -10,7 +10,7 @@ use axum::{
 use chrono::Utc;
 use jana2u_pos_backend::{
     core::{config::Config, constants::roles, id::generate_id},
-    domain::users::Role,
+    domain::{billing::InvoiceStatus, users::Role},
     modules::{
         billing::model::InvoiceDocument,
         inventory::model::{CategoryDocument, SubcategoryDocument},
@@ -856,7 +856,7 @@ async fn complete_sale_split_payment_rejects_legs_exceeding_computed_total() {
 }
 
 #[tokio::test]
-async fn cancel_invoice_reverses_stock_requires_admin_and_is_idempotent_guarded() {
+async fn void_invoice_reverses_stock_requires_admin_and_is_idempotent_guarded() {
     let app = common::spawn_app().await;
     let staff = staff_token(&app.config);
     let admin = admin_token(&app.config);
@@ -886,45 +886,56 @@ async fn cancel_invoice_reverses_stock_requires_admin_and_is_idempotent_guarded(
     let product_after_sale = get_product(&app, &product_id).await;
     assert_eq!(product_after_sale["stockQuantity"], 7);
 
-    // Staff cannot cancel — cancellation is Admin-only (D8).
+    // Staff cannot void — voiding is Admin-only (D8).
     let (status, body) = send_authed(
         &app.router,
         "POST",
-        &format!("/api/billing/invoices/{invoice_key}/cancel"),
-        Some(json!({})),
+        &format!("/api/billing/invoices/{invoice_key}/void"),
+        Some(json!({ "reason": "Customer changed their mind" })),
         &staff,
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "Body: {body}");
 
-    let (status, cancel_body) = send_authed(
+    // A blank reason is rejected even for an Admin.
+    let (status, body) = send_authed(
         &app.router,
         "POST",
-        &format!("/api/billing/invoices/{invoice_key}/cancel"),
+        &format!("/api/billing/invoices/{invoice_key}/void"),
+        Some(json!({ "reason": "  " })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "Body: {body}");
+
+    let (status, void_body) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/billing/invoices/{invoice_key}/void"),
         Some(json!({ "reason": "Customer changed their mind" })),
         &admin,
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "Body: {cancel_body}");
-    assert_eq!(cancel_body["data"]["status"], "cancelled");
+    assert_eq!(status, StatusCode::OK, "Body: {void_body}");
+    assert_eq!(void_body["data"]["status"], "voided");
 
-    let product_after_cancel = get_product(&app, &product_id).await;
+    let product_after_void = get_product(&app, &product_id).await;
     assert_eq!(
-        product_after_cancel["stockQuantity"], 10,
-        "cancelling must restore the stock that was decremented"
+        product_after_void["stockQuantity"], 10,
+        "voiding must restore the stock that was decremented"
     );
 
-    // Cancelling an already-cancelled invoice is rejected.
+    // Voiding an already-voided invoice is rejected.
     let (status, body) = send_authed(
         &app.router,
         "POST",
-        &format!("/api/billing/invoices/{invoice_key}/cancel"),
-        Some(json!({})),
+        &format!("/api/billing/invoices/{invoice_key}/void"),
+        Some(json!({ "reason": "Trying again" })),
         &admin,
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "Body: {body}");
-    assert_eq!(body["code"], "INVOICE_ALREADY_CANCELLED");
+    assert_eq!(body["code"], "INVOICE_ALREADY_VOIDED");
 }
 
 #[tokio::test]
@@ -978,7 +989,7 @@ async fn record_payment_against_credit_invoice_pays_it_off_over_installments() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
-        invoice_after_first["data"]["status"], "pending",
+        invoice_after_first["data"]["status"], "partially_paid",
         "still owes 600000 cents"
     );
 
@@ -1145,14 +1156,24 @@ async fn seed_invoice_full(
             card_ref: None,
             online_ref: None,
             online_note: None,
-            status: status.to_string(),
+            status: match status {
+                "pending" => InvoiceStatus::Pending,
+                "partially_paid" => InvoiceStatus::PartiallyPaid,
+                "paid" => InvoiceStatus::Paid,
+                "voided" => InvoiceStatus::Voided,
+                "closed" => InvoiceStatus::Closed,
+                other => panic!("seed_invoice_full: unknown status '{other}'"),
+            },
             notes: None,
             shop_profile_snapshot: json!({}),
             warranty_terms_snapshot: None,
             document_selection: None,
-            cancelled_at: None,
-            cancelled_by: None,
-            cancellation_reason: None,
+            voided_at: None,
+            voided_by: None,
+            voided_reason: None,
+            closed_at: None,
+            closed_by: None,
+            credit_note_count: 0,
             refunded_cents: 0,
             version: 1,
             created_at,

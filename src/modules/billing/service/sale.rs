@@ -1,4 +1,4 @@
-// Sale completion and cancellation — the centerpiece of the billing
+// Sale completion, voiding, and closing — the centerpiece of the billing
 // backend migration. `complete_sale` implements D4 from the migration
 // plan: all validation/lookups happen before any writes, and once the
 // `Invoice` (+ payment, if any) is durably inserted, no later sub-step
@@ -24,8 +24,8 @@ use crate::{
     },
     domain::{
         billing::{
-            CancelInvoiceRequest, CompleteSaleResponse, CreateSaleItemRequest, CreateSaleRequest,
-            Invoice, InvoiceItem, PricingAdjustments,
+            CompleteSaleResponse, CreateSaleItemRequest, CreateSaleRequest, Invoice, InvoiceItem,
+            InvoiceStatus, PricingAdjustments, VoidInvoiceRequest,
         },
         inventory::{Product, StockMovementType},
         sequences::ReserveSequenceRequest,
@@ -163,7 +163,7 @@ fn compute_discount(
 /// via `try_join_all` instead of a sequential loop, so the whole resolution
 /// step costs roughly one round trip's worth of latency regardless of cart
 /// size, not N.
-async fn resolve_sale_items(
+pub(crate) async fn resolve_sale_items(
     db: &Database,
     items: &[CreateSaleItemRequest],
 ) -> AppResult<(Vec<InvoiceItem>, HashMap<String, Product>)> {
@@ -189,7 +189,7 @@ async fn resolve_sale_items(
     Ok((resolved, products))
 }
 
-async fn resolve_sale_item(
+pub(crate) async fn resolve_sale_item(
     db: &Database,
     item: &CreateSaleItemRequest,
     products: &HashMap<String, Product>,
@@ -203,6 +203,32 @@ async fn resolve_sale_item(
                 let product = products.get(product_key).ok_or_else(|| {
                     AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
                 })?;
+
+                if product.is_serialized {
+                    let serial_numbers = item.serial_numbers.clone().unwrap_or_default();
+                    if serial_numbers.len() as i64 != item.quantity {
+                        return Err(AppError::validation(format!(
+                            "'{}' is serialized — provide exactly {} serial number(s), got {}",
+                            product.name,
+                            item.quantity,
+                            serial_numbers.len()
+                        )));
+                    }
+                    // Fail before any write if a serial is unknown or
+                    // already sold (D4's "resolve everything first" rule) —
+                    // the actual `Sold` transition happens post-commit in
+                    // `apply_line_item_side_effects`, same as the stock
+                    // decrement it accompanies.
+                    for serial_number in &serial_numbers {
+                        inventory::service::product_serial::resolve_in_stock_serial(
+                            db,
+                            &product.key,
+                            serial_number,
+                        )
+                        .await?;
+                    }
+                }
+
                 (
                     product.name.clone(),
                     Some(product.sku.clone()),
@@ -308,6 +334,7 @@ async fn resolve_sale_item(
         source_ticket_number,
         assigned_employee_name,
         returned_quantity: 0,
+        serial_numbers: item.serial_numbers.clone().unwrap_or_default(),
     })
 }
 
@@ -356,6 +383,27 @@ async fn apply_line_item_side_effects(
                     "Stock for '{}' could not be adjusted: {err}",
                     item.name
                 ));
+            }
+
+            if product.is_serialized {
+                for serial_number in &item.serial_numbers {
+                    if let Ok(serial) = inventory::service::product_serial::resolve_in_stock_serial(
+                        db,
+                        &product.key,
+                        serial_number,
+                    )
+                    .await
+                        && let Some(serial_id) = serial.id
+                    {
+                        let _ = inventory::service::product_serial::mark_serial_sold(
+                            db,
+                            serial_id,
+                            &inserted_invoice.key,
+                            product.warranty_months,
+                        )
+                        .await;
+                    }
+                }
             }
             None
         }
@@ -472,9 +520,9 @@ pub async fn complete_sale(
     );
 
     let status = if body.payment.is_credit {
-        "pending"
+        InvoiceStatus::Pending
     } else {
-        "paid"
+        InvoiceStatus::Paid
     };
     let now = BsonDateTime::now();
 
@@ -504,15 +552,18 @@ pub async fn complete_sale(
         card_ref: body.payment.card_ref.clone(),
         online_ref: body.payment.online_ref.clone(),
         online_note: body.payment.online_note.clone(),
-        status: status.to_string(),
+        status,
         notes: body.notes.clone(),
         shop_profile_snapshot: body.shop_profile_snapshot.clone(),
         warranty_terms_snapshot: body.warranty_terms_snapshot.clone(),
         document_selection: body.document_selection.clone(),
-        cancelled_at: None,
-        cancelled_by: None,
-        cancellation_reason: None,
+        voided_at: None,
+        voided_by: None,
+        voided_reason: None,
+        closed_at: None,
+        closed_by: None,
         refunded_cents: 0,
+        credit_note_count: 0,
         version: 1,
         created_at: now,
         updated_at: now,
@@ -605,37 +656,46 @@ pub async fn complete_sale(
     })
 }
 
-/// Basic cancel/void (D8): reverses retail stock and customer financials,
-/// sets `status: "cancelled"`. Does **not** touch repair/print-job ticket
-/// status (ambiguous what "un-delivering" a ticket should mean — flagged
-/// as a warning for manual follow-up instead) and refuses to run at all if
-/// any payment beyond the original sale-time one has been recorded
-/// (reversing partial credit repayments is out of scope for this basic
-/// version).
-pub async fn cancel_invoice(
+/// Void (D8): reverses retail stock and customer financials, sets
+/// `status: Voided` with a mandatory reason and audit trail. This is the
+/// single "invalidated after the fact" action — see
+/// `InvoiceStatus::Voided`'s doc comment for why there is no separate
+/// zero-impact "Cancelled" status in this codebase. Does **not** touch
+/// repair/print-job ticket status (ambiguous what "un-delivering" a ticket
+/// should mean — flagged as a warning for manual follow-up instead) and
+/// refuses to run at all if any payment beyond the original sale-time one
+/// has been recorded (reversing partial credit repayments is out of scope
+/// for this version).
+pub async fn void_invoice(
     db: &Database,
     id_or_key: &str,
-    body: CancelInvoiceRequest,
-    cancelled_by: String,
+    body: VoidInvoiceRequest,
+    voided_by: String,
 ) -> AppResult<(Invoice, Vec<String>)> {
+    if body.reason.trim().is_empty() {
+        return Err(AppError::validation(
+            "A reason is required to void an invoice",
+        ));
+    }
+
     let existing = repository::find_invoice_by_id_or_key(db, id_or_key)
         .await?
         .ok_or_else(|| {
             AppError::not_found_with_code("Invoice not found", codes::INVOICE_NOT_FOUND)
         })?;
 
-    if existing.status == "cancelled" {
+    if existing.status == InvoiceStatus::Voided {
         return Err(AppError::conflict(
-            codes::INVOICE_ALREADY_CANCELLED,
-            "This invoice has already been cancelled",
+            codes::INVOICE_ALREADY_VOIDED,
+            "This invoice has already been voided",
         ));
     }
 
     // How many payment rows `complete_sale` itself would have inserted —
     // zero for a credit sale, one per split leg for a split payment,
     // otherwise exactly one. Any payment beyond that count means a
-    // repayment has since been recorded, which this basic cancel flow
-    // cannot safely reverse (see the fn doc comment).
+    // repayment (or credit-note refund) has since been recorded, which
+    // this basic void flow cannot safely reverse.
     let expected_payment_count: usize = if existing.is_credit {
         0
     } else if existing.payment_method == "split" {
@@ -649,8 +709,8 @@ pub async fn cancel_invoice(
     let payment_count = repository::count_payments_for_invoice(db, &existing.key).await?;
     if payment_count as usize > expected_payment_count {
         return Err(AppError::conflict(
-            codes::INVOICE_HAS_PAYMENTS_CANNOT_CANCEL,
-            "This invoice has payments recorded beyond the original sale and cannot be cancelled automatically",
+            codes::INVOICE_HAS_PAYMENTS_CANNOT_VOID,
+            "This invoice has payments recorded beyond the original sale and cannot be voided automatically",
         ));
     }
 
@@ -663,7 +723,7 @@ pub async fn cancel_invoice(
         if item.source_type != "retail" {
             if matches!(item.source_type.as_str(), "repair" | "print") {
                 warnings.push(format!(
-                    "Invoice cancelled — ticket for '{}' was not reverted and may need manual review",
+                    "Invoice voided — ticket for '{}' was not reverted and may need manual review",
                     item.name
                 ));
             }
@@ -685,12 +745,9 @@ pub async fn cancel_invoice(
                     db,
                     product_object_id,
                     item.quantity,
-                    StockMovementType::Return,
+                    StockMovementType::InvoiceVoidReversal,
                     Some(existing.key.clone()),
-                    Some(format!(
-                        "Cancellation of invoice {}",
-                        existing.invoice_number
-                    )),
+                    Some(format!("Void of invoice {}", existing.invoice_number)),
                 )
                 .await
                 {
@@ -725,15 +782,13 @@ pub async fn cancel_invoice(
         }
     }
 
-    let mut set_doc = doc! {
-        "status": "cancelled",
-        "cancelled_at": BsonDateTime::now(),
-        "cancelled_by": &cancelled_by,
+    let set_doc = doc! {
+        "status": InvoiceStatus::Voided.as_str(),
+        "voided_at": BsonDateTime::now(),
+        "voided_by": &voided_by,
+        "voided_reason": &body.reason,
         "updated_at": BsonDateTime::now(),
     };
-    if let Some(reason) = body.reason {
-        set_doc.insert("cancellation_reason", reason);
-    }
 
     let updated = repository::update_invoice_status(db, object_id, set_doc)
         .await?
@@ -742,4 +797,55 @@ pub async fn cancel_invoice(
         })?;
 
     Ok((updated.into_invoice(), warnings))
+}
+
+/// Marks a fully paid invoice `Closed` — a manual, explicit "done, nothing
+/// more will happen to this invoice" action (never auto-computed). Blocked
+/// unless the invoice is `Paid` and has no open (non-voided) credit notes
+/// against it; re-queries `credit_notes` live for that guard rather than
+/// trusting `Invoice.credit_note_count` alone.
+pub async fn close_invoice(
+    db: &Database,
+    id_or_key: &str,
+    closed_by: String,
+) -> AppResult<Invoice> {
+    let existing = repository::find_invoice_by_id_or_key(db, id_or_key)
+        .await?
+        .ok_or_else(|| {
+            AppError::not_found_with_code("Invoice not found", codes::INVOICE_NOT_FOUND)
+        })?;
+
+    if existing.status != InvoiceStatus::Paid {
+        return Err(AppError::conflict(
+            codes::INVOICE_NOT_CLOSABLE,
+            "Only a fully paid invoice can be closed",
+        ));
+    }
+
+    let open_credit_notes =
+        repository::credit_notes::count_open_credit_notes_for_invoice(db, &existing.key).await?;
+    if open_credit_notes > 0 {
+        return Err(AppError::conflict(
+            codes::INVOICE_NOT_CLOSABLE,
+            "This invoice has an open credit note — void or resolve it before closing",
+        ));
+    }
+
+    let object_id = existing
+        .id
+        .expect("persisted invoice document must have an _id");
+    let set_doc = doc! {
+        "status": InvoiceStatus::Closed.as_str(),
+        "closed_at": BsonDateTime::now(),
+        "closed_by": &closed_by,
+        "updated_at": BsonDateTime::now(),
+    };
+
+    let updated = repository::update_invoice_status(db, object_id, set_doc)
+        .await?
+        .ok_or_else(|| {
+            AppError::not_found_with_code("Invoice not found", codes::INVOICE_NOT_FOUND)
+        })?;
+
+    Ok(updated.into_invoice())
 }

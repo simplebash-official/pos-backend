@@ -209,7 +209,10 @@ pub(crate) async fn list_stock_movements(
             StockMovementType::PurchaseReceipt => "purchase_receipt",
             StockMovementType::RepairPartConsumption => "repair_part_consumption",
             StockMovementType::ManualAdjustment => "manual_adjustment",
-            StockMovementType::Return => "return",
+            StockMovementType::InvoiceVoidReversal => "invoice_void_reversal",
+            StockMovementType::ReturnRestock => "return_restock",
+            StockMovementType::ReturnWriteOff => "return_write_off",
+            StockMovementType::ReturnSupplierRma => "return_supplier_rma",
         };
         filter.insert("movement_type", mtype_str);
     }

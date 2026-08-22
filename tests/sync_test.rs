@@ -13,7 +13,7 @@ use jana2u_pos_backend::{
         id::generate_id,
     },
     domain::{
-        billing::{Invoice, PaymentRecord},
+        billing::{Invoice, InvoiceStatus, PaymentRecord},
         inventory::Product,
         sequences::SequenceReservationResponse,
         sync::SyncChangesResponse,
@@ -205,6 +205,8 @@ async fn negative_stock_rejection_returns_409_insufficient_stock() {
         selling_price_cents: 1500,
         stock_quantity: 5,
         min_stock_threshold: 2,
+        is_serialized: false,
+        warranty_months: None,
         version: 1,
         created_at: now,
         updated_at: now,
@@ -291,6 +293,8 @@ async fn optimistic_concurrency_product_version_conflict() {
         selling_price_cents: 2000,
         stock_quantity: 10,
         min_stock_threshold: 2,
+        is_serialized: false,
+        warranty_months: None,
         version: 1,
         created_at: now,
         updated_at: now,
@@ -556,6 +560,8 @@ async fn sync_changes_items_match_the_rest_dto_shape() {
             selling_price_cents: 1500,
             stock_quantity: 7,
             min_stock_threshold: 2,
+            is_serialized: false,
+            warranty_months: None,
             version: 1,
             created_at: now,
             updated_at: now,
@@ -677,14 +683,17 @@ async fn sync_changes_invoices_and_payments_match_the_rest_dto_shape() {
             card_ref: None,
             online_ref: None,
             online_note: None,
-            status: "paid".to_string(),
+            status: InvoiceStatus::Paid,
             notes: None,
             shop_profile_snapshot: serde_json::json!({ "tradingName": "Shape Test Shop" }),
             warranty_terms_snapshot: None,
             document_selection: None,
-            cancelled_at: None,
-            cancelled_by: None,
-            cancellation_reason: None,
+            voided_at: None,
+            voided_by: None,
+            voided_reason: None,
+            closed_at: None,
+            closed_by: None,
+            credit_note_count: 0,
             refunded_cents: 0,
             version: 1,
             created_at: now,
@@ -735,7 +744,7 @@ async fn sync_changes_invoices_and_payments_match_the_rest_dto_shape() {
     let typed_invoice: Invoice = serde_json::from_value(invoice.clone())
         .expect("a sync item must deserialize as the REST Invoice DTO");
     assert_eq!(typed_invoice.total_cents, 5000);
-    assert_eq!(typed_invoice.status, "paid");
+    assert_eq!(typed_invoice.status, InvoiceStatus::Paid);
     assert_eq!(typed_invoice.invoice_number, invoice_number);
 
     // camelCase, and no BSON wrappers leaking through.

@@ -31,7 +31,8 @@ const SYNCED_COLLECTIONS: &[&str] = &[
     "print_jobs",
     "invoices",
     "payments",
-    "returns",
+    "credit_notes",
+    "product_serials",
 ];
 
 /// How long a completed idempotency record is replayable. Matches the
@@ -95,6 +96,37 @@ pub async fn ensure_indexes(db: &Database) {
 
     if let Err(err) = idempotency.create_index(ttl).await {
         tracing::warn!(%err, "could not create idempotency TTL index");
+    }
+
+    let product_serials = db.collection::<mongodb::bson::Document>("product_serials");
+
+    let unique_serial_number = IndexModel::builder()
+        .keys(doc! { "serial_number": 1 })
+        .options(
+            IndexOptions::builder()
+                .name("product_serials_serial_number_unique".to_string())
+                .unique(true)
+                .build(),
+        )
+        .build();
+
+    if let Err(err) = product_serials.create_index(unique_serial_number).await {
+        tracing::warn!(%err, "could not create unique product serial number index");
+    }
+
+    // Backs `GET /products/{key}/serials?status=` — a product's serial list
+    // filtered by lifecycle status (e.g. the sale-time `in_stock` picker).
+    let product_status = IndexModel::builder()
+        .keys(doc! { "product_key": 1, "status": 1 })
+        .options(
+            IndexOptions::builder()
+                .name("product_serials_product_key_status".to_string())
+                .build(),
+        )
+        .build();
+
+    if let Err(err) = product_serials.create_index(product_status).await {
+        tracing::warn!(%err, "could not create product serials product/status index");
     }
 
     tracing::info!("Database indexes ensured");
