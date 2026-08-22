@@ -18,6 +18,7 @@ use mongodb::{
 
 use crate::{
     core::{
+        calculations,
         constants::{codes, prefixes},
         error::{AppError, AppResult},
         id::generate_id,
@@ -113,36 +114,6 @@ fn validate_pricing_adjustments(adjustments: &PricingAdjustments) -> AppResult<(
         }
     }
     Ok(())
-}
-
-/// Computes the actual discount cents from `pricingAdjustments` against the
-/// resolved subtotal — `None` (no `pricingAdjustments` sent) means no
-/// discount, `"fixed"` is the value verbatim (as cents), `"percentage"` is
-/// `subtotal * value / 100`, floored. The type/value themselves default to
-/// `("fixed", 0.0)` when absent so the persisted/returned invoice always
-/// has a concrete value to display, never an `Option`.
-fn compute_discount(
-    adjustments: Option<&PricingAdjustments>,
-    subtotal_cents: i64,
-) -> (String, f64, i64) {
-    match adjustments {
-        Some(PricingAdjustments {
-            discount_type,
-            discount_value,
-        }) if discount_type == "percentage" => {
-            let discount_cents = ((subtotal_cents as f64) * discount_value / 100.0).floor() as i64;
-            (discount_type.clone(), *discount_value, discount_cents)
-        }
-        Some(PricingAdjustments {
-            discount_type,
-            discount_value,
-        }) => (
-            discount_type.clone(),
-            *discount_value,
-            *discount_value as i64,
-        ),
-        None => ("fixed".to_string(), 0.0, 0),
-    }
 }
 
 /// Resolves each request-side item into a persisted-shape `InvoiceItem`,
@@ -319,7 +290,8 @@ pub(crate) async fn resolve_sale_item(
         }
     };
 
-    let total_cents = (unit_price_cents * item.quantity - item.discount_cents).max(0);
+    let total_cents =
+        calculations::compute_line_total(unit_price_cents, item.quantity, item.discount_cents);
 
     Ok(InvoiceItem {
         product_key: item.product_key.clone(),
@@ -481,26 +453,15 @@ pub async fn complete_sale(
     // line item, so the whole sale is rejected rather than half-completed.
     let (resolved_items, resolved_products) = resolve_sale_items(db, &body.items).await?;
 
-    // subtotal/discount/total/change are never client-supplied — see the
-    // doc comment on `CreateSaleRequest` for why each is fully derivable at
-    // this point.
-    let subtotal_cents: i64 = resolved_items.iter().map(|item| item.total_cents).sum();
-    let (discount_type, discount_value, discount_cents) =
-        compute_discount(body.pricing_adjustments.as_ref(), subtotal_cents);
-    let total_cents = (subtotal_cents - discount_cents).max(0);
-    let change_due_cents = body
-        .payment
-        .amount_received_cents
-        .map(|amount_received| amount_received - total_cents);
+    // subtotal/discount/total/change are calculated via the authoritative calculation engine.
+    let (subtotal_cents, discount_type, discount_value, discount_cents, total_cents) =
+        calculations::compute_sale_totals(&resolved_items, body.pricing_adjustments.as_ref());
+    let change_due_cents =
+        calculations::compute_change_due(body.payment.amount_received_cents, total_cents);
 
     if body.payment.payment_method == "split" {
         let legs = body.payment.split_payments.as_deref().unwrap_or(&[]);
-        let legs_total: i64 = legs.iter().map(|leg| leg.amount_cents).sum();
-        if legs_total > total_cents {
-            return Err(AppError::validation(
-                "Split payment legs cannot sum to more than the invoice total",
-            ));
-        }
+        calculations::validate_split_payments(total_cents, legs)?;
     }
 
     let reservation = sequences::service::reserve_sequence(

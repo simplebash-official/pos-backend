@@ -3,6 +3,7 @@
 // constants, and small request-handling utilities. Nothing in here is
 // domain/business logic — that belongs in `modules::<name>::service`.
 
+pub mod calculations;
 pub mod config;
 pub mod constants;
 pub mod error;
