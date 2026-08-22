@@ -1375,3 +1375,90 @@ async fn list_invoices_filters_by_date_preset() {
     assert_eq!(invoices.len(), 1, "Body: {body}");
     assert_eq!(invoices[0]["invoiceNumber"], today_number);
 }
+
+async fn seed_invoice_with_number(
+    db: &mongodb::Database,
+    invoice_number: &str,
+    customer_name: Option<&str>,
+) -> String {
+    let key = generate_id("inv");
+    let now = BsonDateTime::now();
+    db.collection::<InvoiceDocument>("invoices")
+        .insert_one(InvoiceDocument {
+            id: None,
+            key: key.clone(),
+            invoice_number: invoice_number.to_string(),
+            customer_key: None,
+            customer_name_snapshot: customer_name.map(|s| s.to_string()),
+            customer_phone_snapshot: None,
+            customer_address_snapshot: None,
+            cashier_id: "staff-1".to_string(),
+            cashier_name_snapshot: "Test Cashier".to_string(),
+            items: vec![],
+            subtotal_cents: 1000,
+            discount_type: "fixed".to_string(),
+            discount_value: 0.0,
+            discount_cents: 0,
+            total_cents: 1000,
+            payment_method: "cash".to_string(),
+            split_payments: None,
+            is_credit: false,
+            amount_received_cents: None,
+            change_due_cents: None,
+            due_date: None,
+            card_last4: None,
+            card_ref: None,
+            online_ref: None,
+            online_note: None,
+            status: InvoiceStatus::Paid,
+            notes: None,
+            shop_profile_snapshot: json!({}),
+            warranty_terms_snapshot: None,
+            document_selection: None,
+            voided_at: None,
+            voided_by: None,
+            voided_reason: None,
+            closed_at: None,
+            closed_by: None,
+            credit_note_count: 0,
+            refunded_cents: 0,
+            version: 1,
+            created_at: now,
+            updated_at: now,
+        })
+        .await
+        .unwrap();
+    key
+}
+
+#[tokio::test]
+async fn list_invoices_searches_by_sequence_number() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    seed_invoice_with_number(&app.db, "INV-000001", Some("Sequence Customer")).await;
+
+    for search_term in ["000001", "1", "00001", "INV-1", "inv-000001"] {
+        let (status, body) = send_authed(
+            &app.router,
+            "GET",
+            &format!("/api/billing/invoices?search={search_term}"),
+            None,
+            &token,
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "Failed for search={search_term}: {body}"
+        );
+        let invoices = body["data"]["invoices"].as_array().unwrap();
+        let found = invoices
+            .iter()
+            .any(|inv| inv["invoiceNumber"] == "INV-000001");
+        assert!(
+            found,
+            "Expected to find INV-000001 when searching for '{search_term}', found: {invoices:?}"
+        );
+    }
+}

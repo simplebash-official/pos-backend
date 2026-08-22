@@ -58,13 +58,19 @@ pub async fn list_invoices(
 
     if let Some(search) = query.search.filter(|s| !s.trim().is_empty()) {
         let pattern = build_bson_regex(search.trim());
-        and_clauses.push(doc! {
-            "$or": [
-                { "invoice_number": { "$regex": pattern.clone() } },
-                { "customer_name_snapshot": { "$regex": pattern.clone() } },
-                { "customer_phone_snapshot": { "$regex": pattern } },
-            ]
-        });
+        let mut or_clauses = vec![
+            doc! { "invoice_number": { "$regex": pattern.clone() } },
+            doc! { "customer_name_snapshot": { "$regex": pattern.clone() } },
+            doc! { "customer_phone_snapshot": { "$regex": pattern } },
+        ];
+
+        let digits: String = search.chars().filter(|c| c.is_ascii_digit()).collect();
+        if let Ok(num) = digits.parse::<u64>() {
+            let padded = format!("INV-{num:06}");
+            or_clauses.push(doc! { "invoice_number": padded });
+        }
+
+        and_clauses.push(doc! { "$or": or_clauses });
     }
     if let Some(status) = query.status.filter(|s| !s.trim().is_empty()) {
         and_clauses.push(doc! { "status": status.trim() });

@@ -1248,13 +1248,21 @@ pub async fn list_credit_notes(
 
     if let Some(search) = query.search.filter(|s| !s.trim().is_empty()) {
         let pattern = build_bson_regex(search.trim());
-        and_clauses.push(doc! {
-            "$or": [
-                { "credit_note_number": { "$regex": pattern.clone() } },
-                { "invoice_number": { "$regex": pattern.clone() } },
-                { "customer_name_snapshot": { "$regex": pattern } },
-            ]
-        });
+        let mut or_clauses = vec![
+            doc! { "credit_note_number": { "$regex": pattern.clone() } },
+            doc! { "invoice_number": { "$regex": pattern.clone() } },
+            doc! { "customer_name_snapshot": { "$regex": pattern } },
+        ];
+
+        let digits: String = search.chars().filter(|c| c.is_ascii_digit()).collect();
+        if let Ok(num) = digits.parse::<u64>() {
+            let padded_cn = format!("CN-{num:06}");
+            let padded_inv = format!("INV-{num:06}");
+            or_clauses.push(doc! { "credit_note_number": padded_cn });
+            or_clauses.push(doc! { "invoice_number": padded_inv });
+        }
+
+        and_clauses.push(doc! { "$or": or_clauses });
     }
     if let Some(invoice_key) = query.invoice_key.filter(|s| !s.trim().is_empty()) {
         and_clauses.push(doc! { "invoice_key": invoice_key.trim() });
