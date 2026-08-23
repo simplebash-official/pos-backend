@@ -45,10 +45,8 @@ pub async fn start_strict_mock_document_server() -> String {
         .iter_mut()
     {
         if template["name"] == "a4-invoice" {
-            template["dataSchema"]["required"] = json!([
-                "invoiceNumber",
-                "__never_sent_by_backend"
-            ]);
+            template["dataSchema"]["required"] =
+                json!(["invoiceNumber", "__never_sent_by_backend"]);
         }
     }
     start_mock_document_server_with_templates(templates).await

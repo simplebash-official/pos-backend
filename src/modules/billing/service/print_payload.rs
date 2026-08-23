@@ -393,9 +393,7 @@ mod schema_drift_tests {
         match std::fs::read_to_string(&path) {
             Ok(contents) => Some(serde_json::from_str(&contents).expect("schema sidecar parses")),
             Err(_) => {
-                eprintln!(
-                    "skipping schema drift check for {template_name}: no schema at {path}"
-                );
+                eprintln!("skipping schema drift check for {template_name}: no schema at {path}");
                 None
             }
         }
@@ -601,8 +599,7 @@ mod schema_drift_tests {
     fn credit_note_payloads_match_published_schema() {
         let invoice = cash_sale_invoice();
 
-        let linked =
-            build_credit_note_data(&base_credit_note(), Some(&invoice));
+        let linked = build_credit_note_data(&base_credit_note(), Some(&invoice));
         assert_matches_schema("credit-note", &linked);
 
         // No-receipt variant: no shop profile exists, so every shop field
