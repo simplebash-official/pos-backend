@@ -61,6 +61,11 @@ pub(crate) async fn get_or_render(
     }
 
     let pdf_bytes = doc_server.render(template_name, data).await?;
+    // The document-server-minted unique template key, resolved from the
+    // client's (now warm) name→info cache — recorded so this row states not
+    // just *which* template layout but *which ID the document server gave
+    // it*, per the integration contract.
+    let template_key = doc_server.resolve_template_key(template_name).await?;
 
     let file_name = format!(
         "{cache_key}_{}_{}.pdf",
@@ -94,6 +99,7 @@ pub(crate) async fn get_or_render(
             entity_key: entity_key.to_string(),
             document_type: cache_key.to_string(),
             template_name: template_name.to_string(),
+            template_key,
             file_path: relative_path,
             file_size_bytes: pdf_bytes.len() as i64,
             created_at: now,

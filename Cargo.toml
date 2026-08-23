@@ -28,6 +28,11 @@ rand = "0.10.2"
 # sibling document-server for PDF rendering — no default features (no
 # system TLS dependency), rustls + JSON body support only.
 reqwest = { version = "0.12.24", default-features = false, features = ["json", "rustls-tls"] }
+# Pre-validates print payloads against the document-server's published
+# template schemas (`dataSchema` from `GET /api/templates`) before sending a
+# render — fail fast with field-level errors instead of round-tripping to
+# that service's identical rejection.
+jsonschema = "0.50"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 thiserror = "2.0.19"

@@ -22,6 +22,12 @@ pub(crate) struct GeneratedDocumentDocument {
     pub document_type: String,
     /// Document template name used for rendering.
     pub template_name: String,
+    /// The document-server-minted unique template key (`tpl_...`) the PDF
+    /// was rendered against — the POS side durably holding the ID that
+    /// service assigned, per the integration contract. `default` for rows
+    /// written before this field existed.
+    #[serde(default)]
+    pub template_key: String,
     /// Relative filesystem path to the saved PDF file.
     pub file_path: String,
     /// Size of the generated PDF document in bytes.

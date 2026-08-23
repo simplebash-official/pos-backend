@@ -1,6 +1,6 @@
-// Placeholder module — only a status route today. `repository`/`service`
-// are scaffolded (see `modules::inventory` for the pattern to follow) but
-// still empty, awaiting real reporting endpoints.
+// Feature module for financial intelligence, profit reporting, daily sales analytics,
+// employee commission summaries, credit receivables aging, and inventory valuation.
+
 mod repository;
 pub mod routes;
 mod service;

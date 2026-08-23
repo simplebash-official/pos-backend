@@ -370,3 +370,248 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod schema_drift_tests {
+    use super::*;
+    use crate::domain::billing::{CreditNote, Invoice, InvoiceStatus};
+    use serde_json::json;
+
+    /// Loads the schema sidecar the sibling document-server actually
+    /// publishes for `template_name`. Returns `None` when that repository
+    /// isn't checked out next to this one, so the suite stays runnable in a
+    /// backend-only checkout — where it prints a notice instead of silently
+    /// passing an empty guarantee.
+    fn load_schema(template_name: &str) -> Option<serde_json::Value> {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../document-server/templates/documents/"
+        )
+        .to_string()
+            + template_name
+            + ".schema.json";
+        match std::fs::read_to_string(&path) {
+            Ok(contents) => Some(serde_json::from_str(&contents).expect("schema sidecar parses")),
+            Err(_) => {
+                eprintln!(
+                    "skipping schema drift check for {template_name}: no schema at {path}"
+                );
+                None
+            }
+        }
+    }
+
+    /// Panics with every violation listed when `payload` doesn't satisfy the
+    /// published contract — the same check `DocumentServerClient::render`
+    /// enforces at request time, run here against the *real* sidecar files.
+    fn assert_matches_schema(template_name: &str, payload: &serde_json::Value) {
+        let Some(schema) = load_schema(template_name) else {
+            return;
+        };
+        let validator = jsonschema::validator_for(&schema).expect("published schema compiles");
+        let violations: Vec<String> = validator
+            .iter_errors(payload)
+            .map(|err| {
+                let path = err.instance_path().to_string();
+                if path.is_empty() {
+                    err.to_string()
+                } else {
+                    format!("at '{path}': {err}")
+                }
+            })
+            .collect();
+        assert!(
+            violations.is_empty(),
+            "{template_name} payload drifted from its published data schema:\n  {}",
+            violations.join("\n  ")
+        );
+    }
+
+    fn cash_sale_invoice() -> Invoice {
+        serde_json::from_value(json!({
+            "id": "64b0000000000000000000a1",
+            "key": "inv_testcash",
+            "invoiceNumber": "INV-000001",
+            "customerKey": "cust_test",
+            "customerNameSnapshot": "Kasun Silva",
+            "customerPhoneSnapshot": "077 123 4567",
+            "customerAddressSnapshot": "45 Lake Road, Colombo 06",
+            "cashierId": "usr_admin",
+            "cashierNameSnapshot": "Default Admin",
+            "items": [
+                {
+                    "productKey": "prod_test",
+                    "name": "Screen Protector - iPhone 14",
+                    "sku": "ACC-SP-014",
+                    "unitPriceCents": 15000,
+                    "quantity": 2,
+                    "discountCents": 0,
+                    "totalCents": 30000,
+                    "sourceType": "retail"
+                },
+                {
+                    "name": "Screen Replacement",
+                    "unitPriceCents": 85000,
+                    "quantity": 1,
+                    "discountCents": 5000,
+                    "totalCents": 80000,
+                    "sourceType": "repair",
+                    "sourceTicketKey": "rep_test",
+                    "sourceTicketNumber": "REP-000001",
+                    "assignedEmployeeName": "Ruwan Fernando"
+                }
+            ],
+            "subtotalCents": 110000,
+            "discountType": "percentage",
+            "discountValue": 5.0,
+            "discountCents": 5500,
+            "totalCents": 104500,
+            "paymentMethod": "cash",
+            "isCredit": false,
+            "amountReceivedCents": 110000,
+            "changeDueCents": 5500,
+            "status": "paid",
+            "isOverdue": false,
+            "shopProfileSnapshot": {
+                "tradingName": "TechFix Repairs",
+                "legalName": "TechFix Repairs (Pvt) Ltd",
+                "primaryPhone": "011 234 5678",
+                "secondaryPhone": "",
+                "addressLines": ["123 Galle Road", "Colombo 04"],
+                "vatRate": 0.0,
+                "receiptFooterText": "Thank you!"
+            },
+            "createdAt": "2026-08-23T09:00:00Z",
+            "updatedAt": "2026-08-23T09:00:00Z"
+        }))
+        .expect("cash-sale invoice fixture deserializes")
+    }
+
+    #[test]
+    fn thermal_receipt_payload_matches_published_schema() {
+        let invoice = cash_sale_invoice();
+        let payload = build_thermal_receipt_data(&invoice, 80);
+        assert_matches_schema("thermal-receipt", &payload);
+    }
+
+    #[test]
+    fn a4_invoice_payload_matches_published_schema() {
+        let invoice = cash_sale_invoice();
+        let payload = build_a4_invoice_data(&invoice, "ORIGINAL — CUSTOMER COPY", false);
+        assert_matches_schema("a4-invoice", &payload);
+    }
+
+    /// Every lifecycle status must pass the published enum — the schema's
+    /// `status` enum drifted once (`partially_paid`/`voided`/`closed` were
+    /// rejected), which only surfaced as a customer-facing 422 on the real
+    /// document-server because tests used a mock with minimal schemas.
+    #[test]
+    fn a4_invoice_covers_every_lifecycle_status() {
+        for status in [
+            InvoiceStatus::Paid,
+            InvoiceStatus::Pending,
+            InvoiceStatus::PartiallyPaid,
+            InvoiceStatus::Voided,
+            InvoiceStatus::Closed,
+        ] {
+            let mut invoice = cash_sale_invoice();
+            invoice.status = status;
+            let payload = build_a4_invoice_data(&invoice, "DUPLICATE COPY", true);
+            assert_matches_schema("a4-invoice", &payload);
+        }
+    }
+
+    /// The nastiest drift class: fields that serialize to JSON `null`
+    /// (`vatRatePercent` when the shop snapshot carries no VAT rate) or come
+    /// from an empty snapshot entirely — a minimal shop profile must still
+    /// produce a schema-valid payload for both receipt layouts.
+    #[test]
+    fn split_payment_credit_invoice_with_empty_shop_matches_schemas() {
+        let mut invoice = cash_sale_invoice();
+        invoice.status = InvoiceStatus::PartiallyPaid;
+        invoice.payment_method = "split".to_string();
+        invoice.is_credit = true;
+        invoice.due_date = Some("2026-09-06".to_string());
+        invoice.amount_received_cents = Some(50000);
+        invoice.change_due_cents = None;
+        invoice.split_payments = Some(vec![
+            serde_json::from_value(json!({
+                "method": "cash", "amountCents": 50000
+            }))
+            .unwrap(),
+            serde_json::from_value(json!({
+                "method": "card", "amountCents": 54500, "cardLast4": "4242"
+            }))
+            .unwrap(),
+        ]);
+        // No VAT rate key → builder emits `vatRatePercent: null`; no shop
+        // fields at all beyond what `shop_field_or_empty` can fall back on.
+        invoice.shop_profile_snapshot = json!({});
+
+        let thermal = build_thermal_receipt_data(&invoice, 58);
+        assert_matches_schema("thermal-receipt", &thermal);
+
+        let a4 = build_a4_invoice_data(&invoice, "ORIGINAL — CUSTOMER COPY", false);
+        assert_matches_schema("a4-invoice", &a4);
+    }
+
+    fn base_credit_note() -> CreditNote {
+        serde_json::from_value(json!({
+            "id": "64b0000000000000000000b1",
+            "key": "cn_test",
+            "creditNoteNumber": "CN-000001",
+            "invoiceKey": "inv_testcash",
+            "invoiceNumber": "INV-000001",
+            "noReceipt": false,
+            "customerKey": "cust_test",
+            "customerNameSnapshot": "Kasun Silva",
+            "cashierId": "usr_admin",
+            "cashierNameSnapshot": "Default Admin",
+            "returnedItems": [
+                {
+                    "productKey": "prod_test",
+                    "name": "Screen Protector - iPhone 14",
+                    "sku": "ACC-SP-014",
+                    "quantity": 1,
+                    "unitPriceCents": 15000,
+                    "totalCents": 15000,
+                    "reason": "defective",
+                    "condition": "damaged",
+                    "disposition": "write_off_scrap"
+                }
+            ],
+            "returnSubtotalCents": 15000,
+            "exchangeSubtotalCents": 0,
+            "netRefundCents": 15000,
+            "refundCashCents": 10000,
+            "balanceReductionCents": 5000,
+            "refundBreakdown": [
+                {"method": "cash", "amountCents": 10000}
+            ],
+            "status": "resolved",
+            "isManagerOverride": false,
+            "shopProfileSnapshot": {},
+            "createdAt": "2026-08-23T10:00:00Z",
+            "updatedAt": "2026-08-23T10:00:00Z"
+        }))
+        .expect("credit note fixture deserializes")
+    }
+
+    #[test]
+    fn credit_note_payloads_match_published_schema() {
+        let invoice = cash_sale_invoice();
+
+        let linked =
+            build_credit_note_data(&base_credit_note(), Some(&invoice));
+        assert_matches_schema("credit-note", &linked);
+
+        // No-receipt variant: no shop profile exists, so every shop field
+        // falls back to empty — must still satisfy the required strings.
+        let mut no_receipt = base_credit_note();
+        no_receipt.no_receipt = true;
+        no_receipt.invoice_key = None;
+        no_receipt.invoice_number = None;
+        let payload = build_credit_note_data(&no_receipt, None);
+        assert_matches_schema("credit-note", &payload);
+    }
+}

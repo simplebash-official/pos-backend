@@ -1462,3 +1462,121 @@ async fn list_invoices_searches_by_sequence_number() {
         );
     }
 }
+
+// The integration contract: the POS side durably records the
+// document-server-minted template key (`tpl_...`) on every generated
+// document row — not just the human-readable layout name.
+#[tokio::test]
+async fn get_invoice_document_persists_document_server_template_key() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let mut payload = base_sale_payload();
+    payload["items"] = json!([{
+        "name": "Widget",
+        "unitPriceCents": 1000,
+        "quantity": 1,
+        "discountCents": 0,
+        "sourceType": "retail",
+    }]);
+
+    let (_, sale_body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/billing/sales",
+        Some(payload),
+        &token,
+    )
+    .await;
+    let invoice_key = sale_body["data"]["invoice"]["key"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let request = Request::builder()
+        .method("GET")
+        .uri(format!(
+            "/api/billing/invoices/{invoice_key}/documents/a4-invoice"
+        ))
+        .header(AUTHORIZATION, format!("Bearer {token}"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.router.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let record = app
+        .db
+        .collection::<mongodb::bson::Document>("generated_documents")
+        .find_one(mongodb::bson::doc! { "entity_key": &invoice_key })
+        .await
+        .expect("query generated_documents")
+        .expect("a rendered document should have been recorded");
+    assert_eq!(
+        record.get_str("template_name").unwrap(),
+        "a4-invoice",
+        "layout name recorded as before"
+    );
+    let template_key = record.get_str("template_key").expect(
+        "template_key must be recorded on new rows — the POS side holding the \
+         document-server's unique ID is the point of this contract",
+    );
+    // The mock document-server publishes exactly this key for the template.
+    assert_eq!(template_key, "tpl_a4_invoice");
+}
+
+// Pre-validation: a payload that violates the schema the document-server
+// publishes for a template fails HERE with 422 RENDER_VALIDATION_FAILED —
+// no wasted round trip, field-level message naming the violated contract.
+// Uses its own strict-schema mock so other tests' happy paths are untouched.
+#[tokio::test]
+async fn document_render_payload_violating_published_schema_fails_fast_locally() {
+    let strict_mock_url = common::start_strict_mock_document_server().await;
+    let app = common::spawn_app_with_document_server_url(strict_mock_url).await;
+    let token = staff_token(&app.config);
+
+    let mut payload = base_sale_payload();
+    payload["items"] = json!([{
+        "name": "Widget",
+        "unitPriceCents": 1000,
+        "quantity": 1,
+        "discountCents": 0,
+        "sourceType": "retail",
+    }]);
+
+    let (_, sale_body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/billing/sales",
+        Some(payload),
+        &token,
+    )
+    .await;
+    let invoice_key = sale_body["data"]["invoice"]["key"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let request = Request::builder()
+        .method("GET")
+        .uri(format!(
+            "/api/billing/invoices/{invoice_key}/documents/a4-invoice"
+        ))
+        .header(AUTHORIZATION, format!("Bearer {token}"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.router.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body: Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(body["code"], "RENDER_VALIDATION_FAILED");
+    let message = body["message"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("__never_sent_by_backend"),
+        "rejection should come from local pre-validation and name the missing \
+         required field, got: {message}"
+    );
+}

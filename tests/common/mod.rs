@@ -7,6 +7,7 @@ use jana2u_pos_backend::{
 };
 use jsonwebtoken::{EncodingKey, Header, encode};
 use mongodb::Database;
+use serde_json::json;
 
 pub struct TestApp {
     pub router: Router,
@@ -23,7 +24,90 @@ pub struct TestApp {
 /// Spawns a lightweight in-process mock document-server on a free port so
 /// integration tests can exercise document rendering endpoints without
 /// requiring a live external document-server process.
+///
+/// Serves the same minimal `dataSchema` contracts the real service publishes
+/// for its three billing-relevant templates — enough for the client's
+/// pre-validation to run for real against realistic payloads.
 pub async fn start_mock_document_server() -> String {
+    start_mock_document_server_with_templates(mock_templates_json()).await
+}
+
+/// Same mock, but publishing a deliberately unsatisfiable schema for
+/// `a4-invoice` (requires a field no payload builder will ever send). Used
+/// by the pre-validation failure-path test, which must not disturb the
+/// shared default mock other tests rely on.
+#[allow(dead_code)]
+pub async fn start_strict_mock_document_server() -> String {
+    let mut templates = mock_templates_json();
+    for template in templates["data"]["templates"]
+        .as_array_mut()
+        .expect("default mock template list")
+        .iter_mut()
+    {
+        if template["name"] == "a4-invoice" {
+            template["dataSchema"]["required"] = json!([
+                "invoiceNumber",
+                "__never_sent_by_backend"
+            ]);
+        }
+    }
+    start_mock_document_server_with_templates(templates).await
+}
+
+fn mock_templates_json() -> serde_json::Value {
+    json!({
+        "success": true,
+        "message": "Templates fetched",
+        "data": {
+            "templates": [
+                {
+                    "key": "tpl_a4_invoice",
+                    "name": "a4-invoice",
+                    "dataSchema": {
+                        "$schema": "http://json-schema.org/draft-07/schema#",
+                        "type": "object",
+                        "additionalProperties": true,
+                        "required": ["invoiceNumber"],
+                        "properties": {
+                            "invoiceNumber": { "type": "string" }
+                        }
+                    }
+                },
+                {
+                    "key": "tpl_thermal_receipt",
+                    "name": "thermal-receipt",
+                    "dataSchema": {
+                        "$schema": "http://json-schema.org/draft-07/schema#",
+                        "type": "object",
+                        "additionalProperties": true,
+                        "required": ["paperWidthMm", "invoiceNumber"],
+                        "properties": {
+                            "paperWidthMm": { "type": "integer", "enum": [58, 80] },
+                            "invoiceNumber": { "type": "string" }
+                        }
+                    }
+                },
+                {
+                    "key": "tpl_credit_note",
+                    "name": "credit-note",
+                    "dataSchema": {
+                        "$schema": "http://json-schema.org/draft-07/schema#",
+                        "type": "object",
+                        "additionalProperties": true,
+                        "required": ["creditNoteNumber"],
+                        "properties": {
+                            "creditNoteNumber": { "type": "string" }
+                        }
+                    }
+                },
+            ]
+        }
+    })
+}
+
+async fn start_mock_document_server_with_templates(
+    templates_response: serde_json::Value,
+) -> String {
     use axum::{
         Json,
         body::Body,
@@ -31,7 +115,6 @@ pub async fn start_mock_document_server() -> String {
         http::{HeaderMap, StatusCode, header},
         routing::{get, post},
     };
-    use serde_json::json;
 
     let mock_app = Router::new()
         .route(
@@ -46,18 +129,9 @@ pub async fn start_mock_document_server() -> String {
         )
         .route(
             "/api/templates",
-            get(|| async {
-                Json(json!({
-                    "success": true,
-                    "message": "Templates fetched",
-                    "data": {
-                        "templates": [
-                            { "key": "tpl_a4_invoice", "name": "a4-invoice" },
-                            { "key": "tpl_thermal_receipt", "name": "thermal-receipt" },
-                            { "key": "tpl_credit_note", "name": "credit-note" },
-                        ]
-                    }
-                }))
+            get(move || {
+                let templates_response = templates_response.clone();
+                async move { Json(templates_response) }
             }),
         )
         .route(
@@ -100,10 +174,20 @@ pub async fn start_mock_document_server() -> String {
     format!("http://{}", addr)
 }
 
-/// Builds the real router against a Mongo test database. Reads connection
-/// details from the environment (`.env` is loaded, same as production) but
-/// always targets `MONGODB_TEST_DB_NAME` so tests never touch dev data.
+/// Builds the real router against a Mongo test database and the default
+/// mock document-server. Reads connection details from the environment
+/// (`.env` is loaded, same as production) but always targets
+/// `MONGODB_TEST_DB_NAME` so tests never touch dev data.
 pub async fn spawn_app() -> TestApp {
+    let mock_doc_server_url = start_mock_document_server().await;
+    spawn_app_with_document_server_url(mock_doc_server_url).await
+}
+
+/// Same, but pointing the app at a caller-provided document-server URL —
+/// used by tests that need a differently-configured mock (e.g. the strict-
+/// schema variant for the pre-validation failure path).
+#[allow(dead_code)]
+pub async fn spawn_app_with_document_server_url(document_server_url: String) -> TestApp {
     dotenvy::dotenv().ok();
 
     let mut config = Config::from_env().expect("invalid configuration for test run");
@@ -114,8 +198,7 @@ pub async fn spawn_app() -> TestApp {
         .await
         .expect("failed to connect to test MongoDB");
 
-    let mock_doc_server_url = start_mock_document_server().await;
-    config.document_server_url = mock_doc_server_url;
+    config.document_server_url = document_server_url;
 
     let config = Arc::new(config);
     let document_server = Arc::new(clients::document_server::DocumentServerClient::new(

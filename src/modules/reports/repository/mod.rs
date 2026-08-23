@@ -1,6 +1,8 @@
-// Mongo-only query/persistence layer for this module. Empty for now — the
-// module is still a placeholder (see routes.rs). Once real endpoints are
-// added, repository functions should be `pub(crate)`, returning
-// `Option`/`Vec`/counts straight from the driver and leaving the "not
-// found" -> `AppError` translation to `service` (see
-// `modules::inventory::repository` for the reference pattern).
+// Mongo-only query/persistence layer for the reports module. Performs aggregation
+// pipelines across collections (`invoices`, `products`, `repairs`, `print_jobs`, `credit_notes`).
+
+pub(crate) mod commissions;
+pub(crate) mod inventory_valuation;
+pub(crate) mod receivables;
+pub(crate) mod refunds;
+pub(crate) mod sales;

@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "4a99e5db-6dab-4289-be33-7994c1253468",
     "name": "backend",
-    "description": "Rust/Axum API backend for jana2u-pos, a point-of-sale system for a repair/retail shop.\n\nAll requests inherit the collection-level Bearer auth (`{{accessToken}}`) \u2014 set it once per environment (Developement/Production) after obtaining a JWT via Auth > Login (its Tests script auto-populates `{{accessToken}}`/`{{userId}}` for you on success, so nothing to copy/paste). Admin-gated endpoints (inventory category/subcategory writes, Billing > Cancel Invoice, and every Suppliers/Supplier Products/Purchases request \u2014 reads included) require the token's `role` claim to be `admin`. Permission-gated endpoints (all of Inventory except the module-status stub, Customers writes, Billing > Complete Sale/Record Payment, Repairs writes, Print Jobs writes, Users CRUD, Auth > List Login Sessions) require the token's `permissions` claim to include a specific permission (e.g. `inventory:read`, `inventory:write`, `billing:write`, `repairs:write`, `print_jobs:write`, `users:manage`, `sessions:view`) \u2014 see CLAUDE.md's \"Auth, users & permissions\" section for the full role\u2192permission table; the seeded Admin (`cargo run --bin seed_admin`) has every permission. Users CRUD is additionally scoped by an Admin/Manager hierarchy on top of that permission gate \u2014 see the Users folder's description.\n\nOnly these endpoints work without a token at all: Health, Auth > Login, Swagger, and the `GET /` module-status stubs still remaining on Inventory/Billing/Customers/Reports (Repairs and Print Jobs lost theirs once they gained real `GET /` list endpoints \u2014 those now require a token like every other read). Everything else returns 401 `UNAUTHORIZED` without a valid Bearer token, and 403 `PERMISSION_DENIED`/`ADMIN_REQUIRED` if the token lacks the required permission or role.\n\nBase URL (`{{backendBaseUrl}}`), and the access token, are environment variables \u2014 switch the active Postman environment to point requests at dev vs prod.",
+    "description": "Rust/Axum API backend for jana2u-pos, a point-of-sale system for a repair/retail shop.\n\nAll requests inherit the collection-level Bearer auth (`{{accessToken}}`) \u2014 set it once per environment (Developement/Production) after obtaining a JWT via Auth > Login (its Tests script auto-populates `{{accessToken}}`/`{{userId}}` for you on success, so nothing to copy/paste). Admin-gated endpoints (inventory category/subcategory writes, Billing > Cancel Invoice, and every Suppliers/Supplier Products/Purchases request \u2014 reads included) require the token's `role` claim to be `admin`. Permission-gated endpoints (all of Inventory except the module-status stub, Customers writes, Billing > Complete Sale/Record Payment, Repairs writes, Print Jobs writes, Reports reads (`reports:view`), Users CRUD, Auth > List Login Sessions) require the token's `permissions` claim to include a specific permission (e.g. `inventory:read`, `inventory:write`, `billing:write`, `repairs:write`, `print_jobs:write`, `reports:view`, `users:manage`, `sessions:view`) \u2014 see CLAUDE.md's \"Auth, users & permissions\" section for the full role\u2192permission table; the seeded Admin (`cargo run --bin seed_admin`) has every permission. Users CRUD is additionally scoped by an Admin/Manager hierarchy on top of that permission gate \u2014 see the Users folder's description.\n\nOnly these endpoints work without a token at all: Health, Auth > Login, Swagger, and the `GET /` module-status stubs still remaining on Inventory/Billing/Customers/Reports (Repairs and Print Jobs lost theirs once they gained real `GET /` list endpoints \u2014 those now require a token like every other read). Everything else returns 401 `UNAUTHORIZED` without a valid Bearer token, and 403 `PERMISSION_DENIED`/`ADMIN_REQUIRED` if the token lacks the required permission or role.\n\nBase URL (`{{backendBaseUrl}}`), and the access token, are environment variables \u2014 switch the active Postman environment to point requests at dev vs prod.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "_exporter_id": "46626151"
   },
@@ -664,6 +664,29 @@
             "description": "Reverses a credit note's stock/payment/customer-balance effects and marks it `voided`, with a mandatory `reason` for the audit trail. Reverses `return_restock` movements (deducts the quantity back out); does not attempt to reverse `return_write_off`/`return_supplier_rma` (audit-only) or re-credit exchange stock.\n\n**Requires Admin JWT** (`role: admin` claim) or the API returns 403 `ADMIN_REQUIRED`. Requires a non-empty `reason` or 400."
           },
           "response": []
+        },
+        {
+          "name": "Get Credit Note Document (PDF)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/billing/credit-notes/{{creditNoteKey}}/documents/credit-note",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "billing",
+                "credit-notes",
+                "{{creditNoteKey}}",
+                "documents",
+                "credit-note"
+              ]
+            },
+            "description": "Renders (or returns the cached copy of) the credit note's printable PDF via the external document-server. The only supported documentType is `credit-note`; anything else returns 400. Responds with `application/pdf` bytes.\n\n**Requires a valid Bearer token** (any role)."
+          },
+          "response": []
         }
       ],
       "description": "Sale completion (invoice + payment creation), invoice reads, payment recording/history, invoice cancellation, and on-demand invoice PDF documents (A4 invoice / thermal receipt, rendered via the external document-server and cached). `/invoices` is the real \"list\" entry point \u2014 `GET /` stays the placeholder module-status stub since billing's root has no natural single-collection meaning the way `/invoices` does."
@@ -672,21 +695,77 @@
       "name": "Customers",
       "item": [
         {
-          "name": "Customers Module Status",
+          "name": "List Customers",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{backendBaseUrl}}/api/customers",
+              "raw": "{{backendBaseUrl}}/api/customers?page=1&limit=20",
               "host": [
                 "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
                 "customers"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "Kasun",
+                  "description": "Keyword search across name/phone/email/notes",
+                  "disabled": true
+                },
+                {
+                  "key": "tag",
+                  "value": "corporate",
+                  "description": "Exact-match filter within the customer's tags array",
+                  "disabled": true
+                },
+                {
+                  "key": "sortBy",
+                  "value": "name",
+                  "description": "Field name to sort by",
+                  "disabled": true
+                },
+                {
+                  "key": "sortOrder",
+                  "value": "asc",
+                  "description": "asc | desc",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "1-based page number (default 1)"
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Page size (default 20)"
+                }
               ]
             },
-            "description": "Placeholder status route for the customers module. Real endpoints are not implemented yet."
+            "description": "List customers with keyword search, tag filtering, sorting, and pagination.\n\n**Requires a valid Bearer token** (any role) \u2014 401 otherwise."
+          },
+          "response": []
+        },
+        {
+          "name": "List Customer Tags",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/customers/tags",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                "tags"
+              ]
+            },
+            "description": "Distinct tags currently in use across customers \u2014 the suggestion list behind the tag picker on the customer form.\n\n**Requires a valid Bearer token** (any role)."
           },
           "response": []
         },
@@ -707,6 +786,202 @@
               ]
             },
             "description": "Customers screen KPI cards: total customers, total balance due, and active-debtor count.\n\n**Requires a valid Bearer token** (any role \u2014 `CurrentUser`, no specific permission) or the API returns 401."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Customer",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/customers/{{customerKey}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                "{{customerKey}}"
+              ]
+            },
+            "description": "Fetch one customer profile by Mongo ID or prefixed key (`cust_...`).\n\n**Requires a valid Bearer token** (any role). 404 `CUSTOMER_NOT_FOUND` when missing."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Customer",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const data = pm.response.json().data;",
+                  "    pm.collectionVariables.set(\"customerId\", data.id);",
+                  "    pm.collectionVariables.set(\"customerKey\", data.key);",
+                  "    console.log(`customerId (${data.id}) and customerKey (${data.key}) saved`);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"name\": \"Kasun Silva\",\n  \"contactPerson\": \"\",\n  \"primaryPhone\": \"077 123 4567\",\n  \"secondaryPhone\": \"011 234 5678\",\n  \"email\": \"kasun@example.lk\",\n  \"address\": \"45 Lake Road, Colombo 06\",\n  \"tags\": [\"retail\", \"corporate\"],\n  \"notes\": \"Prefers WhatsApp for repair updates.\"\n}"
+            },
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/customers",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "customers"
+              ]
+            },
+            "description": "Create a customer profile. Only `name` and `primaryPhone` are required; omitted optional fields stay empty. The server mints `id`/`key` \u2014 the test script copies both into collection variables.\n\n**Requires `customers:write` permission** (Admin and Manager roles): staff tokens get 403 `PERMISSION_DENIED`, no token gets 401."
+          },
+          "response": []
+        },
+        {
+          "name": "Replace Customer",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "1",
+                "description": "Current version of the customer \u2014 mismatch returns 409 VERSION_CONFLICT"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"name\": \"Kasun Silva\",\n  \"primaryPhone\": \"077 123 4567\",\n  \"email\": \"kasun.silva@example.lk\",\n  \"address\": \"45 Lake Road, Colombo 06\",\n  \"tags\": [\"corporate\"],\n  \"notes\": \"Moved to monthly credit terms.\"\n}"
+            },
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/customers/{{customerKey}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                "{{customerKey}}"
+              ]
+            },
+            "description": "Full replace \u2014 any optional field omitted from the body is cleared, unlike Update Customer (PATCH) which leaves omitted fields untouched. Send the row's current `version` in `If-Match`; a stale value returns 409 `VERSION_CONFLICT`.\n\n**Requires `customers:write` permission** (Admin and Manager roles)."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Customer",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"secondaryPhone\": \"011 555 1212\",\n  \"notes\": \"Prefers evening calls.\"\n}"
+            },
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/customers/{{customerKey}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                "{{customerKey}}"
+              ]
+            },
+            "description": "Partial update \u2014 send only what changed; omitted fields keep their current values (an explicit `null` clears a field).\n\n**Requires `customers:write` permission** (Admin and Manager roles)."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Customer",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/customers/{{customerKey}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                "{{customerKey}}"
+              ]
+            },
+            "description": "Soft-delete one customer. Blocked with 409 while the customer still has an outstanding credit balance \u2014 settle those first.\n\n**Requires `customers:write` permission** (Admin and Manager roles)."
+          },
+          "response": []
+        },
+        {
+          "name": "Batch Delete Customers",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"ids\": [\n    \"{{customerKey}}\"\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/customers/batch",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                "batch"
+              ]
+            },
+            "description": "Delete several customers in one call; each id may be a Mongo ID or prefixed key.\n\n**Requires `customers:write` permission** (Admin and Manager roles)."
           },
           "response": []
         }
@@ -1899,11 +2174,275 @@
                 "reports"
               ]
             },
-            "description": "Placeholder status route for the reports module. Real endpoints are not implemented yet."
+            "description": "Liveness and status check for the reports module."
+          },
+          "response": []
+        },
+        {
+          "name": "Dashboard Overview",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/reports/dashboard?preset=today",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "dashboard"
+              ],
+              "query": [
+                {
+                  "key": "preset",
+                  "value": "today",
+                  "description": "Date preset: today, yesterday, this_week, this_month, last_month, this_year, all_time, custom"
+                },
+                {
+                  "key": "from",
+                  "value": "2026-08-01",
+                  "description": "Start date for custom range (YYYY-MM-DD)",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2026-08-31",
+                  "description": "End date for custom range (YYYY-MM-DD)",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Executive dashboard overview with overall revenue, repair/print/retail revenue streams, gross/net profits, commissions, and outstanding credit.\n\n**Requires reports:view permission** (Admin and Manager roles)."
+          },
+          "response": []
+        },
+        {
+          "name": "Daily Sales Report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/reports/daily-sales?date=2026-08-23",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "daily-sales"
+              ],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "2026-08-23",
+                  "description": "Specific calendar day (YYYY-MM-DD). Defaults to today if omitted."
+                },
+                {
+                  "key": "from",
+                  "value": "2026-08-01",
+                  "description": "Optional start date for multi-day daily report (YYYY-MM-DD)",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2026-08-31",
+                  "description": "Optional end date for multi-day daily report (YYYY-MM-DD)",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Daily sales report with breakdown by stream (retail, repairs, print) and payment methods (cash, card, online, credit).\n\n**Requires reports:view permission** (Admin and Manager roles)."
+          },
+          "response": []
+        },
+        {
+          "name": "Monthly Profit Report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/reports/monthly-profit?month=2026-08",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "monthly-profit"
+              ],
+              "query": [
+                {
+                  "key": "month",
+                  "value": "2026-08",
+                  "description": "Target month in YYYY-MM format. Defaults to current month."
+                },
+                {
+                  "key": "year",
+                  "value": "2026",
+                  "description": "Target year if month omitted (YYYY)",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Monthly profit and financial intelligence report with revenue streams, estimated COGS, gross profit, commission payouts, return refunds, and net profit.\n\n**Requires reports:view permission** (Admin and Manager roles)."
+          },
+          "response": []
+        },
+        {
+          "name": "Outstanding Credit Receivables",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/reports/outstanding?page=1&limit=20",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "outstanding"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "1-based page number"
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Items per page (max 200)"
+                },
+                {
+                  "key": "search",
+                  "value": "John",
+                  "description": "Customer name, phone, or invoice number search",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Outstanding receivables tracking uncollected credit balances, overdue invoices, and customer aging details.\n\n**Requires reports:view permission** (Admin and Manager roles)."
+          },
+          "response": []
+        },
+        {
+          "name": "Employee Commissions Report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/reports/employee-commissions?preset=this_month",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "employee-commissions"
+              ],
+              "query": [
+                {
+                  "key": "preset",
+                  "value": "this_month",
+                  "description": "Date preset (today, this_week, this_month, etc.)"
+                },
+                {
+                  "key": "from",
+                  "value": "2026-08-01",
+                  "description": "Start date for custom range",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2026-08-31",
+                  "description": "End date for custom range",
+                  "disabled": true
+                },
+                {
+                  "key": "employeeName",
+                  "value": "Nimal",
+                  "description": "Filter by employee name",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Employee performance and profit-split commission payouts across repair and print jobs.\n\n**Requires reports:view permission** (Admin and Manager roles)."
+          },
+          "response": []
+        },
+        {
+          "name": "Inventory Valuation Report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/reports/inventory-valuation",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "inventory-valuation"
+              ]
+            },
+            "description": "Inventory stock valuation report showing total units, valuation at cost vs retail price, potential gross profit, margin %, and low-stock alerts.\n\n**Requires reports:view permission** (Admin and Manager roles)."
+          },
+          "response": []
+        },
+        {
+          "name": "Top Products Report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/reports/top-products?preset=this_month&limit=10&sortBy=revenue",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "top-products"
+              ],
+              "query": [
+                {
+                  "key": "preset",
+                  "value": "this_month",
+                  "description": "Date preset (today, this_month, all_time, custom)"
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "description": "Maximum number of top products to return"
+                },
+                {
+                  "key": "sortBy",
+                  "value": "revenue",
+                  "description": "Sort order: 'revenue' or 'quantity'"
+                },
+                {
+                  "key": "from",
+                  "value": "2026-08-01",
+                  "description": "Start date for custom range",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2026-08-31",
+                  "description": "End date for custom range",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Top-selling products ranked by total revenue or units sold.\n\n**Requires reports:view permission** (Admin and Manager roles)."
           },
           "response": []
         }
-      ]
+      ],
+      "description": "Reports and Financial Intelligence module: executive dashboard KPIs, daily sales, monthly profit/loss, credit receivables aging, employee commissions, inventory valuation, and top products."
     },
     {
       "name": "Suppliers",
@@ -2627,6 +3166,51 @@
         }
       ],
       "description": "Admin-provisioned user account CRUD and role management, scoped by an Admin/Manager hierarchy: Admin manages Manager + Staff accounts, Manager manages Staff accounts only, and an Admin account is never manageable through this API by anyone (see CLAUDE.md's \"Auth, users & permissions\" section). `auth` (above) owns login/token issuance and login-session history."
+    },
+    {
+      "name": "Sequences",
+      "item": [
+        {
+          "name": "Reserve Sequence Block",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Device-Id",
+                "value": "counter-terminal-1",
+                "description": "Identifies which terminal reserved the block"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"blockSize\": 10,\n  \"deviceId\": \"counter-terminal-1\"\n}"
+            },
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/sequences/invoice/reserve",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "sequences",
+                "invoice",
+                "reserve"
+              ]
+            },
+            "description": "Server-reserves a block of sequential human-facing numbers for one sequence name (`invoice`, `repair`, `printJob`, `purchase`) \u2014 how a ticket created offline still gets its number minted by the server instead of guessed client-side. `blockSize` defaults to the server's configured size when omitted; unknown names return 400. Response carries the reserved range.\n\n**Requires a valid Bearer token** (any role)."
+          },
+          "response": []
+        }
+      ]
     }
   ],
   "auth": {
@@ -2699,6 +3283,12 @@
       "key": "creditNoteKey",
       "value": "cn_xxxxxxxxxxxxxxxx",
       "description": "A credit note's system-generated `key` (from Create Credit Note / List Credit Notes) \u2014 used by Get Credit Note / Void Credit Note."
+    },
+    {
+      "key": "customerId",
+      "value": "64b000000000000000000000",
+      "type": "default",
+      "description": "A customer's Mongo hex ID \u2014 Create Customer's test script saves it automatically. Customer routes accept either this or {{customerKey}}."
     }
   ]
 }
