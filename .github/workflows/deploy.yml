@@ -52,5 +52,5 @@ jobs:
             # Recreate the backend container
             docker compose up -d backend
             
-            # Clean up old images
+            # Clean up old imagess
             docker image prune -f
