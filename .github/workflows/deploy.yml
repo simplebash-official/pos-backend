@@ -1,101 +1,56 @@
-name: Deploy Backend
+name: Build and Deploy Backend
 
 on:
   push:
-    branches: [master]
+    branches: [ "main" ]
 
 env:
-  BINARY_NAME: jana2u_pos_backend
-  DEPLOY_PATH: /opt/jana2u-backend
+  REGISTRY: ghcr.io
+  IMAGE_NAME: jana2u-pos-system/jana2u-backend
 
 jobs:
-  ci:
+  build-and-push:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
         with:
-          components: rustfmt, clippy
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Cache cargo registry and build artifacts
-        uses: Swatinem/rust-cache@v2
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
-      - name: Run checks (fmt, clippy, tests)
-        env:
-          MONGODB_URI: ${{ secrets.MONGODB_URI }}
-          MONGODB_DB_NAME: ${{ secrets.MONGODB_DB_NAME }}
-          JWT_SECRET: ${{ secrets.JWT_SECRET }}
-          JWT_EXPIRY_HOURS: 12
-          DOCUMENT_SERVER_URL: http://localhost:8090
-          DOCUMENT_SERVER_API_KEY: ci-test-document-server-api-key
-          GENERATED_DOCUMENTS_DIR: generated_documents
-        run: make ci
-
-  build-and-deploy:
-    needs: ci
+  deploy:
+    needs: build-and-push
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo registry and build artifacts
-        uses: Swatinem/rust-cache@v2
-
-      - name: Build release binary
-        run: cargo build --release
-
-      - name: Install SSH key
-        uses: webfactory/ssh-agent@v0.9.0
+      - name: Execute deployment via SSH
+        uses: appleboy/ssh-action@v1.0.3
         with:
-          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
-
-      - name: Add server to known_hosts
-        run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
-
-      - name: Generate production .env file
-        env:
-          MONGODB_URI: ${{ secrets.MONGODB_URI }}
-          MONGODB_DB_NAME: ${{ secrets.MONGODB_DB_NAME }}
-          JWT_SECRET: ${{ secrets.JWT_SECRET }}
-          DOCUMENT_SERVER_URL: ${{ secrets.DOCUMENT_SERVER_URL }}
-          DOCUMENT_SERVER_API_KEY: ${{ secrets.DOCUMENT_SERVER_API_KEY }}
-        run: |
-          cat << EOF > production.env
-          MONGODB_URI=${MONGODB_URI}
-          MONGODB_DB_NAME=${MONGODB_DB_NAME}
-          JWT_SECRET=${JWT_SECRET}
-          PORT=8080
-          JWT_EXPIRY_HOURS=12
-          DOCUMENT_SERVER_URL=${DOCUMENT_SERVER_URL:-http://localhost:8090}
-          DOCUMENT_SERVER_API_KEY=${DOCUMENT_SERVER_API_KEY}
-          GENERATED_DOCUMENTS_DIR=generated_documents
-          EOF
-
-      - name: Upload binary and .env to server
-        run: |
-          scp target/release/${{ env.BINARY_NAME }} \
-            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:${{ env.DEPLOY_PATH }}/${{ env.BINARY_NAME }}.new
-          scp production.env \
-            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:${{ env.DEPLOY_PATH }}/.env.new
-
-      - name: Swap binary and restart service
-        run: |
-          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} '
-            set -e
-            chmod +x ${{ env.DEPLOY_PATH }}/${{ env.BINARY_NAME }}.new
-            mv ${{ env.DEPLOY_PATH }}/${{ env.BINARY_NAME }}.new ${{ env.DEPLOY_PATH }}/${{ env.BINARY_NAME }}
-            chmod 600 ${{ env.DEPLOY_PATH }}/.env.new
-            mv ${{ env.DEPLOY_PATH }}/.env.new ${{ env.DEPLOY_PATH }}/.env
-            mkdir -p ${{ env.DEPLOY_PATH }}/generated_documents
-            sudo systemctl restart jana2u-backend
-            sleep 2
-            sudo systemctl is-active jana2u-backend
-          '
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cd ~/jana2u-pos
+            
+            # Pull the latest backend image
+            docker compose pull backend
+            
+            # Recreate the backend container
+            docker compose up -d backend
+            
+            # Clean up old images
+            docker image prune -f
