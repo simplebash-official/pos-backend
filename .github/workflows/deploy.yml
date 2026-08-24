@@ -2,7 +2,7 @@ name: Build and Deploy Backend
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "master" ]
 
 env:
   REGISTRY: ghcr.io
@@ -52,5 +52,5 @@ jobs:
             # Recreate the backend container
             docker compose up -d backend
             
-            # Clean up old imagess
+            # Clean up old images
             docker image prune -f
