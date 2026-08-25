@@ -61,17 +61,21 @@ pub(crate) async fn get_monthly_profit_report(
 
     let sales = repository::sales::aggregate_sales_summary(db, start, end).await?;
     let daily_summaries = repository::sales::aggregate_daily_sales(db, start, end).await?;
+    // Only the aggregate totals are needed here — no employee display
+    // name/role resolution, so the raw unresolved bucket map from
+    // `repository::commissions` is used as-is.
     let commissions =
         repository::commissions::aggregate_employee_commissions(db, start, end, None).await?;
     let total_refunds_cents = repository::refunds::aggregate_refunds_total(db, start, end).await?;
 
     let mut cogs_cents = 0;
-    for emp in &commissions.employees {
+    let mut commission_payouts_cents = 0;
+    for emp in commissions.values() {
         cogs_cents += emp.estimated_cost_cents;
+        commission_payouts_cents += emp.earned_commission_cents;
     }
 
     let gross_profit_cents = (sales.total_sales_cents - cogs_cents).max(0);
-    let commission_payouts_cents = commissions.total_commissions_cents;
     let net_profit_cents =
         (gross_profit_cents - commission_payouts_cents - total_refunds_cents).max(0);
 

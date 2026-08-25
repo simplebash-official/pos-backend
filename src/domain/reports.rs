@@ -208,13 +208,20 @@ pub struct EmployeeCommissionsQuery {
     pub preset: Option<String>,
     pub from: Option<String>,
     pub to: Option<String>,
-    pub employee_name: Option<String>,
+    /// Filters to one employee by key. Grouping is by key, not display name
+    /// — two employees sharing a name never merge, and a rename doesn't
+    /// split history across two buckets (see
+    /// `reports::repository::commissions::aggregate_employee_commissions`).
+    pub employee_key: Option<String>,
 }
 
 /// Performance and commission breakdown for one employee/technician.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct EmployeePerformanceEntry {
+    /// `None` for the "unassigned" bucket — there is no real employee to key by.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub employee_key: Option<String>,
     pub employee_name: String,
     pub role: String,
     pub assigned_jobs_count: u64,

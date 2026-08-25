@@ -12,12 +12,13 @@ use utoipa::{IntoParams, ToSchema};
 /// reserved via `modules::sequences`) is the human-facing number printed on
 /// receipts and shown in `ServiceJobPickerModal` on the frontend.
 ///
-/// `assigned_employee_id`/`name`, `split_type`/`split_value` are stored as
-/// opaque display fields only — no `employees` backend module exists yet, so
-/// no commission math happens here. The frontend still computes/records
-/// technician earnings against its own (still-mocked) employees store after
-/// a status update succeeds; see the migration plan's employees/commission
-/// scope note.
+/// `assigned_employee_id` is resolved server-side against `modules::employees`
+/// on create/update (`service::resolve_assignment_employee_name`) — an
+/// unresolvable id 404s before any write, and `assigned_employee_name` is
+/// always server-derived from it, never trusted from the client.
+/// `split_type`/`split_value` stay opaque display fields; the actual
+/// commission math is computed on demand by
+/// `modules::reports::service::employee_earnings`, not stored here.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Repair {
@@ -107,9 +108,9 @@ pub struct RepairCustomer {
 }
 
 /// The `assignment{}` sub-object of `CreateRepairRequest`/
-/// `UpdateRepairRequest` — every field is optional at every layer (no
-/// `employees` backend module exists yet, see `Repair`'s doc comment), so
-/// the whole object is typically omitted entirely on an unassigned ticket.
+/// `UpdateRepairRequest` — every field is optional, so the whole object is
+/// typically omitted entirely on an unassigned ticket. See `Repair`'s doc
+/// comment for how `assignedEmployeeId` is resolved server-side.
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RepairAssignment {

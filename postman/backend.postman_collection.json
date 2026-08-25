@@ -988,6 +988,207 @@
       ]
     },
     {
+      "name": "Employees",
+      "item": [
+        {
+          "name": "List Employees",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/employees?",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "employees"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "Nimal",
+                  "description": "Free-text search across name/phone/nicOrId",
+                  "disabled": true
+                },
+                {
+                  "key": "role",
+                  "value": "technician",
+                  "description": "Filter by exact job-function role",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "active",
+                  "description": "Filter by exact status",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "List all employees (not paginated). Requires `employees:read` \u2014 held by every role (Admin/Manager/Staff), since Staff needs to browse employees when assigning a repair/print job."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Employee",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const data = pm.response.json().data;",
+                  "    pm.environment.set(\"employeeId\", data.id);",
+                  "    pm.environment.set(\"employeeKey\", data.key);",
+                  "    console.log(`employeeId (${data.id}) and employeeKey (${data.key}) saved`);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Nimal Perera\",\n  \"phone\": \"077 234 5678\",\n  \"nicOrId\": \"199012345678\",\n  \"role\": \"technician\",\n  \"defaultSplitType\": \"percentage\",\n  \"defaultSplitValue\": 20,\n  \"status\": \"active\",\n  \"notes\": \"Specializes in screen replacements.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/employees",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "employees"
+              ]
+            },
+            "description": "Create a new employee HR/commission profile. `key` is server-generated, never client-supplied. Requires `employees:write` (Admin/Manager only). This is a profile only \u2014 no login is created; use Users > Create User with `employeeKey` set to give this employee a login."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Employee",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/employees/{{employeeId}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "employees",
+                "{{employeeId}}"
+              ]
+            },
+            "description": "Get a single employee by its Mongo id. The response's `login` field is `null` unless a user account has been linked via `employeeKey`."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Employee",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"defaultSplitValue\": 25\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/employees/{{employeeId}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "employees",
+                "{{employeeId}}"
+              ]
+            },
+            "description": "Partially update an employee. Omitted fields are left untouched. Requires `employees:write`. Optionally send an `If-Match` header with the current `version` for optimistic-locking conflict detection (409 `VERSION_CONFLICT`)."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Employee",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/employees/{{employeeId}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "employees",
+                "{{employeeId}}"
+              ]
+            },
+            "description": "Soft-deletes an employee. Requires `employees:write`. Blocked with 409 `EMPLOYEE_HAS_LOGIN` while the employee still has a linked login account \u2014 remove the login first (Users > Delete User)."
+          },
+          "response": []
+        },
+        {
+          "name": "Batch Delete Employees",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ids\": [\n    \"{{employeeId}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/employees/batch",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "employees",
+                "batch"
+              ]
+            },
+            "description": "Delete multiple employees at once. Ids that fail (invalid, not found, or blocked by EMPLOYEE_HAS_LOGIN) are silently skipped. Requires `employees:write`."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "Inventory",
       "item": [
         {
@@ -3069,7 +3270,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Jane Fernando\",\n  \"email\": \"jane.fernando@example.com\",\n  \"password\": \"Password123!\",\n  \"role\": \"staff\"\n}",
+              "raw": "{\n  \"name\": \"Jane Fernando\",\n  \"email\": \"jane.fernando@example.com\",\n  \"password\": \"Password123!\",\n  \"role\": \"staff\",\n  \"employeeKey\": \"{{employeeKey}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3122,7 +3323,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"role\": \"manager\",\n  \"isActive\": true\n}",
+              "raw": "{\n  \"role\": \"manager\",\n  \"isActive\": true,\n  \"employeeKey\": \"{{employeeKey}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

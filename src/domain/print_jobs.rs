@@ -1,8 +1,10 @@
 // Pure business types for the print-jobs feature — mirrors `domain::repairs`
 // closely; the two modules differ only in their domain-specific fields
 // (job type/quantity vs device model/issue description). See
-// `domain::repairs`'s module comment for why `assigned_employee_*`/
-// `split_*` are opaque display fields with no server-side commission math.
+// `domain::repairs`'s module comment for how `assigned_employee_id` is
+// resolved server-side against `modules::employees` and why `split_*`
+// stay opaque display fields (commission math is computed on demand by
+// `modules::reports::service::employee_earnings`).
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

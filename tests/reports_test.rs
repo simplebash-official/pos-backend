@@ -670,3 +670,111 @@ async fn inventory_valuation_and_top_products_report() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["success"], true);
 }
+
+/// Regression test for the free-text-name grouping bug: commissions used to
+/// be bucketed by `assigned_employee_name`, so a renamed employee's history
+/// split across two entries instead of staying merged under their real
+/// identity. Now bucketed by `assigned_employee_id` (a real `employees`
+/// key), so two tickets completed under the same employee — one before and
+/// one after a rename — must still merge into a single commissions entry.
+#[tokio::test]
+async fn employee_commissions_survive_a_rename() {
+    let app = common::spawn_app().await;
+    let admin_token = common::mint_token(
+        &app.config,
+        Some(Role::Admin),
+        roles::default_permissions(Role::Admin),
+    );
+
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/employees",
+        Some(json!({
+            "name": "Rename Regression Tech",
+            "phone": "0771234567",
+            "role": "technician",
+            "defaultSplitType": "percentage",
+            "defaultSplitValue": 30.0,
+        })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let employee_id = body["data"]["id"].as_str().unwrap().to_string();
+    let employee_key = body["data"]["key"].as_str().unwrap().to_string();
+
+    let target_date = NaiveDate::from_ymd_opt(2026, 8, 20)
+        .unwrap()
+        .and_hms_opt(11, 0, 0)
+        .unwrap()
+        .and_utc();
+
+    let make_repair = |key_suffix: &str, name: &str| RepairDocument {
+        id: None,
+        key: generate_id("rep"),
+        ticket_number: format!("REP-{key_suffix}"),
+        customer_key: None,
+        customer_name: name.to_string(),
+        customer_phone: "0770000000".to_string(),
+        device_model: "iPhone 13".to_string(),
+        serial_number: None,
+        issue_description: "Screen cracked".to_string(),
+        status: "delivered".to_string(),
+        estimated_cost_cents: Some(500000),
+        material_cost_cents: Some(200000),
+        assigned_employee_id: Some(employee_key.clone()),
+        assigned_employee_name: Some("stale snapshot, must be ignored".to_string()),
+        split_type: Some("percentage".to_string()),
+        split_value: Some(30.0),
+        version: 1,
+        created_at: BsonDateTime::from_chrono(target_date),
+        updated_at: BsonDateTime::from_chrono(target_date),
+        deleted_at: None,
+        updated_by_device: None,
+    };
+
+    app.db
+        .collection::<RepairDocument>("repairs")
+        .insert_one(make_repair("R1", "Customer Before Rename"))
+        .await
+        .unwrap();
+
+    // Rename the employee, then complete a second ticket under the same id.
+    let (status, body) = send_authed(
+        &app.router,
+        "PATCH",
+        &format!("/api/employees/{employee_id}"),
+        Some(json!({ "name": "Renamed Regression Tech" })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    app.db
+        .collection::<RepairDocument>("repairs")
+        .insert_one(make_repair("R2", "Customer After Rename"))
+        .await
+        .unwrap();
+
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        &format!(
+            "/api/reports/employee-commissions?from=2026-08-20&to=2026-08-20&employeeKey={employee_key}"
+        ),
+        None,
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let entries = body["data"]["employees"].as_array().unwrap();
+    assert_eq!(
+        entries.len(),
+        1,
+        "both tickets must merge into one entry keyed by employee id, not split by name: {entries:?}"
+    );
+    assert_eq!(entries[0]["employeeName"], "Renamed Regression Tech");
+    assert_eq!(entries[0]["assignedJobsCount"], 2);
+}

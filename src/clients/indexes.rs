@@ -27,6 +27,7 @@ const SYNCED_COLLECTIONS: &[&str] = &[
     "purchases",
     "stock_movements",
     "customers",
+    "employees",
     "repairs",
     "print_jobs",
     "invoices",

@@ -18,6 +18,8 @@ const ADMIN_PERMISSIONS: &[&str] = &[
     perm::PRINT_JOBS_WRITE,
     perm::REPORTS_VIEW,
     perm::CUSTOMERS_WRITE,
+    perm::EMPLOYEES_READ,
+    perm::EMPLOYEES_WRITE,
 ];
 
 // Everything an Admin has except full account management — a Manager runs
@@ -35,6 +37,8 @@ const MANAGER_PERMISSIONS: &[&str] = &[
     perm::PRINT_JOBS_WRITE,
     perm::REPORTS_VIEW,
     perm::CUSTOMERS_WRITE,
+    perm::EMPLOYEES_READ,
+    perm::EMPLOYEES_WRITE,
 ];
 
 // Day-to-day operational permissions only — no inventory administration, no
@@ -45,6 +49,7 @@ const STAFF_PERMISSIONS: &[&str] = &[
     perm::REPAIRS_WRITE,
     perm::PRINT_JOBS_WRITE,
     perm::CUSTOMERS_WRITE,
+    perm::EMPLOYEES_READ,
 ];
 
 /// The fixed permission set a role's JWT carries at login. Three flat

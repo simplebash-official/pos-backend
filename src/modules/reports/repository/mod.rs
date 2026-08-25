@@ -2,6 +2,7 @@
 // pipelines across collections (`invoices`, `products`, `repairs`, `print_jobs`, `credit_notes`).
 
 pub(crate) mod commissions;
+pub(crate) mod employee_earnings;
 pub(crate) mod inventory_valuation;
 pub(crate) mod receivables;
 pub(crate) mod refunds;

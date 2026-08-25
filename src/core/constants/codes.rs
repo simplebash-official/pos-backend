@@ -69,6 +69,11 @@ pub const USER_INACTIVE: &str = "USER_INACTIVE";
 pub const PERMISSION_DENIED: &str = "PERMISSION_DENIED";
 pub const ADMIN_ALREADY_EXISTS: &str = "ADMIN_ALREADY_EXISTS";
 
+// Employees Status Codes
+pub const EMPLOYEE_NOT_FOUND: &str = "EMPLOYEE_NOT_FOUND";
+pub const EMPLOYEE_HAS_LOGIN: &str = "EMPLOYEE_HAS_LOGIN";
+pub const EMPLOYEE_ALREADY_HAS_LOGIN: &str = "EMPLOYEE_ALREADY_HAS_LOGIN";
+
 // Sync, Concurrency & Idempotency Status Codes
 pub const VERSION_CONFLICT: &str = "VERSION_CONFLICT";
 pub const REFERENCE_NOT_FOUND: &str = "REFERENCE_NOT_FOUND";

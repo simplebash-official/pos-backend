@@ -640,3 +640,71 @@ async fn repairs_stats_endpoint_returns_today_job_count_revenue_pending_count_an
 
     db.drop().await.ok();
 }
+
+// ============================================================================
+// Employee assignment FK resolution
+// ============================================================================
+
+fn admin_token(config: &jana2u_pos_backend::core::config::Config) -> String {
+    common::mint_token(
+        config,
+        Some(Role::Admin),
+        roles::default_permissions(Role::Admin),
+    )
+}
+
+async fn create_employee_via_api(router: &axum::Router, token: &str) -> Value {
+    let (status, body) = send_authed(
+        router,
+        "POST",
+        "/api/employees",
+        Some(json!({
+            "name": format!("Test Technician {}", uuid::Uuid::new_v4()),
+            "phone": "0771234567",
+            "role": "technician",
+            "defaultSplitType": "percentage",
+            "defaultSplitValue": 20.0,
+        })),
+        token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    body["data"].clone()
+}
+
+#[tokio::test]
+async fn create_repair_with_valid_assigned_employee_id_resolves_name() {
+    let app = common::spawn_app().await;
+    let admin = admin_token(&app.config);
+    let employee = create_employee_via_api(&app.router, &admin).await;
+    let employee_key = employee["key"].as_str().unwrap();
+
+    let mut payload = sample_repair_payload("9990001");
+    payload["assignment"] = json!({
+        "assignedEmployeeId": employee_key,
+        // A client-sent name must never be trusted once the id resolves.
+        "assignedEmployeeName": "Someone Else Entirely",
+        "splitType": "percentage",
+        "splitValue": 20.0,
+    });
+
+    let (status, body) =
+        send_authed(&app.router, "POST", "/api/repairs", Some(payload), &admin).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["assignedEmployeeId"], employee_key);
+    assert_eq!(body["data"]["assignedEmployeeName"], employee["name"]);
+}
+
+#[tokio::test]
+async fn create_repair_with_unknown_assigned_employee_id_is_not_found() {
+    let app = common::spawn_app().await;
+    let admin = admin_token(&app.config);
+
+    let mut payload = sample_repair_payload("9990002");
+    payload["assignment"] = json!({ "assignedEmployeeId": "emp_does_not_exist" });
+
+    let (status, body) =
+        send_authed(&app.router, "POST", "/api/repairs", Some(payload), &admin).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(body["code"], "EMPLOYEE_NOT_FOUND");
+}

@@ -278,6 +278,7 @@ async fn single_admin_invariant_and_admin_invisible_via_users_api() {
             email: email.clone(),
             password: "Password123!".to_string(),
             role: Role::Admin,
+            employee_key: None,
         },
     )
     .await;
@@ -290,6 +291,7 @@ async fn single_admin_invariant_and_admin_invisible_via_users_api() {
             email: format!("second-admin-{}@example.com", Uuid::new_v4()),
             password: "Password123!".to_string(),
             role: Role::Admin,
+            employee_key: None,
         },
     )
     .await;
@@ -595,4 +597,116 @@ async fn manager_can_delete_staff_but_not_manager_accounts() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
     assert_eq!(body["code"], "USER_NOT_FOUND");
+}
+
+// ============================================================================
+// Employee-linked logins
+// ============================================================================
+
+async fn create_employee_via_api(router: &axum::Router, token: &str) -> Value {
+    let (status, body) = send_authed(
+        router,
+        "POST",
+        "/api/employees",
+        Some(json!({
+            "name": format!("Test Employee {}", Uuid::new_v4()),
+            "phone": "0771234567",
+            "role": "technician",
+            "defaultSplitType": "percentage",
+            "defaultSplitValue": 20.0,
+        })),
+        token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    body["data"].clone()
+}
+
+#[tokio::test]
+async fn creating_user_with_employee_key_links_it() {
+    let app = common::spawn_app().await;
+    let token = admin_token(&app.config);
+    let employee = create_employee_via_api(&app.router, &token).await;
+    let employee_key = employee["key"].as_str().unwrap();
+
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/users",
+        Some(json!({
+            "name": "Linked User",
+            "email": format!("linked-{}@example.com", Uuid::new_v4()),
+            "password": "Password123!",
+            "role": "staff",
+            "employeeKey": employee_key,
+        })),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["data"]["employeeKey"], employee_key);
+}
+
+#[tokio::test]
+async fn creating_user_with_unresolvable_employee_key_is_not_found() {
+    let app = common::spawn_app().await;
+    let token = admin_token(&app.config);
+
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/users",
+        Some(json!({
+            "name": "Orphan Login",
+            "email": format!("orphan-{}@example.com", Uuid::new_v4()),
+            "password": "Password123!",
+            "role": "staff",
+            "employeeKey": "emp_does_not_exist",
+        })),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(body["code"], "EMPLOYEE_NOT_FOUND");
+}
+
+#[tokio::test]
+async fn creating_second_login_for_already_linked_employee_is_rejected() {
+    let app = common::spawn_app().await;
+    let token = admin_token(&app.config);
+    let employee = create_employee_via_api(&app.router, &token).await;
+    let employee_key = employee["key"].as_str().unwrap();
+
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/users",
+        Some(json!({
+            "name": "First Login",
+            "email": format!("first-{}@example.com", Uuid::new_v4()),
+            "password": "Password123!",
+            "role": "staff",
+            "employeeKey": employee_key,
+        })),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/users",
+        Some(json!({
+            "name": "Second Login",
+            "email": format!("second-{}@example.com", Uuid::new_v4()),
+            "password": "Password123!",
+            "role": "staff",
+            "employeeKey": employee_key,
+        })),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "EMPLOYEE_ALREADY_HAS_LOGIN");
 }

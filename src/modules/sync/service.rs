@@ -15,6 +15,7 @@ use crate::{
             payments as billing_payments_service,
         },
         customers::service as customers_service,
+        employees::service as employees_service,
         inventory::service::{
             category as inventory_category, product as inventory_product,
             product_serial as inventory_product_serial, stock as inventory_stock,
@@ -47,6 +48,7 @@ const SYNCABLE: &[(&str, &str)] = &[
     ("purchases", "purchases"),
     ("stockMovements", "stock_movements"),
     ("customers", "customers"),
+    ("employees", "employees"),
     ("repairs", "repairs"),
     ("printJobs", "print_jobs"),
     ("invoices", "invoices"),
@@ -125,6 +127,11 @@ async fn hydrate(db: &Database, resource: &str, documents: Vec<Document>) -> App
             to_values(inventory_stock::hydrate_sync_documents(documents)?)?
         }
         "customers" => to_values(customers_service::hydrate_sync_documents(documents)?)?,
+        // Unlike every other arm here, `employees::hydrate_sync_documents` is
+        // async and takes `db` — it enriches each row with a live-resolved
+        // `login` summary, the same cross-module lookup a REST read performs
+        // (see `modules::employees::service::hydrate_sync_documents`).
+        "employees" => to_values(employees_service::hydrate_sync_documents(db, documents).await?)?,
         "repairs" => to_values(repairs_service::hydrate_sync_documents(documents)?)?,
         "printJobs" | "print_jobs" => {
             to_values(print_jobs_service::hydrate_sync_documents(documents)?)?

@@ -780,3 +780,144 @@ async fn sync_changes_invoices_and_payments_match_the_rest_dto_shape() {
     assert!(payment["id"].is_string(), "_id must be a hex string");
     assert!(payment.get("_id").is_none());
 }
+
+/// Same DTO-parity guard as `sync_changes_items_match_the_rest_dto_shape`,
+/// covering the new `employees` resource — the one resource whose
+/// `hydrate_sync_documents` is async and enriches each row with a
+/// live-resolved `login` summary (see
+/// `modules::employees::service::hydrate_sync_documents`).
+#[tokio::test]
+async fn sync_changes_employees_match_the_rest_dto_shape() {
+    let app = common::spawn_app().await;
+    let token = admin_token(&app.config);
+
+    let watermark = encode_cursor(Utc::now() - chrono::Duration::seconds(5), "");
+
+    let employee_name = format!("Shape Employee {}", Uuid::new_v4());
+    let (status, _, created) = send_authed(
+        &app.router,
+        &token,
+        "POST",
+        "/api/employees",
+        Some(serde_json::json!({
+            "name": employee_name,
+            "phone": "0771234567",
+            "role": "technician",
+            "defaultSplitType": "percentage",
+            "defaultSplitValue": 20.0,
+        })),
+        vec![],
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let employee_key = created["data"]["key"].as_str().unwrap().to_string();
+
+    let (status, _, json) = send_authed(
+        &app.router,
+        &token,
+        "GET",
+        &format!("/api/sync/changes?resources=employees&since={watermark}"),
+        None,
+        vec![],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "sync changes: {json}");
+
+    let items = json["data"]["changes"]["employees"]["items"]
+        .as_array()
+        .expect("employees items must be an array");
+    let item = items
+        .iter()
+        .find(|item| item["key"] == serde_json::json!(employee_key))
+        .expect("the seeded employee must appear in the delta feed");
+
+    let typed: jana2u_pos_backend::domain::employees::Employee =
+        serde_json::from_value(item.clone())
+            .expect("a sync item must deserialize as the REST Employee DTO");
+    assert_eq!(typed.name, employee_name);
+    assert!(typed.login.is_none(), "no login was ever linked");
+
+    // camelCase, and no BSON wrappers leaking through.
+    assert!(item["defaultSplitValue"].is_number());
+    assert!(item.get("default_split_value").is_none());
+    assert!(item["id"].is_string(), "_id must be a hex string");
+    assert!(item.get("_id").is_none());
+}
+
+/// Regression test: linking a login to an employee doesn't change any field
+/// on the employee document itself (the link lives on the `users`
+/// collection), so without an explicit `updated_at` bump the sync delta
+/// feed would never re-deliver that employee row — an offline mirror would
+/// show "no login" forever, even after the employee gains one. See
+/// `modules::employees::service::touch_by_key`.
+#[tokio::test]
+async fn sync_changes_redelivers_an_employee_after_a_login_is_linked() {
+    let app = common::spawn_app().await;
+    let token = admin_token(&app.config);
+
+    let (status, _, created) = send_authed(
+        &app.router,
+        &token,
+        "POST",
+        "/api/employees",
+        Some(serde_json::json!({
+            "name": format!("Touch Regression {}", Uuid::new_v4()),
+            "phone": "0771234567",
+            "role": "technician",
+            "defaultSplitType": "percentage",
+            "defaultSplitValue": 20.0,
+        })),
+        vec![],
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let employee_key = created["data"]["key"].as_str().unwrap().to_string();
+
+    // Watermark taken strictly after the employee's own create — only the
+    // login-linking touch should be visible in the delta from here on.
+    let watermark = encode_cursor(Utc::now() + chrono::Duration::milliseconds(50), "");
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let (status, _, _) = send_authed(
+        &app.router,
+        &token,
+        "POST",
+        "/api/users",
+        Some(serde_json::json!({
+            "name": "Touch Regression Login",
+            "email": format!("touch-regression-{}@example.com", Uuid::new_v4()),
+            "password": "Password123!",
+            "role": "staff",
+            "employeeKey": employee_key,
+        })),
+        vec![],
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    let (status, _, json) = send_authed(
+        &app.router,
+        &token,
+        "GET",
+        &format!("/api/sync/changes?resources=employees&since={watermark}"),
+        None,
+        vec![],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "sync changes: {json}");
+
+    let items = json["data"]["changes"]["employees"]["items"]
+        .as_array()
+        .expect("employees items must be an array");
+    let item = items
+        .iter()
+        .find(|item| item["key"] == serde_json::json!(employee_key))
+        .expect(
+            "the employee must reappear in the delta after its login was linked, \
+             even though no field on the employee document itself changed",
+        );
+    assert!(
+        !item["login"].is_null(),
+        "the re-delivered row must carry the newly-linked login: {item}"
+    );
+}

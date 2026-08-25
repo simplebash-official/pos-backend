@@ -3,6 +3,7 @@ pub mod barcode;
 pub mod billing;
 pub mod customers;
 pub mod documents;
+pub mod employees;
 pub mod inventory;
 pub mod print_jobs;
 pub mod purchases;

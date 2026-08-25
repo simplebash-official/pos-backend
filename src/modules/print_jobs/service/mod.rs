@@ -23,7 +23,7 @@ use crate::{
         sequences::ReserveSequenceRequest,
     },
     modules::{
-        customers,
+        customers, employees,
         print_jobs::{model::PrintJobDocument, repository},
         sequences,
     },
@@ -193,6 +193,21 @@ async fn resolve_customer_name_phone(
     }
 }
 
+/// See `repairs::service::resolve_assignment_employee_name` — identical
+/// resolve-from-key/server-derives-name/never-trust-client-name rule.
+async fn resolve_assignment_employee_name(
+    db: &Database,
+    assigned_employee_id: Option<&str>,
+) -> AppResult<Option<String>> {
+    match assigned_employee_id {
+        Some(key) => {
+            let employee = employees::service::get_employee_by_key(db, key).await?;
+            Ok(Some(employee.name))
+        }
+        None => Ok(None),
+    }
+}
+
 pub async fn create_print_job(
     db: &Database,
     body: CreatePrintJobRequest,
@@ -219,10 +234,12 @@ pub async fn create_print_job(
     let assignment = body.assignment.unwrap_or_default();
     let PrintJobAssignment {
         assigned_employee_id,
-        assigned_employee_name,
         split_type,
         split_value,
+        ..
     } = assignment;
+    let assigned_employee_name =
+        resolve_assignment_employee_name(db, assigned_employee_id.as_deref()).await?;
 
     let reservation = sequences::service::reserve_sequence(
         db,
@@ -325,9 +342,8 @@ pub async fn update_print_job(
     }
     if let Some(assignment) = body.assignment {
         if let Some(eid) = assignment.assigned_employee_id {
+            let ename = resolve_assignment_employee_name(db, Some(&eid)).await?;
             set_doc.insert("assigned_employee_id", eid);
-        }
-        if let Some(ename) = assignment.assigned_employee_name {
             set_doc.insert("assigned_employee_name", ename);
         }
         if let Some(st) = assignment.split_type {

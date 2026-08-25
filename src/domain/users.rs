@@ -51,8 +51,24 @@ pub struct User {
     pub email: String,
     /// User permission role (admin, manager, or staff).
     pub role: Role,
+    /// The fixed permission set this role carries, computed from
+    /// `core::constants::roles::default_permissions(role)` — never stored,
+    /// always derived fresh so it can never drift from the role. This is
+    /// what the frontend's `AuthUser.permissions` reads (from `/auth/login`
+    /// and `/auth/me`'s `user` object) to gate UI, since permissions
+    /// otherwise live only inside the opaque JWT `token`.
+    pub permissions: Vec<String>,
     /// Whether user account is active.
     pub is_active: bool,
+    /// Key of the `Employee` HR/commission profile this login belongs to,
+    /// if any. Optional — a login can exist with no linked employee profile
+    /// only in the legacy/no-employee-yet case; going forward every
+    /// `POST /users` call should supply it. There is deliberately no
+    /// reverse `user_key` field on `Employee` — "does this employee have a
+    /// login" is always resolved live against this field instead (see
+    /// `modules::users::service::find_user_summary_by_employee_key`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub employee_key: Option<String>,
     /// Timestamp when user was created.
     pub created_at: DateTime<Utc>,
     /// Timestamp when user was last updated.
@@ -73,6 +89,11 @@ pub struct CreateUserRequest {
     pub password: String,
     /// Role to assign to new user (admin, manager, or staff).
     pub role: Role,
+    /// Key of the `Employee` profile this login belongs to. Optional, but
+    /// every login created through the Employee "Create Login" action
+    /// supplies it — see `service::create_user`'s validation.
+    #[serde(default)]
+    pub employee_key: Option<String>,
 }
 
 /// Body for `PATCH /users/{id}`. Every field optional so a client sends
@@ -93,6 +114,8 @@ pub struct UpdateUserRequest {
     pub role: Option<Role>,
     /// Updated active status flag.
     pub is_active: Option<bool>,
+    /// Updated linked employee key.
+    pub employee_key: Option<String>,
 }
 
 /// Query params for `GET /users`. `search` matches against name/email.

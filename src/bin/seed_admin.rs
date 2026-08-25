@@ -42,6 +42,7 @@ async fn main() {
             email: email.clone(),
             password,
             role: Role::Admin,
+            employee_key: None,
         },
     )
     .await;

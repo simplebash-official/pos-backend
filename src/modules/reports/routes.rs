@@ -19,6 +19,7 @@ use crate::{
     },
     domain::{
         ModuleStatusResponse,
+        employees::EmployeeEarningsResponse,
         reports::{
             DailySalesQuery, DailySalesReportResponse, EmployeeCommissionsQuery,
             EmployeeCommissionsReportResponse, InventoryValuationResponse, MonthlyProfitQuery,
@@ -47,6 +48,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_outstanding_receivables))
         // Employee commissions & performance
         .routes(routes!(get_employee_commissions))
+        .routes(routes!(get_employee_earnings_items))
         // Inventory valuation & Product performance
         .routes(routes!(get_inventory_valuation))
         .routes(routes!(get_top_products))
@@ -210,6 +212,34 @@ async fn get_employee_commissions(
     Ok(Json(ApiResponse::success(
         response,
         "Employee commissions report retrieved successfully",
+    )))
+}
+
+#[utoipa::path(
+    get,
+    path = "/employee-commissions/{employeeKey}/items",
+    tag = modules::REPORTS,
+    params(("employeeKey" = String, Path, description = "Employee key"), EmployeeCommissionsQuery),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Itemized commission line items for one employee", body = ApiResponse<EmployeeEarningsResponse>),
+        (status = 400, description = "Validation error", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+        (status = 404, description = "Employee not found", body = ErrorResponse),
+    )
+)]
+async fn get_employee_earnings_items(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    axum::extract::Path(employee_key): axum::extract::Path<String>,
+    Query(query): Query<EmployeeCommissionsQuery>,
+) -> AppResult<Json<ApiResponse<EmployeeEarningsResponse>>> {
+    user.require_permission(perm::REPORTS_VIEW)?;
+    let response = service::get_employee_earnings(&state.db, &employee_key, query).await?;
+    Ok(Json(ApiResponse::success(
+        response,
+        "Employee earnings retrieved successfully",
     )))
 }
 

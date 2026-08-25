@@ -10,5 +10,6 @@ pub const SUPPLIERS: &str = "suppliers";
 pub const SUPPLIER_PRODUCTS: &str = "supplier_products";
 pub const PURCHASES: &str = "purchases";
 pub const USERS: &str = "users";
+pub const EMPLOYEES: &str = "employees";
 pub const SYNC: &str = "sync";
 pub const SEQUENCES: &str = "sequences";

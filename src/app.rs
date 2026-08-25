@@ -113,6 +113,10 @@ pub fn build_router(state: AppState) -> Router {
             modules::customers::routes::router(),
         )
         .nest(
+            &format!("/{}", mod_names::EMPLOYEES),
+            modules::employees::routes::router(),
+        )
+        .nest(
             &format!("/{}", mod_names::INVENTORY),
             modules::inventory::routes::router(),
         )

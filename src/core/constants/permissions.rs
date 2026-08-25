@@ -41,3 +41,16 @@ pub const BILLING_WRITE: &str = "billing:write";
 pub const REPAIRS_WRITE: &str = "repairs:write";
 pub const PRINT_JOBS_WRITE: &str = "print_jobs:write";
 pub const REPORTS_VIEW: &str = "reports:view";
+
+/// Read access to the employee HR/commission directory — every `GET` under
+/// `/api/employees`. Granted to all three roles, since Staff genuinely needs
+/// to browse/pick an employee when assigning a repair or print job.
+pub const EMPLOYEES_READ: &str = "employees:read";
+/// Employee profile create/update/delete, including the default commission
+/// split. Granted to Admin and Manager only — mirrors `INVENTORY_READ`/
+/// `INVENTORY_WRITE`'s read/write split, not `USERS_MANAGE`/
+/// `USERS_MANAGE_STAFF`'s target-hierarchy split, since employees carry no
+/// role hierarchy among themselves. Creating a *login* for an employee is a
+/// separate action gated by `USERS_MANAGE`/`USERS_MANAGE_STAFF` instead (see
+/// `modules::users::service`), not this permission.
+pub const EMPLOYEES_WRITE: &str = "employees:write";

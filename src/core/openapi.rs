@@ -18,6 +18,7 @@ use utoipa::{
         (name = "auth", description = "Authentication"),
         (name = "billing", description = "Billing"),
         (name = "customers", description = "Customers"),
+        (name = "employees", description = "Employee HR/commission profiles"),
         (name = "inventory", description = "Inventory"),
         (name = "print_jobs", description = "Print jobs"),
         (name = "repairs", description = "Repairs"),

@@ -7,7 +7,10 @@ use mongodb::bson::{DateTime as BsonDateTime, oid::ObjectId};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    core::{constants::prefixes, id::generate_id},
+    core::{
+        constants::{prefixes, roles},
+        id::generate_id,
+    },
     domain::users::{Role, User},
 };
 
@@ -35,6 +38,10 @@ pub struct UserDocument {
     /// Whether the user account is enabled and allowed to log in.
     #[serde(default = "default_true")]
     pub is_active: bool,
+    /// Key of the `Employee` HR/commission profile this login belongs to,
+    /// if any — see `domain::users::User`'s doc comment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub employee_key: Option<String>,
     /// Timestamp when user account was created.
     #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
@@ -59,7 +66,12 @@ impl UserDocument {
             name: self.name,
             email: self.email,
             role: self.role,
+            permissions: roles::default_permissions(self.role)
+                .iter()
+                .map(|p| p.to_string())
+                .collect(),
             is_active: self.is_active,
+            employee_key: self.employee_key,
             created_at: self.created_at.to_chrono(),
             updated_at: self.updated_at.to_chrono(),
         }

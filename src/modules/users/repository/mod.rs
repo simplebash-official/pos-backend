@@ -36,6 +36,38 @@ pub(crate) async fn find_user_by_email(
     Ok(users(db).find_one(doc! { "email": email }).await?)
 }
 
+/// Looked up by linked employee key — backs `service::find_user_by_employee_key`,
+/// the entry point `modules::employees` uses to answer "does this employee
+/// already have a login" (on create-validation and on delete's
+/// `EMPLOYEE_HAS_LOGIN` guard).
+pub(crate) async fn find_user_by_employee_key(
+    db: &Database,
+    employee_key: &str,
+) -> AppResult<Option<UserDocument>> {
+    Ok(users(db)
+        .find_one(doc! { "employee_key": employee_key })
+        .await?)
+}
+
+/// Batch variant of `find_user_by_employee_key` — used by
+/// `service::find_user_summaries_by_employee_keys` to enrich a whole page of
+/// employees with their login summary in one query instead of one lookup
+/// per row.
+pub(crate) async fn find_users_by_employee_keys(
+    db: &Database,
+    employee_keys: &[String],
+) -> AppResult<Vec<UserDocument>> {
+    let mut cursor = users(db)
+        .find(doc! { "employee_key": { "$in": employee_keys } })
+        .await?;
+
+    let mut items = Vec::new();
+    while let Some(document) = cursor.try_next().await? {
+        items.push(document);
+    }
+    Ok(items)
+}
+
 pub(crate) async fn insert_user(
     db: &Database,
     mut document: UserDocument,
