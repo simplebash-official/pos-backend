@@ -184,9 +184,13 @@ appropriate when an inequality can't hide a real bug (see that test for the cont
 
 ## Offline sync
 
-`../frontend` is offline-first: it mirrors every syncable collection into IndexedDB and reads that
-mirror rather than this API. `modules::sync` is what keeps that mirror current, and several rules
-here exist for its benefit rather than any HTTP caller's.
+`../frontend` no longer consumes any of this — its offline-first sync engine was removed and it now
+reads/writes straight through the plain REST endpoints below, the same as any ordinary web client.
+`modules::sync` (`/sync/changes`, `/sync/status`) is kept fully implemented and untouched: a future,
+separate sync backend is planned to reintroduce cross-terminal syncing, and it (or whatever replaces
+`../frontend`'s removed engine) is the intended consumer. Several rules below exist for that
+consumer's benefit rather than any REST caller's, and remain load-bearing for it even while nothing
+currently calls this endpoint.
 
 **The one rule that matters: `/sync/changes` items must be byte-identical to what the REST read
 endpoints return.** The client merges the delta feed and the REST snapshot feed into the *same*
