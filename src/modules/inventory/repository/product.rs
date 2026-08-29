@@ -49,6 +49,23 @@ pub(crate) async fn find_product_by_barcode(
         .await?)
 }
 
+/// Same collision check as `find_product_by_barcode`, but ignoring one product
+/// — used when editing a product's own barcode, where re-saving the value it
+/// already has must not count as a conflict with itself.
+pub(crate) async fn find_product_by_barcode_excluding(
+    db: &Database,
+    barcode: &str,
+    exclude_id: ObjectId,
+) -> AppResult<Option<ProductDocument>> {
+    Ok(products(db)
+        .find_one(doc! {
+            "barcode": barcode,
+            "_id": { "$ne": exclude_id },
+            "deleted_at": { "$exists": false },
+        })
+        .await?)
+}
+
 /// Looked up by `key` rather than `_id` — the entry point for other modules
 /// (e.g. `supplier_products`/`purchases`) that only hold a product's
 /// immutable `key`, never its `ObjectId`.

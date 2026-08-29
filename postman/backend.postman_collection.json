@@ -1381,6 +1381,28 @@
               "response": []
             },
             {
+              "name": "Get Product By Barcode",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{backendBaseUrl}}/api/inventory/products/by-barcode/4901234567894",
+                  "host": [
+                    "{{backendBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory",
+                    "products",
+                    "by-barcode",
+                    "4901234567894"
+                  ]
+                },
+                "description": "Resolve an exact barcode to the one product that carries it \u2014 an anchored equality match (not the substring regex the `search` list param uses), so a scanner gets a single unambiguous result. 404 `PRODUCT_NOT_FOUND` when no product has that barcode.\n\n**Requires the `inventory:read` permission** \u2014 held by all three roles. Returns 401 without a token."
+              },
+              "response": []
+            },
+            {
               "name": "Create Product",
               "event": [
                 {
@@ -1442,7 +1464,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"name\": \"iPhone 13 Screen Replacement (OEM)\",\n  \"sellingPriceCents\": 680000,\n  \"minStockThreshold\": 5\n}",
+                  "raw": "{\n  \"name\": \"iPhone 13 Screen Replacement (OEM)\",\n  \"sellingPriceCents\": 680000,\n  \"minStockThreshold\": 5,\n  \"barcode\": \"4901234567894\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -1461,7 +1483,7 @@
                     "{{productId}}"
                   ]
                 },
-                "description": "Partially update a product \u2014 omit any field to leave it unchanged. `barcode` is not editable via this endpoint (immutable after creation, same as `sku`).\n\n**Requires the `inventory:write` permission** \u2014 held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token."
+                "description": "Partially update a product \u2014 omit any field to leave it unchanged. `barcode` may be set or corrected here (8\u201314 digits; stored as a manual barcode; 409 `BARCODE_ALREADY_EXISTS` if another product already carries it). `sku` stays immutable.\n\n**Requires the `inventory:write` permission** \u2014 held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token."
               },
               "response": []
             },

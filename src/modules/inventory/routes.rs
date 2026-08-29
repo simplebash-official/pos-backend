@@ -57,6 +57,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(inventory_stats))
         // Products
         .routes(routes!(list_products, create_product, delete_products))
+        .routes(routes!(get_product_by_barcode))
         .routes(routes!(get_product, update_product, delete_product))
         // Stock
         .routes(routes!(list_all_stock_movements))
@@ -189,6 +190,30 @@ async fn get_product(
     user.require_permission(perm::INVENTORY_READ)?;
     let object_id = parse_object_id(&id)?;
     let product = service::product::get_product(&state.db, object_id).await?;
+
+    Ok(Json(ApiResponse::success(
+        product,
+        "Product retrieved successfully",
+    )))
+}
+
+#[utoipa::path(get, path = "/products/by-barcode/{barcode}", tag = modules::INVENTORY,
+    params(("barcode" = String, Path, description = "Exact barcode to look up")),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Get the product carrying this barcode", body = ApiResponse<Product>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+        (status = 404, description = "No product with this barcode", body = ErrorResponse),
+    )
+)]
+async fn get_product_by_barcode(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Path(barcode): Path<String>,
+) -> AppResult<Json<ApiResponse<Product>>> {
+    user.require_permission(perm::INVENTORY_READ)?;
+    let product = service::product::get_product_by_barcode(&state.db, &barcode).await?;
 
     Ok(Json(ApiResponse::success(
         product,

@@ -248,6 +248,23 @@ pub(crate) async fn get_product_by_key(db: &Database, key: &str) -> AppResult<Pr
     Ok(document.into_product(category_name, subcategory_name))
 }
 
+/// Exact barcode lookup for a scan — resolves the one product carrying
+/// `barcode`, 404ing with `PRODUCT_NOT_FOUND` when none does. Unlike the
+/// `search` list param (a substring regex that can return several rows) this
+/// is an anchored equality match, so a scanner gets an unambiguous result.
+pub(crate) async fn get_product_by_barcode(db: &Database, barcode: &str) -> AppResult<Product> {
+    let document = repository::product::find_product_by_barcode(db, barcode)
+        .await?
+        .ok_or_else(|| {
+            AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
+        })?;
+
+    let (category_name, subcategory_name) =
+        resolve_display_names(db, &document.category_key, &document.subcategory_key).await?;
+
+    Ok(document.into_product(category_name, subcategory_name))
+}
+
 /// Loose validation for a staff-entered manual barcode: numeric digits
 /// only, 8-14 characters — spans common real-world formats (EAN-8/UPC-A/
 /// EAN-13/GTIN-14) a scanned product might already carry. Deliberately does
@@ -511,6 +528,11 @@ pub(crate) async fn update_product(
         {
             conflicting.push("minStockThreshold");
         }
+        if let Some(ref barcode) = body.barcode
+            && Some(barcode) != existing.barcode.as_ref()
+        {
+            conflicting.push("barcode");
+        }
 
         let (category_name, subcategory_name) =
             resolve_display_names(db, &existing.category_key, &existing.subcategory_key).await?;
@@ -536,6 +558,29 @@ pub(crate) async fn update_product(
     {
         return Err(AppError::validation("Product name cannot be empty"));
     }
+
+    // Resolve a barcode edit before `existing` is partially moved below. A
+    // value equal to the current one is a no-op (no needless write, no
+    // `barcode_source` flip); a new value is validated and checked for a
+    // collision against every *other* product.
+    let barcode_change: Option<String> = match body.barcode {
+        Some(ref candidate) if existing.barcode.as_deref() == Some(candidate.as_str()) => None,
+        Some(candidate) => {
+            validate_manual_barcode(&candidate)?;
+            if repository::product::find_product_by_barcode_excluding(db, &candidate, id)
+                .await?
+                .is_some()
+            {
+                return Err(AppError::custom(
+                    StatusCode::CONFLICT,
+                    codes::BARCODE_ALREADY_EXISTS,
+                    format!("A product with barcode '{candidate}' already exists"),
+                ));
+            }
+            Some(candidate)
+        }
+        None => None,
+    };
 
     let category_key = body.category_key.unwrap_or(existing.category_key);
     let subcategory_key = body.subcategory_key.unwrap_or(existing.subcategory_key);
@@ -574,6 +619,15 @@ pub(crate) async fn update_product(
     }
     if let Some(warranty_months) = body.warranty_months {
         set_doc.insert("warranty_months", warranty_months);
+    }
+    if let Some(barcode) = barcode_change {
+        set_doc.insert("barcode", barcode);
+        // A staff-entered barcode is always "manual", even if the product
+        // previously carried a system-generated one. Serialize through serde
+        // so it stays in sync with `BarcodeSource`'s wire form.
+        let source = mongodb::bson::serialize_to_bson(&BarcodeSource::Manual)
+            .expect("BarcodeSource serializes to a plain string");
+        set_doc.insert("barcode_source", source);
     }
     if let Some(device) = device_id {
         set_doc.insert("updated_by_device", device);

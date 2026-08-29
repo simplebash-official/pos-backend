@@ -790,24 +790,126 @@ async fn create_product_rejects_zero_or_negative_supplier_quantity() {
 }
 
 #[tokio::test]
-async fn update_product_cannot_change_barcode() {
+async fn update_product_can_set_barcode() {
     let app = common::spawn_app().await;
     let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Widgets").await;
-    let original_barcode = unique_manual_barcode();
 
+    // Created with an auto-generated barcode; the shop later wants the real
+    // manufacturer number on the package instead.
     let (status, created) = send(
         &app,
         "POST",
         "/api/inventory/products",
         Some(json!({
-            "name": "Immutable Barcode Widget",
+            "name": "Rebarcoded Widget",
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
             "costPriceCents": 1000,
             "sellingPriceCents": 2000,
             "stockQuantity": 1,
             "minStockThreshold": 1,
-            "barcode": original_barcode,
+            "autoGenerateBarcode": true,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let id = created["data"]["id"].as_str().unwrap().to_string();
+    assert_eq!(created["data"]["barcodeSource"], "generated");
+
+    let manufacturer_barcode = unique_manual_barcode();
+    let (status, updated) = send(
+        &app,
+        "PUT",
+        &format!("/api/inventory/products/{id}"),
+        Some(json!({ "barcode": manufacturer_barcode })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(updated["data"]["barcode"], manufacturer_barcode);
+    assert_eq!(updated["data"]["barcodeSource"], "manual");
+
+    // And it is now findable by that barcode.
+    let (status, listed) = send(
+        &app,
+        "GET",
+        &format!("/api/inventory/products?search={manufacturer_barcode}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = listed["data"]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], id);
+}
+
+#[tokio::test]
+async fn update_product_barcode_collision_returns_409() {
+    let app = common::spawn_app().await;
+    let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Widgets").await;
+    let taken = unique_manual_barcode();
+
+    for name in ["Owner Widget", "Other Widget"] {
+        let (status, _) = send(
+            &app,
+            "POST",
+            "/api/inventory/products",
+            Some(json!({
+                "name": name,
+                "categoryKey": category_key,
+                "subcategoryKey": subcategory_key,
+                "costPriceCents": 1000,
+                "sellingPriceCents": 2000,
+                "stockQuantity": 1,
+                "minStockThreshold": 1,
+                "barcode": if name == "Owner Widget" { taken.clone() } else { unique_manual_barcode() },
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+    }
+
+    let (_, other) = send(
+        &app,
+        "GET",
+        "/api/inventory/products?search=Other%20Widget",
+        None,
+    )
+    .await;
+    let other_id = other["data"]["items"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let (status, body) = send(
+        &app,
+        "PUT",
+        &format!("/api/inventory/products/{other_id}"),
+        Some(json!({ "barcode": taken })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["code"], "BARCODE_ALREADY_EXISTS");
+}
+
+#[tokio::test]
+async fn update_product_re_saving_own_barcode_is_not_a_collision() {
+    let app = common::spawn_app().await;
+    let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Widgets").await;
+    let barcode = unique_manual_barcode();
+
+    let (status, created) = send(
+        &app,
+        "POST",
+        "/api/inventory/products",
+        Some(json!({
+            "name": "Self Widget",
+            "categoryKey": category_key,
+            "subcategoryKey": subcategory_key,
+            "costPriceCents": 1000,
+            "sellingPriceCents": 2000,
+            "stockQuantity": 1,
+            "minStockThreshold": 1,
+            "barcode": barcode,
         })),
     )
     .await;
@@ -818,12 +920,97 @@ async fn update_product_cannot_change_barcode() {
         &app,
         "PUT",
         &format!("/api/inventory/products/{id}"),
-        Some(json!({ "name": "Renamed Widget", "barcode": unique_manual_barcode() })),
+        Some(json!({ "name": "Self Widget Renamed", "barcode": barcode })),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(updated["data"]["name"], "Renamed Widget");
-    assert_eq!(updated["data"]["barcode"], original_barcode);
+    assert_eq!(updated["data"]["barcode"], barcode);
+}
+
+#[tokio::test]
+async fn update_product_rejects_invalid_barcode() {
+    let app = common::spawn_app().await;
+    let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Widgets").await;
+
+    let (status, created) = send(
+        &app,
+        "POST",
+        "/api/inventory/products",
+        Some(json!({
+            "name": "Validated Widget",
+            "categoryKey": category_key,
+            "subcategoryKey": subcategory_key,
+            "costPriceCents": 1000,
+            "sellingPriceCents": 2000,
+            "stockQuantity": 1,
+            "minStockThreshold": 1,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let id = created["data"]["id"].as_str().unwrap().to_string();
+
+    for bad in ["abc12345", "1234", "1234567890123456", ""] {
+        let (status, body) = send(
+            &app,
+            "PUT",
+            &format!("/api/inventory/products/{id}"),
+            Some(json!({ "barcode": bad })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "barcode: {bad:?}");
+        assert_eq!(body["code"], "VALIDATION_ERROR");
+    }
+}
+
+#[tokio::test]
+async fn get_product_by_barcode_returns_the_matching_product() {
+    let app = common::spawn_app().await;
+    let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Widgets").await;
+    let barcode = unique_manual_barcode();
+
+    let (status, created) = send(
+        &app,
+        "POST",
+        "/api/inventory/products",
+        Some(json!({
+            "name": "Scannable Widget",
+            "categoryKey": category_key,
+            "subcategoryKey": subcategory_key,
+            "costPriceCents": 1000,
+            "sellingPriceCents": 2000,
+            "stockQuantity": 1,
+            "minStockThreshold": 1,
+            "barcode": barcode,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let id = created["data"]["id"].as_str().unwrap().to_string();
+
+    let (status, found) = send(
+        &app,
+        "GET",
+        &format!("/api/inventory/products/by-barcode/{barcode}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(found["data"]["id"], id);
+    assert_eq!(found["data"]["name"], "Scannable Widget");
+    // display names are resolved from the category/subcategory keys, not echoed keys
+    assert!(found["data"]["category"].as_str().is_some());
+    assert!(found["data"]["subcategory"].as_str().is_some());
+
+    let (status, body) = send(
+        &app,
+        "GET",
+        "/api/inventory/products/by-barcode/99999999999",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["code"], "PRODUCT_NOT_FOUND");
 }
 
 #[tokio::test]
@@ -875,6 +1062,44 @@ async fn list_products_filters_by_category_and_search() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["name"], "Findable Gadget");
     assert_eq!(listed["data"]["pagination"]["total"], 1);
+}
+
+#[tokio::test]
+async fn list_products_search_matches_barcode() {
+    let app = common::spawn_app().await;
+    let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Widgets").await;
+    let barcode = unique_manual_barcode();
+
+    let (status, _) = send(
+        &app,
+        "POST",
+        "/api/inventory/products",
+        Some(json!({
+            "name": "Barcoded Gadget",
+            "categoryKey": category_key,
+            "subcategoryKey": subcategory_key,
+            "costPriceCents": 500,
+            "sellingPriceCents": 1200,
+            "stockQuantity": 5,
+            "minStockThreshold": 1,
+            "barcode": barcode,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    let (status, listed) = send(
+        &app,
+        "GET",
+        &format!("/api/inventory/products?search={barcode}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = listed["data"]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["name"], "Barcoded Gadget");
+    assert_eq!(items[0]["barcode"], barcode);
 }
 
 #[tokio::test]

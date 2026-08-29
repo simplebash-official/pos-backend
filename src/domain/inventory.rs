@@ -151,14 +151,19 @@ pub struct CreateProductRequest {
 /// send only what changed — `service::product::update_product` fills in
 /// omitted fields from the existing document rather than clearing them.
 /// `category_key`/`subcategory_key`, like on create, must be keys, not names.
-/// `barcode` is deliberately absent here — it is
-/// immutable after creation, same as `sku` (which also has no field on this
-/// struct); a dedicated "replace barcode" action is out of scope for now.
+/// `sku` stays immutable (no field here); `barcode` can be set/corrected once,
+/// so a product created without the right barcode (or with an auto-generated
+/// one) can be pointed at the real label number later.
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateProductRequest {
     /// Updated product name.
     pub name: Option<String>,
+    /// Add or correct the scannable barcode (e.g. store the manufacturer
+    /// barcode printed on the package). 8-14 digits; saved as a manual
+    /// barcode. Omit to leave the existing barcode untouched — an empty
+    /// string is a validation error, not a "clear".
+    pub barcode: Option<String>,
     /// Updated category key.
     pub category_key: Option<String>,
     /// Updated subcategory key.
@@ -184,7 +189,8 @@ pub struct UpdateProductRequest {
 #[serde(rename_all = "camelCase")]
 #[into_params(parameter_in = Query)]
 pub struct ProductListQuery {
-    /// Search term matching product name or SKU.
+    /// Free-text search — matches product name, SKU, or barcode, plus any
+    /// product whose category or subcategory name contains the term.
     pub search: Option<String>,
     /// Filter products by category key.
     pub category_key: Option<String>,
@@ -207,7 +213,8 @@ pub struct ProductListQuery {
 #[serde(rename_all = "camelCase")]
 #[into_params(parameter_in = Query)]
 pub struct InventoryOverviewQuery {
-    /// Search keyword.
+    /// Free-text search — matches product name, SKU, or barcode, plus any
+    /// product whose category or subcategory name contains the term.
     pub search: Option<String>,
     /// Filter by category key.
     pub category_key: Option<String>,
@@ -398,9 +405,9 @@ pub struct LowStockResponse {
 }
 
 /// How a product's `barcode` was populated. `None` on `Product` whenever
-/// `barcode` itself is `None` — a product may be created with no
-/// barcode at all, since it can never be added later (barcode is immutable
-/// after creation, see `UpdateProductRequest`).
+/// `barcode` itself is `None` — a product may be created with no barcode at
+/// all. A barcode set or corrected later via `PUT /products/{id}` is always
+/// recorded as `Manual`, regardless of what it was before.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BarcodeSource {
