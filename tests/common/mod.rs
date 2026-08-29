@@ -32,8 +32,8 @@ pub async fn start_mock_document_server() -> String {
     start_mock_document_server_with_templates(mock_templates_json()).await
 }
 
-/// Same mock, but publishing a deliberately unsatisfiable schema for
-/// `a4-invoice` (requires a field no payload builder will ever send). Used
+/// Same mock, but publishing a deliberately unsatisfiable schema for the
+/// A4 Invoice (requires a field no payload builder will ever send). Used
 /// by the pre-validation failure-path test, which must not disturb the
 /// shared default mock other tests rely on.
 #[allow(dead_code)]
@@ -44,7 +44,7 @@ pub async fn start_strict_mock_document_server() -> String {
         .expect("default mock template list")
         .iter_mut()
     {
-        if template["name"] == "a4-invoice" {
+        if template["description"] == "A4 Invoice" {
             template["dataSchema"]["required"] =
                 json!(["invoiceNumber", "__never_sent_by_backend"]);
         }
@@ -60,20 +60,23 @@ fn mock_templates_json() -> serde_json::Value {
             "templates": [
                 {
                     "key": "tpl_a4_invoice",
-                    "name": "a4-invoice",
+                    "name": "doc_temp_vEf0Y7jQHQj2rIuO",
+                    "description": "A4 Invoice",
                     "dataSchema": {
                         "$schema": "http://json-schema.org/draft-07/schema#",
                         "type": "object",
                         "additionalProperties": true,
                         "required": ["invoiceNumber"],
                         "properties": {
-                            "invoiceNumber": { "type": "string" }
+                            "invoiceNumber": { "type": "string" },
+                            "logoUrl": { "type": "string" }
                         }
                     }
                 },
                 {
                     "key": "tpl_thermal_receipt",
-                    "name": "thermal-receipt",
+                    "name": "doc_temp_4pz79z5iba7TcEIp",
+                    "description": "Thermal Receipt",
                     "dataSchema": {
                         "$schema": "http://json-schema.org/draft-07/schema#",
                         "type": "object",
@@ -87,7 +90,8 @@ fn mock_templates_json() -> serde_json::Value {
                 },
                 {
                     "key": "tpl_credit_note",
-                    "name": "credit-note",
+                    "name": "doc_temp_5DHl8hUQTX3oLBSR",
+                    "description": "Credit Note",
                     "dataSchema": {
                         "$schema": "http://json-schema.org/draft-07/schema#",
                         "type": "object",

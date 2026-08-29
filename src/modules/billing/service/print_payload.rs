@@ -1,9 +1,11 @@
-// Builds the JSON payload handed to document-server's Typst templates
-// (`a4-invoice.typ` / `thermal-receipt.typ`) from a persisted `Invoice`.
-// Rust port of the frontend's `buildPrintPayload.ts` — same field
-// contract, called by `modules::documents::service::get_or_render` via
-// `modules::billing::routes`'s document-fetch handlers (not written yet
-// here; this module only builds the data, `documents::service` renders it).
+// Builds the JSON payload handed to document-server's Typst templates (the
+// "A4 Invoice" / "Thermal Receipt" / "Credit Note" templates, addressed by
+// the slugs `a4-invoice` / `thermal-receipt` / `credit-note` — see
+// `clients::document_server`) from a persisted `Invoice`. Rust port of the
+// frontend's `buildPrintPayload.ts` — same field contract, called by
+// `modules::documents::service::get_or_render` via `modules::billing::routes`'s
+// document-fetch handlers; this module only builds the data, `documents::service`
+// renders it.
 
 use serde_json::{Value, json};
 
@@ -43,8 +45,8 @@ fn formatted_date_time(invoice: &Invoice) -> (String, String) {
     (formatted_date, formatted_time)
 }
 
-/// Builds `data` for `a4-invoice.typ` — field-for-field the contract
-/// documented in that template's header comment.
+/// Builds `data` for the "A4 Invoice" template — field-for-field the
+/// contract documented in that template's `.typ` header comment.
 pub(crate) fn build_a4_invoice_data(
     invoice: &Invoice,
     copy_designation: &str,
@@ -58,6 +60,10 @@ pub(crate) fn build_a4_invoice_data(
         .unwrap_or_else(|| shop_field_or_empty(shop, "defaultWarrantyText").to_string());
 
     json!({
+        // The shop logo, sent as a data: URI (the frontend's
+        // `shopProfile.logoBase64`). document-server decodes it, stamps it on
+        // this one render, and drops it — `""` means "use the built-in mark".
+        "logoUrl": shop_field_or_empty(shop, "logoBase64"),
         "invoiceNumber": invoice.invoice_number,
         "formattedDate": formatted_date,
         "formattedTime": formatted_time,
@@ -101,7 +107,7 @@ pub(crate) fn build_a4_invoice_data(
     })
 }
 
-/// Builds `data` for `thermal-receipt.typ`. `paper_width_mm` is the
+/// Builds `data` for the "Thermal Receipt" template. `paper_width_mm` is the
 /// terminal's configured receipt width (58 or 80) — see D9, the frontend
 /// already switches between both, so this must too.
 pub(crate) fn build_thermal_receipt_data(invoice: &Invoice, paper_width_mm: u32) -> Value {
@@ -170,7 +176,7 @@ fn disposition_label(disposition: Option<ItemDisposition>) -> &'static str {
     }
 }
 
-/// Builds `data` for `credit-note.typ`. `invoice` is `None` for a
+/// Builds `data` for the "Credit Note" template. `invoice` is `None` for a
 /// no-receipt credit note (see `CreditNote.no_receipt`) — there is no shop
 /// profile snapshot to read in that case (only an `Invoice` carries one, per
 /// D2), so shop/warranty fields fall back to an empty JSON object, matching
@@ -377,26 +383,50 @@ mod schema_drift_tests {
     use crate::domain::billing::{CreditNote, Invoice, InvoiceStatus};
     use serde_json::json;
 
-    /// Loads the schema sidecar the sibling document-server actually
-    /// publishes for `template_name`. Returns `None` when that repository
+    /// The `<name>.schema.json` sidecar the sibling document-server publishes
+    /// for the template addressed by `slug`. document-server's on-disk
+    /// filenames are opaque `doc_temp_<nanoid>.schema.json` now, so this
+    /// scans that directory and matches on the schema's `title` (the human
+    /// label — `"A4 Invoice"` etc.). Returns `None` when that repository
     /// isn't checked out next to this one, so the suite stays runnable in a
     /// backend-only checkout — where it prints a notice instead of silently
     /// passing an empty guarantee.
-    fn load_schema(template_name: &str) -> Option<serde_json::Value> {
-        let path = concat!(
+    fn load_schema(slug: &str) -> Option<serde_json::Value> {
+        let title = match slug {
+            "a4-invoice" => "A4 Invoice",
+            "thermal-receipt" => "Thermal Receipt",
+            "credit-note" => "Credit Note",
+            other => other,
+        };
+        let dir = concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../document-server/templates/documents/"
-        )
-        .to_string()
-            + template_name
-            + ".schema.json";
-        match std::fs::read_to_string(&path) {
-            Ok(contents) => Some(serde_json::from_str(&contents).expect("schema sidecar parses")),
-            Err(_) => {
-                eprintln!("skipping schema drift check for {template_name}: no schema at {path}");
-                None
+            "/../document-server/templates/documents"
+        );
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            eprintln!(
+                "skipping schema drift check for {slug}: no document-server checkout at {dir}"
+            );
+            return None;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json")
+                || !path.to_string_lossy().ends_with(".schema.json")
+            {
+                continue;
+            }
+            let Ok(contents) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(schema) = serde_json::from_str::<serde_json::Value>(&contents) else {
+                continue;
+            };
+            if schema.get("title").and_then(|t| t.as_str()) == Some(title) {
+                return Some(schema);
             }
         }
+        eprintln!("skipping schema drift check for {slug}: no schema titled {title:?} in {dir}");
+        None
     }
 
     /// Panics with every violation listed when `payload` doesn't satisfy the
@@ -496,6 +526,23 @@ mod schema_drift_tests {
     fn a4_invoice_payload_matches_published_schema() {
         let invoice = cash_sale_invoice();
         let payload = build_a4_invoice_data(&invoice, "ORIGINAL — CUSTOMER COPY", false);
+        assert_matches_schema("a4-invoice", &payload);
+    }
+
+    #[test]
+    fn a4_invoice_carries_the_shop_logo_as_logo_url() {
+        // No `logoBase64` in the snapshot -> empty string (the "no logo"
+        // signal document-server understands), still schema-valid.
+        let mut invoice = cash_sale_invoice();
+        let payload = build_a4_invoice_data(&invoice, "ORIGINAL — CUSTOMER COPY", false);
+        assert_eq!(payload["logoUrl"], "");
+        assert_matches_schema("a4-invoice", &payload);
+
+        // A shop logo (a data: URI) is passed straight through as `logoUrl`.
+        let logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+        invoice.shop_profile_snapshot["logoBase64"] = json!(logo);
+        let payload = build_a4_invoice_data(&invoice, "ORIGINAL — CUSTOMER COPY", false);
+        assert_eq!(payload["logoUrl"], logo);
         assert_matches_schema("a4-invoice", &payload);
     }
 

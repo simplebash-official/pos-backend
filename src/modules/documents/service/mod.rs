@@ -21,9 +21,11 @@ use crate::{
 /// purposes (e.g. `billing::routes` uses `"thermal-receipt-80mm"` vs
 /// `"thermal-receipt-58mm"` so a terminal's paper-width choice, D9, can't
 /// serve a cached PDF sized for the wrong roll), while `template_name` is
-/// the literal document-server template to render (`"a4-invoice"` /
-/// `"thermal-receipt"` — document-server has no concept of a width
-/// variant, that's encoded in `data.paperWidthMm` instead).
+/// the stable document-server template *slug* to render (`"a4-invoice"` /
+/// `"thermal-receipt"` — document-server has no concept of a width variant,
+/// that's encoded in `data.paperWidthMm` instead). The slug is what's
+/// persisted on the row; `clients::document_server` maps it to the
+/// template's current `description` for the wire lookup.
 ///
 /// Invoices are immutable once created (see `modules::billing`'s design —
 /// no general edit endpoint), so caching by entity+cache_key is safe: the

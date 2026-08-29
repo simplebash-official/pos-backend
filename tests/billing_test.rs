@@ -1112,6 +1112,60 @@ async fn get_invoice_document_returns_pdf_and_caches_by_paper_width() {
     );
 }
 
+/// A shop that has a logo (a base64 `data:` URI in its profile snapshot)
+/// still renders its A4 invoice — the builder forwards `logoBase64` as
+/// `logoUrl`, which passes pre-validation and reaches document-server (the
+/// data-URI decode itself is covered in that repo's tests).
+#[tokio::test]
+async fn get_invoice_document_with_shop_logo_renders() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let mut payload = base_sale_payload();
+    payload["items"] = json!([{
+        "name": "Widget", "unitPriceCents": 1000, "quantity": 1,
+        "discountCents": 0, "sourceType": "retail",
+    }]);
+    payload["shopProfileSnapshot"] = json!({
+        "tradingName": "TechFix Repairs",
+        "logoBase64": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    });
+
+    let (_, sale_body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/billing/sales",
+        Some(payload),
+        &token,
+    )
+    .await;
+    let invoice_key = sale_body["data"]["invoice"]["key"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let response = app
+        .router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!(
+                    "/api/billing/invoices/{invoice_key}/documents/a4-invoice"
+                ))
+                .header(AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let pdf_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert!(pdf_bytes.starts_with(b"%PDF-"));
+}
+
 /// Inserts a minimal `InvoiceDocument` directly, bypassing `complete_sale`,
 /// with full control over the fields the list-filter tests need. Returns
 /// `(key, invoiceNumber)` — `invoiceNumber` is uuid-suffixed and unique per
