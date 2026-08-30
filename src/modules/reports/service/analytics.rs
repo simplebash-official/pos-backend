@@ -116,8 +116,8 @@ fn bucket_label(bucket_start: DateTime<Utc>, gran: Granularity, tz: FixedOffset)
     let local = bucket_start.with_timezone(&tz);
     match gran {
         Granularity::Day => local.format("%-d %b").to_string(),
-        Granularity::Week => format!("W{:02}", local.iso_week().week()),
-        Granularity::Month => local.format("%Y-%m").to_string(),
+        Granularity::Week => local.format("%-d %b").to_string(),
+        Granularity::Month => local.format("%b %Y").to_string(),
         Granularity::Year => local.format("%Y").to_string(),
     }
 }
@@ -245,11 +245,44 @@ pub(crate) async fn get_analytics_timeseries(
         .map(|b| (b.period_start.timestamp_millis(), b))
         .collect();
 
+    // Determine the actual starting bucket for the timeseries:
+    // If raw or commission data exists, find the earliest period containing data.
+    // If start is before that earliest period, align cursor to that earliest period
+    // so we never produce dozens of empty leading zero buckets (e.g. from 1970).
+    let earliest_data_ts = raw_by_ms
+        .keys()
+        .next()
+        .copied()
+        .or_else(|| commission.keys().next().copied());
+
+    let effective_start = if let Some(earliest_ms) = earliest_data_ts {
+        let earliest_dt = DateTime::from_timestamp_millis(earliest_ms).unwrap_or(start);
+        if earliest_dt > start {
+            align_bucket(earliest_dt, gran, tz)
+        } else {
+            start
+        }
+    } else {
+        start
+    };
+
+    let now_local = Utc::now().with_timezone(&tz);
+    let today = now_local.date_naive();
+    let today_bound = today
+        .and_hms_opt(0, 0, 0)
+        .expect("00:00:00 is valid")
+        .and_local_timezone(tz)
+        .single()
+        .expect("fixed offset has no ambiguous local times")
+        .with_timezone(&Utc)
+        + Duration::days(1);
+    let effective_end = end.min(today_bound);
+
     let mut points = Vec::new();
-    let mut cursor = align_bucket(start, gran, tz);
+    let mut cursor = align_bucket(effective_start, gran, tz);
     // Guard against a pathological range producing an unbounded loop.
     let mut guard = 0;
-    while cursor < end && guard < 5_000 {
+    while cursor < effective_end && guard < 5_000 {
         guard += 1;
         let ms = cursor.timestamp_millis();
         let commission_cents = commission.get(&ms).copied().unwrap_or(0);

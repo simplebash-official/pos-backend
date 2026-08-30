@@ -1,6 +1,6 @@
 // Date calculation and parsing utilities for reporting periods and presets.
 
-use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, TimeZone, Utc};
+use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, Utc};
 
 use crate::core::error::{AppError, AppResult};
 
@@ -110,7 +110,12 @@ pub(crate) fn parse_date_range(
             Ok((start, end))
         }
         Some("all_time") => {
-            let start = Utc.with_ymd_and_hms(1970, 1, 1, 0, 0, 0).unwrap();
+            let y = today.year();
+            let start = NaiveDate::from_ymd_opt(y - 1, 1, 1)
+                .expect("valid Jan 1 last year")
+                .and_hms_opt(0, 0, 0)
+                .expect("valid time")
+                .and_utc();
             let end = today_start + Duration::days(1);
             Ok((start, end))
         }
@@ -234,8 +239,12 @@ pub(crate) fn parse_date_range_tz(
             ))
         }
         Some("all_time") => {
-            let start = Utc.with_ymd_and_hms(1970, 1, 1, 0, 0, 0).unwrap();
-            Ok((start, local_midnight(today + Duration::days(1))))
+            let y = today.year();
+            let start = first_of_month(y - 1, 1);
+            Ok((
+                local_midnight(start),
+                local_midnight(today + Duration::days(1)),
+            ))
         }
         Some("custom") | None => {
             let start = match from.filter(|s| !s.trim().is_empty()) {
