@@ -83,10 +83,13 @@ async fn build_test_app() -> axum::Router {
         config.document_server_url.clone(),
         config.document_server_api_key.clone(),
     ));
+    let reports_engine =
+        Arc::new(jana2u_pos_backend::modules::reports::engine::AnalyticsEngine::new(db.clone()));
     let state = AppState {
         config,
         db,
         document_server,
+        reports_engine,
     };
     app::build_router(state)
 }

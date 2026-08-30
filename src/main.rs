@@ -61,10 +61,15 @@ async fn main() {
         });
     tracing::info!("Successfully connected to document-server");
 
+    let reports_engine =
+        Arc::new(jana2u_pos_backend::modules::reports::engine::AnalyticsEngine::new(db.clone()));
+    reports_engine.init().await;
+
     let state = AppState {
         config: Arc::new(config),
         db,
         document_server: Arc::new(document_server),
+        reports_engine,
     };
     let router = app::build_router(state);
 

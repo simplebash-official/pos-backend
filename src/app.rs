@@ -35,6 +35,7 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub db: Database,
     pub document_server: Arc<DocumentServerClient>,
+    pub reports_engine: Arc<modules::reports::engine::AnalyticsEngine>,
 }
 
 /// Assembles the full HTTP router: the top-level `/health` check, every

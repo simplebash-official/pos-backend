@@ -225,10 +225,13 @@ pub async fn spawn_app_with_document_server_url(document_server_url: String) -> 
         config.document_server_url.clone(),
         config.document_server_api_key.clone(),
     ));
+    let reports_engine =
+        Arc::new(jana2u_pos_backend::modules::reports::engine::AnalyticsEngine::new(db.clone()));
     let state = AppState {
         config: config.clone(),
         db: db.clone(),
         document_server,
+        reports_engine,
     };
 
     TestApp {

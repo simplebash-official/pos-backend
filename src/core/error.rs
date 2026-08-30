@@ -15,7 +15,7 @@ use crate::core::response::ErrorResponse;
 /// used throughout `inventory` for uniqueness/in-use guards). Implements
 /// `IntoResponse` directly, so `?`-propagating one of these from a handler
 /// is enough to produce the right HTTP response — no separate mapping step.
-#[derive(Debug, thiserror::Error)]
+#[derive(Clone, Debug, thiserror::Error)]
 pub enum AppError {
     #[error("{message}")]
     NotFound {

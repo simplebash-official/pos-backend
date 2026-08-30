@@ -136,23 +136,25 @@ pub(crate) async fn get_analytics_summary(
         query.to.as_deref(),
     )?;
 
-    let current = compute_kpis(db, start, end).await?;
-
-    let (previous, deltas) = if query.compare_previous.unwrap_or(false) {
+    let (current, previous, deltas) = if query.compare_previous.unwrap_or(false) {
         let span = end - start;
         let prev_start = start - span;
-        let prev = compute_kpis(db, prev_start, start).await?;
+        let (cur, prev) = tokio::try_join!(
+            compute_kpis(db, start, end),
+            compute_kpis(db, prev_start, start),
+        )?;
         let deltas = AnalyticsKpiDeltas {
-            total_revenue_bps: delta_bps(current.total_revenue_cents, prev.total_revenue_cents),
-            gross_profit_bps: delta_bps(current.gross_profit_cents, prev.gross_profit_cents),
-            net_profit_bps: delta_bps(current.net_profit_cents, prev.net_profit_cents),
-            invoice_count_bps: delta_bps(current.invoice_count as i64, prev.invoice_count as i64),
-            avg_basket_bps: delta_bps(current.avg_basket_cents, prev.avg_basket_cents),
-            gross_margin_delta_bps: current.gross_margin_bps - prev.gross_margin_bps,
+            total_revenue_bps: delta_bps(cur.total_revenue_cents, prev.total_revenue_cents),
+            gross_profit_bps: delta_bps(cur.gross_profit_cents, prev.gross_profit_cents),
+            net_profit_bps: delta_bps(cur.net_profit_cents, prev.net_profit_cents),
+            invoice_count_bps: delta_bps(cur.invoice_count as i64, prev.invoice_count as i64),
+            avg_basket_bps: delta_bps(cur.avg_basket_cents, prev.avg_basket_cents),
+            gross_margin_delta_bps: cur.gross_margin_bps - prev.gross_margin_bps,
         };
-        (Some(prev), Some(deltas))
+        (cur, Some(prev), Some(deltas))
     } else {
-        (None, None)
+        let cur = compute_kpis(db, start, end).await?;
+        (cur, None, None)
     };
 
     Ok(AnalyticsSummaryResponse {
@@ -170,10 +172,11 @@ async fn compute_kpis(
     start: DateTime<Utc>,
     end: DateTime<Utc>,
 ) -> AppResult<AnalyticsKpis> {
-    let invoice = repository::analytics::aggregate_invoice_kpis(db, start, end).await?;
-    let commissions =
-        repository::commissions::aggregate_employee_commissions(db, start, end, None).await?;
-    let refunds = repository::refunds::aggregate_refund_totals(db, start, end).await?;
+    let (invoice, commissions, refunds) = tokio::try_join!(
+        repository::analytics::aggregate_invoice_kpis(db, start, end),
+        repository::commissions::aggregate_employee_commissions(db, start, end, None),
+        repository::refunds::aggregate_refund_totals(db, start, end),
+    )?;
 
     let mut service_material_cost_cents = 0;
     let mut commission_payouts_cents = 0;
@@ -232,9 +235,10 @@ pub(crate) async fn get_analytics_timeseries(
     let gran = resolve_granularity(query.granularity.as_deref(), start, end)?;
     let tz = report_tz();
 
-    let raw = repository::analytics::aggregate_revenue_series(db, start, end, gran).await?;
-    let commission =
-        repository::analytics::aggregate_commission_series(db, start, end, gran).await?;
+    let (raw, commission) = tokio::try_join!(
+        repository::analytics::aggregate_revenue_series(db, start, end, gran),
+        repository::analytics::aggregate_commission_series(db, start, end, gran),
+    )?;
 
     let raw_by_ms: std::collections::BTreeMap<i64, _> = raw
         .into_iter()

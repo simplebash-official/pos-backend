@@ -27,6 +27,7 @@ use crate::{
             AnalyticsPaymentMethodsResponse, AnalyticsRangeQuery, AnalyticsSummaryResponse,
             CashierPerformanceResponse, DailySalesQuery, DailySalesReportResponse,
             DiscountAnalyticsResponse, EmployeeCommissionsQuery, EmployeeCommissionsReportResponse,
+            EngineFeedQuery, EngineFeedResponse, EngineInvalidateResponse,
             InventoryValuationResponse, MonthlyProfitQuery, MonthlyProfitReportResponse,
             OutstandingReceivablesQuery, OutstandingReceivablesResponse, ReceivablesAgingQuery,
             ReceivablesAgingResponse, RefundAnalyticsResponse, ReportDateRangeQuery,
@@ -47,6 +48,9 @@ pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         // Module status
         .routes(routes!(status))
+        // High-speed Analytics & Chart Engine
+        .routes(routes!(get_engine_feed))
+        .routes(routes!(invalidate_engine_cache))
         // Executive overview & KPIs
         .routes(routes!(get_dashboard_overview))
         // Sales & Profit intelligence
@@ -88,6 +92,62 @@ pub fn router() -> OpenApiRouter<AppState> {
 )]
 async fn status() -> Json<ApiResponse<ModuleStatusResponse>> {
     module_status_response(modules::REPORTS)
+}
+
+// ============================================================================
+// Analytics & Chart Engine
+// ============================================================================
+
+#[utoipa::path(
+    get,
+    path = "/engine/feed",
+    tag = modules::REPORTS,
+    params(EngineFeedQuery),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Unified high-speed analytics & chart engine feed", body = ApiResponse<EngineFeedResponse>),
+        (status = 400, description = "Validation error", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+    )
+)]
+async fn get_engine_feed(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Query(query): Query<EngineFeedQuery>,
+) -> AppResult<Json<ApiResponse<EngineFeedResponse>>> {
+    user.require_permission(perm::REPORTS_VIEW)?;
+    let response = state.reports_engine.get_feed(query).await?;
+    Ok(Json(ApiResponse::success(
+        response,
+        "Engine feed retrieved successfully",
+    )))
+}
+
+#[utoipa::path(
+    post,
+    path = "/engine/invalidate",
+    tag = modules::REPORTS,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Engine cache invalidated successfully", body = ApiResponse<EngineInvalidateResponse>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+    )
+)]
+async fn invalidate_engine_cache(
+    user: CurrentUser,
+    State(state): State<AppState>,
+) -> AppResult<Json<ApiResponse<EngineInvalidateResponse>>> {
+    user.require_permission(perm::REPORTS_VIEW)?;
+    let count = state.reports_engine.invalidate_all();
+    Ok(Json(ApiResponse::success(
+        EngineInvalidateResponse {
+            invalidated_keys_count: count,
+            message: format!("Successfully cleared {count} cached analytical entries"),
+        },
+        "Reports engine cache cleared successfully",
+    )))
 }
 
 // ============================================================================
