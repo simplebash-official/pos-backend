@@ -226,6 +226,7 @@ async fn dashboard_overview_and_daily_sales_aggregate_data() {
                 quantity: 2,
                 discount_cents: 0,
                 total_cents: 300000,
+                unit_cost_cents: Some(90000),
                 source_type: "retail".to_string(),
                 source_ticket_key: None,
                 source_ticket_number: None,
@@ -241,6 +242,7 @@ async fn dashboard_overview_and_daily_sales_aggregate_data() {
                 quantity: 1,
                 discount_cents: 50000,
                 total_cents: 450000,
+                unit_cost_cents: Some(30000),
                 source_type: "repair".to_string(),
                 source_ticket_key: Some("rep_101".to_string()),
                 source_ticket_number: Some("REP-000101".to_string()),
@@ -300,6 +302,7 @@ async fn dashboard_overview_and_daily_sales_aggregate_data() {
             quantity: 1,
             discount_cents: 0,
             total_cents: 200000,
+            unit_cost_cents: Some(40000),
             source_type: "print".to_string(),
             source_ticket_key: Some("prj_202".to_string()),
             source_ticket_number: Some("PRN-000202".to_string()),
@@ -359,6 +362,7 @@ async fn dashboard_overview_and_daily_sales_aggregate_data() {
             quantity: 1,
             discount_cents: 0,
             total_cents: 1000000,
+            unit_cost_cents: Some(650000),
             source_type: "retail".to_string(),
             source_ticket_key: None,
             source_ticket_number: None,
@@ -777,4 +781,352 @@ async fn employee_commissions_survive_a_rename() {
     );
     assert_eq!(entries[0]["employeeName"], "Renamed Regression Tech");
     assert_eq!(entries[0]["assignedJobsCount"], 2);
+}
+
+// ---------------------------------------------------------------------------
+// Analytics & Reports — /reports/analytics/*
+// ---------------------------------------------------------------------------
+
+/// Minimal paid retail invoice for analytics seeding. `unit_cost_cents` is set
+/// on the single line so retail COGS / gross profit / coverage can be asserted.
+#[allow(clippy::too_many_arguments)]
+fn analytics_seed_invoice(
+    key: &str,
+    created_at: chrono::DateTime<Utc>,
+    line_total_cents: i64,
+    unit_cost_cents: i64,
+    quantity: i64,
+    invoice_discount_cents: i64,
+) -> InvoiceDocument {
+    use jana2u_pos_backend::domain::billing::InvoiceItem;
+    let net = (line_total_cents - invoice_discount_cents).max(0);
+    InvoiceDocument {
+        id: None,
+        key: key.to_string(),
+        invoice_number: format!("INV-{}", generate_id("t")),
+        customer_key: None,
+        customer_name_snapshot: Some("Walk-in".to_string()),
+        customer_phone_snapshot: None,
+        customer_address_snapshot: None,
+        cashier_id: "usr_cashier_ax".to_string(),
+        cashier_name_snapshot: "Cashier AX".to_string(),
+        items: vec![InvoiceItem {
+            product_key: Some(format!("prd_{key}")),
+            name: "Analytics Test Item".to_string(),
+            sku: Some("AX-TST-0001".to_string()),
+            unit_price_cents: line_total_cents / quantity.max(1),
+            quantity,
+            discount_cents: 0,
+            total_cents: line_total_cents,
+            unit_cost_cents: Some(unit_cost_cents),
+            source_type: "retail".to_string(),
+            source_ticket_key: None,
+            source_ticket_number: None,
+            assigned_employee_name: None,
+            returned_quantity: 0,
+            serial_numbers: vec![],
+        }],
+        subtotal_cents: line_total_cents,
+        discount_type: "fixed".to_string(),
+        discount_value: (invoice_discount_cents as f64) / 100.0,
+        discount_cents: invoice_discount_cents,
+        total_cents: net,
+        payment_method: "cash".to_string(),
+        is_credit: false,
+        amount_received_cents: Some(net),
+        change_due_cents: Some(0),
+        split_payments: None,
+        card_last4: None,
+        card_ref: None,
+        online_ref: None,
+        online_note: None,
+        due_date: None,
+        status: InvoiceStatus::Paid,
+        refunded_cents: 0,
+        credit_note_count: 0,
+        voided_at: None,
+        voided_by: None,
+        voided_reason: None,
+        closed_at: None,
+        closed_by: None,
+        shop_profile_snapshot: json!({}),
+        notes: None,
+        warranty_terms_snapshot: None,
+        document_selection: None,
+        version: 1,
+        created_at: BsonDateTime::from_chrono(created_at),
+        updated_at: BsonDateTime::from_chrono(created_at),
+    }
+}
+
+#[tokio::test]
+async fn analytics_summary_and_timeseries_use_cost_snapshot_and_shop_local_buckets() {
+    let app = common::spawn_app().await;
+    let admin_token = common::mint_token(
+        &app.config,
+        Some(Role::Admin),
+        roles::default_permissions(Role::Admin),
+    );
+    let staff_token = common::mint_token(
+        &app.config,
+        Some(Role::Staff),
+        roles::default_permissions(Role::Staff),
+    );
+
+    // A quiet future window no other test seeds into. Two shop-local days:
+    // 15 Jun (15:30 Colombo) and 16 Jun (09:30 Colombo).
+    let day1 = NaiveDate::from_ymd_opt(2027, 6, 15)
+        .unwrap()
+        .and_hms_opt(10, 0, 0)
+        .unwrap()
+        .and_utc();
+    let day2 = NaiveDate::from_ymd_opt(2027, 6, 16)
+        .unwrap()
+        .and_hms_opt(4, 0, 0)
+        .unwrap()
+        .and_utc();
+
+    // Clear anything (from a prior run) that the analytics aggregations read
+    // across in this window: invoices, and the repair/print jobs + credit
+    // notes that feed service material cost and refunds.
+    let window = doc! {
+        "created_at": {
+            "$gte": BsonDateTime::from_chrono(day1 - Duration::days(2)),
+            "$lte": BsonDateTime::from_chrono(day2 + Duration::days(2)),
+        }
+    };
+    for coll in ["invoices", "repairs", "print_jobs", "credit_notes"] {
+        let _ = app
+            .db
+            .collection::<Document>(coll)
+            .delete_many(window.clone())
+            .await;
+    }
+
+    // A real product + category so sales-by-category can resolve a name via
+    // the `categories` `$lookup` (the `products` collection stores only the
+    // key). Upserted rather than window-scoped since these have no useful
+    // `created_at` filter.
+    let cat_key = "cat_ax_widgets";
+    let prd_key = "prd_ax_widget";
+    let _ = app
+        .db
+        .collection::<Document>("categories")
+        .update_one(
+            doc! { "key": cat_key },
+            doc! { "$set": { "key": cat_key, "name": "AX Widgets", "icon": "", "color": "" } },
+        )
+        .upsert(true)
+        .await;
+    let _ = app
+        .db
+        .collection::<Document>("products")
+        .update_one(
+            doc! { "key": prd_key },
+            doc! { "$set": {
+                "key": prd_key,
+                "category_key": cat_key,
+                "subcategory_key": "sub_ax",
+                "cost_price_cents": 40_000_i64,
+                "selling_price_cents": 100_000_i64,
+            } },
+        )
+        .upsert(true)
+        .await;
+
+    let invoices_coll = app.db.collection::<InvoiceDocument>("invoices");
+
+    let mut categorized =
+        analytics_seed_invoice(&generate_id("axinv"), day1, 200_000, 40_000, 1, 0);
+    categorized.items[0].product_key = Some(prd_key.to_string());
+
+    invoices_coll
+        .insert_many(vec![
+            analytics_seed_invoice(&generate_id("axinv"), day1, 300_000, 90_000, 2, 0),
+            analytics_seed_invoice(&generate_id("axinv"), day2, 100_000, 60_000, 1, 10_000),
+            categorized,
+        ])
+        .await
+        .unwrap();
+
+    // Staff (no reports:view) is rejected.
+    let (status, _) = send_authed(
+        &app.router,
+        "GET",
+        "/api/reports/analytics/summary?preset=custom&from=2027-06-15&to=2027-06-16",
+        None,
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // Summary: retail COGS + gross profit come from the per-line cost snapshot.
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        "/api/reports/analytics/summary?preset=custom&from=2027-06-15&to=2027-06-16&comparePrevious=true",
+        None,
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let cur = &body["data"]["current"];
+    assert_eq!(cur["totalRevenueCents"], 590_000); // 300000 + (100000 - 10000) + 200000
+    assert_eq!(cur["retailCogsCents"], 280_000); // 90000*2 + 60000*1 + 40000*1
+    assert_eq!(cur["grossProfitCents"], 310_000); // 590000 - 280000
+    assert_eq!(cur["itemsSold"], 4);
+    assert_eq!(cur["invoiceCount"], 3);
+    assert_eq!(cur["cogsCoverageBps"], 10_000); // every retail line had a cost
+    assert!(body["data"]["previous"].is_object());
+    assert!(body["data"]["deltas"].is_object());
+
+    // Time series: two daily buckets, one per shop-local day, gap-free.
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        "/api/reports/analytics/timeseries?preset=custom&from=2027-06-15&to=2027-06-16&granularity=day",
+        None,
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["granularity"], "day");
+    let points = body["data"]["points"].as_array().unwrap();
+    assert_eq!(points.len(), 2, "one bucket per shop-local day: {points:?}");
+    assert_eq!(points[0]["revenueCents"], 500_000); // day1: 300000 + 200000
+    assert_eq!(points[1]["revenueCents"], 100_000); // day2 line total, pre-invoice-discount
+    assert_eq!(points[1]["cogsCents"], 60_000);
+    assert_eq!(body["data"]["totals"]["revenueCents"], 600_000);
+
+    // Payment methods: every invoice was cash.
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        "/api/reports/analytics/payment-methods?preset=custom&from=2027-06-15&to=2027-06-16",
+        None,
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["breakdown"]["cashCents"], 590_000);
+    assert_eq!(body["data"]["totalCents"], 590_000);
+
+    // Top customers: all walk-in → one collapsed row.
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        "/api/reports/analytics/top-customers?preset=custom&from=2027-06-15&to=2027-06-16",
+        None,
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let customers = body["data"]["customers"].as_array().unwrap();
+    assert_eq!(customers.len(), 1);
+    assert_eq!(customers[0]["isWalkIn"], true);
+    assert_eq!(customers[0]["invoiceCount"], 3);
+    // retail line revenue (300000 + 100000 + 200000) − cogs (180000 + 60000 + 40000)
+    assert_eq!(customers[0]["grossProfitCents"], 320_000);
+
+    // Cashier performance: one cashier, both invoices.
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        "/api/reports/analytics/cashier-performance?preset=custom&from=2027-06-15&to=2027-06-16",
+        None,
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let cashiers = body["data"]["cashiers"].as_array().unwrap();
+    assert_eq!(cashiers.len(), 1);
+    assert_eq!(cashiers[0]["cashierId"], "usr_cashier_ax");
+    assert_eq!(cashiers[0]["invoiceCount"], 3);
+    assert_eq!(cashiers[0]["itemsSold"], 4);
+
+    // Sales by category: the categorised line resolves its name via the
+    // `categories` lookup; the two `prd_axinv…` lines don't resolve a product
+    // and land in `uncategorised`.
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        "/api/reports/analytics/sales-by-category?preset=custom&from=2027-06-15&to=2027-06-16",
+        None,
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["uncategorised"]["revenueCents"], 400_000); // 300000 + 100000
+    assert_eq!(body["data"]["totalRevenueCents"], 600_000);
+    let rows = body["data"]["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["categoryName"], "AX Widgets");
+    assert_eq!(rows[0]["revenueCents"], 200_000);
+
+    // Sales patterns: 168 zero-filled cells, both sales on the same weekday cell counted.
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        "/api/reports/analytics/sales-patterns?preset=custom&from=2027-06-15&to=2027-06-16",
+        None,
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["cells"].as_array().unwrap().len(), 168);
+    let total_pattern_invoices: u64 = body["data"]["byWeekday"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b["invoiceCount"].as_u64().unwrap())
+        .sum();
+    assert_eq!(total_pattern_invoices, 3);
+
+    // Discounts: one invoice had a 10000 order-level discount.
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        "/api/reports/analytics/discounts?preset=custom&from=2027-06-15&to=2027-06-16",
+        None,
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["orderLevelDiscountCents"], 10_000);
+    assert_eq!(body["data"]["invoicesWithDiscount"], 1);
+}
+
+/// The analytics PDF endpoint round-trips backend route -> payload builder ->
+/// document-server client. `spawn_app`'s mock document-server publishes an
+/// "Analytics Report" template and returns stub PDF bytes, so this exercises
+/// the whole backend path (aggregation, payload shaping, schema pre-validation,
+/// headers) without needing the real Typst renderer.
+#[tokio::test]
+async fn analytics_document_returns_a_pdf() {
+    let app = common::spawn_app().await;
+    let admin_token = common::mint_token(
+        &app.config,
+        Some(Role::Admin),
+        roles::default_permissions(Role::Admin),
+    );
+
+    let request = Request::builder()
+        .method("GET")
+        .uri("/api/reports/analytics/document?preset=this_month&granularity=week")
+        .header(AUTHORIZATION, format!("Bearer {admin_token}"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.router.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok()),
+        Some("application/pdf")
+    );
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert!(bytes.starts_with(b"%PDF"), "response body should be a PDF");
 }

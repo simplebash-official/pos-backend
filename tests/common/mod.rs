@@ -102,6 +102,24 @@ fn mock_templates_json() -> serde_json::Value {
                         }
                     }
                 },
+                {
+                    "key": "tpl_analytics_report",
+                    "name": "doc_temp_An1yT1csRep0rtV1",
+                    "description": "Analytics Report",
+                    "dataSchema": {
+                        "$schema": "http://json-schema.org/draft-07/schema#",
+                        "type": "object",
+                        "additionalProperties": true,
+                        "required": ["generatedAt", "periodLabel", "granularityLabel", "kpis", "timeseries"],
+                        "properties": {
+                            "generatedAt": { "type": "string" },
+                            "periodLabel": { "type": "string" },
+                            "granularityLabel": { "type": "string" },
+                            "kpis": { "type": "array" },
+                            "timeseries": { "type": "object" }
+                        }
+                    }
+                },
             ]
         }
     })

@@ -118,7 +118,8 @@ pub(crate) async fn aggregate_sales_summary(
 }
 
 /// Helper to accurately compute payment breakdown across cash, card, online, credit, and split payments.
-async fn compute_payment_methods(
+/// Reused by `repository::analytics` for the range-scoped payment-methods endpoint.
+pub(crate) async fn compute_payment_methods(
     db: &Database,
     start: DateTime<Utc>,
     end: DateTime<Utc>,

@@ -4,7 +4,10 @@
 
 use axum::{
     Json,
+    body::Body,
     extract::{Query, State},
+    http::{StatusCode, header},
+    response::{IntoResponse, Response},
 };
 use utoipa_axum::{router::OpenApiRouter, routes};
 
@@ -21,13 +24,18 @@ use crate::{
         ModuleStatusResponse,
         employees::EmployeeEarningsResponse,
         reports::{
-            DailySalesQuery, DailySalesReportResponse, EmployeeCommissionsQuery,
-            EmployeeCommissionsReportResponse, InventoryValuationResponse, MonthlyProfitQuery,
-            MonthlyProfitReportResponse, OutstandingReceivablesQuery,
-            OutstandingReceivablesResponse, ReportDateRangeQuery, ReportsDashboardResponse,
+            AnalyticsPaymentMethodsResponse, AnalyticsRangeQuery, AnalyticsSummaryResponse,
+            CashierPerformanceResponse, DailySalesQuery, DailySalesReportResponse,
+            DiscountAnalyticsResponse, EmployeeCommissionsQuery, EmployeeCommissionsReportResponse,
+            InventoryValuationResponse, MonthlyProfitQuery, MonthlyProfitReportResponse,
+            OutstandingReceivablesQuery, OutstandingReceivablesResponse, ReceivablesAgingQuery,
+            ReceivablesAgingResponse, RefundAnalyticsResponse, ReportDateRangeQuery,
+            ReportsDashboardResponse, SalesByCategoryQuery, SalesByCategoryResponse,
+            SalesPatternsResponse, TimeSeriesResponse, TopCustomersQuery, TopCustomersResponse,
             TopProductsQuery, TopProductsResponse,
         },
     },
+    modules::documents,
     modules::reports::service,
 };
 
@@ -52,6 +60,18 @@ pub fn router() -> OpenApiRouter<AppState> {
         // Inventory valuation & Product performance
         .routes(routes!(get_inventory_valuation))
         .routes(routes!(get_top_products))
+        // Analytics & Reports
+        .routes(routes!(get_analytics_summary))
+        .routes(routes!(get_analytics_timeseries))
+        .routes(routes!(get_analytics_payment_methods))
+        .routes(routes!(get_analytics_top_customers))
+        .routes(routes!(get_analytics_sales_by_category))
+        .routes(routes!(get_analytics_cashier_performance))
+        .routes(routes!(get_analytics_sales_patterns))
+        .routes(routes!(get_analytics_receivables_aging))
+        .routes(routes!(get_analytics_discounts))
+        .routes(routes!(get_analytics_refunds))
+        .routes(routes!(get_analytics_document))
 }
 
 // ============================================================================
@@ -294,4 +314,310 @@ async fn get_top_products(
         response,
         "Top products report retrieved successfully",
     )))
+}
+
+// ============================================================================
+// Analytics & Reports
+// ============================================================================
+
+#[utoipa::path(
+    get,
+    path = "/analytics/summary",
+    tag = modules::REPORTS,
+    params(AnalyticsRangeQuery),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Headline analytics KPIs with optional previous-period comparison", body = ApiResponse<AnalyticsSummaryResponse>),
+        (status = 400, description = "Validation error", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+    )
+)]
+async fn get_analytics_summary(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Query(query): Query<AnalyticsRangeQuery>,
+) -> AppResult<Json<ApiResponse<AnalyticsSummaryResponse>>> {
+    user.require_permission(perm::REPORTS_VIEW)?;
+    let response = service::get_analytics_summary(&state.db, query).await?;
+    Ok(Json(ApiResponse::success(
+        response,
+        "Analytics summary retrieved successfully",
+    )))
+}
+
+#[utoipa::path(
+    get,
+    path = "/analytics/timeseries",
+    tag = modules::REPORTS,
+    params(AnalyticsRangeQuery),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Gap-filled revenue/profit time series bucketed by day, week, month or year", body = ApiResponse<TimeSeriesResponse>),
+        (status = 400, description = "Validation error", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+    )
+)]
+async fn get_analytics_timeseries(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Query(query): Query<AnalyticsRangeQuery>,
+) -> AppResult<Json<ApiResponse<TimeSeriesResponse>>> {
+    user.require_permission(perm::REPORTS_VIEW)?;
+    let response = service::get_analytics_timeseries(&state.db, query).await?;
+    Ok(Json(ApiResponse::success(
+        response,
+        "Analytics time series retrieved successfully",
+    )))
+}
+
+#[utoipa::path(
+    get,
+    path = "/analytics/payment-methods",
+    tag = modules::REPORTS,
+    params(AnalyticsRangeQuery),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Payment-method split (cash/card/online/credit) over the range", body = ApiResponse<AnalyticsPaymentMethodsResponse>),
+        (status = 400, description = "Validation error", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+    )
+)]
+async fn get_analytics_payment_methods(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Query(query): Query<AnalyticsRangeQuery>,
+) -> AppResult<Json<ApiResponse<AnalyticsPaymentMethodsResponse>>> {
+    user.require_permission(perm::REPORTS_VIEW)?;
+    let response = service::get_analytics_payment_methods(&state.db, query).await?;
+    Ok(Json(ApiResponse::success(
+        response,
+        "Analytics payment methods retrieved successfully",
+    )))
+}
+
+#[utoipa::path(
+    get,
+    path = "/analytics/top-customers",
+    tag = modules::REPORTS,
+    params(TopCustomersQuery),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Top customers by revenue, invoices or product margin", body = ApiResponse<TopCustomersResponse>),
+        (status = 400, description = "Validation error", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+    )
+)]
+async fn get_analytics_top_customers(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Query(query): Query<TopCustomersQuery>,
+) -> AppResult<Json<ApiResponse<TopCustomersResponse>>> {
+    user.require_permission(perm::REPORTS_VIEW)?;
+    let response = service::get_analytics_top_customers(&state.db, query).await?;
+    Ok(Json(ApiResponse::success(
+        response,
+        "Analytics top customers retrieved successfully",
+    )))
+}
+
+#[utoipa::path(
+    get,
+    path = "/analytics/sales-by-category",
+    tag = modules::REPORTS,
+    params(SalesByCategoryQuery),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Retail sales rolled up by product category or subcategory", body = ApiResponse<SalesByCategoryResponse>),
+        (status = 400, description = "Validation error", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+    )
+)]
+async fn get_analytics_sales_by_category(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Query(query): Query<SalesByCategoryQuery>,
+) -> AppResult<Json<ApiResponse<SalesByCategoryResponse>>> {
+    user.require_permission(perm::REPORTS_VIEW)?;
+    let response = service::get_analytics_sales_by_category(&state.db, query).await?;
+    Ok(Json(ApiResponse::success(
+        response,
+        "Analytics sales by category retrieved successfully",
+    )))
+}
+
+#[utoipa::path(
+    get,
+    path = "/analytics/cashier-performance",
+    tag = modules::REPORTS,
+    params(AnalyticsRangeQuery),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Per-cashier sales, discounts, refunds and product margin", body = ApiResponse<CashierPerformanceResponse>),
+        (status = 400, description = "Validation error", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+    )
+)]
+async fn get_analytics_cashier_performance(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Query(query): Query<AnalyticsRangeQuery>,
+) -> AppResult<Json<ApiResponse<CashierPerformanceResponse>>> {
+    user.require_permission(perm::REPORTS_VIEW)?;
+    let response = service::get_analytics_cashier_performance(&state.db, query).await?;
+    Ok(Json(ApiResponse::success(
+        response,
+        "Analytics cashier performance retrieved successfully",
+    )))
+}
+
+#[utoipa::path(
+    get,
+    path = "/analytics/sales-patterns",
+    tag = modules::REPORTS,
+    params(AnalyticsRangeQuery),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Weekday × hour sales heatmap in shop-local time", body = ApiResponse<SalesPatternsResponse>),
+        (status = 400, description = "Validation error", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+    )
+)]
+async fn get_analytics_sales_patterns(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Query(query): Query<AnalyticsRangeQuery>,
+) -> AppResult<Json<ApiResponse<SalesPatternsResponse>>> {
+    user.require_permission(perm::REPORTS_VIEW)?;
+    let response = service::get_analytics_sales_patterns(&state.db, query).await?;
+    Ok(Json(ApiResponse::success(
+        response,
+        "Analytics sales patterns retrieved successfully",
+    )))
+}
+
+#[utoipa::path(
+    get,
+    path = "/analytics/receivables-aging",
+    tag = modules::REPORTS,
+    params(ReceivablesAgingQuery),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Open credit invoices bucketed by age (current / 1-30 / 31-60 / 61-90 / 90+)", body = ApiResponse<ReceivablesAgingResponse>),
+        (status = 400, description = "Validation error", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+    )
+)]
+async fn get_analytics_receivables_aging(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Query(query): Query<ReceivablesAgingQuery>,
+) -> AppResult<Json<ApiResponse<ReceivablesAgingResponse>>> {
+    user.require_permission(perm::REPORTS_VIEW)?;
+    let response = service::get_analytics_receivables_aging(&state.db, query).await?;
+    Ok(Json(ApiResponse::success(
+        response,
+        "Analytics receivables aging retrieved successfully",
+    )))
+}
+
+#[utoipa::path(
+    get,
+    path = "/analytics/discounts",
+    tag = modules::REPORTS,
+    params(AnalyticsRangeQuery),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Discount totals, split by type/cashier/product", body = ApiResponse<DiscountAnalyticsResponse>),
+        (status = 400, description = "Validation error", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+    )
+)]
+async fn get_analytics_discounts(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Query(query): Query<AnalyticsRangeQuery>,
+) -> AppResult<Json<ApiResponse<DiscountAnalyticsResponse>>> {
+    user.require_permission(perm::REPORTS_VIEW)?;
+    let response = service::get_analytics_discounts(&state.db, query).await?;
+    Ok(Json(ApiResponse::success(
+        response,
+        "Analytics discounts retrieved successfully",
+    )))
+}
+
+#[utoipa::path(
+    get,
+    path = "/analytics/refunds",
+    tag = modules::REPORTS,
+    params(AnalyticsRangeQuery),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Refund / returns analytics from non-voided credit notes", body = ApiResponse<RefundAnalyticsResponse>),
+        (status = 400, description = "Validation error", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+    )
+)]
+async fn get_analytics_refunds(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Query(query): Query<AnalyticsRangeQuery>,
+) -> AppResult<Json<ApiResponse<RefundAnalyticsResponse>>> {
+    user.require_permission(perm::REPORTS_VIEW)?;
+    let response = service::get_analytics_refunds(&state.db, query).await?;
+    Ok(Json(ApiResponse::success(
+        response,
+        "Analytics refunds retrieved successfully",
+    )))
+}
+
+#[utoipa::path(
+    get,
+    path = "/analytics/document",
+    tag = modules::REPORTS,
+    params(AnalyticsRangeQuery),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Rendered analytics PDF report", content_type = "application/pdf", body = Vec<u8>),
+        (status = 400, description = "Validation error", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+    )
+)]
+async fn get_analytics_document(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Query(query): Query<AnalyticsRangeQuery>,
+) -> AppResult<Response> {
+    user.require_permission(perm::REPORTS_VIEW)?;
+    // PDF only — CSV export is done entirely client-side from the JSON
+    // endpoints, so there is no `format` param here.
+    let payload = service::build_analytics_report_data(&state.db, query).await?;
+    // Rendered fresh every time (no `get_or_render` cache): a report over a
+    // still-open period changes with every sale and has no owning entity.
+    let pdf_bytes =
+        documents::service::render_uncached(&state.document_server, "analytics-report", payload)
+            .await?;
+
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "application/pdf"),
+            (
+                header::CONTENT_DISPOSITION,
+                "inline; filename=\"analytics-report.pdf\"",
+            ),
+        ],
+        Body::from(pdf_bytes),
+    )
+        .into_response())
 }

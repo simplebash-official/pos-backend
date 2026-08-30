@@ -340,6 +340,9 @@ async fn complete_sale_retail_cash_decrements_stock_and_marks_paid() {
     );
     assert_eq!(item["unitPriceCents"], price);
     assert_eq!(item["totalCents"], price * 2);
+    // The product's cost is snapshotted onto the line at sale time (seed_product
+    // creates it with costPriceCents 1000) so retail profit reporting is exact.
+    assert_eq!(item["unitCostCents"], 1000);
 
     let product = get_product(&app, &product_id).await;
     assert_eq!(product["stockQuantity"], 8, "stock should decrement by 2");

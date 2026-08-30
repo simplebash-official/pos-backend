@@ -38,6 +38,15 @@ pub struct InvoiceItem {
     pub discount_cents: i64,
     /// Total price for this line item in cents after discount.
     pub total_cents: i64,
+    /// Snapshot of the unit cost at sale time, in cents. For a retail line
+    /// this is the product's `cost_price_cents` when the sale was completed;
+    /// for a repair/print line it is the linked ticket's `material_cost_cents`
+    /// divided across the line quantity. `None` on an ad-hoc line with no
+    /// product/ticket to resolve against, and on every invoice created before
+    /// this field existed — treat a missing value as "cost unknown", never as
+    /// zero, in any margin calculation that must not silently understate cost.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit_cost_cents: Option<i64>,
     /// Source category: `"retail"`, `"repair"`, or `"print"`.
     pub source_type: String,
     /// Key of linked repair or print job ticket, if applicable.

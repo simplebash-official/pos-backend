@@ -76,10 +76,14 @@ async fn resolve_exchange_item(
     item: &CreateSaleItemRequest,
     products: &HashMap<String, Product>,
 ) -> AppResult<InvoiceItem> {
-    let (name, sku, unit_price_cents, source_ticket_number, assigned_employee_name) = match item
-        .source_type
-        .as_str()
-    {
+    let (
+        name,
+        sku,
+        unit_price_cents,
+        source_ticket_number,
+        assigned_employee_name,
+        unit_cost_cents,
+    ) = match item.source_type.as_str() {
         "retail" => match &item.product_key {
             Some(product_key) => {
                 let product = products.get(product_key).ok_or_else(|| {
@@ -91,6 +95,7 @@ async fn resolve_exchange_item(
                     product.selling_price_cents,
                     None,
                     None,
+                    Some(product.cost_price_cents),
                 )
             }
             None => (
@@ -101,6 +106,7 @@ async fn resolve_exchange_item(
                 item.unit_price_cents.ok_or_else(|| {
                     AppError::validation("An item with no productKey must include unitPriceCents")
                 })?,
+                None,
                 None,
                 None,
             ),
@@ -125,6 +131,7 @@ async fn resolve_exchange_item(
                     estimated_cost_cents + ticket.material_cost_cents.unwrap_or(0),
                     Some(ticket.ticket_number),
                     ticket.assigned_employee_name,
+                    Some(ticket.material_cost_cents.unwrap_or(0) / item.quantity.max(1)),
                 )
             }
             None => (
@@ -141,6 +148,7 @@ async fn resolve_exchange_item(
                 })?,
                 None,
                 item.assigned_employee_name.clone(),
+                None,
             ),
         },
         "print" => match &item.source_ticket_key {
@@ -152,6 +160,7 @@ async fn resolve_exchange_item(
                     ticket.estimated_cost_cents + ticket.material_cost_cents.unwrap_or(0),
                     Some(ticket.ticket_number),
                     ticket.assigned_employee_name,
+                    Some(ticket.material_cost_cents.unwrap_or(0) / item.quantity.max(1)),
                 )
             }
             None => (
@@ -166,6 +175,7 @@ async fn resolve_exchange_item(
                 })?,
                 None,
                 item.assigned_employee_name.clone(),
+                None,
             ),
         },
         other => {
@@ -185,6 +195,7 @@ async fn resolve_exchange_item(
         quantity: item.quantity,
         discount_cents: item.discount_cents,
         total_cents,
+        unit_cost_cents,
         source_type: item.source_type.clone(),
         source_ticket_key: item.source_ticket_key.clone(),
         source_ticket_number,

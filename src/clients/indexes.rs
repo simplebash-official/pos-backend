@@ -69,6 +69,77 @@ pub async fn ensure_indexes(db: &Database) {
         }
     }
 
+    // Analytics reporting (`modules::reports::repository::analytics`) matches
+    // and buckets on `created_at` across whole collections. Without these the
+    // POS has no `created_at` index at all and every analytics range query is
+    // a full collection scan — the single biggest lever on report latency as
+    // a shop's history grows. Best-effort, same as the sync indexes above.
+    for collection_name in ["invoices", "credit_notes", "purchases", "payments"] {
+        let model = IndexModel::builder()
+            .keys(doc! { "created_at": 1 })
+            .options(
+                IndexOptions::builder()
+                    .name("analytics_created_at".to_string())
+                    .build(),
+            )
+            .build();
+
+        if let Err(err) = db
+            .collection::<mongodb::bson::Document>(collection_name)
+            .create_index(model)
+            .await
+        {
+            tracing::warn!(collection = collection_name, %err, "could not create analytics created_at index");
+        }
+    }
+
+    // Per-cashier and per-customer analytics slices scan `invoices` filtered
+    // by one id and a date range — a compound index keeps those bounded.
+    for (name, keys) in [
+        (
+            "analytics_cashier_created_at",
+            doc! { "cashier_id": 1, "created_at": 1 },
+        ),
+        (
+            "analytics_customer_created_at",
+            doc! { "customer_key": 1, "created_at": 1 },
+        ),
+    ] {
+        let model = IndexModel::builder()
+            .keys(keys)
+            .options(IndexOptions::builder().name(name.to_string()).build())
+            .build();
+
+        if let Err(err) = db
+            .collection::<mongodb::bson::Document>("invoices")
+            .create_index(model)
+            .await
+        {
+            tracing::warn!(index = name, %err, "could not create invoices analytics compound index");
+        }
+    }
+
+    // `sales-by-category` joins invoice lines to `products` by `key`; the sync
+    // index has `key` second, so a `$lookup` on it alone can't use it.
+    {
+        let model = IndexModel::builder()
+            .keys(doc! { "key": 1 })
+            .options(
+                IndexOptions::builder()
+                    .name("products_key".to_string())
+                    .build(),
+            )
+            .build();
+
+        if let Err(err) = db
+            .collection::<mongodb::bson::Document>("products")
+            .create_index(model)
+            .await
+        {
+            tracing::warn!(%err, "could not create products key index");
+        }
+    }
+
     let idempotency = db.collection::<mongodb::bson::Document>("idempotency_keys");
 
     let unique_key = IndexModel::builder()

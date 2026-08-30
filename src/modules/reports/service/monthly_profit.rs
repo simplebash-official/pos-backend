@@ -66,7 +66,9 @@ pub(crate) async fn get_monthly_profit_report(
     // `repository::commissions` is used as-is.
     let commissions =
         repository::commissions::aggregate_employee_commissions(db, start, end, None).await?;
-    let total_refunds_cents = repository::refunds::aggregate_refunds_total(db, start, end).await?;
+    let total_refunds_cents = repository::refunds::aggregate_refund_totals(db, start, end)
+        .await?
+        .net_refund_cents;
 
     let mut cogs_cents = 0;
     let mut commission_payouts_cents = 0;

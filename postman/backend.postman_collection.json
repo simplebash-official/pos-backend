@@ -2663,6 +2663,464 @@
             "description": "Top-selling products ranked by total revenue or units sold.\n\n**Requires reports:view permission** (Admin and Manager roles)."
           },
           "response": []
+        },
+        {
+          "name": "Analytics \u2014 Summary KPIs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/reports/analytics/summary?preset=this_month&from=2027-06-01&to=2027-06-30&comparePrevious=true",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "analytics",
+                "summary"
+              ],
+              "query": [
+                {
+                  "key": "preset",
+                  "value": "this_month",
+                  "description": "today, yesterday, this_week, this_month, last_month, this_year, all_time, custom"
+                },
+                {
+                  "key": "from",
+                  "value": "2027-06-01",
+                  "description": "Custom range start (YYYY-MM-DD, shop-local)",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2027-06-30",
+                  "description": "Custom range end (YYYY-MM-DD, shop-local)",
+                  "disabled": true
+                },
+                {
+                  "key": "comparePrevious",
+                  "value": "true",
+                  "description": "Also return previous equal-length period + deltas"
+                }
+              ]
+            },
+            "description": "Headline KPIs: revenue by stream, retail COGS from the per-line cost snapshot, gross/net profit, discount & refund rates, cogs coverage.\n\n**Requires reports:view permission** (Admin and Manager roles)."
+          },
+          "response": []
+        },
+        {
+          "name": "Analytics \u2014 Time Series",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/reports/analytics/timeseries?preset=this_year&granularity=month&from=2027-06-01&to=2027-06-30",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "analytics",
+                "timeseries"
+              ],
+              "query": [
+                {
+                  "key": "preset",
+                  "value": "this_year",
+                  "description": "Preset or custom range"
+                },
+                {
+                  "key": "granularity",
+                  "value": "month",
+                  "description": "day | week | month | year (auto by span)"
+                },
+                {
+                  "key": "from",
+                  "value": "2027-06-01",
+                  "description": "Custom range start (YYYY-MM-DD, shop-local)",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2027-06-30",
+                  "description": "Custom range end (YYYY-MM-DD, shop-local)",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Gap-filled revenue / COGS / gross-profit / commission / net-profit series in shop-local buckets.\n\n**Requires reports:view permission** (Admin and Manager roles)."
+          },
+          "response": []
+        },
+        {
+          "name": "Analytics \u2014 Payment Methods",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/reports/analytics/payment-methods?preset=this_month&from=2027-06-01&to=2027-06-30",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "analytics",
+                "payment-methods"
+              ],
+              "query": [
+                {
+                  "key": "preset",
+                  "value": "this_month",
+                  "description": "today, yesterday, this_week, this_month, last_month, this_year, all_time, custom"
+                },
+                {
+                  "key": "from",
+                  "value": "2027-06-01",
+                  "description": "Custom range start (YYYY-MM-DD, shop-local)",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2027-06-30",
+                  "description": "Custom range end (YYYY-MM-DD, shop-local)",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Cash / card / online / credit split over the range (split-payment aware).\n\n**Requires reports:view permission** (Admin and Manager roles)."
+          },
+          "response": []
+        },
+        {
+          "name": "Analytics \u2014 Top Customers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/reports/analytics/top-customers?preset=this_month&from=2027-06-01&to=2027-06-30&limit=20&sortBy=revenue",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "analytics",
+                "top-customers"
+              ],
+              "query": [
+                {
+                  "key": "preset",
+                  "value": "this_month",
+                  "description": "today, yesterday, this_week, this_month, last_month, this_year, all_time, custom"
+                },
+                {
+                  "key": "from",
+                  "value": "2027-06-01",
+                  "description": "Custom range start (YYYY-MM-DD, shop-local)",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2027-06-30",
+                  "description": "Custom range end (YYYY-MM-DD, shop-local)",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "1\u2013100"
+                },
+                {
+                  "key": "sortBy",
+                  "value": "revenue",
+                  "description": "revenue | invoices | profit"
+                }
+              ]
+            },
+            "description": "Top customers by revenue, invoice count or product margin, with current outstanding balance.\n\n**Requires reports:view permission** (Admin and Manager roles)."
+          },
+          "response": []
+        },
+        {
+          "name": "Analytics \u2014 Sales by Category",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/reports/analytics/sales-by-category?preset=this_month&from=2027-06-01&to=2027-06-30&groupBy=category",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "analytics",
+                "sales-by-category"
+              ],
+              "query": [
+                {
+                  "key": "preset",
+                  "value": "this_month",
+                  "description": "today, yesterday, this_week, this_month, last_month, this_year, all_time, custom"
+                },
+                {
+                  "key": "from",
+                  "value": "2027-06-01",
+                  "description": "Custom range start (YYYY-MM-DD, shop-local)",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2027-06-30",
+                  "description": "Custom range end (YYYY-MM-DD, shop-local)",
+                  "disabled": true
+                },
+                {
+                  "key": "groupBy",
+                  "value": "category",
+                  "description": "category | subcategory"
+                }
+              ]
+            },
+            "description": "Retail sales rolled up by product category or subcategory (units / revenue / margin).\n\n**Requires reports:view permission** (Admin and Manager roles)."
+          },
+          "response": []
+        },
+        {
+          "name": "Analytics \u2014 Cashier Performance",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/reports/analytics/cashier-performance?preset=this_month&from=2027-06-01&to=2027-06-30",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "analytics",
+                "cashier-performance"
+              ],
+              "query": [
+                {
+                  "key": "preset",
+                  "value": "this_month",
+                  "description": "today, yesterday, this_week, this_month, last_month, this_year, all_time, custom"
+                },
+                {
+                  "key": "from",
+                  "value": "2027-06-01",
+                  "description": "Custom range start (YYYY-MM-DD, shop-local)",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2027-06-30",
+                  "description": "Custom range end (YYYY-MM-DD, shop-local)",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Per-cashier sales, discount rate, credit invoices, refunds and product margin.\n\n**Requires reports:view permission** (Admin and Manager roles)."
+          },
+          "response": []
+        },
+        {
+          "name": "Analytics \u2014 Sales Patterns",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/reports/analytics/sales-patterns?preset=this_month&from=2027-06-01&to=2027-06-30",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "analytics",
+                "sales-patterns"
+              ],
+              "query": [
+                {
+                  "key": "preset",
+                  "value": "this_month",
+                  "description": "today, yesterday, this_week, this_month, last_month, this_year, all_time, custom"
+                },
+                {
+                  "key": "from",
+                  "value": "2027-06-01",
+                  "description": "Custom range start (YYYY-MM-DD, shop-local)",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2027-06-30",
+                  "description": "Custom range end (YYYY-MM-DD, shop-local)",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Weekday \u00d7 hour sales heatmap (168 cells) plus by-weekday / by-hour rollups, shop-local.\n\n**Requires reports:view permission** (Admin and Manager roles)."
+          },
+          "response": []
+        },
+        {
+          "name": "Analytics \u2014 Receivables Aging",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/reports/analytics/receivables-aging?asOf=2027-06-30",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "analytics",
+                "receivables-aging"
+              ],
+              "query": [
+                {
+                  "key": "asOf",
+                  "value": "2027-06-30",
+                  "description": "Snapshot date (YYYY-MM-DD), defaults to today"
+                }
+              ]
+            },
+            "description": "Open credit invoices bucketed current / 1-30 / 31-60 / 61-90 / 90+ with top debtors.\n\n**Requires reports:view permission** (Admin and Manager roles)."
+          },
+          "response": []
+        },
+        {
+          "name": "Analytics \u2014 Discounts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/reports/analytics/discounts?preset=this_month&from=2027-06-01&to=2027-06-30",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "analytics",
+                "discounts"
+              ],
+              "query": [
+                {
+                  "key": "preset",
+                  "value": "this_month",
+                  "description": "today, yesterday, this_week, this_month, last_month, this_year, all_time, custom"
+                },
+                {
+                  "key": "from",
+                  "value": "2027-06-01",
+                  "description": "Custom range start (YYYY-MM-DD, shop-local)",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2027-06-30",
+                  "description": "Custom range end (YYYY-MM-DD, shop-local)",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Discount totals split by type, cashier and product; order-level vs line-level.\n\n**Requires reports:view permission** (Admin and Manager roles)."
+          },
+          "response": []
+        },
+        {
+          "name": "Analytics \u2014 Refunds",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/reports/analytics/refunds?preset=this_month&from=2027-06-01&to=2027-06-30",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "analytics",
+                "refunds"
+              ],
+              "query": [
+                {
+                  "key": "preset",
+                  "value": "this_month",
+                  "description": "today, yesterday, this_week, this_month, last_month, this_year, all_time, custom"
+                },
+                {
+                  "key": "from",
+                  "value": "2027-06-01",
+                  "description": "Custom range start (YYYY-MM-DD, shop-local)",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2027-06-30",
+                  "description": "Custom range end (YYYY-MM-DD, shop-local)",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Refund / returns analytics from non-voided credit notes: totals, by reason, by method, top returned products.\n\n**Requires reports:view permission** (Admin and Manager roles)."
+          },
+          "response": []
+        },
+        {
+          "name": "Analytics \u2014 PDF Report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/reports/analytics/document?preset=this_month&from=2027-06-01&to=2027-06-30&granularity=month",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "analytics",
+                "document"
+              ],
+              "query": [
+                {
+                  "key": "preset",
+                  "value": "this_month",
+                  "description": "today, yesterday, this_week, this_month, last_month, this_year, all_time, custom"
+                },
+                {
+                  "key": "from",
+                  "value": "2027-06-01",
+                  "description": "Custom range start (YYYY-MM-DD, shop-local)",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2027-06-30",
+                  "description": "Custom range end (YYYY-MM-DD, shop-local)",
+                  "disabled": true
+                },
+                {
+                  "key": "granularity",
+                  "value": "month",
+                  "description": "day | week | month | year"
+                }
+              ]
+            },
+            "description": "Renders the full multi-section analytics PDF via the document-server. Returns application/pdf.\n\n**Requires reports:view permission** (Admin and Manager roles)."
+          },
+          "response": []
         }
       ],
       "description": "Reports and Financial Intelligence module: executive dashboard KPIs, daily sales, monthly profit/loss, credit receivables aging, employee commissions, inventory valuation, and top products."

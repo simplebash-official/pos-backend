@@ -24,6 +24,7 @@ const TEMPLATE_DESCRIPTIONS: &[(&str, &str)] = &[
     ("a4-invoice", "A4 Invoice"),
     ("thermal-receipt", "Thermal Receipt"),
     ("credit-note", "Credit Note"),
+    ("analytics-report", "Analytics Report"),
 ];
 
 /// Resolves a call-site slug to the `description` document-server publishes.

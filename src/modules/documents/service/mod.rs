@@ -14,6 +14,21 @@ use crate::{
     modules::documents::{model::GeneratedDocumentDocument, repository},
 };
 
+/// Renders a template through the document-server without caching or writing
+/// a `generated_documents` row. For **dynamic** documents whose source data
+/// changes between renders and that have no owning entity to key a cache on —
+/// today just the Analytics & Reports PDF (`GET /reports/analytics/document`),
+/// where a report over "this month" must reflect every sale rung since the
+/// last render. Still routed through this module so `clients::document_server`
+/// keeps its single-caller invariant.
+pub(crate) async fn render_uncached(
+    doc_server: &DocumentServerClient,
+    template_slug: &str,
+    data: serde_json::Value,
+) -> AppResult<Vec<u8>> {
+    doc_server.render(template_slug, data).await
+}
+
 /// Returns the PDF bytes for `(entity_key, cache_key)`, rendering and
 /// persisting a fresh copy only if one doesn't already exist. `cache_key`
 /// and `template_name` are deliberately separate: `cache_key` is whatever
