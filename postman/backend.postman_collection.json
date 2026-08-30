@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "4a99e5db-6dab-4289-be33-7994c1253468",
     "name": "backend",
-    "description": "Rust/Axum API backend for jana2u-pos, a point-of-sale system for a repair/retail shop.\n\nAll requests inherit the collection-level Bearer auth (`{{accessToken}}`) \u2014 set it once per environment (Developement/Production) after obtaining a JWT via Auth > Login (its Tests script auto-populates `{{accessToken}}`/`{{userId}}` for you on success, so nothing to copy/paste). Admin-gated endpoints (inventory category/subcategory writes, Billing > Cancel Invoice, and every Suppliers/Supplier Products/Purchases request \u2014 reads included) require the token's `role` claim to be `admin`. Permission-gated endpoints (all of Inventory except the module-status stub, Customers writes, Billing > Complete Sale/Record Payment, Repairs writes, Print Jobs writes, Reports reads (`reports:view`), Users CRUD, Auth > List Login Sessions) require the token's `permissions` claim to include a specific permission (e.g. `inventory:read`, `inventory:write`, `billing:write`, `repairs:write`, `print_jobs:write`, `reports:view`, `users:manage`, `sessions:view`) \u2014 see CLAUDE.md's \"Auth, users & permissions\" section for the full role\u2192permission table; the seeded Admin (`cargo run --bin seed_admin`) has every permission. Users CRUD is additionally scoped by an Admin/Manager hierarchy on top of that permission gate \u2014 see the Users folder's description.\n\nOnly these endpoints work without a token at all: Health, Auth > Login, Swagger, and the `GET /` module-status stubs still remaining on Inventory/Billing/Customers/Reports (Repairs and Print Jobs lost theirs once they gained real `GET /` list endpoints \u2014 those now require a token like every other read). Everything else returns 401 `UNAUTHORIZED` without a valid Bearer token, and 403 `PERMISSION_DENIED`/`ADMIN_REQUIRED` if the token lacks the required permission or role.\n\nBase URL (`{{backendBaseUrl}}`), and the access token, are environment variables \u2014 switch the active Postman environment to point requests at dev vs prod.",
+    "description": "Rust/Axum API backend for jana2u-pos, a point-of-sale system for a repair/retail shop.\n\nAll requests inherit the collection-level Bearer auth (`{{accessToken}}`) — set it once per environment (Development/Production) after obtaining a JWT via Auth > Login (its Tests script auto-populates `{{accessToken}}`/`{{userId}}` for you on success, so nothing to copy/paste). Admin-gated endpoints (inventory category/subcategory writes, Billing > Void Invoice / Close Invoice, and every Suppliers/Supplier Products/Purchases request — reads included) require the token's `role` claim to be `admin`. Permission-gated endpoints (all of Inventory except the module-status stub, Customers writes, Employees CRUD, Billing > Complete Sale/Record Payment/Credit Notes, Repairs writes, Print Jobs writes, Reports reads (`reports:view`), Users CRUD, Auth > List Login Sessions) require the token's `permissions` claim to include a specific permission (e.g. `inventory:read`, `inventory:write`, `customers:write`, `employees:read`, `employees:write`, `billing:write`, `repairs:write`, `print_jobs:write`, `reports:view`, `users:manage`, `sessions:view`) — see CLAUDE.md's \"Auth, users & permissions\" section for the full role→permission table; the seeded Admin (`cargo run --bin seed_admin`) has every permission. Users CRUD is additionally scoped by an Admin/Manager hierarchy on top of that permission gate — see the Users folder's description.\n\nOnly these endpoints work without a token at all: Health, Auth > Login, Swagger, and the `GET /` module-status stubs still remaining on Inventory/Billing/Reports (Customers, Repairs, Employees, and Print Jobs have real authenticated `GET /` list endpoints). Everything else returns 401 `UNAUTHORIZED` without a valid Bearer token, and 403 `PERMISSION_DENIED`/`ADMIN_REQUIRED` if the token lacks the required permission or role.\n\nBase URL (`{{backendBaseUrl}}`), and the access token, are environment variables — switch the active Postman environment to point requests at dev vs prod.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "_exporter_id": "46626151"
   },
@@ -166,7 +166,7 @@
                 "billing"
               ]
             },
-            "description": "Placeholder status route for the billing module. Real endpoints are not implemented yet."
+            "description": "Liveness and placeholder status check for the billing module."
           },
           "response": []
         },
@@ -2402,6 +2402,108 @@
           "response": []
         },
         {
+          "name": "Analytics Engine Feed",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/reports/engine/feed?section=all&preset=this_month",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "engine",
+                "feed"
+              ],
+              "query": [
+                {
+                  "key": "section",
+                  "value": "all",
+                  "description": "Section: overview, sales, profit, customers, staff, all (defaults to overview)"
+                },
+                {
+                  "key": "preset",
+                  "value": "this_month",
+                  "description": "Date preset: today, yesterday, this_week, this_month, last_month, this_year, custom"
+                },
+                {
+                  "key": "from",
+                  "value": "2026-08-01",
+                  "description": "Start date for custom range (YYYY-MM-DD or RFC3339 timestamp)",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2026-08-31",
+                  "description": "End date for custom range (YYYY-MM-DD or RFC3339 timestamp)",
+                  "disabled": true
+                },
+                {
+                  "key": "granularity",
+                  "value": "day",
+                  "description": "Time-bucket size: day, week, month, year (auto by span if omitted)",
+                  "disabled": true
+                },
+                {
+                  "key": "comparePrevious",
+                  "value": "true",
+                  "description": "When true, compute previous period comparison and deltas",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Limit for ranked lists (top products, customers). Defaults to 20",
+                  "disabled": true
+                },
+                {
+                  "key": "sortBy",
+                  "value": "revenue",
+                  "description": "Sort criteria: revenue, invoices, profit, quantity",
+                  "disabled": true
+                },
+                {
+                  "key": "groupBy",
+                  "value": "category",
+                  "description": "Grouping for category sales: category or subcategory",
+                  "disabled": true
+                },
+                {
+                  "key": "bypassCache",
+                  "value": "true",
+                  "description": "Force bypass in-memory cache (admin/debugging)",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Unified high-speed analytical feed combining KPIs, timeseries, payment mixes, sales patterns, category breakdowns, discounts, refunds, customer rankings, and aging charts in parallel with Tokio SingleFlight deduplication and in-memory caching.\n\n**Requires reports:view permission** (Admin and Manager roles)."
+          },
+          "response": []
+        },
+        {
+          "name": "Invalidate Engine Cache",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/reports/engine/invalidate",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "engine",
+                "invalidate"
+              ]
+            },
+            "description": "Explicitly invalidates all active cached entries in the in-memory Analytics Engine cache, forcing future queries to re-aggregate live from MongoDB.\n\n**Requires reports:view permission** (Admin and Manager roles)."
+          },
+          "response": []
+        },
+        {
           "name": "Dashboard Overview",
           "request": {
             "method": "GET",
@@ -2592,6 +2694,47 @@
               ]
             },
             "description": "Employee performance and profit-split commission payouts across repair and print jobs.\n\n**Requires reports:view permission** (Admin and Manager roles)."
+          },
+          "response": []
+        },
+        {
+          "name": "Employee Commission Itemized Lines",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/reports/employee-commissions/{{employeeKey}}/items?preset=this_month",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "employee-commissions",
+                "{{employeeKey}}",
+                "items"
+              ],
+              "query": [
+                {
+                  "key": "preset",
+                  "value": "this_month",
+                  "description": "Date preset (today, this_week, this_month, etc.)"
+                },
+                {
+                  "key": "from",
+                  "value": "2026-08-01",
+                  "description": "Start date for custom range (YYYY-MM-DD)",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2026-08-31",
+                  "description": "End date for custom range (YYYY-MM-DD)",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Itemized commission line items and job tickets credited to an individual employee during the selected period.\n\n**Requires reports:view permission** (Admin and Manager roles)."
           },
           "response": []
         },
@@ -3123,7 +3266,7 @@
           "response": []
         }
       ],
-      "description": "Reports and Financial Intelligence module: executive dashboard KPIs, daily sales, monthly profit/loss, credit receivables aging, employee commissions, inventory valuation, and top products."
+      "description": "Reports, Analytics & Chart Engine and Financial Intelligence module: high-speed multi-dataset analytical feed, cache invalidation, executive dashboard KPIs, daily sales, monthly profit/loss, credit receivables aging, employee commissions, inventory valuation, and top products."
     },
     {
       "name": "Suppliers",
@@ -3928,7 +4071,19 @@
     {
       "key": "customerKey",
       "value": "cus_xxxxxxxxxxxxxxxx",
-      "description": "A customer's system-generated `key` \u2014 grab a real value from a Customers response once that module's real endpoints are added to this collection; used to scope Billing > List Invoices and to link a sale to a customer in Complete Sale."
+      "description": "A customer's system-generated `key` (seeded via `cargo run --bin seed_customers` or created via Create Customer) — used to scope Billing > List Invoices and to link a sale to a customer in Complete Sale."
+    },
+    {
+      "key": "employeeId",
+      "value": "65f1a2b3c4d5e6f7a8b9c0d1",
+      "type": "default",
+      "description": "An employee's MongoDB hex ObjectId — Create Employee test script saves it automatically; used by Get/Update/Delete Employee."
+    },
+    {
+      "key": "employeeKey",
+      "value": "emp_xxxxxxxxxxxxxxxx",
+      "type": "default",
+      "description": "An employee's system-generated business key (e.g. emp_...) — saved by Create Employee test script; used by Create/Update User and Reports > Employee Commission Itemized Lines."
     },
     {
       "key": "supplierId",
