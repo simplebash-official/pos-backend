@@ -357,7 +357,7 @@ pub(crate) async fn get_analytics_top_customers(
         query.from.as_deref(),
         query.to.as_deref(),
     )?;
-    let limit = query.limit.unwrap_or(20).clamp(1, 100) as usize;
+    let limit = query.limit.unwrap_or(100).clamp(1, 100) as usize;
     let sort_by = query.sort_by.as_deref().unwrap_or("revenue");
 
     let mut rows = repository::analytics::aggregate_top_customers(db, start, end).await?;

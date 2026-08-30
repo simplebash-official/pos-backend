@@ -137,7 +137,7 @@ async fn build_sales_feed(
         preset: query.preset.clone(),
         from: query.from.clone(),
         to: query.to.clone(),
-        limit: query.limit.or(Some(15)),
+        limit: query.limit.or(Some(100)),
         sort_by: query.sort_by.clone(),
     };
 
@@ -187,7 +187,7 @@ async fn build_customers_feed(
         preset: query.preset.clone(),
         from: query.from.clone(),
         to: query.to.clone(),
-        limit: query.limit.or(Some(25)),
+        limit: query.limit.or(Some(100)),
         sort_by: query.sort_by.clone(),
     };
 
