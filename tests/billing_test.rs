@@ -531,6 +531,255 @@ async fn complete_sale_credit_sale_increases_customer_balance_and_stays_pending(
 }
 
 #[tokio::test]
+async fn complete_sale_credit_sale_with_deposit_is_partially_paid() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+    let (_customer_id, customer_key) = seed_customer(&app).await;
+
+    let mut payload = base_sale_payload();
+    payload["customer"] = json!({ "customerKey": customer_key });
+    payload["payment"]["isCredit"] = json!(true);
+    payload["payment"]["amountReceivedCents"] = json!(50000);
+    payload["payment"]["dueDate"] = json!("2099-01-01");
+    payload["items"] = json!([{
+        "name": "Ad-hoc repair charge",
+        "unitPriceCents": 150000,
+        "quantity": 1,
+        "discountCents": 0,
+        "sourceType": "retail",
+    }]);
+
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/billing/sales",
+        Some(payload),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    assert_eq!(body["data"]["invoice"]["status"], "partially_paid");
+    assert_eq!(body["data"]["invoice"]["amountReceivedCents"], 50000);
+    let payments = body["data"]["payments"].as_array().unwrap();
+    assert_eq!(payments.len(), 1, "the deposit is recorded as one payment");
+    assert_eq!(payments[0]["amountCents"], 50000);
+    assert_eq!(payments[0]["paymentMethod"], "cash");
+
+    let invoice_key = body["data"]["invoice"]["key"].as_str().unwrap().to_string();
+    let (_, invoice_body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/billing/invoices/{invoice_key}"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(invoice_body["data"]["status"], "partially_paid");
+
+    let (_, customer_body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/customers/{customer_key}"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(
+        customer_body["data"]["outstandingBalanceCents"], 100000,
+        "only the un-deposited remainder is owed"
+    );
+    assert_eq!(customer_body["data"]["totalPurchasesCents"], 150000);
+}
+
+#[tokio::test]
+async fn complete_sale_rejects_deposit_at_or_above_total() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+    let (_customer_id, customer_key) = seed_customer(&app).await;
+
+    let mut payload = base_sale_payload();
+    payload["customer"] = json!({ "customerKey": customer_key });
+    payload["payment"]["isCredit"] = json!(true);
+    payload["payment"]["amountReceivedCents"] = json!(150000);
+    payload["payment"]["dueDate"] = json!("2099-01-01");
+    payload["items"] = json!([{
+        "name": "Ad-hoc repair charge",
+        "unitPriceCents": 150000,
+        "quantity": 1,
+        "discountCents": 0,
+        "sourceType": "retail",
+    }]);
+
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/billing/sales",
+        Some(payload),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "Body: {body}");
+}
+
+#[tokio::test]
+async fn complete_sale_credit_deposit_by_card_records_card_payment_and_invoice_last4() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+    let (_customer_id, customer_key) = seed_customer(&app).await;
+
+    let mut payload = base_sale_payload();
+    payload["customer"] = json!({ "customerKey": customer_key });
+    payload["payment"]["isCredit"] = json!(true);
+    payload["payment"]["amountReceivedCents"] = json!(50000);
+    payload["payment"]["depositMethod"] = json!("card");
+    payload["payment"]["cardLast4"] = json!("4321");
+    payload["payment"]["dueDate"] = json!("2099-01-01");
+    payload["items"] = json!([{
+        "name": "Ad-hoc repair charge",
+        "unitPriceCents": 150000,
+        "quantity": 1,
+        "discountCents": 0,
+        "sourceType": "retail",
+    }]);
+
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/billing/sales",
+        Some(payload),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    let payments = body["data"]["payments"].as_array().unwrap();
+    assert_eq!(payments.len(), 1);
+    assert_eq!(payments[0]["paymentMethod"], "card");
+    assert_eq!(body["data"]["invoice"]["cardLast4"], "4321");
+}
+
+#[tokio::test]
+async fn void_credit_invoice_with_deposit_reverses_only_the_remainder() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+    let admin = admin_token(&app.config);
+    let (_customer_id, customer_key) = seed_customer(&app).await;
+
+    let mut payload = base_sale_payload();
+    payload["customer"] = json!({ "customerKey": customer_key });
+    payload["payment"]["isCredit"] = json!(true);
+    payload["payment"]["amountReceivedCents"] = json!(50000);
+    payload["payment"]["dueDate"] = json!("2099-01-01");
+    payload["items"] = json!([{
+        "name": "Ad-hoc repair charge",
+        "unitPriceCents": 150000,
+        "quantity": 1,
+        "discountCents": 0,
+        "sourceType": "retail",
+    }]);
+
+    let (_, sale_body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/billing/sales",
+        Some(payload),
+        &token,
+    )
+    .await;
+    let invoice_key = sale_body["data"]["invoice"]["key"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let (status, void_body) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/billing/invoices/{invoice_key}/void"),
+        Some(json!({ "reason": "Customer changed their mind" })),
+        &admin,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "a deposited credit invoice can still be voided: {void_body}"
+    );
+
+    let (_, customer_body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/customers/{customer_key}"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(customer_body["data"]["outstandingBalanceCents"], 0);
+    assert_eq!(customer_body["data"]["totalPurchasesCents"], 0);
+}
+
+#[tokio::test]
+async fn record_payment_after_deposit_pays_off_to_paid() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+    let (_customer_id, customer_key) = seed_customer(&app).await;
+
+    let mut payload = base_sale_payload();
+    payload["customer"] = json!({ "customerKey": customer_key });
+    payload["payment"]["isCredit"] = json!(true);
+    payload["payment"]["amountReceivedCents"] = json!(50000);
+    payload["payment"]["dueDate"] = json!("2099-01-01");
+    payload["items"] = json!([{
+        "name": "Credit Purchase",
+        "unitPriceCents": 150000,
+        "quantity": 1,
+        "discountCents": 0,
+        "sourceType": "retail",
+    }]);
+
+    let (_, sale_body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/billing/sales",
+        Some(payload),
+        &token,
+    )
+    .await;
+    let invoice_key = sale_body["data"]["invoice"]["key"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let (status, _) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/billing/invoices/{invoice_key}/payments"),
+        Some(json!({ "amountCents": 100000, "paymentMethod": "cash" })),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (_, invoice_body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/billing/invoices/{invoice_key}"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(invoice_body["data"]["status"], "paid");
+
+    let (_, customer_body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/customers/{customer_key}"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(customer_body["data"]["outstandingBalanceCents"], 0);
+}
+
+#[tokio::test]
 async fn complete_sale_split_payment_records_one_payment_per_leg() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);
@@ -1289,11 +1538,11 @@ async fn billing_stats_endpoint_returns_today_sales_invoice_count_outstanding_cr
     let now = BsonDateTime::now();
     let yesterday = BsonDateTime::from_chrono(now.to_chrono() - chrono::Duration::days(1));
 
-    // Today: one paid cash sale (2000), one paid credit sale (500, also
-    // counts toward outstanding credit since is_credit is true).
+    // Today: one paid cash sale (2000), one paid credit sale (500 — fully
+    // paid, so it does NOT count toward outstanding credit).
     seed_invoice_with(&db, 2000, false, "paid", now).await;
     seed_invoice_with(&db, 500, true, "paid", now).await;
-    // Today but pending (not credit) — also counts toward outstanding.
+    // Today but pending (not credit) — counts toward outstanding.
     seed_invoice_with(&db, 300, false, "pending", now).await;
     // Backdated (outside "today") paid invoice — must NOT count toward
     // today's sales/count, but a backdated pending one still counts toward
@@ -1308,9 +1557,10 @@ async fn billing_stats_endpoint_returns_today_sales_invoice_count_outstanding_cr
     // today_sales/count only include the 3 invoices created "now".
     assert_eq!(stats.today_sales_cents, 2000 + 500 + 300);
     assert_eq!(stats.today_invoice_count, 3);
-    // outstanding credit = all is_credit OR pending invoices, any date:
-    // 500 (today, credit) + 300 (today, pending) + 700 (yesterday, pending).
-    assert_eq!(stats.outstanding_credit_cents, 500 + 300 + 700);
+    // outstanding credit = remaining balance on every pending/partially-paid
+    // invoice, any date: 300 (today, pending) + 700 (yesterday, pending).
+    // The fully-paid credit sale (500) contributes nothing.
+    assert_eq!(stats.outstanding_credit_cents, 300 + 700);
     // avg basket = today's sales / today's count, rounded.
     assert_eq!(stats.avg_basket_cents, (2000 + 500 + 300) / 3);
 

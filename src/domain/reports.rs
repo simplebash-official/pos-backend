@@ -201,6 +201,78 @@ pub struct OutstandingReceivablesResponse {
     pub total_pages: u64,
 }
 
+/// Query parameters for the dashboard reminders feed (`GET /reports/reminders`).
+#[derive(Debug, Clone, Default, Deserialize, ToSchema, IntoParams)]
+#[serde(rename_all = "camelCase")]
+pub struct RemindersQuery {
+    /// How many days ahead counts as "due soon" (not yet overdue). Clamped
+    /// to 1..=30; defaults to 7.
+    pub due_within_days: Option<u32>,
+    /// Max reminders returned in the merged list (headline counts still
+    /// reflect the full set). Clamped to 1..=100; defaults to 20.
+    pub limit: Option<u64>,
+}
+
+/// What a single reminder is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ReminderKind {
+    /// A credit invoice whose payment due date has passed.
+    CreditOverdue,
+    /// A credit invoice due within the "due soon" window.
+    CreditDueSoon,
+    /// A repair or print job whose promised-ready date has passed.
+    JobOverdue,
+    /// A repair or print job promised ready within the "due soon" window.
+    JobDueSoon,
+}
+
+/// One actionable reminder for the dashboard's attention list.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReminderEntry {
+    pub kind: ReminderKind,
+    /// Mongo hex id of the underlying invoice / job.
+    pub id: String,
+    /// Prefixed key (`inv_…` / `rep_…` / `prj_…`) of the underlying record.
+    pub key: String,
+    /// Human-facing number: invoice number or ticket number.
+    pub reference_number: String,
+    /// Short label — customer name for a credit reminder, device/job
+    /// description for a job reminder.
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub customer_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub customer_phone: Option<String>,
+    /// Credit: the balance still owed. Job: the estimated cost (0 if unquoted).
+    pub amount_cents: i64,
+    /// The due / promised date (YYYY-MM-DD) — always present.
+    pub due_date: String,
+    /// Signed day delta: positive = overdue by N days, negative = due in N
+    /// days, 0 = due today.
+    pub days_from_due: i64,
+    pub severity: String,
+    /// Frontend deep link that opens the record with the right action.
+    pub link_to: String,
+}
+
+/// The dashboard reminders feed: a merged, sorted list plus honest headline
+/// counts over the full (pre-truncation) set.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RemindersResponse {
+    /// Overdue reminders first, then due-soon; each group ordered by date.
+    pub reminders: Vec<ReminderEntry>,
+    pub credit_overdue_count: u64,
+    pub credit_overdue_amount_cents: i64,
+    pub credit_due_soon_count: u64,
+    pub credit_due_soon_amount_cents: i64,
+    pub jobs_overdue_count: u64,
+    pub jobs_due_soon_count: u64,
+    pub due_within_days: u32,
+}
+
 /// Query parameters for Employee Commissions report.
 #[derive(Debug, Clone, Default, Deserialize, ToSchema, IntoParams)]
 #[serde(rename_all = "camelCase")]

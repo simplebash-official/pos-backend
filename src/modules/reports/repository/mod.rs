@@ -7,4 +7,5 @@ pub(crate) mod employee_earnings;
 pub(crate) mod inventory_valuation;
 pub(crate) mod receivables;
 pub(crate) mod refunds;
+pub(crate) mod reminders;
 pub(crate) mod sales;

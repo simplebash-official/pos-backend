@@ -90,6 +90,44 @@ fn validate_sale_request(body: &CreateSaleRequest) -> AppResult<()> {
     Ok(())
 }
 
+/// Resolves and validates the up-front partial payment on a credit sale.
+/// Returns the amount (in cents) to record as a deposit payment now — `0`
+/// for a plain "pay later" credit sale or any non-credit sale. A credit
+/// deposit must be strictly less than the total (a deposit that covers the
+/// whole invoice is a normal paid sale, not a credit sale) and, when
+/// present, needs a real due date and a `"cash"`/`"card"` method.
+fn resolve_credit_deposit(body: &CreateSaleRequest, total_cents: i64) -> AppResult<i64> {
+    if !body.payment.is_credit {
+        return Ok(0);
+    }
+    let deposit = body.payment.amount_received_cents.unwrap_or(0);
+    if deposit <= 0 {
+        return Ok(0);
+    }
+    if deposit >= total_cents {
+        return Err(AppError::validation(
+            "Amount paid now must be less than the invoice total for a credit sale",
+        ));
+    }
+    match body.payment.deposit_method.as_deref() {
+        None | Some("cash") | Some("card") => {}
+        Some(other) => {
+            return Err(AppError::validation(format!(
+                "Invalid deposit method '{other}'. Must be 'cash' or 'card'"
+            )));
+        }
+    }
+    match body.payment.due_date.as_deref() {
+        Some(due) if chrono::NaiveDate::parse_from_str(due, "%Y-%m-%d").is_ok() => {}
+        _ => {
+            return Err(AppError::validation(
+                "A payment due date (YYYY-MM-DD) is required when the customer pays part of a credit sale now",
+            ));
+        }
+    }
+    Ok(deposit)
+}
+
 fn validate_pricing_adjustments(adjustments: &PricingAdjustments) -> AppResult<()> {
     match adjustments.discount_type.as_str() {
         "percentage" => {
@@ -470,6 +508,10 @@ pub async fn complete_sale(
     let change_due_cents =
         calculations::compute_change_due(body.payment.amount_received_cents, total_cents);
 
+    // An up-front partial payment on a credit sale ("pay Rs 500 now, rest on
+    // account"). `0` for a plain credit sale or any non-credit sale.
+    let credit_deposit_cents = resolve_credit_deposit(&body, total_cents)?;
+
     if body.payment.payment_method == "split" {
         let legs = body.payment.split_payments.as_deref().unwrap_or(&[]);
         calculations::validate_split_payments(total_cents, legs)?;
@@ -492,10 +534,16 @@ pub async fn complete_sale(
     );
 
     let status = if body.payment.is_credit {
-        InvoiceStatus::Pending
+        InvoiceStatus::from_payment_progress(total_cents, credit_deposit_cents)
     } else {
         InvoiceStatus::Paid
     };
+    // Method the deposit leg is recorded under (invoice.payment_method stays
+    // "credit"); also mirrored onto the invoice's card fields when it was a
+    // card deposit so downstream readers (dashboard cash-drawer split) can
+    // tell how the up-front money came in.
+    let deposit_method = body.payment.deposit_method.as_deref().unwrap_or("cash");
+    let deposit_is_card = credit_deposit_cents > 0 && deposit_method == "card";
     let now = BsonDateTime::now();
 
     let invoice_document = InvoiceDocument {
@@ -520,7 +568,11 @@ pub async fn complete_sale(
         amount_received_cents: body.payment.amount_received_cents,
         change_due_cents,
         due_date: body.payment.due_date.clone(),
-        card_last4: body.payment.card_last4.clone(),
+        card_last4: if body.payment.is_credit && !deposit_is_card {
+            None
+        } else {
+            body.payment.card_last4.clone()
+        },
         card_ref: body.payment.card_ref.clone(),
         online_ref: body.payment.online_ref.clone(),
         online_note: body.payment.online_note.clone(),
@@ -587,6 +639,42 @@ pub async fn complete_sale(
                 )),
             }
         }
+    } else if credit_deposit_cents > 0 {
+        // Up-front deposit on a credit sale. Recorded as a real payment row
+        // so the invoice reads `partially_paid` and the outstanding balance
+        // is derived (total − Σ payments) everywhere, exactly like a later
+        // installment. The customer-balance effect of this deposit is folded
+        // into the single `apply_financial_delta` call below — it must NOT
+        // also go through `service::payments`, or the balance would be
+        // decremented twice.
+        let deposit_document = crate::modules::billing::model::PaymentDocument {
+            id: None,
+            key: generate_id(prefixes::PAYMENT),
+            invoice_key: inserted_invoice.key.clone(),
+            amount_cents: credit_deposit_cents,
+            payment_method: deposit_method.to_string(),
+            notes: Some(
+                match (deposit_is_card, body.payment.card_last4.as_deref()) {
+                    (true, Some(last4)) if !last4.is_empty() => {
+                        format!("Deposit at checkout — card ending {last4}")
+                    }
+                    _ => "Deposit at checkout".to_string(),
+                },
+            ),
+            recorded_by_user_id: cashier_id.clone(),
+            recorded_by_name_snapshot: body.staff.cashier_name.clone(),
+            recorded_at: now,
+            version: 1,
+            created_at: now,
+            updated_at: now,
+        };
+        match repository::insert_payment(db, deposit_document).await {
+            Ok(inserted) => payment_documents.push(inserted),
+            Err(err) => warnings.push(format!(
+                "Invoice {} was created but the deposit payment record failed to save: {err}",
+                inserted_invoice.invoice_number
+            )),
+        }
     }
 
     // Run every line item's stock/ticket side effect concurrently instead of
@@ -605,8 +693,11 @@ pub async fn complete_sale(
     warnings.extend(side_effect_warnings.into_iter().flatten());
 
     if let Some(customer_key) = &customer_key {
+        // Total spend always grows by the full invoice; the owed balance
+        // grows only by the part left on account (total minus any deposit
+        // taken now).
         let balance_delta = if body.payment.is_credit {
-            total_cents
+            total_cents - credit_deposit_cents
         } else {
             0
         };
@@ -664,12 +755,13 @@ pub async fn void_invoice(
     }
 
     // How many payment rows `complete_sale` itself would have inserted —
-    // zero for a credit sale, one per split leg for a split payment,
-    // otherwise exactly one. Any payment beyond that count means a
-    // repayment (or credit-note refund) has since been recorded, which
-    // this basic void flow cannot safely reverse.
+    // for a credit sale, one if a deposit was taken at checkout else zero;
+    // one per split leg for a split payment; otherwise exactly one. Any
+    // payment beyond that count means a repayment (or credit-note refund)
+    // has since been recorded, which this basic void flow cannot safely
+    // reverse.
     let expected_payment_count: usize = if existing.is_credit {
-        0
+        usize::from(existing.amount_received_cents.unwrap_or(0) > 0)
     } else if existing.payment_method == "split" {
         existing
             .split_payments
@@ -737,8 +829,13 @@ pub async fn void_invoice(
     }
 
     if let Some(customer_key) = &existing.customer_key {
+        // Only the amount that actually landed on the customer's account
+        // (total minus any checkout deposit) was ever added to their owed
+        // balance, so only that much is reversed. The deposit payment row
+        // itself is left in place (same as a voided cash sale keeps its
+        // sale-time payment row).
         let balance_delta = if existing.is_credit {
-            -existing.total_cents
+            -(existing.total_cents - existing.amount_received_cents.unwrap_or(0))
         } else {
             0
         };

@@ -52,6 +52,17 @@ fn validate_status(status: &str) -> AppResult<()> {
     }
 }
 
+/// A promised-ready date, when given, must be a real `YYYY-MM-DD` date.
+fn validate_promised_ready_at(promised_ready_at: Option<&str>) -> AppResult<()> {
+    match promised_ready_at {
+        None => Ok(()),
+        Some(value) if chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok() => Ok(()),
+        Some(_) => Err(AppError::validation(
+            "Promised ready date must be a valid date (YYYY-MM-DD)",
+        )),
+    }
+}
+
 fn validate_phone_number(phone: &str, field_name: &str) -> AppResult<()> {
     let trimmed = phone.trim();
     if trimmed.is_empty() {
@@ -250,6 +261,7 @@ pub async fn create_repair(
 ) -> AppResult<Repair> {
     let status = body.status.unwrap_or_else(|| "received".to_string());
     validate_status(&status)?;
+    validate_promised_ready_at(body.promised_ready_at.as_deref())?;
 
     let (customer_name, customer_phone) = resolve_customer_name_phone(
         db,
@@ -305,6 +317,7 @@ pub async fn create_repair(
         device_model: body.device_model,
         serial_number: body.serial_number,
         issue_description: body.issue_description,
+        promised_ready_at: body.promised_ready_at,
         status,
         estimated_cost_cents: body.estimated_cost_cents,
         material_cost_cents: body.material_cost_cents,
@@ -356,6 +369,7 @@ pub async fn update_repair(
     let status = body.status.unwrap_or(existing.status);
 
     validate_status(&status)?;
+    validate_promised_ready_at(body.promised_ready_at.as_deref())?;
     validate_required_fields(
         &customer_name,
         &customer_phone,
@@ -386,6 +400,9 @@ pub async fn update_repair(
     }
     if let Some(sn) = body.serial_number {
         set_doc.insert("serial_number", sn);
+    }
+    if let Some(promised) = body.promised_ready_at {
+        set_doc.insert("promised_ready_at", promised);
     }
     if let Some(mc) = body.material_cost_cents {
         set_doc.insert("material_cost_cents", mc);

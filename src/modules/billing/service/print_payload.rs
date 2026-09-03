@@ -45,13 +45,28 @@ fn formatted_date_time(invoice: &Invoice) -> (String, String) {
     (formatted_date, formatted_time)
 }
 
+/// How much has been paid against this invoice, and how much is still owed,
+/// for the printed "Amount Paid" / "Balance Due" lines. `paid_so_far_cents`
+/// is the sum of every payment row (checkout deposit + later installments);
+/// callers that don't have it can pass `invoice.amount_received_cents`.
+fn paid_and_balance(invoice: &Invoice, paid_so_far_cents: i64) -> (i64, i64) {
+    if invoice.is_credit {
+        let balance = (invoice.total_cents - paid_so_far_cents - invoice.refunded_cents).max(0);
+        (paid_so_far_cents, balance)
+    } else {
+        (invoice.total_cents, 0)
+    }
+}
+
 /// Builds `data` for the "A4 Invoice" template — field-for-field the
 /// contract documented in that template's `.typ` header comment.
 pub(crate) fn build_a4_invoice_data(
     invoice: &Invoice,
     copy_designation: &str,
     is_duplicate: bool,
+    paid_so_far_cents: i64,
 ) -> Value {
+    let (amount_paid_cents, balance_due_cents) = paid_and_balance(invoice, paid_so_far_cents);
     let (formatted_date, formatted_time) = formatted_date_time(invoice);
     let shop = &invoice.shop_profile_snapshot;
     let warranty_text = invoice
@@ -59,7 +74,7 @@ pub(crate) fn build_a4_invoice_data(
         .clone()
         .unwrap_or_else(|| shop_field_or_empty(shop, "defaultWarrantyText").to_string());
 
-    json!({
+    let mut data = json!({
         // The shop logo, sent as a data: URI (the frontend's
         // `shopProfile.logoBase64`). document-server decodes it, stamps it on
         // this one render, and drops it — `""` means "use the built-in mark".
@@ -104,13 +119,23 @@ pub(crate) fn build_a4_invoice_data(
         "shopAddressLines": shop_address_lines(shop),
         "shopPrimaryPhone": shop_field_or_empty(shop, "primaryPhone"),
         "shopSecondaryPhone": shop_field_or_empty(shop, "secondaryPhone"),
-    })
+    });
+    // Inserted after the fact: the `json!` above is already near the macro
+    // recursion limit for this many keys.
+    data["amountPaidCents"] = json!(amount_paid_cents);
+    data["balanceDueCents"] = json!(balance_due_cents);
+    data
 }
 
 /// Builds `data` for the "Thermal Receipt" template. `paper_width_mm` is the
 /// terminal's configured receipt width (58 or 80) — see D9, the frontend
 /// already switches between both, so this must too.
-pub(crate) fn build_thermal_receipt_data(invoice: &Invoice, paper_width_mm: u32) -> Value {
+pub(crate) fn build_thermal_receipt_data(
+    invoice: &Invoice,
+    paper_width_mm: u32,
+    paid_so_far_cents: i64,
+) -> Value {
+    let (amount_paid_cents, balance_due_cents) = paid_and_balance(invoice, paid_so_far_cents);
     let (formatted_date, formatted_time) = formatted_date_time(invoice);
     let shop = &invoice.shop_profile_snapshot;
     let warranty_text = invoice
@@ -142,6 +167,9 @@ pub(crate) fn build_thermal_receipt_data(invoice: &Invoice, paper_width_mm: u32)
         "cardLast4": invoice.card_last4.clone().unwrap_or_default(),
         "splitPayments": invoice.split_payments.clone().unwrap_or_default(),
         "isCredit": invoice.is_credit,
+        "dueDate": invoice.due_date.clone().unwrap_or_default(),
+        "amountPaidCents": amount_paid_cents,
+        "balanceDueCents": balance_due_cents,
         "warrantyText": warranty_text,
         "footerText": footer_text,
         "shopTradingName": shop_field_or_empty(shop, "tradingName"),
@@ -518,14 +546,20 @@ mod schema_drift_tests {
     #[test]
     fn thermal_receipt_payload_matches_published_schema() {
         let invoice = cash_sale_invoice();
-        let payload = build_thermal_receipt_data(&invoice, 80);
+        let payload =
+            build_thermal_receipt_data(&invoice, 80, invoice.amount_received_cents.unwrap_or(0));
         assert_matches_schema("thermal-receipt", &payload);
     }
 
     #[test]
     fn a4_invoice_payload_matches_published_schema() {
         let invoice = cash_sale_invoice();
-        let payload = build_a4_invoice_data(&invoice, "ORIGINAL — CUSTOMER COPY", false);
+        let payload = build_a4_invoice_data(
+            &invoice,
+            "ORIGINAL — CUSTOMER COPY",
+            false,
+            invoice.amount_received_cents.unwrap_or(0),
+        );
         assert_matches_schema("a4-invoice", &payload);
     }
 
@@ -534,14 +568,24 @@ mod schema_drift_tests {
         // No `logoBase64` in the snapshot -> empty string (the "no logo"
         // signal document-server understands), still schema-valid.
         let mut invoice = cash_sale_invoice();
-        let payload = build_a4_invoice_data(&invoice, "ORIGINAL — CUSTOMER COPY", false);
+        let payload = build_a4_invoice_data(
+            &invoice,
+            "ORIGINAL — CUSTOMER COPY",
+            false,
+            invoice.amount_received_cents.unwrap_or(0),
+        );
         assert_eq!(payload["logoUrl"], "");
         assert_matches_schema("a4-invoice", &payload);
 
         // A shop logo (a data: URI) is passed straight through as `logoUrl`.
         let logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
         invoice.shop_profile_snapshot["logoBase64"] = json!(logo);
-        let payload = build_a4_invoice_data(&invoice, "ORIGINAL — CUSTOMER COPY", false);
+        let payload = build_a4_invoice_data(
+            &invoice,
+            "ORIGINAL — CUSTOMER COPY",
+            false,
+            invoice.amount_received_cents.unwrap_or(0),
+        );
         assert_eq!(payload["logoUrl"], logo);
         assert_matches_schema("a4-invoice", &payload);
     }
@@ -561,7 +605,12 @@ mod schema_drift_tests {
         ] {
             let mut invoice = cash_sale_invoice();
             invoice.status = status;
-            let payload = build_a4_invoice_data(&invoice, "DUPLICATE COPY", true);
+            let payload = build_a4_invoice_data(
+                &invoice,
+                "DUPLICATE COPY",
+                true,
+                invoice.amount_received_cents.unwrap_or(0),
+            );
             assert_matches_schema("a4-invoice", &payload);
         }
     }
@@ -593,10 +642,16 @@ mod schema_drift_tests {
         // fields at all beyond what `shop_field_or_empty` can fall back on.
         invoice.shop_profile_snapshot = json!({});
 
-        let thermal = build_thermal_receipt_data(&invoice, 58);
+        let thermal =
+            build_thermal_receipt_data(&invoice, 58, invoice.amount_received_cents.unwrap_or(0));
         assert_matches_schema("thermal-receipt", &thermal);
 
-        let a4 = build_a4_invoice_data(&invoice, "ORIGINAL — CUSTOMER COPY", false);
+        let a4 = build_a4_invoice_data(
+            &invoice,
+            "ORIGINAL — CUSTOMER COPY",
+            false,
+            invoice.amount_received_cents.unwrap_or(0),
+        );
         assert_matches_schema("a4-invoice", &a4);
     }
 

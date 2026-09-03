@@ -519,6 +519,7 @@ async fn employee_commissions_and_performance_report() {
         device_model: "iPhone 13".to_string(),
         serial_number: None,
         issue_description: "Screen cracked".to_string(),
+        promised_ready_at: None,
         status: "delivered".to_string(),
         estimated_cost_cents: Some(500000), // Revenue = 5,000 LKR
         material_cost_cents: Some(200000),  // Cost = 2,000 LKR -> Profit = 3,000 LKR
@@ -549,6 +550,7 @@ async fn employee_commissions_and_performance_report() {
         customer_phone: None,
         job_type: "mug".to_string(),
         quantity: 10,
+        promised_ready_at: None,
         status: "completed".to_string(),
         estimated_cost_cents: 300000,      // Revenue = 3,000 LKR
         material_cost_cents: Some(100000), // Cost = 1,000 LKR -> Profit = 2,000 LKR
@@ -724,6 +726,7 @@ async fn employee_commissions_survive_a_rename() {
         device_model: "iPhone 13".to_string(),
         serial_number: None,
         issue_description: "Screen cracked".to_string(),
+        promised_ready_at: None,
         status: "delivered".to_string(),
         estimated_cost_cents: Some(500000),
         material_cost_cents: Some(200000),
@@ -1129,4 +1132,248 @@ async fn analytics_document_returns_a_pdf() {
         .await
         .unwrap();
     assert!(bytes.starts_with(b"%PDF"), "response body should be a PDF");
+}
+
+// ===========================================================================
+// Dashboard reminders feed (GET /api/reports/reminders)
+// ===========================================================================
+
+fn full_access_token(config: &jana2u_pos_backend::core::config::Config) -> String {
+    common::mint_token(
+        config,
+        Some(Role::Admin),
+        roles::default_permissions(Role::Admin),
+    )
+}
+
+/// `days` from today, formatted YYYY-MM-DD.
+fn date_offset(days: i64) -> String {
+    (Utc::now().date_naive() + Duration::days(days))
+        .format("%Y-%m-%d")
+        .to_string()
+}
+
+async fn seed_reminder_customer(app: &common::TestApp, token: &str, phone_suffix: &str) -> String {
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/customers",
+        Some(json!({ "name": "Reminder Customer", "primaryPhone": format!("0755{phone_suffix}") })),
+        token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    body["data"]["key"].as_str().unwrap().to_string()
+}
+
+async fn seed_credit_sale(
+    app: &common::TestApp,
+    token: &str,
+    customer_key: &str,
+    total_cents: i64,
+    deposit_cents: i64,
+    due_date: &str,
+) -> String {
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/billing/sales",
+        Some(json!({
+            "staff": { "cashierName": "Reminder Cashier" },
+            "customer": { "customerKey": customer_key },
+            "items": [{
+                "name": "Reminder line",
+                "unitPriceCents": total_cents,
+                "quantity": 1,
+                "discountCents": 0,
+                "sourceType": "retail",
+            }],
+            "payment": {
+                "paymentMethod": "credit",
+                "isCredit": true,
+                "amountReceivedCents": deposit_cents,
+                "dueDate": due_date,
+            },
+            "shopProfileSnapshot": { "tradingName": "Reminder Shop" },
+        })),
+        token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    body["data"]["invoice"]["key"].as_str().unwrap().to_string()
+}
+
+fn find_reminder<'a>(body: &'a Value, key: &str) -> Option<&'a Value> {
+    body["data"]["reminders"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["key"] == key)
+}
+
+#[tokio::test]
+async fn reminders_requires_reports_view_permission() {
+    let app = common::spawn_app().await;
+    let token = common::mint_token(&app.config, Some(Role::Staff), &[]);
+    let (status, _) = send_authed(&app.router, "GET", "/api/reports/reminders", None, &token).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn reminders_split_credit_invoices_into_overdue_and_due_soon_and_are_installment_aware() {
+    let app = common::spawn_app().await;
+    let token = full_access_token(&app.config);
+
+    let customer_key = seed_reminder_customer(&app, &token, "100001").await;
+    // Overdue: due 5 days ago, no deposit → whole 150000 owed.
+    let overdue_key =
+        seed_credit_sale(&app, &token, &customer_key, 150_000, 0, &date_offset(-5)).await;
+    // Due soon: due in 3 days, 50000 deposit → 100000 still owed.
+    let due_soon_key = seed_credit_sale(
+        &app,
+        &token,
+        &customer_key,
+        150_000,
+        50_000,
+        &date_offset(3),
+    )
+    .await;
+    // Far future: due in 40 days → not returned.
+    let far_key = seed_credit_sale(&app, &token, &customer_key, 150_000, 0, &date_offset(40)).await;
+
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        "/api/reports/reminders?dueWithinDays=7",
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+
+    let overdue = find_reminder(&body, &overdue_key).expect("overdue invoice should be listed");
+    assert_eq!(overdue["kind"], "credit_overdue");
+    assert_eq!(overdue["amountCents"], 150_000);
+    assert_eq!(overdue["daysFromDue"], 5);
+
+    let due_soon = find_reminder(&body, &due_soon_key).expect("due-soon invoice should be listed");
+    assert_eq!(due_soon["kind"], "credit_due_soon");
+    assert_eq!(
+        due_soon["amountCents"], 100_000,
+        "balance is total minus the checkout deposit"
+    );
+    assert_eq!(due_soon["daysFromDue"], -3);
+
+    assert!(
+        find_reminder(&body, &far_key).is_none(),
+        "an invoice due outside the window is not a reminder yet"
+    );
+}
+
+#[tokio::test]
+async fn reminders_include_overdue_and_due_soon_repair_and_print_jobs() {
+    let app = common::spawn_app().await;
+    let token = full_access_token(&app.config);
+
+    let (status, repair_body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/repairs",
+        Some(json!({
+            "customer": { "customerName": "Job Reminder", "customerPhone": "0755200002" },
+            "deviceModel": "Pixel 7",
+            "issueDescription": "No power",
+            "estimatedCostCents": 400_000,
+            "promisedReadyAt": date_offset(-2),
+        })),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {repair_body}");
+    let repair_key = repair_body["data"]["key"].as_str().unwrap().to_string();
+
+    let (status, print_body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/print-jobs",
+        Some(json!({
+            "customer": { "customerName": "Print Reminder" },
+            "jobType": "banner",
+            "quantity": 2,
+            "estimatedCostCents": 90_000,
+            "promisedReadyAt": date_offset(1),
+        })),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {print_body}");
+    let print_key = print_body["data"]["key"].as_str().unwrap().to_string();
+
+    let (status, body) =
+        send_authed(&app.router, "GET", "/api/reports/reminders", None, &token).await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+
+    let repair = find_reminder(&body, &repair_key).expect("overdue repair should be listed");
+    assert_eq!(repair["kind"], "job_overdue");
+    assert_eq!(repair["amountCents"], 400_000);
+
+    let print = find_reminder(&body, &print_key).expect("due-soon print job should be listed");
+    assert_eq!(print["kind"], "job_due_soon");
+}
+
+#[tokio::test]
+async fn reminders_due_within_days_param_narrows_the_window() {
+    let app = common::spawn_app().await;
+    let token = full_access_token(&app.config);
+    let customer_key = seed_reminder_customer(&app, &token, "300003").await;
+    let key = seed_credit_sale(&app, &token, &customer_key, 120_000, 0, &date_offset(5)).await;
+
+    let (_, wide) = send_authed(
+        &app.router,
+        "GET",
+        "/api/reports/reminders?dueWithinDays=7",
+        None,
+        &token,
+    )
+    .await;
+    assert!(find_reminder(&wide, &key).is_some());
+
+    let (_, narrow) = send_authed(
+        &app.router,
+        "GET",
+        "/api/reports/reminders?dueWithinDays=2",
+        None,
+        &token,
+    )
+    .await;
+    assert!(
+        find_reminder(&narrow, &key).is_none(),
+        "an invoice 5 days out drops off a 2-day window"
+    );
+}
+
+#[tokio::test]
+async fn reminders_exclude_paid_and_delivered_records() {
+    let app = common::spawn_app().await;
+    let token = full_access_token(&app.config);
+    let customer_key = seed_reminder_customer(&app, &token, "400004").await;
+    let invoice_key =
+        seed_credit_sale(&app, &token, &customer_key, 100_000, 0, &date_offset(-3)).await;
+
+    // Pay it off in full.
+    let (status, _) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/billing/invoices/{invoice_key}/payments"),
+        Some(json!({ "amountCents": 100_000, "paymentMethod": "cash" })),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (_, body) = send_authed(&app.router, "GET", "/api/reports/reminders", None, &token).await;
+    assert!(
+        find_reminder(&body, &invoice_key).is_none(),
+        "a fully paid invoice is not a reminder"
+    );
 }

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     core::{constants::prefixes, id::generate_id},
-    domain::repairs::Repair,
+    domain::repairs::{Repair, compute_job_is_overdue},
 };
 
 /// Mongo document shape representing a repair ticket.
@@ -35,6 +35,11 @@ pub struct RepairDocument {
     pub serial_number: Option<String>,
     /// Problem description or repair diagnosis notes.
     pub issue_description: String,
+    /// Date the job was promised ready for the customer (YYYY-MM-DD), if a
+    /// hand-back date was agreed. `#[serde(default)]` keeps older stored
+    /// documents (written before this field existed) deserializing cleanly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub promised_ready_at: Option<String>,
     /// Lifecycle status ("received", "in_progress", "completed", "delivered", "cancelled").
     pub status: String,
     /// Estimated or final charge to customer in cents. Absent until quoted.
@@ -83,6 +88,7 @@ impl RepairDocument {
         } else {
             self.key
         };
+        let is_overdue = compute_job_is_overdue(&self.status, self.promised_ready_at.as_deref());
         Repair {
             id: self
                 .id
@@ -96,6 +102,8 @@ impl RepairDocument {
             device_model: self.device_model,
             serial_number: self.serial_number,
             issue_description: self.issue_description,
+            promised_ready_at: self.promised_ready_at,
+            is_overdue,
             status: self.status,
             estimated_cost_cents: self.estimated_cost_cents,
             material_cost_cents: self.material_cost_cents,

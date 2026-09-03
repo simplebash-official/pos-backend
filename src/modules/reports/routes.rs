@@ -30,10 +30,10 @@ use crate::{
             EngineFeedQuery, EngineFeedResponse, EngineInvalidateResponse,
             InventoryValuationResponse, MonthlyProfitQuery, MonthlyProfitReportResponse,
             OutstandingReceivablesQuery, OutstandingReceivablesResponse, ReceivablesAgingQuery,
-            ReceivablesAgingResponse, RefundAnalyticsResponse, ReportDateRangeQuery,
-            ReportsDashboardResponse, SalesByCategoryQuery, SalesByCategoryResponse,
-            SalesPatternsResponse, TimeSeriesResponse, TopCustomersQuery, TopCustomersResponse,
-            TopProductsQuery, TopProductsResponse,
+            ReceivablesAgingResponse, RefundAnalyticsResponse, RemindersQuery, RemindersResponse,
+            ReportDateRangeQuery, ReportsDashboardResponse, SalesByCategoryQuery,
+            SalesByCategoryResponse, SalesPatternsResponse, TimeSeriesResponse, TopCustomersQuery,
+            TopCustomersResponse, TopProductsQuery, TopProductsResponse,
         },
     },
     modules::documents,
@@ -58,6 +58,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_monthly_profit))
         // Receivables & Outstanding credit
         .routes(routes!(get_outstanding_receivables))
+        .routes(routes!(get_reminders))
         // Employee commissions & performance
         .routes(routes!(get_employee_commissions))
         .routes(routes!(get_employee_earnings_items))
@@ -262,6 +263,31 @@ async fn get_outstanding_receivables(
     Ok(Json(ApiResponse::success(
         response,
         "Outstanding receivables report retrieved successfully",
+    )))
+}
+
+#[utoipa::path(
+    get,
+    path = "/reminders",
+    tag = modules::REPORTS,
+    params(RemindersQuery),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Dashboard reminders: overdue and due-soon credit invoices and repair/print jobs", body = ApiResponse<RemindersResponse>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+    )
+)]
+async fn get_reminders(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Query(query): Query<RemindersQuery>,
+) -> AppResult<Json<ApiResponse<RemindersResponse>>> {
+    user.require_permission(perm::REPORTS_VIEW)?;
+    let response = service::get_reminders(&state.db, query).await?;
+    Ok(Json(ApiResponse::success(
+        response,
+        "Reminders retrieved successfully",
     )))
 }
 

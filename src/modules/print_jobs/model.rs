@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     core::{constants::prefixes, id::generate_id},
-    domain::print_jobs::PrintJob,
+    domain::{print_jobs::PrintJob, repairs::compute_job_is_overdue},
 };
 
 /// Mongo document shape representing a print job ticket.
@@ -33,6 +33,10 @@ pub struct PrintJobDocument {
     pub job_type: String,
     /// Number of items to print.
     pub quantity: i32,
+    /// Date the job was promised ready (YYYY-MM-DD), if agreed.
+    /// `#[serde(default)]` keeps older stored documents deserializing cleanly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub promised_ready_at: Option<String>,
     /// Job lifecycle status ("received", "in_progress", "completed", "delivered", "cancelled").
     pub status: String,
     /// Estimated charge to customer in cents.
@@ -80,6 +84,7 @@ impl PrintJobDocument {
         } else {
             self.key
         };
+        let is_overdue = compute_job_is_overdue(&self.status, self.promised_ready_at.as_deref());
         PrintJob {
             id: self
                 .id
@@ -92,6 +97,8 @@ impl PrintJobDocument {
             customer_phone: self.customer_phone,
             job_type: self.job_type,
             quantity: self.quantity,
+            promised_ready_at: self.promised_ready_at,
+            is_overdue,
             status: self.status,
             estimated_cost_cents: self.estimated_cost_cents,
             material_cost_cents: self.material_cost_cents,

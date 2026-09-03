@@ -162,6 +162,62 @@ async fn create_repair_reserves_ticket_number_and_defaults_status_to_received() 
         data["ticketNumber"]
     );
     assert!(data["key"].as_str().unwrap().starts_with("rep_"));
+    assert!(
+        data.get("promisedReadyAt").is_none() || data["promisedReadyAt"].is_null(),
+        "no promised date unless one was given"
+    );
+    assert_eq!(data["isOverdue"], false);
+}
+
+#[tokio::test]
+async fn repair_promised_ready_at_round_trips_and_drives_is_overdue() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    // Create with a past promised date → job is open, so it reads overdue.
+    let mut payload = sample_repair_payload("2424242");
+    payload["promisedReadyAt"] = json!("2000-01-01");
+    let (status, body) =
+        send_authed(&app.router, "POST", "/api/repairs", Some(payload), &token).await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    assert_eq!(body["data"]["promisedReadyAt"], "2000-01-01");
+    assert_eq!(body["data"]["isOverdue"], true);
+    let key = body["data"]["key"].as_str().unwrap().to_string();
+
+    // A future promised date clears the overdue flag.
+    let (status, body) = send_authed(
+        &app.router,
+        "PATCH",
+        &format!("/api/repairs/{key}"),
+        Some(json!({ "promisedReadyAt": "2999-12-31" })),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    assert_eq!(body["data"]["promisedReadyAt"], "2999-12-31");
+    assert_eq!(body["data"]["isOverdue"], false);
+
+    // Delivering a past-promised job also clears overdue.
+    let (_, body) = send_authed(
+        &app.router,
+        "PATCH",
+        &format!("/api/repairs/{key}"),
+        Some(json!({ "promisedReadyAt": "2000-01-01", "status": "delivered" })),
+        &token,
+    )
+    .await;
+    assert_eq!(body["data"]["isOverdue"], false);
+}
+
+#[tokio::test]
+async fn repair_rejects_malformed_promised_ready_at() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let mut payload = sample_repair_payload("2525252");
+    payload["promisedReadyAt"] = json!("next tuesday");
+    let (status, _) = send_authed(&app.router, "POST", "/api/repairs", Some(payload), &token).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -550,6 +606,7 @@ async fn seed_repair_with_named(
             device_model: "Test Device".to_string(),
             serial_number: None,
             issue_description: "Stats test seed".to_string(),
+            promised_ready_at: None,
             status: status.to_string(),
             estimated_cost_cents,
             material_cost_cents: None,

@@ -42,6 +42,15 @@ pub struct Repair {
     pub serial_number: Option<String>,
     /// Diagnosis or reported issue description.
     pub issue_description: String,
+    /// Date the shop promised the job would be ready for the customer
+    /// (YYYY-MM-DD). Optional — set when a hand-back date was agreed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub promised_ready_at: Option<String>,
+    /// Derived flag: the promised-ready date has passed and the job is still
+    /// open (not delivered/cancelled). Computed fresh on every read, never
+    /// stored — mirrors `billing::Invoice.is_overdue`.
+    #[serde(default)]
+    pub is_overdue: bool,
     /// Lifecycle status ("received", "in_progress", "completed", "delivered", "cancelled").
     pub status: String,
     /// Quoted or final repair price in cents. Absent until a technician has
@@ -81,6 +90,27 @@ pub struct Repair {
 
 fn default_version() -> i64 {
     1
+}
+
+/// Statuses that mean the job is finished and off the shop's plate, so a
+/// passed promised-ready date no longer matters.
+const CLOSED_JOB_STATUSES: [&str; 2] = ["delivered", "cancelled"];
+
+/// Whether a repair/print job should be flagged overdue: still open and its
+/// `promised_ready_at` date has passed. Pure function of the two persisted
+/// fields, recomputed on every read (`RepairDocument::into_repair` /
+/// `PrintJobDocument::into_print_job`) — mirrors `billing::compute_is_overdue`.
+pub fn compute_job_is_overdue(status: &str, promised_ready_at: Option<&str>) -> bool {
+    if CLOSED_JOB_STATUSES.contains(&status) {
+        return false;
+    }
+    let Some(promised) = promised_ready_at else {
+        return false;
+    };
+    match chrono::NaiveDate::parse_from_str(promised, "%Y-%m-%d") {
+        Ok(due) => due < Utc::now().date_naive(),
+        Err(_) => false,
+    }
 }
 
 /// The `customer{}` sub-object of `CreateRepairRequest`/`UpdateRepairRequest`.
@@ -144,6 +174,9 @@ pub struct CreateRepairRequest {
     pub serial_number: Option<String>,
     /// Reported issue or symptom description.
     pub issue_description: String,
+    /// Optional date the job was promised ready (YYYY-MM-DD).
+    #[serde(default)]
+    pub promised_ready_at: Option<String>,
     /// Initial status (defaults to "received").
     #[serde(default)]
     pub status: Option<String>,
@@ -175,6 +208,9 @@ pub struct UpdateRepairRequest {
     pub serial_number: Option<String>,
     /// Updated issue description.
     pub issue_description: Option<String>,
+    /// Updated promised-ready date (YYYY-MM-DD). Omit the key to leave it
+    /// untouched; there is no way to clear it back to unset via this endpoint.
+    pub promised_ready_at: Option<String>,
     /// Updated status.
     pub status: Option<String>,
     /// Updated customer price estimate in cents. Omit the key to leave the

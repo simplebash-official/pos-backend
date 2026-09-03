@@ -82,13 +82,7 @@ pub async fn record_payment(
     let inserted = repository::insert_payment(db, payment_document).await?;
 
     let new_total_paid = already_paid + inserted.amount_cents;
-    let new_status = if new_total_paid >= invoice.total_cents {
-        InvoiceStatus::Paid
-    } else if new_total_paid > 0 {
-        InvoiceStatus::PartiallyPaid
-    } else {
-        InvoiceStatus::Pending
-    };
+    let new_status = InvoiceStatus::from_payment_progress(invoice.total_cents, new_total_paid);
     if new_status != invoice.status
         && let Some(invoice_id) = invoice.id
         && let Err(err) = repository::update_invoice_status(

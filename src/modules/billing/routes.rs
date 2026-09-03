@@ -226,6 +226,14 @@ async fn get_invoice_document(
     Query(params): Query<DocumentQueryParams>,
 ) -> AppResult<Response> {
     let invoice = service::get_invoice(&state.db, &id).await?;
+    // Sum of every payment against this invoice (checkout deposit + any
+    // installments) so a partial-credit slip prints the right "Amount Paid"
+    // / "Balance Due".
+    let paid_so_far_cents: i64 = service::payments::list_payments(&state.db, &invoice.key)
+        .await?
+        .iter()
+        .map(|p| p.amount_cents)
+        .sum();
 
     let (cache_key, template_name, data) = match document_type.as_str() {
         "a4-invoice" => (
@@ -235,6 +243,7 @@ async fn get_invoice_document(
                 &invoice,
                 "ORIGINAL — CUSTOMER COPY",
                 false,
+                paid_so_far_cents,
             ),
         ),
         "thermal-receipt" => {
@@ -242,7 +251,11 @@ async fn get_invoice_document(
             (
                 format!("thermal-receipt-{width}mm"),
                 "thermal-receipt",
-                service::print_payload::build_thermal_receipt_data(&invoice, width),
+                service::print_payload::build_thermal_receipt_data(
+                    &invoice,
+                    width,
+                    paid_so_far_cents,
+                ),
             )
         }
         other => {

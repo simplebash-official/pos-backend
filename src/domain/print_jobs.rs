@@ -35,6 +35,13 @@ pub struct PrintJob {
     pub job_type: String,
     /// Quantity of printed items.
     pub quantity: i32,
+    /// Date the shop promised the job would be ready (YYYY-MM-DD), if agreed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub promised_ready_at: Option<String>,
+    /// Derived flag: promised-ready date has passed and the job is still open
+    /// (not delivered/cancelled). Computed on every read, never stored.
+    #[serde(default)]
+    pub is_overdue: bool,
     /// Status ("received", "in_progress", "completed", "delivered", "cancelled").
     pub status: String,
     /// Quoted or estimated price in cents.
@@ -124,6 +131,9 @@ pub struct CreatePrintJobRequest {
     pub job_type: String,
     /// Quantity of copies/items.
     pub quantity: i32,
+    /// Optional date the job was promised ready (YYYY-MM-DD).
+    #[serde(default)]
+    pub promised_ready_at: Option<String>,
     /// Initial status (defaults to "received").
     #[serde(default)]
     pub status: Option<String>,
@@ -149,6 +159,9 @@ pub struct UpdatePrintJobRequest {
     pub job_type: Option<String>,
     /// Updated quantity.
     pub quantity: Option<i32>,
+    /// Updated promised-ready date (YYYY-MM-DD). Omit the key to leave it
+    /// untouched; there is no way to clear it back to unset via this endpoint.
+    pub promised_ready_at: Option<String>,
     /// Updated lifecycle status.
     pub status: Option<String>,
     /// Updated customer charge estimate in cents.

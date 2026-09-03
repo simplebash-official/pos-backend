@@ -119,6 +119,41 @@ pub async fn ensure_indexes(db: &Database) {
         }
     }
 
+    // Credit-reminder / receivables reads filter `invoices` by lifecycle
+    // status and sort/filter by `due_date`; repair & print-job reminders do
+    // the same over `promised_ready_at` + status. Best-effort compound
+    // indexes keep those scans bounded.
+    for (collection_name, name, keys) in [
+        (
+            "invoices",
+            "reminders_status_due_date",
+            doc! { "status": 1, "due_date": 1 },
+        ),
+        (
+            "repairs",
+            "reminders_promised_ready_at_status",
+            doc! { "promised_ready_at": 1, "status": 1 },
+        ),
+        (
+            "print_jobs",
+            "reminders_promised_ready_at_status",
+            doc! { "promised_ready_at": 1, "status": 1 },
+        ),
+    ] {
+        let model = IndexModel::builder()
+            .keys(keys)
+            .options(IndexOptions::builder().name(name.to_string()).build())
+            .build();
+
+        if let Err(err) = db
+            .collection::<mongodb::bson::Document>(collection_name)
+            .create_index(model)
+            .await
+        {
+            tracing::warn!(collection = collection_name, index = name, %err, "could not create reminders index");
+        }
+    }
+
     // `sales-by-category` joins invoice lines to `products` by `key`; the sync
     // index has `key` second, so a `$lookup` on it alone can't use it.
     {

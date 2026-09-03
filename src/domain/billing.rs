@@ -208,6 +208,13 @@ pub struct PaymentDetails {
     /// Due date for credit invoice repayment (YYYY-MM-DD).
     #[serde(default)]
     pub due_date: Option<String>,
+    /// How an up-front partial payment on a credit sale was taken:
+    /// `"cash"` or `"card"`. Only meaningful when `is_credit` is true and
+    /// `amount_received_cents` is a non-zero amount below the total — it
+    /// selects the method recorded on the deposit's payment row. The
+    /// invoice's own `payment_method` still stays `"credit"`.
+    #[serde(default)]
+    pub deposit_method: Option<String>,
 }
 
 /// An invoice's lifecycle state. There is deliberately no `Draft` variant —
@@ -246,6 +253,22 @@ impl InvoiceStatus {
             InvoiceStatus::Paid => "paid",
             InvoiceStatus::Voided => "voided",
             InvoiceStatus::Closed => "closed",
+        }
+    }
+
+    /// Maps "how much has been paid against this total" to the lifecycle
+    /// state, so `complete_sale` (a deposit at checkout) and `record_payment`
+    /// (later installments) derive the status the same way: nothing paid is
+    /// `Pending`, the full amount (or more) is `Paid`, anything between is
+    /// `PartiallyPaid`. Never returns `Voided`/`Closed` — those are set by
+    /// their own explicit actions.
+    pub fn from_payment_progress(total_cents: i64, paid_cents: i64) -> InvoiceStatus {
+        if paid_cents >= total_cents {
+            InvoiceStatus::Paid
+        } else if paid_cents > 0 {
+            InvoiceStatus::PartiallyPaid
+        } else {
+            InvoiceStatus::Pending
         }
     }
 }

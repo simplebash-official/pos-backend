@@ -9,6 +9,7 @@ pub(crate) mod employee_earnings;
 pub(crate) mod inventory;
 pub(crate) mod monthly_profit;
 pub(crate) mod outstanding;
+pub(crate) mod reminders;
 pub(crate) mod report_payload;
 
 pub(crate) use analytics::{
@@ -24,4 +25,5 @@ pub(crate) use employee_earnings::get_employee_earnings;
 pub(crate) use inventory::{get_inventory_valuation, get_top_products};
 pub(crate) use monthly_profit::get_monthly_profit_report;
 pub(crate) use outstanding::get_outstanding_report;
+pub(crate) use reminders::get_reminders;
 pub(crate) use report_payload::build_analytics_report_data;

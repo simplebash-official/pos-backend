@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "4a99e5db-6dab-4289-be33-7994c1253468",
     "name": "backend",
-    "description": "Rust/Axum API backend for jana2u-pos, a point-of-sale system for a repair/retail shop.\n\nAll requests inherit the collection-level Bearer auth (`{{accessToken}}`) — set it once per environment (Development/Production) after obtaining a JWT via Auth > Login (its Tests script auto-populates `{{accessToken}}`/`{{userId}}` for you on success, so nothing to copy/paste). Admin-gated endpoints (inventory category/subcategory writes, Billing > Void Invoice / Close Invoice, and every Suppliers/Supplier Products/Purchases request — reads included) require the token's `role` claim to be `admin`. Permission-gated endpoints (all of Inventory except the module-status stub, Customers writes, Employees CRUD, Billing > Complete Sale/Record Payment/Credit Notes, Repairs writes, Print Jobs writes, Reports reads (`reports:view`), Users CRUD, Auth > List Login Sessions) require the token's `permissions` claim to include a specific permission (e.g. `inventory:read`, `inventory:write`, `customers:write`, `employees:read`, `employees:write`, `billing:write`, `repairs:write`, `print_jobs:write`, `reports:view`, `users:manage`, `sessions:view`) — see CLAUDE.md's \"Auth, users & permissions\" section for the full role→permission table; the seeded Admin (`cargo run --bin seed_admin`) has every permission. Users CRUD is additionally scoped by an Admin/Manager hierarchy on top of that permission gate — see the Users folder's description.\n\nOnly these endpoints work without a token at all: Health, Auth > Login, Swagger, and the `GET /` module-status stubs still remaining on Inventory/Billing/Reports (Customers, Repairs, Employees, and Print Jobs have real authenticated `GET /` list endpoints). Everything else returns 401 `UNAUTHORIZED` without a valid Bearer token, and 403 `PERMISSION_DENIED`/`ADMIN_REQUIRED` if the token lacks the required permission or role.\n\nBase URL (`{{backendBaseUrl}}`), and the access token, are environment variables — switch the active Postman environment to point requests at dev vs prod.",
+    "description": "Rust/Axum API backend for jana2u-pos, a point-of-sale system for a repair/retail shop.\n\nAll requests inherit the collection-level Bearer auth (`{{accessToken}}`) \u2014 set it once per environment (Development/Production) after obtaining a JWT via Auth > Login (its Tests script auto-populates `{{accessToken}}`/`{{userId}}` for you on success, so nothing to copy/paste). Admin-gated endpoints (inventory category/subcategory writes, Billing > Void Invoice / Close Invoice, and every Suppliers/Supplier Products/Purchases request \u2014 reads included) require the token's `role` claim to be `admin`. Permission-gated endpoints (all of Inventory except the module-status stub, Customers writes, Employees CRUD, Billing > Complete Sale/Record Payment/Credit Notes, Repairs writes, Print Jobs writes, Reports reads (`reports:view`), Users CRUD, Auth > List Login Sessions) require the token's `permissions` claim to include a specific permission (e.g. `inventory:read`, `inventory:write`, `customers:write`, `employees:read`, `employees:write`, `billing:write`, `repairs:write`, `print_jobs:write`, `reports:view`, `users:manage`, `sessions:view`) \u2014 see CLAUDE.md's \"Auth, users & permissions\" section for the full role\u2192permission table; the seeded Admin (`cargo run --bin seed_admin`) has every permission. Users CRUD is additionally scoped by an Admin/Manager hierarchy on top of that permission gate \u2014 see the Users folder's description.\n\nOnly these endpoints work without a token at all: Health, Auth > Login, Swagger, and the `GET /` module-status stubs still remaining on Inventory/Billing/Reports (Customers, Repairs, Employees, and Print Jobs have real authenticated `GET /` list endpoints). Everything else returns 401 `UNAUTHORIZED` without a valid Bearer token, and 403 `PERMISSION_DENIED`/`ADMIN_REQUIRED` if the token lacks the required permission or role.\n\nBase URL (`{{backendBaseUrl}}`), and the access token, are environment variables \u2014 switch the active Postman environment to point requests at dev vs prod.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "_exporter_id": "46626151"
   },
@@ -200,6 +200,57 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"staff\": {\n    \"cashierName\": \"Nimal Perera\"\n  },\n  \"customer\": {\n    \"customerName\": \"Walk-in Customer\"\n  },\n  \"items\": [\n    {\n      \"productKey\": \"prod_vV5MdqUu9pb4PLRB\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_bnwm19dFjZMb_MlV\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_YyeS9HYrB1mrJXbu\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_Od-SNpuusY0BD-hM\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_0GTJkxVVeQRM6DhS\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_bmep131grOtOLlg1\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_sUoKrjtaRkqnrWst\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_87DxPdIW9_CLjNzb\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_8SFmf69yOPnyyPZ4\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_zgic03VcQen4KOyx\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_S0lMggeli71oKQGR\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_LJXiyEc6Igt9opli\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_xdZqGbnzBYiktVNy\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_M_qR-bJlMP3qqQZT\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_llQi0geWF01LmvuW\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_JdC2stRLyIir4nlr\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_ISaUzZfR6EInrAVn\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_KBFeChexGaBcWvNq\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_EK7e44M50ZsdNfja\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_y1UK17b1gvE9ZI0K\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    }\n  ],\n  \"pricingAdjustments\": {\n    \"discountType\": \"fixed\",\n    \"discountValue\": 0\n  },\n  \"payment\": {\n    \"paymentMethod\": \"cash\",\n    \"isCredit\": false,\n    \"amountReceivedCents\": 700000\n  },\n  \"shopProfileSnapshot\": {\n    \"tradingName\": \"TechFix Repairs\",\n    \"address\": \"123 Galle Road, Colombo 03\",\n    \"phone\": \"011 234 5678\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/billing/sales",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "billing",
+                "sales"
+              ]
+            },
+            "description": "Completes a sale: creates the invoice (and, unless `payment.isCredit`, its payment record(s)), decrements stock for any `productKey` line items, and marks any linked repair/print-job ticket (`sourceTicketKey`) delivered. `cashierId` is never sent \u2014 the completing cashier is always the bearer token's user. There is no tax in this system. The request is grouped into sub-objects: `staff{cashierName}`, `customer{}` (optional \u2014 omit for a walk-in with no linked account; only used as typed when `customerKey` is absent, otherwise resolved from the linked `Customer` record), `items[]`, `pricingAdjustments{}` (optional \u2014 omit for no discount; `discountType` is `\"percentage\"` [0-100, e.g. 7.5] or `\"fixed\"` [a cents amount]; the server computes the actual `discountCents` from this against the resolved subtotal), and `payment{paymentMethod, isCredit, amountReceivedCents, splitPayments, cardLast4, cardRef, onlineRef, onlineNote, dueDate}`. `shopProfileSnapshot`/`notes`/`warrantyTermsSnapshot`/`documentSelection` stay top-level. Line items are resolved server-side, never trusted from the payload: a retail item's `name`/`sku`/`unitPriceCents` come from the product record via `productKey`, a repair/print item's `unitPriceCents`/`assignedEmployeeName`/`sourceTicketNumber` come from the ticket via `sourceTicketKey`, and an item's `totalCents` is always computed as `unitPriceCents * quantity - discountCents`. `name`/`unitPriceCents` are only required on an item when it has no `productKey`/`sourceTicketKey` to resolve from (an ad-hoc line). `subtotalCents`/`totalCents`/`changeDueCents` are likewise never sent \u2014 `subtotalCents` is the sum of the resolved items' `totalCents`, `totalCents` is `subtotalCents - discountCents`, and `changeDueCents` (when `payment.amountReceivedCents` is given) is `amountReceivedCents - totalCents`. An unresolvable `productKey`/`sourceTicketKey`/`customerKey` rejects the whole request before any write. `warnings` in the response surfaces any post-write side effect (stock decrement, ticket status, customer balance) that failed without rolling back the already-durable invoice/payment \u2014 see CLAUDE.md's billing module notes.\n\n**Requires the `billing:write` permission** in the token's `permissions` claim \u2014 granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role, 400 for an invalid `pricingAdjustments`/split-leg total, 404 if a `productKey`/`sourceTicketKey`/`customerKey` doesn't resolve."
+          },
+          "response": []
+        },
+        {
+          "name": "Complete Sale (partial credit + deposit)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const data = pm.response.json().data;",
+                  "    pm.environment.set(\"invoiceKey\", data.invoice.key);",
+                  "    console.log(`invoiceKey (${data.invoice.key}) saved`);",
+                  "}"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"staff\": {\n    \"cashierName\": \"Nimal Perera\"\n  },\n  \"customer\": {\n    \"customerKey\": \"{{customerKey}}\"\n  },\n  \"items\": [\n    {\n      \"productKey\": \"{{productKey}}\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    }\n  ],\n  \"payment\": {\n    \"paymentMethod\": \"credit\",\n    \"isCredit\": true,\n    \"amountReceivedCents\": 50000,\n    \"depositMethod\": \"cash\",\n    \"dueDate\": \"2026-12-31\"\n  },\n  \"shopProfileSnapshot\": {\n    \"tradingName\": \"TechFix Repairs\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2084,7 +2135,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"customer\": {\n    \"customerName\": \"Nadeesha Perera\",\n    \"customerPhone\": \"0711234567\"\n  },\n  \"jobType\": \"mug\",\n  \"quantity\": 25,\n  \"estimatedCostCents\": 500000,\n  \"materialCostCents\": 200000\n}",
+              "raw": "{\n  \"customer\": {\n    \"customerName\": \"Nadeesha Perera\",\n    \"customerPhone\": \"0711234567\"\n  },\n  \"jobType\": \"mug\",\n  \"quantity\": 25,\n  \"estimatedCostCents\": 500000,\n  \"materialCostCents\": 200000,\n  \"promisedReadyAt\": \"2026-09-15\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2137,7 +2188,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"status\": \"ready\"\n}",
+              "raw": "{\n  \"status\": \"ready\",\n  \"promisedReadyAt\": \"2026-09-15\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2281,7 +2332,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"customer\": {\n    \"customerName\": \"Kasun Silva\",\n    \"customerPhone\": \"0771234567\"\n  },\n  \"deviceModel\": \"iPhone 14\",\n  \"serialNumber\": \"C02XG2AVJHD3\",\n  \"issueDescription\": \"Cracked screen, touch unresponsive in top corner\",\n  \"estimatedCostCents\": 850000\n}",
+              "raw": "{\n  \"customer\": {\n    \"customerName\": \"Kasun Silva\",\n    \"customerPhone\": \"0771234567\"\n  },\n  \"deviceModel\": \"iPhone 14\",\n  \"serialNumber\": \"C02XG2AVJHD3\",\n  \"issueDescription\": \"Cracked screen, touch unresponsive in top corner\",\n  \"estimatedCostCents\": 850000,\n  \"promisedReadyAt\": \"2026-09-15\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2334,7 +2385,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"status\": \"ready\"\n}",
+              "raw": "{\n  \"status\": \"ready\",\n  \"promisedReadyAt\": \"2026-09-15\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2649,6 +2700,37 @@
               ]
             },
             "description": "Outstanding receivables tracking uncollected credit balances, overdue invoices, and customer aging details.\n\n**Requires reports:view permission** (Admin and Manager roles)."
+          },
+          "response": []
+        },
+        {
+          "name": "Dashboard Reminders",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/reports/reminders?dueWithinDays=7",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "reminders"
+              ],
+              "query": [
+                {
+                  "key": "dueWithinDays",
+                  "value": "7"
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Overdue and due-soon credit invoices and repair/print jobs for the dashboard attention list."
           },
           "response": []
         },
@@ -4071,19 +4153,19 @@
     {
       "key": "customerKey",
       "value": "cus_xxxxxxxxxxxxxxxx",
-      "description": "A customer's system-generated `key` (seeded via `cargo run --bin seed_customers` or created via Create Customer) — used to scope Billing > List Invoices and to link a sale to a customer in Complete Sale."
+      "description": "A customer's system-generated `key` (seeded via `cargo run --bin seed_customers` or created via Create Customer) \u2014 used to scope Billing > List Invoices and to link a sale to a customer in Complete Sale."
     },
     {
       "key": "employeeId",
       "value": "65f1a2b3c4d5e6f7a8b9c0d1",
       "type": "default",
-      "description": "An employee's MongoDB hex ObjectId — Create Employee test script saves it automatically; used by Get/Update/Delete Employee."
+      "description": "An employee's MongoDB hex ObjectId \u2014 Create Employee test script saves it automatically; used by Get/Update/Delete Employee."
     },
     {
       "key": "employeeKey",
       "value": "emp_xxxxxxxxxxxxxxxx",
       "type": "default",
-      "description": "An employee's system-generated business key (e.g. emp_...) — saved by Create Employee test script; used by Create/Update User and Reports > Employee Commission Itemized Lines."
+      "description": "An employee's system-generated business key (e.g. emp_...) \u2014 saved by Create Employee test script; used by Create/Update User and Reports > Employee Commission Itemized Lines."
     },
     {
       "key": "supplierId",

@@ -54,6 +54,17 @@ fn validate_status(status: &str) -> AppResult<()> {
     }
 }
 
+/// A promised-ready date, when given, must be a real `YYYY-MM-DD` date.
+fn validate_promised_ready_at(promised_ready_at: Option<&str>) -> AppResult<()> {
+    match promised_ready_at {
+        None => Ok(()),
+        Some(value) if chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok() => Ok(()),
+        Some(_) => Err(AppError::validation(
+            "Promised ready date must be a valid date (YYYY-MM-DD)",
+        )),
+    }
+}
+
 fn validate_job_type(job_type: &str) -> AppResult<()> {
     if VALID_JOB_TYPES.contains(&job_type) {
         Ok(())
@@ -215,6 +226,7 @@ pub async fn create_print_job(
 ) -> AppResult<PrintJob> {
     let status = body.status.unwrap_or_else(|| "received".to_string());
     validate_status(&status)?;
+    validate_promised_ready_at(body.promised_ready_at.as_deref())?;
 
     let (customer_name, customer_phone) = resolve_customer_name_phone(
         db,
@@ -267,6 +279,7 @@ pub async fn create_print_job(
         customer_phone,
         job_type: body.job_type,
         quantity: body.quantity,
+        promised_ready_at: body.promised_ready_at,
         status,
         estimated_cost_cents: body.estimated_cost_cents,
         material_cost_cents: body.material_cost_cents,
@@ -320,6 +333,7 @@ pub async fn update_print_job(
     let status = body.status.unwrap_or(existing.status);
 
     validate_status(&status)?;
+    validate_promised_ready_at(body.promised_ready_at.as_deref())?;
     validate_required_fields(&customer_name, &job_type, quantity, estimated_cost_cents)?;
 
     let mut set_doc = doc! {
@@ -337,6 +351,9 @@ pub async fn update_print_job(
         Some(phone) => set_doc.insert("customer_phone", phone),
         None => set_doc.insert("customer_phone", mongodb::bson::Bson::Null),
     };
+    if let Some(promised) = body.promised_ready_at {
+        set_doc.insert("promised_ready_at", promised);
+    }
     if let Some(mc) = body.material_cost_cents {
         set_doc.insert("material_cost_cents", mc);
     }

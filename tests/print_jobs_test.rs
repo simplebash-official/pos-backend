@@ -148,6 +148,56 @@ async fn create_print_job_reserves_ticket_number_and_defaults_status_to_received
         data["ticketNumber"]
     );
     assert!(data["key"].as_str().unwrap().starts_with("prn_"));
+    assert_eq!(data["isOverdue"], false);
+}
+
+#[tokio::test]
+async fn print_job_promised_ready_at_round_trips_and_drives_is_overdue() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let mut payload = sample_print_job_payload();
+    payload["promisedReadyAt"] = json!("2000-01-01");
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/print-jobs",
+        Some(payload),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    assert_eq!(body["data"]["promisedReadyAt"], "2000-01-01");
+    assert_eq!(body["data"]["isOverdue"], true);
+    let key = body["data"]["key"].as_str().unwrap().to_string();
+
+    let (_, body) = send_authed(
+        &app.router,
+        "PATCH",
+        &format!("/api/print-jobs/{key}"),
+        Some(json!({ "promisedReadyAt": "2999-12-31" })),
+        &token,
+    )
+    .await;
+    assert_eq!(body["data"]["isOverdue"], false);
+}
+
+#[tokio::test]
+async fn print_job_rejects_malformed_promised_ready_at() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let mut payload = sample_print_job_payload();
+    payload["promisedReadyAt"] = json!("2026/09/15");
+    let (status, _) = send_authed(
+        &app.router,
+        "POST",
+        "/api/print-jobs",
+        Some(payload),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -464,6 +514,7 @@ async fn seed_print_job_with_named(
             customer_phone: Some("0770000000".to_string()),
             job_type: "mug".to_string(),
             quantity: 1,
+            promised_ready_at: None,
             status: status.to_string(),
             estimated_cost_cents,
             material_cost_cents: None,

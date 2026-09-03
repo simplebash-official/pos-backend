@@ -203,9 +203,24 @@ pub(crate) async fn aggregate_stats(
                 },
                 { "$group": { "_id": null, "sum": { "$sum": "$total_cents" }, "count": { "$sum": 1 } } }
             ],
+            // Real money still owed: for every unpaid/part-paid invoice,
+            // total minus what has actually been paid against it (sale-time
+            // deposit + any later installments live in `payments`). Summing
+            // raw `total_cents` would overstate this once deposits exist.
             "outstanding": [
-                { "$match": { "$or": [ { "is_credit": true }, { "status": { "$in": ["pending", "partially_paid"] } } ] } },
-                { "$group": { "_id": null, "sum": { "$sum": "$total_cents" } } }
+                { "$match": { "status": { "$in": ["pending", "partially_paid"] } } },
+                { "$lookup": {
+                    "from": "payments",
+                    "localField": "key",
+                    "foreignField": "invoice_key",
+                    "as": "pmts",
+                } },
+                { "$project": {
+                    "balance_due": {
+                        "$max": [0, { "$subtract": ["$total_cents", { "$sum": "$pmts.amount_cents" }] }]
+                    }
+                } },
+                { "$group": { "_id": null, "sum": { "$sum": "$balance_due" } } }
             ],
         }
     }];
