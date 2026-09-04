@@ -4,6 +4,7 @@ pub mod billing;
 pub mod customers;
 pub mod documents;
 pub mod employees;
+pub mod imports;
 pub mod inventory;
 pub mod print_jobs;
 pub mod purchases;

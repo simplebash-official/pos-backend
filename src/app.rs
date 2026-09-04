@@ -163,6 +163,10 @@ pub fn build_router(state: AppState) -> Router {
         .nest(
             &format!("/{}", mod_names::USERS),
             modules::users::routes::router(),
+        )
+        .nest(
+            &format!("/{}", mod_names::IMPORTS),
+            modules::imports::routes::router(),
         );
 
     let (router, openapi) = OpenApiRouter::<AppState>::with_openapi(ApiDoc::openapi())

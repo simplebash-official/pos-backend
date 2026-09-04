@@ -13,3 +13,4 @@ pub const USERS: &str = "users";
 pub const EMPLOYEES: &str = "employees";
 pub const SYNC: &str = "sync";
 pub const SEQUENCES: &str = "sequences";
+pub const IMPORTS: &str = "imports";

@@ -4117,6 +4117,110 @@
           "response": []
         }
       ]
+    },
+    {
+      "name": "Imports",
+      "item": [
+        {
+          "name": "Process Import",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const data = pm.response.json().data;",
+                  "    pm.environment.set(\"importBatchKey\", data.key);",
+                  "    console.log(`importBatchKey set to ${data.key}`);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"target\": \"inventory\",\n  \"fileName\": \"inventory_sample.xlsx\",\n  \"fileType\": \"xlsx\",\n  \"fileSizeBytes\": 12450,\n  \"rows\": [\n    {\n      \"name\": \"USB-C Cable 1m\",\n      \"category\": \"Accessories\",\n      \"subcategory\": \"Cables\",\n      \"sellingPrice\": 450,\n      \"costPrice\": 200,\n      \"stockQuantity\": 25,\n      \"minStockThreshold\": 5\n    }\n  ],\n  \"options\": {\n    \"autoGenerateBarcodes\": true,\n    \"autoCreateCategories\": true\n  }\n}"
+            },
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/imports",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "imports"
+              ]
+            },
+            "description": "Submits a batch of extracted spreadsheet rows for server-side validation and database persistence. Requires CurrentUser with write permission for the target module (e.g. inventory:write for inventory)."
+          },
+          "response": []
+        },
+        {
+          "name": "List Imports",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/imports?target=inventory&page=1&limit=20",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "imports"
+              ],
+              "query": [
+                {
+                  "key": "target",
+                  "value": "inventory",
+                  "description": "Filter by target module (e.g. inventory)"
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "1-indexed page number"
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Items per page"
+                }
+              ]
+            },
+            "description": "Lists previous import batches with status, counts, and timestamps. Requires CurrentUser."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Import Batch",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/imports/{{importBatchKey}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "imports",
+                "{{importBatchKey}}"
+              ]
+            },
+            "description": "Retrieves full details of a specific import batch including any row-level error entries. Requires CurrentUser."
+          },
+          "response": []
+        }
+      ]
     }
   ],
   "auth": {
@@ -4207,6 +4311,11 @@
       "value": "64b000000000000000000000",
       "type": "default",
       "description": "A customer's Mongo hex ID \u2014 Create Customer's test script saves it automatically. Customer routes accept either this or {{customerKey}}."
+    },
+    {
+      "key": "importBatchKey",
+      "value": "imp_xxxxxxxxxxxxxxxx",
+      "description": "An import batch system-generated key (from Process Import / List Imports)."
     }
   ]
 }
