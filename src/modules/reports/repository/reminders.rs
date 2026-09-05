@@ -36,6 +36,10 @@ pub(crate) struct RemindersRaw {
     pub credit_due_soon_amount_cents: i64,
     pub jobs_overdue_count: u64,
     pub jobs_due_soon_count: u64,
+    pub total: u64,
+    pub page: u64,
+    pub limit: u64,
+    pub total_pages: u64,
 }
 
 /// `positive` = overdue by N days, `negative` = due in N days, `0` = today.
@@ -65,7 +69,9 @@ enum Bucket {
 pub(crate) async fn list_reminders(
     db: &Database,
     due_within_days: u32,
+    page: u64,
     limit: u64,
+    skip: u64,
 ) -> AppResult<RemindersRaw> {
     let today = Utc::now().date_naive();
     let window = due_within_days as i64;
@@ -81,6 +87,10 @@ pub(crate) async fn list_reminders(
         credit_due_soon_amount_cents: 0,
         jobs_overdue_count: 0,
         jobs_due_soon_count: 0,
+        total: 0,
+        page,
+        limit,
+        total_pages: 1,
     };
 
     // ---- Credit invoices ---------------------------------------------------
@@ -251,15 +261,42 @@ pub(crate) async fn list_reminders(
         }
     }
 
-    // Overdue first (most overdue at the top), then due-soon (soonest first):
-    // in both groups a larger `days_from_due` should come first.
-    overdue.sort_by_key(|e| std::cmp::Reverse(e.days_from_due));
-    due_soon.sort_by_key(|e| std::cmp::Reverse(e.days_from_due));
+    // Payment overdues first, then most overdue at the top;
+    // then due-soon (payment due soon first, then soonest first).
+    overdue.sort_by(|a, b| {
+        let is_a_credit = a.kind == ReminderKind::CreditOverdue;
+        let is_b_credit = b.kind == ReminderKind::CreditOverdue;
+        match (is_a_credit, is_b_credit) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => b.days_from_due.cmp(&a.days_from_due),
+        }
+    });
+    due_soon.sort_by(|a, b| {
+        let is_a_credit = a.kind == ReminderKind::CreditDueSoon;
+        let is_b_credit = b.kind == ReminderKind::CreditDueSoon;
+        match (is_a_credit, is_b_credit) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => b.days_from_due.cmp(&a.days_from_due),
+        }
+    });
 
-    let mut entries = overdue;
-    entries.extend(due_soon);
-    entries.truncate(limit as usize);
-    raw.entries = entries;
+    let mut all_entries = overdue;
+    all_entries.extend(due_soon);
+
+    let total = all_entries.len() as u64;
+    let total_pages = if total == 0 { 1 } else { total.div_ceil(limit) };
+
+    let paged_entries = all_entries
+        .into_iter()
+        .skip(skip as usize)
+        .take(limit as usize)
+        .collect();
+
+    raw.entries = paged_entries;
+    raw.total = total;
+    raw.total_pages = total_pages;
 
     Ok(raw)
 }

@@ -211,6 +211,16 @@ pub struct RemindersQuery {
     /// Max reminders returned in the merged list (headline counts still
     /// reflect the full set). Clamped to 1..=100; defaults to 20.
     pub limit: Option<u64>,
+    /// Page number (1-indexed). Defaults to 1.
+    pub page: Option<u64>,
+}
+
+fn default_one() -> u64 {
+    1
+}
+
+fn default_twenty() -> u64 {
+    20
 }
 
 /// What a single reminder is about.
@@ -271,6 +281,14 @@ pub struct RemindersResponse {
     pub jobs_overdue_count: u64,
     pub jobs_due_soon_count: u64,
     pub due_within_days: u32,
+    #[serde(default)]
+    pub total: u64,
+    #[serde(default = "default_one")]
+    pub page: u64,
+    #[serde(default = "default_twenty")]
+    pub limit: u64,
+    #[serde(default = "default_one")]
+    pub total_pages: u64,
 }
 
 /// Query parameters for Employee Commissions report.

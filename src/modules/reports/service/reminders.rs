@@ -5,7 +5,7 @@
 use mongodb::Database;
 
 use crate::{
-    core::error::AppResult,
+    core::{error::AppResult, utils::calculate_pagination},
     domain::reports::{RemindersQuery, RemindersResponse},
     modules::reports::repository,
 };
@@ -21,9 +21,9 @@ pub(crate) async fn get_reminders(
         .due_within_days
         .unwrap_or(DEFAULT_DUE_WITHIN_DAYS)
         .clamp(1, 30);
-    let limit = query.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, 100);
+    let (page, limit, skip) = calculate_pagination(query.page, query.limit, DEFAULT_LIMIT, 100);
 
-    let raw = repository::reminders::list_reminders(db, due_within_days, limit).await?;
+    let raw = repository::reminders::list_reminders(db, due_within_days, page, limit, skip).await?;
 
     Ok(RemindersResponse {
         reminders: raw.entries,
@@ -34,5 +34,9 @@ pub(crate) async fn get_reminders(
         jobs_overdue_count: raw.jobs_overdue_count,
         jobs_due_soon_count: raw.jobs_due_soon_count,
         due_within_days,
+        total: raw.total,
+        page: raw.page,
+        limit: raw.limit,
+        total_pages: raw.total_pages,
     })
 }
