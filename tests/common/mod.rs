@@ -248,6 +248,60 @@ pub async fn spawn_app_with_document_server_url(document_server_url: String) -> 
     }
 }
 
+/// Builds the router against an isolated, clean SQLite test database.
+#[allow(dead_code)]
+pub async fn spawn_app_sqlite() -> TestApp {
+    let mock_doc_server_url = start_mock_document_server().await;
+    spawn_app_sqlite_with_document_server_url(mock_doc_server_url).await
+}
+
+/// Same as `spawn_app_sqlite`, but pointing at a custom mock document-server URL.
+#[allow(dead_code)]
+pub async fn spawn_app_sqlite_with_document_server_url(document_server_url: String) -> TestApp {
+    dotenvy::dotenv().ok();
+
+    let mut config = Config::from_env().expect("invalid configuration for test run");
+    config.database_type = jana2u_pos_backend::core::config::DatabaseType::Sqlite;
+    let test_id = jana2u_pos_backend::core::id::generate_id("test");
+    let test_db_path = format!("data/test_{test_id}.db");
+    config.database_url = format!("sqlite://{test_db_path}?mode=rwc");
+
+    let db_handle = clients::db::connect_from_config(&config)
+        .await
+        .expect("failed to connect to test SQLite database");
+
+    config.document_server_url = document_server_url;
+    let config = Arc::new(config);
+    let document_server = Arc::new(clients::document_server::DocumentServerClient::new(
+        config.document_server_url.clone(),
+        config.document_server_api_key.clone(),
+    ));
+    let reports_engine = Arc::new(
+        jana2u_pos_backend::modules::reports::engine::AnalyticsEngine::new(db_handle.clone()),
+    );
+    let state = AppState {
+        config: config.clone(),
+        db: db_handle.clone(),
+        document_server,
+        reports_engine,
+    };
+
+    let mongo_client = match mongodb::Client::with_uri_str(&config.mongodb_uri).await {
+        Ok(client) => client,
+        Err(_) => mongodb::Client::with_uri_str("mongodb://localhost:27017")
+            .await
+            .expect("fallback mongo client"),
+    };
+    let db = mongo_client.database("jana2u_pos_test");
+
+    TestApp {
+        router: app::build_router(state),
+        db,
+        db_handle,
+        config,
+    }
+}
+
 /// Mints a JWT signed with the test app's own `jwt_secret`, carrying the
 /// given role and permission set — shared across every test file that gates
 /// a request behind `CurrentUser`/`AdminUser`/a specific permission without

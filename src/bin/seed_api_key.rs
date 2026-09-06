@@ -1,12 +1,8 @@
-use chrono::Utc;
-use jana2u_pos_backend::{
-    clients,
-    core::{config::Config, constants::prefixes, id::generate_id},
-};
-use mongodb::bson::doc;
-use rand::{RngExt, distr::Alphanumeric};
+use jana2u_pos_backend::{clients, core::config::Config, seeds};
 
-/// Generates a random API key and inserts it into the `api_keys` collection.
+/// Generates a random API key and inserts it into the `api_keys` table/collection.
+/// Safe to run against SQLite or MongoDB.
+///
 /// Run with: `cargo run --bin seed_api_key`
 #[tokio::main]
 async fn main() {
@@ -14,27 +10,12 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     let config = Config::from_env().expect("invalid configuration");
-    let db = clients::mongo::connect(&config.mongodb_uri, &config.mongodb_db_name)
+    let db = clients::db::connect_from_config(&config)
         .await
-        .expect("failed to connect to MongoDB");
+        .expect("failed to connect to database");
 
-    let secret_key: String = rand::rng()
-        .sample_iter(&Alphanumeric)
-        .take(48)
-        .map(char::from)
-        .collect();
-    let model_key = generate_id(prefixes::API_KEY);
-
-    let now_iso = Utc::now().to_rfc3339();
-    db.collection::<mongodb::bson::Document>("api_keys")
-        .insert_one(doc! {
-            "key": &model_key,
-            "secret": &secret_key,
-            "created_at": &now_iso,
-            "updated_at": &now_iso,
-        })
-        .await
-        .expect("failed to insert api key");
-
-    println!("seeded api key: key={model_key}, secret={secret_key}");
+    match seeds::api_key::seed_api_key(&db).await {
+        Ok(res) => println!("seeded api key: key={}, secret={}", res.key, res.secret),
+        Err(err) => panic!("failed to seed api key: {err}"),
+    }
 }

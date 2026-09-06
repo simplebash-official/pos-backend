@@ -385,7 +385,6 @@ CREATE TABLE IF NOT EXISTS login_sessions (
     key TEXT PRIMARY KEY,
     id TEXT NOT NULL,
     user_key TEXT NOT NULL,
-    user_id TEXT NOT NULL,
     name_at_login TEXT NOT NULL,
     email_at_login TEXT NOT NULL,
     role_at_login TEXT NOT NULL,
