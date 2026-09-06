@@ -36,6 +36,9 @@ pub struct Config {
     /// (unlike `mongodb_uri`/`jwt_secret`) since it's a business-tunable
     /// policy value, not a startup-integrity concern.
     pub return_window_days: i64,
+    /// Whether to automatically seed the database on startup if enabled.
+    /// Safe and idempotent (never overwrites existing data).
+    pub auto_seed: bool,
 }
 
 /// Why startup configuration failed to load. `main.rs` logs this and exits
@@ -111,6 +114,9 @@ impl Config {
             .ok()
             .and_then(|v| v.parse::<i64>().ok())
             .unwrap_or(30);
+        let auto_seed = env::var("AUTO_SEED")
+            .map(|v| v.eq_ignore_ascii_case("true") || v == "1" || v.eq_ignore_ascii_case("yes"))
+            .unwrap_or(false);
 
         Ok(Self {
             database_type,
@@ -124,6 +130,7 @@ impl Config {
             document_server_api_key,
             generated_documents_dir,
             return_window_days,
+            auto_seed,
         })
     }
 }

@@ -60,6 +60,7 @@ async fn setup_sqlite_app() -> SqliteTestContext {
         document_server_api_key: "test-doc-key".to_string(),
         generated_documents_dir: std::env::temp_dir().display().to_string(),
         return_window_days: 30,
+        auto_seed: false,
     };
 
     let config = Arc::new(config);

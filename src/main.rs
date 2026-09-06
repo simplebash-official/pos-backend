@@ -45,6 +45,25 @@ async fn main() {
         clients::indexes::ensure_indexes(mongo_db).await;
     }
 
+    if config.auto_seed {
+        tracing::info!("AUTO_SEED is enabled — checking and seeding database...");
+        match jana2u_pos_backend::seeds::seed_all(&db).await {
+            Ok(summary) => {
+                tracing::info!(
+                    admin = %summary.admin.message,
+                    providers = summary.providers.categories_created,
+                    suppliers = summary.suppliers.suppliers_created,
+                    customers = summary.customers.customers_created,
+                    products = summary.inventory.products_created,
+                    "Automated database seeding finished successfully"
+                );
+            }
+            Err(err) => {
+                tracing::error!(%err, "Automated database seeding encountered an error");
+            }
+        }
+    }
+
     let document_server = clients::document_server::DocumentServerClient::new(
         config.document_server_url.clone(),
         config.document_server_api_key.clone(),
