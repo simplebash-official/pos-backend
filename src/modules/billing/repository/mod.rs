@@ -431,7 +431,27 @@ pub(crate) async fn find_invoice_by_id_or_key(
     {
         return Ok(Some(doc));
     }
-    find_invoice_by_key(db, id_or_key).await
+    match db {
+        Db::Mongo(db) => Ok(invoices(db)
+            .find_one(doc! {
+                "$or": [
+                    { "key": id_or_key },
+                    { "invoice_number": id_or_key },
+                ]
+            })
+            .await?),
+        Db::Sqlite(pool) => {
+            let row_opt = sqlx::query(
+                "SELECT * FROM invoices WHERE (key = ? OR invoice_number = ?) AND deleted_at IS NULL",
+            )
+            .bind(id_or_key)
+            .bind(id_or_key)
+            .fetch_optional(pool)
+            .await?;
+
+            row_opt.map(|row| invoice_from_sqlite_row(&row)).transpose()
+        }
+    }
 }
 
 pub(crate) async fn list_invoices(

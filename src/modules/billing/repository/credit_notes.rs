@@ -228,6 +228,7 @@ pub(crate) async fn find_credit_note_by_id(
 }
 
 /// Look up a single credit note document by its unique model key (`cn_...`).
+#[allow(dead_code)]
 pub(crate) async fn find_credit_note_by_key(
     db: &Db,
     key: &str,
@@ -258,7 +259,29 @@ pub(crate) async fn find_credit_note_by_id_or_key(
     {
         return Ok(Some(doc));
     }
-    find_credit_note_by_key(db, id_or_key).await
+    match db {
+        Db::Mongo(db) => Ok(credit_notes(db)
+            .find_one(doc! {
+                "$or": [
+                    { "key": id_or_key },
+                    { "credit_note_number": id_or_key },
+                ]
+            })
+            .await?),
+        Db::Sqlite(pool) => {
+            let row_opt = sqlx::query(
+                "SELECT * FROM credit_notes WHERE (key = ? OR credit_note_number = ?) AND deleted_at IS NULL",
+            )
+            .bind(id_or_key)
+            .bind(id_or_key)
+            .fetch_optional(pool)
+            .await?;
+
+            row_opt
+                .map(|row| credit_note_from_sqlite_row(&row))
+                .transpose()
+        }
+    }
 }
 
 /// Lists credit note documents matching a filter, sorted newest first with pagination.

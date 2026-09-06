@@ -456,12 +456,17 @@ CREATE TABLE IF NOT EXISTS import_batches (
 CREATE TABLE IF NOT EXISTS generated_documents (
     key TEXT PRIMARY KEY,
     id TEXT NOT NULL,
-    template_key TEXT NOT NULL,
+    entity_key TEXT NOT NULL,
+    document_type TEXT NOT NULL,
     template_name TEXT NOT NULL,
+    template_key TEXT NOT NULL,
     file_path TEXT NOT NULL,
+    file_size_bytes INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_generated_documents_lookup ON generated_documents(entity_key, document_type, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS api_keys (
     key TEXT PRIMARY KEY,

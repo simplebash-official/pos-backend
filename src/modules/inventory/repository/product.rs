@@ -606,43 +606,36 @@ pub(crate) async fn adjust_product_stock_pipeline(
         }
         Db::Sqlite(pool) => {
             let id_str = id.to_hex();
-            let mut tx = pool.begin().await?;
-
-            let row = sqlx::query("SELECT * FROM products WHERE id = ? AND deleted_at IS NULL")
-                .bind(&id_str)
-                .fetch_optional(&mut *tx)
-                .await?;
-
-            let Some(row) = row else {
-                return Ok(None);
-            };
-
-            let mut doc = row_to_product_doc(&row)?;
-            let previous_stock = doc.stock_quantity;
-            let new_stock = previous_stock + delta;
-            if new_stock < 0 {
-                return Ok(None);
-            }
-
-            doc.stock_quantity = new_stock;
-            doc.updated_at = now;
-            doc.version += 1;
-
             let updated_at_iso = bson_to_iso(&now);
 
-            sqlx::query(
-                "UPDATE products SET stock_quantity = ?, updated_at = ?, version = ? WHERE id = ?",
+            // Atomic single-statement update with stock floor guard (stock_quantity + delta >= 0)
+            // and RETURNING * to eliminate multi-statement transaction concurrency deadlocks.
+            let row = sqlx::query(
+                r#"
+                UPDATE products
+                SET stock_quantity = stock_quantity + ?,
+                    updated_at = ?,
+                    version = version + 1
+                WHERE id = ?
+                  AND deleted_at IS NULL
+                  AND (stock_quantity + ? >= 0)
+                RETURNING *
+                "#,
             )
-            .bind(doc.stock_quantity)
+            .bind(delta)
             .bind(&updated_at_iso)
-            .bind(doc.version)
             .bind(&id_str)
-            .execute(&mut *tx)
+            .bind(delta)
+            .fetch_optional(pool)
             .await?;
 
-            tx.commit().await?;
-
-            Ok(Some((previous_stock, doc)))
+            if let Some(row) = row {
+                let updated = row_to_product_doc(&row)?;
+                let previous_stock = updated.stock_quantity - delta;
+                Ok(Some((previous_stock, updated)))
+            } else {
+                Ok(None)
+            }
         }
     }
 }

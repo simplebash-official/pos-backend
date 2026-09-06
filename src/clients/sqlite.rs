@@ -44,10 +44,81 @@ pub async fn connect(url: &str) -> Result<SqlitePool, sqlx::Error> {
     Ok(pool)
 }
 
-/// Runs embedded DDL schema migrations to create all tables and indexes.
+/// Runs embedded DDL schema migrations to create all tables and indexes,
+/// followed by automatic schema healing/migrations for existing databases.
 pub async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    // Run migrations first so legacy tables have required columns before SCHEMA_SQL creates indexes on them
+    migrate_schema(pool).await?;
     pool.execute(SCHEMA_SQL).await?;
+    migrate_schema(pool).await?;
     tracing::info!("SQLite database schema and indexes initialized");
+    Ok(())
+}
+
+/// Applies incremental migrations for legacy databases (e.g., removing deprecated columns).
+pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    // Check if 'login_sessions' table has a legacy 'user_id' column from earlier revisions
+    let columns: Vec<(i32, String)> =
+        sqlx::query_as("SELECT cid, name FROM pragma_table_info('login_sessions')")
+            .fetch_all(pool)
+            .await
+            .unwrap_or_default();
+
+    if columns.iter().any(|(_, name)| name == "user_id") {
+        tracing::info!("Migrating legacy column 'user_id' from 'login_sessions' table");
+        let _ = pool
+            .execute("ALTER TABLE login_sessions DROP COLUMN user_id")
+            .await;
+    }
+
+    // Check if 'generated_documents' table is missing required columns from earlier schema versions
+    let gen_doc_cols: Vec<(i32, String)> =
+        sqlx::query_as("SELECT cid, name FROM pragma_table_info('generated_documents')")
+            .fetch_all(pool)
+            .await
+            .unwrap_or_default();
+
+    if !gen_doc_cols.is_empty() {
+        if !gen_doc_cols.iter().any(|(_, name)| name == "entity_key") {
+            tracing::info!(
+                "Migrating 'generated_documents' table: adding missing 'entity_key' column"
+            );
+            let _ = pool
+                .execute(
+                    "ALTER TABLE generated_documents ADD COLUMN entity_key TEXT NOT NULL DEFAULT ''",
+                )
+                .await;
+        }
+        if !gen_doc_cols.iter().any(|(_, name)| name == "document_type") {
+            tracing::info!(
+                "Migrating 'generated_documents' table: adding missing 'document_type' column"
+            );
+            let _ = pool
+                .execute(
+                    "ALTER TABLE generated_documents ADD COLUMN document_type TEXT NOT NULL DEFAULT ''",
+                )
+                .await;
+        }
+        if !gen_doc_cols
+            .iter()
+            .any(|(_, name)| name == "file_size_bytes")
+        {
+            tracing::info!(
+                "Migrating 'generated_documents' table: adding missing 'file_size_bytes' column"
+            );
+            let _ = pool
+                .execute(
+                    "ALTER TABLE generated_documents ADD COLUMN file_size_bytes INTEGER NOT NULL DEFAULT 0",
+                )
+                .await;
+        }
+        let _ = pool
+            .execute(
+                "CREATE INDEX IF NOT EXISTS idx_generated_documents_lookup ON generated_documents(entity_key, document_type, created_at DESC)",
+            )
+            .await;
+    }
+
     Ok(())
 }
 

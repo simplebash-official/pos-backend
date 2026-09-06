@@ -119,6 +119,33 @@ async fn send_authed(
     execute(router, builder.body(body_bytes).unwrap()).await
 }
 
+async fn execute_raw(
+    router: &axum::Router,
+    request: Request<Body>,
+) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
+    let response = router.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let headers = response.headers().clone();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap()
+        .to_vec();
+    (status, headers, bytes)
+}
+
+async fn send_authed_raw(
+    router: &axum::Router,
+    method: &str,
+    uri: &str,
+    token: &str,
+) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
+    let builder = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(AUTHORIZATION, format!("Bearer {token}"));
+    execute_raw(router, builder.body(Body::empty()).unwrap()).await
+}
+
 fn admin_token(config: &Config) -> String {
     common::mint_token(
         config,
@@ -218,6 +245,47 @@ async fn test_sqlite_complete_pos_lifecycle() {
         sku.starts_with("ELE-SMA-"),
         "SKU should follow derived prefix, got {sku}"
     );
+
+    // Create 2 additional products to test multi-item cart checkout concurrency
+    let (status, prod2_res) = send_authed(
+        &ctx.router,
+        "POST",
+        "/api/inventory/products",
+        Some(json!({
+            "name": "USB Ring Light 10-inch with Phone Holder",
+            "categoryKey": category_key,
+            "subcategoryKey": subcategory_key,
+            "sellingPriceCents": 2499,
+            "costPriceCents": 1500,
+            "stockQuantity": 20,
+            "minStockThreshold": 5
+        })),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let product_id_2 = prod2_res["data"]["id"].as_str().unwrap().to_string();
+    let product_key_2 = prod2_res["data"]["key"].as_str().unwrap().to_string();
+
+    let (status, prod3_res) = send_authed(
+        &ctx.router,
+        "POST",
+        "/api/inventory/products",
+        Some(json!({
+            "name": "Silicone Sport Band 20mm (Black)",
+            "categoryKey": category_key,
+            "subcategoryKey": subcategory_key,
+            "sellingPriceCents": 799,
+            "costPriceCents": 300,
+            "stockQuantity": 15,
+            "minStockThreshold": 2
+        })),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let product_id_3 = prod3_res["data"]["id"].as_str().unwrap().to_string();
+    let product_key_3 = prod3_res["data"]["key"].as_str().unwrap().to_string();
 
     // 4. Stock Adjustment
     let (status, adj_res) = send_authed(
@@ -328,7 +396,7 @@ async fn test_sqlite_complete_pos_lifecycle() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(prod_check["data"]["stockQuantity"], 30);
 
-    // 8. Billing Sale Completion (Transaction: Invoice + Payment + Stock decrement)
+    // 8. Billing Sale Completion (Multi-item cart: Invoice + Payment + Stock decrement for 3 items)
     let (status, sale_res) = send_authed(
         &ctx.router,
         "POST",
@@ -346,12 +414,24 @@ async fn test_sqlite_complete_pos_lifecycle() {
                     "quantity": 2,
                     "discountCents": 0,
                     "sourceType": "retail"
+                },
+                {
+                    "productKey": product_key_2,
+                    "quantity": 1,
+                    "discountCents": 0,
+                    "sourceType": "retail"
+                },
+                {
+                    "productKey": product_key_3,
+                    "quantity": 3,
+                    "discountCents": 0,
+                    "sourceType": "retail"
                 }
             ],
             "payment": {
                 "paymentMethod": "cash",
                 "isCredit": false,
-                "amountReceivedCents": 200000
+                "amountReceivedCents": 300000
             },
             "shopProfileSnapshot": {
                 "name": "Jana2u Shop",
@@ -362,19 +442,28 @@ async fn test_sqlite_complete_pos_lifecycle() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "billing sale failed: {sale_res}");
+    let warnings = sale_res["data"]["warnings"].as_array().unwrap();
+    assert_eq!(
+        warnings.len(),
+        0,
+        "multi-item sale must complete with 0 warnings, got: {warnings:?}"
+    );
+
     let invoice_key = sale_res["data"]["invoice"]["key"]
         .as_str()
         .unwrap()
         .to_string();
+    let invoice_number = sale_res["data"]["invoice"]["invoiceNumber"]
+        .as_str()
+        .unwrap()
+        .to_string();
     assert!(
-        sale_res["data"]["invoice"]["invoiceNumber"]
-            .as_str()
-            .unwrap()
-            .starts_with("INV-"),
+        invoice_number.starts_with("INV-"),
         "Invoice number should start with INV-"
     );
 
-    // Check that stock was decremented from 30 to 28
+    // Check that stock was decremented accurately across all 3 products:
+    // Product 1: 30 -> 28
     let (status, prod_after_sale) = send_authed(
         &ctx.router,
         "GET",
@@ -385,6 +474,30 @@ async fn test_sqlite_complete_pos_lifecycle() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(prod_after_sale["data"]["stockQuantity"], 28);
+
+    // Product 2: 20 -> 19
+    let (status, prod2_after_sale) = send_authed(
+        &ctx.router,
+        "GET",
+        &format!("/api/inventory/products/{product_id_2}"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(prod2_after_sale["data"]["stockQuantity"], 19);
+
+    // Product 3: 15 -> 12
+    let (status, prod3_after_sale) = send_authed(
+        &ctx.router,
+        "GET",
+        &format!("/api/inventory/products/{product_id_3}"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(prod3_after_sale["data"]["stockQuantity"], 12);
 
     // 9. Credit Note (Return 1 item, restores 1 stock)
     let (status, cn_res) = send_authed(
@@ -407,11 +520,13 @@ async fn test_sqlite_complete_pos_lifecycle() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "credit note failed: {cn_res}");
+    let credit_note_key = cn_res["data"]["key"].as_str().unwrap().to_string();
+    let credit_note_number = cn_res["data"]["creditNoteNumber"]
+        .as_str()
+        .unwrap()
+        .to_string();
     assert!(
-        cn_res["data"]["creditNoteNumber"]
-            .as_str()
-            .unwrap()
-            .starts_with("CN-"),
+        credit_note_number.starts_with("CN-"),
         "Credit note number should start with CN-"
     );
 
@@ -427,7 +542,72 @@ async fn test_sqlite_complete_pos_lifecycle() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(prod_after_return["data"]["stockQuantity"], 29);
 
-    // 10. Reports Engine Feeds
+    // 10. Document Generation & Caching (Invoice & Credit Note)
+    // 10a. Render A4 Invoice by invoice_key
+    let (status, headers, a4_bytes) = send_authed_raw(
+        &ctx.router,
+        "GET",
+        &format!("/api/billing/invoices/{invoice_key}/documents/a4-invoice"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        headers.get("content-type").unwrap(),
+        "application/pdf",
+        "expected application/pdf content-type"
+    );
+    assert!(!a4_bytes.is_empty(), "PDF bytes should not be empty");
+
+    // 10b. Render A4 Invoice by invoice_number (verifies lookup by sequence number & cache hit)
+    let (status, headers, a4_cached_bytes) = send_authed_raw(
+        &ctx.router,
+        "GET",
+        &format!("/api/billing/invoices/{invoice_number}/documents/a4-invoice"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers.get("content-type").unwrap(), "application/pdf");
+    assert_eq!(a4_cached_bytes, a4_bytes, "cached PDF bytes should match");
+
+    // 10c. Render Thermal Receipt
+    let (status, headers, receipt_bytes) = send_authed_raw(
+        &ctx.router,
+        "GET",
+        &format!("/api/billing/invoices/{invoice_key}/documents/thermal-receipt?paperWidthMm=80"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers.get("content-type").unwrap(), "application/pdf");
+    assert!(!receipt_bytes.is_empty());
+
+    // 10d. Render Credit Note by credit_note_key
+    let (status, headers, cn_bytes) = send_authed_raw(
+        &ctx.router,
+        "GET",
+        &format!("/api/billing/credit-notes/{credit_note_key}/documents/credit-note"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers.get("content-type").unwrap(), "application/pdf");
+    assert!(!cn_bytes.is_empty());
+
+    // 10e. Render Credit Note by credit_note_number
+    let (status, headers, cn_cached_bytes) = send_authed_raw(
+        &ctx.router,
+        "GET",
+        &format!("/api/billing/credit-notes/{credit_note_number}/documents/credit-note"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers.get("content-type").unwrap(), "application/pdf");
+    assert_eq!(cn_cached_bytes, cn_bytes);
+
+    // 11. Reports Engine Feeds
     let (status, dashboard) = send_authed(
         &ctx.router,
         "GET",
@@ -455,7 +635,7 @@ async fn test_sqlite_complete_pos_lifecycle() {
     assert!(feed["data"]["overview"].is_object());
     assert!(feed["data"]["overview"]["summary"].is_object());
 
-    // 11. Sync Changes
+    // 12. Sync Changes
     let (status, sync_res) = send_authed(
         &ctx.router,
         "GET",
@@ -470,4 +650,170 @@ async fn test_sqlite_complete_pos_lifecycle() {
         !changes.is_empty(),
         "Changelog should contain sync mutations"
     );
+}
+
+#[tokio::test]
+async fn test_sqlite_legacy_user_id_schema_migration() {
+    dotenvy::dotenv().ok();
+    let db_path = std::env::temp_dir().join(format!("pos_legacy_test_{}.db", Uuid::new_v4()));
+    let db_url = format!("sqlite://{}?mode=rwc", db_path.display());
+
+    let options: sqlx::sqlite::SqliteConnectOptions = db_url.parse().unwrap();
+    let options = options.create_if_missing(true);
+    let pool = sqlx::SqlitePool::connect_with(options).await.unwrap();
+
+    // 1. Artificially create legacy schema containing user_id TEXT NOT NULL
+    sqlx::query(
+        r#"
+        CREATE TABLE login_sessions (
+            key TEXT PRIMARY KEY,
+            id TEXT NOT NULL,
+            user_key TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            name_at_login TEXT NOT NULL,
+            email_at_login TEXT NOT NULL,
+            role_at_login TEXT NOT NULL,
+            ip_address TEXT,
+            user_agent TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // 2. Run init_db which must automatically heal and drop legacy user_id
+    clients::sqlite::init_db(&pool).await.unwrap();
+
+    // 3. Verify user_id is dropped
+    let columns: Vec<(i32, String)> =
+        sqlx::query_as("SELECT cid, name FROM pragma_table_info('login_sessions')")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+
+    assert!(
+        !columns.iter().any(|(_, name)| name == "user_id"),
+        "legacy user_id column should have been dropped by migrate_schema"
+    );
+
+    // 4. Test insert into login_sessions with current schema (no user_id) succeeds without constraint failure
+    sqlx::query(
+        r#"
+        INSERT INTO login_sessions (
+            id, key, user_key, name_at_login, email_at_login, role_at_login,
+            ip_address, user_agent, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "#,
+    )
+    .bind("507f1f77bcf86cd799439011")
+    .bind("ses_test123456789")
+    .bind("usr_test123456789")
+    .bind("Admin Test")
+    .bind("admin@test.com")
+    .bind("admin")
+    .bind("127.0.0.1")
+    .bind("TestAgent")
+    .bind("2026-09-06T10:00:00Z")
+    .bind("2026-09-06T10:00:00Z")
+    .execute(&pool)
+    .await
+    .expect("INSERT INTO login_sessions without user_id must succeed after migration");
+
+    // Clean up temp database
+    let _ = std::fs::remove_file(&db_path);
+}
+
+#[tokio::test]
+async fn test_sqlite_generated_documents_schema_migration() {
+    dotenvy::dotenv().ok();
+    let db_path =
+        std::env::temp_dir().join(format!("pos_gen_doc_migration_test_{}.db", Uuid::new_v4()));
+    let db_url = format!("sqlite://{}?mode=rwc", db_path.display());
+
+    let options: sqlx::sqlite::SqliteConnectOptions = db_url.parse().unwrap();
+    let options = options.create_if_missing(true);
+    let pool = sqlx::SqlitePool::connect_with(options).await.unwrap();
+
+    // 1. Artificially create legacy generated_documents schema missing entity_key, document_type, file_size_bytes
+    sqlx::query(
+        r#"
+        CREATE TABLE generated_documents (
+            key TEXT PRIMARY KEY,
+            id TEXT NOT NULL,
+            template_key TEXT NOT NULL,
+            template_name TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // 2. Run init_db which must automatically heal and add missing columns & index
+    clients::sqlite::init_db(&pool).await.unwrap();
+
+    // 3. Verify entity_key, document_type, and file_size_bytes are added
+    let columns: Vec<(i32, String)> =
+        sqlx::query_as("SELECT cid, name FROM pragma_table_info('generated_documents')")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+
+    assert!(
+        columns.iter().any(|(_, name)| name == "entity_key"),
+        "entity_key column should have been added by migrate_schema"
+    );
+    assert!(
+        columns.iter().any(|(_, name)| name == "document_type"),
+        "document_type column should have been added by migrate_schema"
+    );
+    assert!(
+        columns.iter().any(|(_, name)| name == "file_size_bytes"),
+        "file_size_bytes column should have been added by migrate_schema"
+    );
+
+    // 4. Test SELECT query with all columns works without database error
+    let row_count: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)
+        FROM generated_documents
+        WHERE entity_key = 'inv_123' AND document_type = 'a4-invoice'
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("SELECT on generated_documents with entity_key must succeed");
+    assert_eq!(row_count, 0);
+
+    // 5. Test INSERT into generated_documents with all 10 columns succeeds
+    sqlx::query(
+        r#"
+        INSERT INTO generated_documents (
+            key, id, entity_key, document_type, template_name, template_key,
+            file_path, file_size_bytes, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "#,
+    )
+    .bind("doc_test123456789")
+    .bind("507f1f77bcf86cd799439011")
+    .bind("inv_test123456789")
+    .bind("a4-invoice")
+    .bind("a4-invoice")
+    .bind("tpl_a4_invoice")
+    .bind("inv_test123456789/a4-invoice.pdf")
+    .bind(1024_i64)
+    .bind("2026-09-06T10:00:00Z")
+    .bind("2026-09-06T10:00:00Z")
+    .execute(&pool)
+    .await
+    .expect("INSERT INTO generated_documents must succeed after migration");
+
+    // Clean up temp database
+    let _ = std::fs::remove_file(&db_path);
 }

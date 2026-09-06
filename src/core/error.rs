@@ -246,16 +246,19 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, code, message, details) = self.status_code_code_message_and_details();
 
-        // 5xx failures are unexpected (Mongo down, a bug) — log them
-        // server-side since the client only sees the generic message, not
-        // the internal detail that ended up in `message` here.
-        if status.is_server_error() {
+        let client_message = if status.is_server_error() {
+            // 5xx failures are unexpected — log the technical detail server-side
             tracing::error!(code = %code, error = %message, "internal server error");
-        }
+
+            // Sanitize message so technical driver strings, SQL errors, or stack details never leak to clients
+            sanitize_server_error_message(&message)
+        } else {
+            message
+        };
 
         let body = ErrorResponse {
             success: false,
-            message,
+            message: client_message,
             code,
             status_code: status.as_u16(),
             details,
@@ -265,46 +268,75 @@ impl IntoResponse for AppError {
     }
 }
 
+/// Sanitizes 5xx server messages to prevent internal driver or database details from leaking to clients.
+fn sanitize_server_error_message(msg: &str) -> String {
+    let lower = msg.to_lowercase();
+    if msg.trim().is_empty()
+        || lower.contains("error returned from database")
+        || lower.contains("constraint failed")
+        || lower.contains("syntax error")
+        || lower.contains("connection refused")
+        || lower.contains("sqlx")
+        || lower.contains("sqlite")
+        || lower.contains("mongodb")
+        || lower.contains("bson")
+        || lower.contains("not null")
+        || lower.contains("foreign key")
+        || lower.contains("unique constraint")
+        || lower.contains("table info")
+        || lower.contains("driver")
+        || lower.contains("no such table")
+        || lower.contains("no such column")
+        || lower.contains("duplicate key")
+        || lower.contains("broken pipe")
+        || lower.contains("timeout")
+    {
+        "An unexpected internal server error occurred. Please try again later or contact support."
+            .to_string()
+    } else {
+        msg.to_string()
+    }
+}
+
 // Lets handlers `?`-propagate a Mongo driver error directly into an
 // `AppResult` instead of matching on it at every call site. Collapsed to
-// `Internal` because a raw driver error (connection drop, query error) is
-// never something the caller can act on — it's always a 500.
+// `Internal` with full technical details logged on the server.
 impl From<mongodb::error::Error> for AppError {
     fn from(err: mongodb::error::Error) -> Self {
-        AppError::internal(err.to_string())
+        tracing::error!(error = %err, "database error (mongodb)");
+        AppError::internal("A database error occurred. Please try again later.")
     }
 }
 
 impl From<sqlx::Error> for AppError {
     fn from(err: sqlx::Error) -> Self {
-        AppError::internal(err.to_string())
+        tracing::error!(error = %err, "database error (sqlite)");
+        AppError::internal("A database error occurred. Please try again later.")
     }
 }
 
-// Same idea for JWT decode failures (expired/malformed/wrong-signature
-// token) — always means "the caller isn't authenticated", so this maps to
-// `Unauthorized` rather than distinguishing the underlying JWT error kind.
+// JWT decode failures (expired/malformed/wrong-signature token) — always means
+// "the caller isn't authenticated", so this maps to a clean `Unauthorized` message.
 impl From<jsonwebtoken::errors::Error> for AppError {
     fn from(err: jsonwebtoken::errors::Error) -> Self {
-        AppError::unauthorized(err.to_string())
+        tracing::warn!(error = %err, "JWT authentication failure");
+        AppError::unauthorized("Invalid or expired authentication token. Please log in again.")
     }
 }
 
-// Same idea for BSON (de)serialization failures against a document we built
-// or read ourselves (e.g. deserializing an aggregation pipeline result) —
-// never something a caller can act on, always a 500.
+// BSON (de)serialization failures against a document we built or read ourselves.
 impl From<bson::error::Error> for AppError {
     fn from(err: bson::error::Error) -> Self {
-        AppError::internal(err.to_string())
+        tracing::error!(error = %err, "BSON serialization error");
+        AppError::internal("An error occurred while processing data. Please try again.")
     }
 }
 
-// Same idea for JSON serialization of a value we constructed ourselves
-// (e.g. `modules::sync` rendering a hydrated DTO into the changes envelope).
-// A failure here is a bug in our own types, never bad caller input.
+// JSON serialization of a value we constructed ourselves.
 impl From<serde_json::Error> for AppError {
     fn from(err: serde_json::Error) -> Self {
-        AppError::internal(err.to_string())
+        tracing::error!(error = %err, "JSON serialization error");
+        AppError::internal("An error occurred while processing data. Please try again.")
     }
 }
 

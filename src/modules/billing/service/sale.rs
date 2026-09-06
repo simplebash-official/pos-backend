@@ -683,11 +683,24 @@ pub async fn complete_sale(
     // `warnings` no longer matters (D4: this section only ever collects
     // warnings, never fails the request), so collecting results after the
     // fact is equivalent to the old sequential push.
-    let side_effect_warnings: Vec<Option<String>> =
-        futures_util::future::join_all(resolved_items.iter().map(|item| {
-            apply_line_item_side_effects(db, item, &resolved_products, &inserted_invoice)
-        }))
-        .await;
+    let side_effect_warnings: Vec<Option<String>> = match db {
+        Db::Mongo(_) => {
+            futures_util::future::join_all(resolved_items.iter().map(|item| {
+                apply_line_item_side_effects(db, item, &resolved_products, &inserted_invoice)
+            }))
+            .await
+        }
+        Db::Sqlite(_) => {
+            let mut results = Vec::with_capacity(resolved_items.len());
+            for item in &resolved_items {
+                results.push(
+                    apply_line_item_side_effects(db, item, &resolved_products, &inserted_invoice)
+                        .await,
+                );
+            }
+            results
+        }
+    };
     warnings.extend(side_effect_warnings.into_iter().flatten());
 
     if let Some(customer_key) = &customer_key {
