@@ -1,7 +1,7 @@
 use chrono::{Duration, Utc};
-use mongodb::Database;
 
 use crate::{
+    clients::db::Db,
     core::{
         constants::{codes, prefixes},
         error::{AppError, AppResult},
@@ -12,7 +12,7 @@ use crate::{
 };
 
 pub async fn reserve_sequence(
-    db: &Database,
+    db: &Db,
     name: String,
     req: ReserveSequenceRequest,
 ) -> AppResult<SequenceReservationResponse> {

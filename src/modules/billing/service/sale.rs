@@ -11,12 +11,10 @@
 
 use std::collections::HashMap;
 
-use mongodb::{
-    Database,
-    bson::{DateTime as BsonDateTime, doc, oid::ObjectId},
-};
+use mongodb::bson::{DateTime as BsonDateTime, doc, oid::ObjectId};
 
 use crate::{
+    clients::db::Db,
     core::{
         calculations,
         constants::{codes, prefixes},
@@ -173,7 +171,7 @@ fn validate_pricing_adjustments(adjustments: &PricingAdjustments) -> AppResult<(
 /// step costs roughly one round trip's worth of latency regardless of cart
 /// size, not N.
 pub(crate) async fn resolve_sale_items(
-    db: &Database,
+    db: &Db,
     items: &[CreateSaleItemRequest],
 ) -> AppResult<(Vec<InvoiceItem>, HashMap<String, Product>)> {
     let retail_product_keys: Vec<String> = items
@@ -199,7 +197,7 @@ pub(crate) async fn resolve_sale_items(
 }
 
 pub(crate) async fn resolve_sale_item(
-    db: &Database,
+    db: &Db,
     item: &CreateSaleItemRequest,
     products: &HashMap<String, Product>,
 ) -> AppResult<InvoiceItem> {
@@ -365,7 +363,7 @@ pub(crate) async fn resolve_sale_item(
 /// sequentially. Returns `Some(warning)` on a non-fatal failure, `None` on
 /// success; never fails the request itself (D4).
 async fn apply_line_item_side_effects(
-    db: &Database,
+    db: &Db,
     item: &InvoiceItem,
     resolved_products: &HashMap<String, Product>,
     inserted_invoice: &InvoiceDocument,
@@ -465,7 +463,7 @@ async fn apply_line_item_side_effects(
 }
 
 pub async fn complete_sale(
-    db: &Database,
+    db: &Db,
     body: CreateSaleRequest,
     cashier_id: String,
     device_id: Option<String>,
@@ -730,7 +728,7 @@ pub async fn complete_sale(
 /// has been recorded (reversing partial credit repayments is out of scope
 /// for this version).
 pub async fn void_invoice(
-    db: &Database,
+    db: &Db,
     id_or_key: &str,
     body: VoidInvoiceRequest,
     voided_by: String,
@@ -873,11 +871,7 @@ pub async fn void_invoice(
 /// unless the invoice is `Paid` and has no open (non-voided) credit notes
 /// against it; re-queries `credit_notes` live for that guard rather than
 /// trusting `Invoice.credit_note_count` alone.
-pub async fn close_invoice(
-    db: &Database,
-    id_or_key: &str,
-    closed_by: String,
-) -> AppResult<Invoice> {
+pub async fn close_invoice(db: &Db, id_or_key: &str, closed_by: String) -> AppResult<Invoice> {
     let existing = repository::find_invoice_by_id_or_key(db, id_or_key)
         .await?
         .ok_or_else(|| {

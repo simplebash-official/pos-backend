@@ -3,12 +3,10 @@
 // a `StockMovement` audit record — the two collections are always written
 // together from here, never independently.
 
-use mongodb::{
-    Database,
-    bson::{DateTime as BsonDateTime, doc, oid::ObjectId},
-};
+use mongodb::bson::{DateTime as BsonDateTime, doc, oid::ObjectId};
 
 use crate::{
+    clients::db::Db,
     core::{
         constants::{codes, prefixes},
         error::{AppError, AppResult},
@@ -35,7 +33,7 @@ use crate::{
 /// stock is ever mutated, so every caller gets the same guard and audit
 /// trail for free.
 pub(crate) async fn apply_stock_delta(
-    db: &Database,
+    db: &Db,
     id: ObjectId,
     delta: i64,
     movement_type: StockMovementType,
@@ -108,7 +106,7 @@ pub(crate) async fn apply_stock_delta(
 /// pre-adjustment quantity so a client can display the change without a
 /// second request).
 pub(crate) async fn adjust_stock(
-    db: &Database,
+    db: &Db,
     id: ObjectId,
     body: StockAdjustmentRequest,
 ) -> AppResult<StockAdjustmentResponse> {
@@ -138,7 +136,7 @@ pub(crate) async fn adjust_stock(
 }
 
 /// Products at or below their configured reorder threshold.
-pub(crate) async fn low_stock(db: &Database) -> AppResult<LowStockResponse> {
+pub(crate) async fn low_stock(db: &Db) -> AppResult<LowStockResponse> {
     let documents = repository::product::find_low_stock_products(db).await?;
 
     let items: Vec<LowStockItem> = documents
@@ -165,10 +163,7 @@ pub(crate) async fn low_stock(db: &Database) -> AppResult<LowStockResponse> {
 /// The audit-trail history for one product. 404s if the product itself
 /// doesn't exist (rather than just returning an empty list), so a typo'd
 /// id is distinguishable from a real product with no movements yet.
-pub(crate) async fn product_movements(
-    db: &Database,
-    id: ObjectId,
-) -> AppResult<StockMovementsResponse> {
+pub(crate) async fn product_movements(db: &Db, id: ObjectId) -> AppResult<StockMovementsResponse> {
     if repository::product::find_product_by_id(db, id)
         .await?
         .is_none()
@@ -190,7 +185,7 @@ pub(crate) async fn product_movements(
 
 /// Unfiltered, paginated listing of all stock movements for delta/offline sync.
 pub(crate) async fn list_stock_movements(
-    db: &Database,
+    db: &Db,
     query: StockMovementListQuery,
 ) -> AppResult<StockMovementListResponse> {
     let mut filter = doc! { "deleted_at": { "$exists": false } };

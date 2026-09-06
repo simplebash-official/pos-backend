@@ -3,4 +3,4 @@
 // (`Config`, `ConfigError`) even if how the values are parsed changes.
 mod env;
 
-pub use env::{Config, ConfigError};
+pub use env::{Config, ConfigError, DatabaseType};

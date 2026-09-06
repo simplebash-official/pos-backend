@@ -6,12 +6,10 @@
 
 use std::collections::HashMap;
 
-use mongodb::{
-    Database,
-    bson::{DateTime as BsonDateTime, doc},
-};
+use mongodb::bson::{DateTime as BsonDateTime, doc};
 
 use crate::{
+    clients::db::Db,
     core::{
         constants::{codes, prefixes},
         error::{AppError, AppResult},
@@ -33,7 +31,7 @@ use crate::{
 
 /// Lists links scoped to a supplier, a product, their intersection, or all links paginated.
 pub async fn list_links(
-    db: &Database,
+    db: &Db,
     query: SupplierProductLinkQuery,
 ) -> AppResult<SupplierProductListResponse> {
     let mut filter = doc! { "deleted_at": { "$exists": false } };
@@ -80,7 +78,7 @@ pub async fn list_links(
 /// updates its `costPriceCents`/`notes` in place rather than erroring on a
 /// duplicate (matching the frontend's upsert contract for this endpoint).
 pub async fn upsert_link(
-    db: &Database,
+    db: &Db,
     body: UpsertSupplierProductLinkRequest,
 ) -> AppResult<SupplierProductLink> {
     if let Some(cost_price_cents) = body.cost_price_cents
@@ -129,11 +127,7 @@ pub async fn upsert_link(
 
 /// Unlinks a supplier from a product, 404ing with
 /// `SUPPLIER_PRODUCT_LINK_NOT_FOUND` if no such link exists.
-pub(crate) async fn delete_link(
-    db: &Database,
-    supplier_key: &str,
-    product_key: &str,
-) -> AppResult<()> {
+pub(crate) async fn delete_link(db: &Db, supplier_key: &str, product_key: &str) -> AppResult<()> {
     repository::delete_link(db, supplier_key, product_key)
         .await?
         .ok_or_else(|| {
@@ -150,7 +144,7 @@ pub(crate) async fn delete_link(
 /// the supplier's existing links and re-inserts the new set — preserving
 /// `costPriceCents`/`notes` for any product key that already had a link.
 pub(crate) async fn replace_links_for_supplier(
-    db: &Database,
+    db: &Db,
     supplier_key: String,
     body: BulkReplaceLinksRequest,
 ) -> AppResult<Vec<SupplierProductLink>> {
@@ -207,13 +201,13 @@ pub(crate) async fn replace_links_for_supplier(
 }
 
 /// Cascade entry point called from `suppliers::service::delete_supplier`.
-pub(crate) async fn delete_links_for_supplier(db: &Database, supplier_key: &str) -> AppResult<u64> {
+pub(crate) async fn delete_links_for_supplier(db: &Db, supplier_key: &str) -> AppResult<u64> {
     repository::delete_links_by_supplier(db, supplier_key).await
 }
 
 /// Cascade entry point called from
 /// `inventory::service::product::delete_product`/`delete_products`.
-pub(crate) async fn delete_links_for_product(db: &Database, product_key: &str) -> AppResult<u64> {
+pub(crate) async fn delete_links_for_product(db: &Db, product_key: &str) -> AppResult<u64> {
     repository::delete_links_by_product(db, product_key).await
 }
 

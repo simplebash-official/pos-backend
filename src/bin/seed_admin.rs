@@ -25,9 +25,9 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     let config = Config::from_env().expect("invalid configuration");
-    let db = clients::mongo::connect(&config.mongodb_uri, &config.mongodb_db_name)
+    let db = clients::db::connect_from_config(&config)
         .await
-        .expect("failed to connect to MongoDB");
+        .expect("failed to connect to database");
 
     let email =
         env::var("SEED_ADMIN_EMAIL").expect("SEED_ADMIN_EMAIL must be set (see .env.example)");

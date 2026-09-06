@@ -12,12 +12,10 @@ pub mod payments;
 pub(crate) mod print_payload;
 pub mod sale;
 
-use mongodb::{
-    Database,
-    bson::{DateTime as BsonDateTime, Document, doc},
-};
+use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
 
 use crate::{
+    clients::db::Db,
     core::{
         constants::codes,
         error::{AppError, AppResult},
@@ -41,7 +39,7 @@ pub(crate) fn hydrate_sync_documents(documents: Vec<Document>) -> AppResult<Vec<
         .collect()
 }
 
-pub async fn get_invoice(db: &Database, id_or_key: &str) -> AppResult<Invoice> {
+pub async fn get_invoice(db: &Db, id_or_key: &str) -> AppResult<Invoice> {
     let document = repository::find_invoice_by_id_or_key(db, id_or_key)
         .await?
         .ok_or_else(|| {
@@ -50,10 +48,7 @@ pub async fn get_invoice(db: &Database, id_or_key: &str) -> AppResult<Invoice> {
     Ok(document.into_invoice())
 }
 
-pub async fn list_invoices(
-    db: &Database,
-    query: InvoiceListQuery,
-) -> AppResult<InvoiceListResponse> {
+pub async fn list_invoices(db: &Db, query: InvoiceListQuery) -> AppResult<InvoiceListResponse> {
     let mut and_clauses: Vec<Document> = Vec::new();
 
     if let Some(search) = query.search.filter(|s| !s.trim().is_empty()) {
@@ -122,7 +117,7 @@ pub async fn list_invoices(
 
 /// Computes the 4 dashboard KPI cards for the Sales & Invoices History
 /// screen. See `today_utc_range` for how "today" is bounded.
-pub async fn get_billing_stats(db: &Database) -> AppResult<BillingStats> {
+pub async fn get_billing_stats(db: &Db) -> AppResult<BillingStats> {
     let (today_start, today_end) = today_utc_range();
     let agg = repository::aggregate_stats(db, today_start, today_end).await?;
 

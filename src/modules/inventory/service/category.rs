@@ -5,12 +5,10 @@
 // category/subcategory by its immutable `key`, not its (renameable) name.
 
 use axum::http::StatusCode;
-use mongodb::{
-    Database,
-    bson::{DateTime as BsonDateTime, doc},
-};
+use mongodb::bson::{DateTime as BsonDateTime, doc};
 
 use crate::{
+    clients::db::Db,
     core::{
         constants::{codes, prefixes},
         error::{AppError, AppResult},
@@ -31,7 +29,7 @@ use crate::{
 /// `$lookup` aggregation round trip (see
 /// `repository::category::list_categories_with_subcategories`) rather than a
 /// separate subcategory query grouped by `category_key` in memory.
-pub async fn list_categories(db: &Database) -> AppResult<CategoriesResponse> {
+pub async fn list_categories(db: &Db) -> AppResult<CategoriesResponse> {
     let categories = repository::category::list_categories_with_subcategories(db)
         .await?
         .into_iter()
@@ -50,10 +48,7 @@ pub async fn list_categories(db: &Database) -> AppResult<CategoriesResponse> {
 /// Validates required fields and name uniqueness, inserts the category, then
 /// inserts one `SubcategoryDocument` per name in `body.subcategories` so a
 /// category can be bootstrapped with its starter subcategories in one call.
-pub async fn create_category(
-    db: &Database,
-    body: CreateCategoryRequest,
-) -> AppResult<CategoryInfo> {
+pub async fn create_category(db: &Db, body: CreateCategoryRequest) -> AppResult<CategoryInfo> {
     if body.name.trim().is_empty() {
         return Err(AppError::validation("Category name is required"));
     }
@@ -119,7 +114,7 @@ pub async fn create_category(
 /// products/subcategories reference this category by `key`, nothing else
 /// needs to be touched.
 pub async fn update_category(
-    db: &Database,
+    db: &Db,
     category_key: String,
     body: UpdateCategoryRequest,
 ) -> AppResult<CategoryInfo> {
@@ -188,10 +183,7 @@ pub async fn update_category(
 /// this same `category_key` (enforced by
 /// `service::product::ensure_valid_category`), so no product can be left
 /// pointing at an orphaned subcategory.
-pub(crate) async fn delete_category(
-    db: &Database,
-    category_key: String,
-) -> AppResult<CategoryInfo> {
+pub(crate) async fn delete_category(db: &Db, category_key: String) -> AppResult<CategoryInfo> {
     let products_using_category =
         repository::product::count_products_in_category(db, &category_key).await?;
 
@@ -219,7 +211,7 @@ pub(crate) async fn delete_category(
 /// Same underlying data as `list_categories`, reshaped as key+name pairs so
 /// a client (e.g. a product-creation form) can display names while
 /// submitting `categoryKey`/`subcategoryKey`.
-pub(crate) async fn get_valid_categories(db: &Database) -> AppResult<ValidCategoriesResponse> {
+pub(crate) async fn get_valid_categories(db: &Db) -> AppResult<ValidCategoriesResponse> {
     let categories = repository::category::list_categories_with_subcategories(db)
         .await?
         .into_iter()
@@ -242,7 +234,7 @@ pub(crate) async fn get_valid_categories(db: &Database) -> AppResult<ValidCatego
 /// The subcategories for one category, 404ing if the category itself
 /// doesn't exist.
 pub(crate) async fn get_category_subcategories(
-    db: &Database,
+    db: &Db,
     category_key: String,
 ) -> AppResult<SubcategoriesResponse> {
     repository::category::find_category_by_key(db, &category_key)
@@ -267,7 +259,7 @@ pub(crate) async fn get_category_subcategories(
 /// Adds a subcategory under a category, rejecting duplicate names within
 /// that same category (409 `SUBCATEGORY_ALREADY_EXISTS`).
 pub async fn add_subcategory(
-    db: &Database,
+    db: &Db,
     category_key: String,
     name: String,
 ) -> AppResult<CategoryInfo> {
@@ -321,7 +313,7 @@ pub async fn add_subcategory(
 /// `SUBCATEGORY_IN_USE`) while any product still references this exact
 /// `subcategory_key`.
 pub(crate) async fn remove_subcategory(
-    db: &Database,
+    db: &Db,
     category_key: String,
     subcategory_key: String,
 ) -> AppResult<CategoryInfo> {
@@ -374,7 +366,7 @@ pub(crate) async fn remove_subcategory(
 /// is `undefined`, which is why the sync feed resolves them here rather
 /// than exposing `subcategories` as its own syncable resource.
 pub(crate) async fn hydrate_sync_documents(
-    db: &Database,
+    db: &Db,
     documents: Vec<mongodb::bson::Document>,
 ) -> AppResult<Vec<CategoryInfo>> {
     if documents.is_empty() {

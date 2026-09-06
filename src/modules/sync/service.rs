@@ -1,9 +1,10 @@
 use chrono::Utc;
-use mongodb::{Database, bson::Document};
+use mongodb::bson::Document;
 use serde_json::Value;
 use std::collections::HashMap;
 
 use crate::{
+    clients::db::Db,
     core::error::AppResult,
     domain::sync::{
         ResourceChanges, ResourceSyncStatus, SyncChangesQuery, SyncChangesResponse,
@@ -112,7 +113,7 @@ fn parse_cursors_map(query: &SyncChangesQuery) -> AppResult<HashMap<String, Stri
 /// same resolved display fields, no BSON `$oid`/`$date` wrappers. Serializing
 /// the raw `Document` instead would write structurally different rows for the
 /// same entity depending only on which feed happened to deliver it.
-async fn hydrate(db: &Database, resource: &str, documents: Vec<Document>) -> AppResult<Vec<Value>> {
+async fn hydrate(db: &Db, resource: &str, documents: Vec<Document>) -> AppResult<Vec<Value>> {
     let values = match resource {
         "products" => to_values(inventory_product::hydrate_sync_documents(db, documents).await?)?,
         "categories" => {
@@ -156,7 +157,7 @@ fn to_values<T: serde::Serialize>(items: Vec<T>) -> AppResult<Vec<Value>> {
         .collect()
 }
 
-pub async fn get_changes(db: &Database, query: SyncChangesQuery) -> AppResult<SyncChangesResponse> {
+pub async fn get_changes(db: &Db, query: SyncChangesQuery) -> AppResult<SyncChangesResponse> {
     let server_time = Utc::now();
     let requested_limit = query.limit.unwrap_or(DEFAULT_LIMIT);
     // `limit = 0` means "tell me the cursor, send me nothing".
@@ -280,7 +281,7 @@ pub async fn get_changes(db: &Database, query: SyncChangesQuery) -> AppResult<Sy
     })
 }
 
-pub async fn get_sync_status(db: &Database) -> AppResult<SyncStatusResponse> {
+pub async fn get_sync_status(db: &Db) -> AppResult<SyncStatusResponse> {
     let mut resources = HashMap::new();
 
     for (resource_name, collection_name) in SYNCABLE {

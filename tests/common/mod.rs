@@ -10,6 +10,7 @@ use mongodb::Database;
 use serde_json::json;
 
 pub struct TestApp {
+    #[allow(dead_code)]
     pub router: Router,
     // Not every integration test binary that includes this module needs
     // direct DB access (e.g. to seed data outside the API) or the config
@@ -17,6 +18,8 @@ pub struct TestApp {
     // from the perspective of whichever one doesn't.
     #[allow(dead_code)]
     pub db: Database,
+    #[allow(dead_code)]
+    pub db_handle: jana2u_pos_backend::clients::db::Db,
     #[allow(dead_code)]
     pub config: Arc<Config>,
 }
@@ -198,6 +201,7 @@ async fn start_mock_document_server_with_templates(
 /// mock document-server. Reads connection details from the environment
 /// (`.env` is loaded, same as production) but always targets
 /// `MONGODB_TEST_DB_NAME` so tests never touch dev data.
+#[allow(dead_code)]
 pub async fn spawn_app() -> TestApp {
     let mock_doc_server_url = start_mock_document_server().await;
     spawn_app_with_document_server_url(mock_doc_server_url).await
@@ -225,11 +229,13 @@ pub async fn spawn_app_with_document_server_url(document_server_url: String) -> 
         config.document_server_url.clone(),
         config.document_server_api_key.clone(),
     ));
-    let reports_engine =
-        Arc::new(jana2u_pos_backend::modules::reports::engine::AnalyticsEngine::new(db.clone()));
+    let db_handle = jana2u_pos_backend::clients::db::Db::Mongo(db.clone());
+    let reports_engine = Arc::new(
+        jana2u_pos_backend::modules::reports::engine::AnalyticsEngine::new(db_handle.clone()),
+    );
     let state = AppState {
         config: config.clone(),
-        db: db.clone(),
+        db: db_handle.clone(),
         document_server,
         reports_engine,
     };
@@ -237,6 +243,7 @@ pub async fn spawn_app_with_document_server_url(document_server_url: String) -> 
     TestApp {
         router: app::build_router(state),
         db,
+        db_handle,
         config,
     }
 }

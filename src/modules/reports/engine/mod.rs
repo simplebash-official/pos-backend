@@ -12,10 +12,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::{Duration, Utc};
-use mongodb::Database;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
+use crate::clients::db::Db;
 use crate::core::error::{AppError, AppResult};
 use crate::domain::reports::{EngineFeedQuery, EngineFeedResponse, EngineMetadata};
 
@@ -26,13 +26,13 @@ use self::singleflight::SingleFlightGroup;
 
 #[derive(Clone)]
 pub struct AnalyticsEngine {
-    db: Database,
+    db: Db,
     cache: Arc<ReportsCache>,
     singleflight: Arc<SingleFlightGroup<Value>>,
 }
 
 impl AnalyticsEngine {
-    pub fn new(db: Database) -> Self {
+    pub fn new(db: Db) -> Self {
         Self {
             db,
             cache: Arc::new(ReportsCache::new()),
@@ -42,11 +42,13 @@ impl AnalyticsEngine {
 
     /// Run background index verification on MongoDB collections.
     pub async fn init(&self) {
-        ensure_analytics_indexes(&self.db).await;
+        if let Some(mongo_db) = self.db.as_mongo() {
+            ensure_analytics_indexes(mongo_db).await;
+        }
     }
 
     /// Access database handle.
-    pub fn db(&self) -> &Database {
+    pub fn db(&self) -> &Db {
         &self.db
     }
 

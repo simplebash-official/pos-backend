@@ -9,9 +9,9 @@ use jana2u_pos_backend::{
 async fn main() {
     dotenvy::dotenv().ok();
     let config = Config::from_env().expect("invalid configuration");
-    let db = clients::mongo::connect(&config.mongodb_uri, &config.mongodb_db_name)
+    let db = clients::db::connect_from_config(&config)
         .await
-        .expect("failed to connect to MongoDB");
+        .expect("failed to connect to database");
 
     let categories_res = category::list_categories(&db)
         .await

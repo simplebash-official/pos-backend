@@ -10,11 +10,11 @@
 // for the `analytics-report` template and deep-merged in at render time.
 
 use chrono::{DateTime, Utc};
-use mongodb::Database;
 use serde_json::{Value, json};
 
 use super::dates::{parse_date_range_tz, report_tz};
 use crate::{
+    clients::db::Db,
     core::error::AppResult,
     domain::reports::{
         AnalyticsKpiDeltas, AnalyticsKpis, AnalyticsRangeQuery, Granularity, ReceivablesAgingQuery,
@@ -137,7 +137,7 @@ fn range_query(q: &AnalyticsRangeQuery) -> AnalyticsRangeQuery {
 }
 
 pub(crate) async fn build_analytics_report_data(
-    db: &Database,
+    db: &Db,
     query: AnalyticsRangeQuery,
 ) -> AppResult<Value> {
     let (start, end) = parse_date_range_tz(

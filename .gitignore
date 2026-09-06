@@ -11,3 +11,12 @@
 .DS_Store?
 ._*
 Thumbs.db
+
+# Local SQLite databases
+/data/
+*.db
+*.db-shm
+*.db-wal
+
+# Graphify AST cache
+graphify-out/cache/

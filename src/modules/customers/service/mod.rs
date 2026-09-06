@@ -4,12 +4,10 @@
 // an outstanding balance. Delegates all Mongo access to `super::repository`.
 
 use axum::http::StatusCode;
-use mongodb::{
-    Database,
-    bson::{DateTime as BsonDateTime, Document, doc},
-};
+use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
 
 use crate::{
+    clients::db::Db,
     core::{
         constants::{codes, prefixes},
         error::{AppError, AppResult},
@@ -86,10 +84,7 @@ fn sort_field_for(sort_by: Option<&str>) -> &'static str {
     }
 }
 
-pub async fn list_customers(
-    db: &Database,
-    query: CustomerListQuery,
-) -> AppResult<CustomerListResponse> {
+pub async fn list_customers(db: &Db, query: CustomerListQuery) -> AppResult<CustomerListResponse> {
     let mut and_clauses: Vec<Document> = Vec::new();
 
     if let Some(search) = query.search.filter(|s| !s.trim().is_empty()) {
@@ -141,7 +136,7 @@ pub async fn list_customers(
     })
 }
 
-pub async fn get_customer(db: &Database, id_or_key: &str) -> AppResult<Customer> {
+pub async fn get_customer(db: &Db, id_or_key: &str) -> AppResult<Customer> {
     let document = repository::find_customer_by_id_or_key(db, id_or_key)
         .await?
         .ok_or_else(|| {
@@ -152,7 +147,7 @@ pub async fn get_customer(db: &Database, id_or_key: &str) -> AppResult<Customer>
 }
 
 pub async fn create_customer(
-    db: &Database,
+    db: &Db,
     body: CreateCustomerRequest,
     device_id: Option<String>,
 ) -> AppResult<Customer> {
@@ -208,7 +203,7 @@ pub async fn create_customer(
 }
 
 pub async fn replace_customer(
-    db: &Database,
+    db: &Db,
     id_or_key: &str,
     body: CreateCustomerRequest,
     expected_version: Option<i64>,
@@ -314,7 +309,7 @@ pub async fn replace_customer(
 }
 
 pub async fn update_customer(
-    db: &Database,
+    db: &Db,
     id_or_key: &str,
     body: UpdateCustomerRequest,
     expected_version: Option<i64>,
@@ -459,7 +454,7 @@ pub async fn update_customer(
 }
 
 pub async fn delete_customer(
-    db: &Database,
+    db: &Db,
     id_or_key: &str,
     expected_version: Option<i64>,
     device_id: Option<String>,
@@ -509,7 +504,7 @@ pub async fn delete_customer(
     Ok(deleted.into_customer())
 }
 
-pub async fn delete_customers(db: &Database, ids: Vec<String>) -> AppResult<u64> {
+pub async fn delete_customers(db: &Db, ids: Vec<String>) -> AppResult<u64> {
     let mut deleted_count = 0u64;
     for id in ids {
         if delete_customer(db, &id, None, None).await.is_ok() {
@@ -519,7 +514,7 @@ pub async fn delete_customers(db: &Database, ids: Vec<String>) -> AppResult<u64>
     Ok(deleted_count)
 }
 
-pub async fn get_customer_tags(db: &Database) -> AppResult<CustomerTagsResponse> {
+pub async fn get_customer_tags(db: &Db) -> AppResult<CustomerTagsResponse> {
     let mut tags = repository::distinct_tags(db).await?;
     tags.sort();
     tags.dedup();
@@ -528,7 +523,7 @@ pub async fn get_customer_tags(db: &Database) -> AppResult<CustomerTagsResponse>
 
 /// Cross-module customer lookup by key — called by billing/invoices/repairs modules.
 #[allow(dead_code)]
-pub(crate) async fn get_customer_by_key(db: &Database, key: &str) -> AppResult<Customer> {
+pub(crate) async fn get_customer_by_key(db: &Db, key: &str) -> AppResult<Customer> {
     let doc = repository::find_customer_by_key(db, key)
         .await?
         .ok_or_else(|| {
@@ -540,7 +535,7 @@ pub(crate) async fn get_customer_by_key(db: &Database, key: &str) -> AppResult<C
 /// Cross-module customer financial adjustment — called by billing/invoices/payments modules.
 #[allow(dead_code)]
 pub(crate) async fn apply_financial_delta(
-    db: &Database,
+    db: &Db,
     key: &str,
     purchases_delta: i64,
     balance_delta: i64,
@@ -567,7 +562,7 @@ pub(crate) fn hydrate_sync_documents(documents: Vec<Document>) -> AppResult<Vec<
 }
 
 /// Computes the KPI cards for the Customers screen.
-pub async fn get_customer_stats(db: &Database) -> AppResult<CustomerStats> {
+pub async fn get_customer_stats(db: &Db) -> AppResult<CustomerStats> {
     let agg = repository::aggregate_stats(db).await?;
     Ok(CustomerStats {
         total_customers: agg.total_customers,

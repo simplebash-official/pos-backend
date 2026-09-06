@@ -6,6 +6,7 @@
 use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
 
 use crate::{
+    clients::db::Db,
     core::{
         constants::{codes, prefixes},
         error::{AppError, AppResult},
@@ -27,7 +28,7 @@ pub(crate) fn hydrate_sync_documents(documents: Vec<Document>) -> AppResult<Vec<
 }
 
 pub async fn record_payment(
-    db: &mongodb::Database,
+    db: &Db,
     invoice_key: &str,
     body: RecordPaymentRequest,
     recorded_by_user_id: String,
@@ -110,10 +111,7 @@ pub async fn record_payment(
     Ok(inserted.into_payment_record())
 }
 
-pub async fn list_payments(
-    db: &mongodb::Database,
-    invoice_key: &str,
-) -> AppResult<Vec<PaymentRecord>> {
+pub async fn list_payments(db: &Db, invoice_key: &str) -> AppResult<Vec<PaymentRecord>> {
     // 404s if the invoice itself doesn't exist, so a typo'd key is
     // distinguishable from a real invoice with no payments yet — same
     // convention as `inventory::service::stock::product_movements`.

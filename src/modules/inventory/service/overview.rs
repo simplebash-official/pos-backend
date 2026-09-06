@@ -3,12 +3,10 @@
 // free-text search across products/categories/subcategories, low-stock filter,
 // and per-subcategory product data table pagination.
 
-use mongodb::{
-    Database,
-    bson::{Document, doc},
-};
+use mongodb::bson::{Document, doc};
 
 use crate::{
+    clients::db::Db,
     core::{
         error::AppResult,
         utils::{build_bson_regex, calculate_pagination},
@@ -23,7 +21,7 @@ use crate::{
 /// Computes the complete hierarchical overview for the Inventory & Stock frontend page.
 /// Performs MongoDB aggregation pipelines to calculate dashboard metrics and group item counts.
 pub async fn get_inventory_overview(
-    db: &Database,
+    db: &Db,
     query: InventoryOverviewQuery,
 ) -> AppResult<InventoryOverviewResponse> {
     // 1. Fetch every category paired with its subcategories in one `$lookup`

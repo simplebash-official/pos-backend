@@ -18,7 +18,11 @@ use mongodb::{
     bson::{DateTime as BsonDateTime, Document, doc},
 };
 
-use crate::{core::error::AppResult, domain::reports::EmployeePerformanceEntry};
+use crate::{
+    clients::{db::Db, sqlite::map_sqlite_row_to_document},
+    core::error::AppResult,
+    domain::reports::EmployeePerformanceEntry,
+};
 
 /// Internal bucket keys for jobs with no `assigned_employee_id` at all —
 /// never resolved against `employees` and never treated as a real
@@ -130,57 +134,111 @@ fn accumulate(
 /// the caller must resolve them via `employees::service::get_employees_by_keys`
 /// before returning this to an API client.
 pub(crate) async fn aggregate_employee_commissions(
-    db: &Database,
+    db: &Db,
     start: DateTime<Utc>,
     end: DateTime<Utc>,
     filter_employee_key: Option<&str>,
 ) -> AppResult<BTreeMap<String, EmployeePerformanceEntry>> {
     let mut perf_map: BTreeMap<String, EmployeePerformanceEntry> = BTreeMap::new();
 
-    let mut repair_match = doc! {
-        "deleted_at": null,
-        "status": { "$in": ["completed", "delivered", "ready_for_pickup"] },
-        "created_at": {
-            "$gte": BsonDateTime::from_chrono(start),
-            "$lt": BsonDateTime::from_chrono(end),
+    match db {
+        Db::Mongo(db) => {
+            let mut repair_match = doc! {
+                "deleted_at": null,
+                "status": { "$in": ["completed", "delivered", "ready_for_pickup"] },
+                "created_at": {
+                    "$gte": BsonDateTime::from_chrono(start),
+                    "$lt": BsonDateTime::from_chrono(end),
+                }
+            };
+            if let Some(key) = filter_employee_key {
+                repair_match.insert("assigned_employee_id", key);
+            }
+
+            let mut cursor = repairs(db).find(repair_match).await?;
+            while let Some(doc) = cursor.try_next().await? {
+                accumulate(
+                    &mut perf_map,
+                    &doc,
+                    UNASSIGNED_TECHNICIAN,
+                    "Unassigned Technician",
+                    "technician",
+                );
+            }
+
+            let mut print_match = doc! {
+                "deleted_at": null,
+                "status": { "$in": ["completed", "delivered", "ready_for_pickup"] },
+                "created_at": {
+                    "$gte": BsonDateTime::from_chrono(start),
+                    "$lt": BsonDateTime::from_chrono(end),
+                }
+            };
+            if let Some(key) = filter_employee_key {
+                print_match.insert("assigned_employee_id", key);
+            }
+
+            let mut cursor = print_jobs(db).find(print_match).await?;
+            while let Some(doc) = cursor.try_next().await? {
+                accumulate(
+                    &mut perf_map,
+                    &doc,
+                    UNASSIGNED_PRINTER,
+                    "Unassigned Printer",
+                    "printer",
+                );
+            }
         }
-    };
-    if let Some(key) = filter_employee_key {
-        repair_match.insert("assigned_employee_id", key);
-    }
+        Db::Sqlite(pool) => {
+            let start_iso = start.to_rfc3339();
+            let end_iso = end.to_rfc3339();
 
-    let mut cursor = repairs(db).find(repair_match).await?;
-    while let Some(doc) = cursor.try_next().await? {
-        accumulate(
-            &mut perf_map,
-            &doc,
-            UNASSIGNED_TECHNICIAN,
-            "Unassigned Technician",
-            "technician",
-        );
-    }
+            let (filter_repair_clause, filter_print_clause) = match filter_employee_key {
+                Some(k) => (
+                    format!(" AND assigned_employee_id = '{k}'"),
+                    format!(" AND assigned_employee_id = '{k}'"),
+                ),
+                None => ("".to_string(), "".to_string()),
+            };
 
-    let mut print_match = doc! {
-        "deleted_at": null,
-        "status": { "$in": ["completed", "delivered", "ready_for_pickup"] },
-        "created_at": {
-            "$gte": BsonDateTime::from_chrono(start),
-            "$lt": BsonDateTime::from_chrono(end),
+            let repair_query = format!(
+                "SELECT * FROM repairs WHERE deleted_at IS NULL AND status IN ('completed', 'delivered', 'ready_for_pickup') AND created_at >= ? AND created_at < ?{filter_repair_clause}"
+            );
+            let repair_rows = sqlx::query(&repair_query)
+                .bind(&start_iso)
+                .bind(&end_iso)
+                .fetch_all(pool)
+                .await?;
+            for row in repair_rows {
+                let doc = map_sqlite_row_to_document(&row);
+                accumulate(
+                    &mut perf_map,
+                    &doc,
+                    UNASSIGNED_TECHNICIAN,
+                    "Unassigned Technician",
+                    "technician",
+                );
+            }
+
+            let print_query = format!(
+                "SELECT * FROM print_jobs WHERE deleted_at IS NULL AND status IN ('completed', 'delivered', 'ready_for_pickup') AND created_at >= ? AND created_at < ?{filter_print_clause}"
+            );
+            let print_rows = sqlx::query(&print_query)
+                .bind(&start_iso)
+                .bind(&end_iso)
+                .fetch_all(pool)
+                .await?;
+            for row in print_rows {
+                let doc = map_sqlite_row_to_document(&row);
+                accumulate(
+                    &mut perf_map,
+                    &doc,
+                    UNASSIGNED_PRINTER,
+                    "Unassigned Printer",
+                    "printer",
+                );
+            }
         }
-    };
-    if let Some(key) = filter_employee_key {
-        print_match.insert("assigned_employee_id", key);
-    }
-
-    let mut cursor = print_jobs(db).find(print_match).await?;
-    while let Some(doc) = cursor.try_next().await? {
-        accumulate(
-            &mut perf_map,
-            &doc,
-            UNASSIGNED_PRINTER,
-            "Unassigned Printer",
-            "printer",
-        );
     }
 
     Ok(perf_map)

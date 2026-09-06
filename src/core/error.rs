@@ -275,6 +275,12 @@ impl From<mongodb::error::Error> for AppError {
     }
 }
 
+impl From<sqlx::Error> for AppError {
+    fn from(err: sqlx::Error) -> Self {
+        AppError::internal(err.to_string())
+    }
+}
+
 // Same idea for JWT decode failures (expired/malformed/wrong-signature
 // token) — always means "the caller isn't authenticated", so this maps to
 // `Unauthorized` rather than distinguishing the underlying JWT error kind.

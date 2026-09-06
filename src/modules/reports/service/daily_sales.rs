@@ -1,9 +1,6 @@
-// Business logic for the Daily Sales reporting endpoint.
-
-use mongodb::Database;
-
 use super::dates;
 use crate::{
+    clients::db::Db,
     core::{error::AppResult, utils::today_utc_range},
     domain::reports::{DailySalesQuery, DailySalesReportResponse, PaymentMethodBreakdown},
     modules::reports::repository,
@@ -11,7 +8,7 @@ use crate::{
 
 /// Generates daily sales summaries with breakdowns by stream and payment methods.
 pub(crate) async fn get_daily_sales_report(
-    db: &Database,
+    db: &Db,
     query: DailySalesQuery,
 ) -> AppResult<DailySalesReportResponse> {
     let (start, end) = if let Some(d) = query.date.filter(|s| !s.trim().is_empty()) {

@@ -3,12 +3,10 @@
 // domain-specific validation (job type/quantity vs device model/issue
 // description).
 
-use mongodb::{
-    Database,
-    bson::{DateTime as BsonDateTime, Document, doc},
-};
+use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
 
 use crate::{
+    clients::db::Db,
     core::{
         constants::{codes, prefixes},
         error::{AppError, AppResult},
@@ -29,16 +27,7 @@ use crate::{
     },
 };
 
-const VALID_STATUSES: &[&str] = &[
-    "received",
-    "diagnosing",
-    "in_repair",
-    "ready",
-    "delivered",
-    "cancelled",
-];
-
-const VALID_JOB_TYPES: &[&str] = &["mug", "t-shirt", "handbill", "banner", "custom"];
+const VALID_STATUSES: &[&str] = &["received", "in_progress", "ready", "delivered", "cancelled"];
 
 fn validate_status(status: &str) -> AppResult<()> {
     if VALID_STATUSES.contains(&status) {
@@ -65,20 +54,6 @@ fn validate_promised_ready_at(promised_ready_at: Option<&str>) -> AppResult<()> 
     }
 }
 
-fn validate_job_type(job_type: &str) -> AppResult<()> {
-    if VALID_JOB_TYPES.contains(&job_type) {
-        Ok(())
-    } else {
-        Err(AppError::validation_with_code(
-            format!(
-                "Invalid job type '{job_type}'. Must be one of: {}",
-                VALID_JOB_TYPES.join(", ")
-            ),
-            codes::INVALID_JOB_TYPE,
-        ))
-    }
-}
-
 fn validate_required_fields(
     customer_name: &str,
     job_type: &str,
@@ -88,7 +63,9 @@ fn validate_required_fields(
     if customer_name.trim().is_empty() {
         return Err(AppError::validation("Customer name is required"));
     }
-    validate_job_type(job_type)?;
+    if job_type.trim().is_empty() {
+        return Err(AppError::validation("Job type is required"));
+    }
     if quantity < 1 {
         return Err(AppError::validation("Quantity must be at least 1"));
     }
@@ -98,10 +75,7 @@ fn validate_required_fields(
     Ok(())
 }
 
-pub async fn list_print_jobs(
-    db: &Database,
-    query: PrintJobListQuery,
-) -> AppResult<PrintJobListResponse> {
+pub async fn list_print_jobs(db: &Db, query: PrintJobListQuery) -> AppResult<PrintJobListResponse> {
     let mut and_clauses: Vec<Document> = Vec::new();
 
     if let Some(search) = query.search.filter(|s| !s.trim().is_empty()) {
@@ -156,7 +130,7 @@ pub async fn list_print_jobs(
 
 /// Computes the KPI cards for the Print Jobs screen. See `today_utc_range`
 /// for how "today" is bounded.
-pub async fn get_print_job_stats(db: &Database) -> AppResult<PrintJobStats> {
+pub async fn get_print_job_stats(db: &Db) -> AppResult<PrintJobStats> {
     let (today_start, today_end) = today_utc_range();
     let agg = repository::aggregate_stats(db, today_start, today_end).await?;
 
@@ -174,7 +148,7 @@ pub async fn get_print_job_stats(db: &Database) -> AppResult<PrintJobStats> {
     })
 }
 
-pub async fn get_print_job(db: &Database, id_or_key: &str) -> AppResult<PrintJob> {
+pub async fn get_print_job(db: &Db, id_or_key: &str) -> AppResult<PrintJob> {
     let document = repository::find_by_id_or_key(db, id_or_key)
         .await?
         .ok_or_else(|| {
@@ -190,7 +164,7 @@ pub async fn get_print_job(db: &Database, id_or_key: &str) -> AppResult<PrintJob
 /// (a walk-in with no linked account). Mirrors
 /// `billing::service::sale::complete_sale`'s customer-key resolution.
 async fn resolve_customer_name_phone(
-    db: &Database,
+    db: &Db,
     customer_key: Option<&str>,
     fallback_name: String,
     fallback_phone: Option<String>,
@@ -207,7 +181,7 @@ async fn resolve_customer_name_phone(
 /// See `repairs::service::resolve_assignment_employee_name` — identical
 /// resolve-from-key/server-derives-name/never-trust-client-name rule.
 async fn resolve_assignment_employee_name(
-    db: &Database,
+    db: &Db,
     assigned_employee_id: Option<&str>,
 ) -> AppResult<Option<String>> {
     match assigned_employee_id {
@@ -220,7 +194,7 @@ async fn resolve_assignment_employee_name(
 }
 
 pub async fn create_print_job(
-    db: &Database,
+    db: &Db,
     body: CreatePrintJobRequest,
     device_id: Option<String>,
 ) -> AppResult<PrintJob> {
@@ -299,7 +273,7 @@ pub async fn create_print_job(
 }
 
 pub async fn update_print_job(
-    db: &Database,
+    db: &Db,
     id_or_key: &str,
     body: UpdatePrintJobRequest,
     device_id: Option<String>,
@@ -383,7 +357,7 @@ pub async fn update_print_job(
 }
 
 pub async fn delete_print_job(
-    db: &Database,
+    db: &Db,
     id_or_key: &str,
     device_id: Option<String>,
 ) -> AppResult<PrintJob> {
@@ -408,7 +382,7 @@ pub async fn delete_print_job(
 /// See `repairs::service::mark_delivered`'s comment for why this is
 /// deliberately narrow (status only).
 #[allow(dead_code)]
-pub(crate) async fn mark_delivered(db: &Database, key: &str) -> AppResult<PrintJob> {
+pub(crate) async fn mark_delivered(db: &Db, key: &str) -> AppResult<PrintJob> {
     let updated = repository::set_status_by_key(db, key, "delivered")
         .await?
         .ok_or_else(|| {

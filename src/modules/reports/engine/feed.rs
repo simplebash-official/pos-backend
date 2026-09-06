@@ -2,10 +2,10 @@
 // Uses `tokio::try_join!` for high-concurrency database execution, reducing
 // frontend roundtrips from 15 to 1.
 
-use mongodb::Database;
 use tokio::try_join;
 
 use crate::{
+    clients::db::Db,
     core::error::AppResult,
     domain::reports::{
         AnalyticsRangeQuery, CustomersFeedData, DailySalesQuery, EmployeeCommissionsQuery,
@@ -17,7 +17,7 @@ use crate::{
 };
 
 pub async fn build_engine_feed(
-    db: &Database,
+    db: &Db,
     query: &EngineFeedQuery,
     meta: EngineMetadata,
 ) -> AppResult<EngineFeedResponse> {
@@ -97,7 +97,7 @@ pub async fn build_engine_feed(
 }
 
 async fn build_overview_feed(
-    db: &Database,
+    db: &Db,
     range_query: &AnalyticsRangeQuery,
 ) -> AppResult<OverviewFeedData> {
     let (summary, timeseries, payment_methods, sales_patterns) = try_join!(
@@ -116,7 +116,7 @@ async fn build_overview_feed(
 }
 
 async fn build_sales_feed(
-    db: &Database,
+    db: &Db,
     query: &EngineFeedQuery,
     range_query: &AnalyticsRangeQuery,
 ) -> AppResult<SalesFeedData> {
@@ -159,7 +159,7 @@ async fn build_sales_feed(
 }
 
 async fn build_profit_feed(
-    db: &Database,
+    db: &Db,
     _query: &EngineFeedQuery,
     range_query: &AnalyticsRangeQuery,
 ) -> AppResult<ProfitFeedData> {
@@ -179,10 +179,7 @@ async fn build_profit_feed(
     })
 }
 
-async fn build_customers_feed(
-    db: &Database,
-    query: &EngineFeedQuery,
-) -> AppResult<CustomersFeedData> {
+async fn build_customers_feed(db: &Db, query: &EngineFeedQuery) -> AppResult<CustomersFeedData> {
     let top_cust_query = TopCustomersQuery {
         preset: query.preset.clone(),
         from: query.from.clone(),
@@ -205,7 +202,7 @@ async fn build_customers_feed(
 }
 
 async fn build_staff_feed(
-    db: &Database,
+    db: &Db,
     query: &EngineFeedQuery,
     range_query: &AnalyticsRangeQuery,
 ) -> AppResult<StaffFeedData> {

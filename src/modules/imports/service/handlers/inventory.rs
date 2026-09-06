@@ -4,10 +4,11 @@
 
 use std::collections::HashSet;
 
-use mongodb::{Database, bson::oid::ObjectId};
+use mongodb::bson::oid::ObjectId;
 use serde_json::Value;
 
 use crate::{
+    clients::db::Db,
     core::error::AppResult,
     domain::{
         imports::{ImportOptions, ImportRowError},
@@ -145,7 +146,7 @@ fn get_bool(row: &Value, keys: &[&str], default: bool) -> bool {
 }
 
 pub(crate) async fn process_inventory_import(
-    db: &Database,
+    db: &Db,
     rows: &[Value],
     options: &ImportOptions,
     file_name: &str,

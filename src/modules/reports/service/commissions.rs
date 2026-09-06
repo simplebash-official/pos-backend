@@ -7,10 +7,9 @@
 
 use std::collections::HashMap;
 
-use mongodb::Database;
-
 use super::dates;
 use crate::{
+    clients::db::Db,
     core::error::AppResult,
     domain::reports::{
         EmployeeCommissionsQuery, EmployeeCommissionsReportResponse, EmployeePerformanceEntry,
@@ -26,7 +25,7 @@ use crate::{
 
 /// Retrieves the technician and staff job performance, profit generation, and earned commission splits.
 pub(crate) async fn get_employee_commissions_report(
-    db: &Database,
+    db: &Db,
     query: EmployeeCommissionsQuery,
 ) -> AppResult<EmployeeCommissionsReportResponse> {
     let (start, end) = dates::parse_date_range(

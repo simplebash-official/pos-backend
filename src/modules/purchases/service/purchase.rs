@@ -7,12 +7,10 @@
 
 use std::collections::HashMap;
 
-use mongodb::{
-    Database,
-    bson::{DateTime as BsonDateTime, doc, oid::ObjectId},
-};
+use mongodb::bson::{DateTime as BsonDateTime, doc, oid::ObjectId};
 
 use crate::{
+    clients::db::Db,
     core::{
         constants::prefixes,
         error::{AppError, AppResult},
@@ -40,7 +38,7 @@ use crate::{
 /// movement in the same call inventory's own manual adjustment uses —
 /// reusing the one place stock is ever mutated rather than duplicating that
 /// invariant here.
-pub async fn record_purchase(db: &Database, body: CreatePurchaseRequest) -> AppResult<Purchase> {
+pub async fn record_purchase(db: &Db, body: CreatePurchaseRequest) -> AppResult<Purchase> {
     if body.quantity < 1 {
         return Err(AppError::validation("Quantity must be at least 1"));
     }
@@ -119,10 +117,7 @@ pub async fn record_purchase(db: &Database, body: CreatePurchaseRequest) -> AppR
 }
 
 /// Lists purchases scoped to a supplier, a product, their intersection, or all purchases paginated.
-pub async fn list_purchases(
-    db: &Database,
-    query: PurchaseListQuery,
-) -> AppResult<PurchaseListResponse> {
+pub async fn list_purchases(db: &Db, query: PurchaseListQuery) -> AppResult<PurchaseListResponse> {
     let mut filter = doc! { "deleted_at": { "$exists": false } };
 
     if let Some(ref supplier_key) = query.supplier_key {
@@ -213,10 +208,7 @@ pub async fn list_purchases(
 
 /// Used by `suppliers::service::delete_supplier`'s `SUPPLIER_HAS_PURCHASES`
 /// guard.
-pub(crate) async fn count_purchases_for_supplier(
-    db: &Database,
-    supplier_key: &str,
-) -> AppResult<u64> {
+pub(crate) async fn count_purchases_for_supplier(db: &Db, supplier_key: &str) -> AppResult<u64> {
     repository::count_purchases_for_supplier(db, supplier_key).await
 }
 
@@ -227,7 +219,7 @@ pub(crate) async fn count_purchases_for_supplier(
 /// arrives by delta carries the same display data as one from a snapshot.
 /// See `inventory::service::product::hydrate_sync_documents`.
 pub(crate) async fn hydrate_sync_documents(
-    db: &Database,
+    db: &Db,
     documents: Vec<mongodb::bson::Document>,
 ) -> AppResult<Vec<Purchase>> {
     if documents.is_empty() {

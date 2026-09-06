@@ -10,12 +10,10 @@ use argon2::{
     password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
 };
 use axum::http::StatusCode;
-use mongodb::{
-    Database,
-    bson::{DateTime as BsonDateTime, Document, doc, oid::ObjectId},
-};
+use mongodb::bson::{DateTime as BsonDateTime, Document, doc, oid::ObjectId};
 
 use crate::{
+    clients::db::Db,
     core::{
         constants::{codes, prefixes},
         error::{AppError, AppResult},
@@ -124,7 +122,7 @@ fn verify_password(password: &str, hash: &str) -> AppResult<bool> {
 /// filtering `role=admin`) returns an empty list rather than an error, the
 /// same "just don't show it" spirit as `ensure_manageable`'s 404.
 pub(crate) async fn list_users(
-    db: &Database,
+    db: &Db,
     query: UserListQuery,
     caller_role: Role,
 ) -> AppResult<UsersResponse> {
@@ -166,7 +164,7 @@ pub(crate) async fn list_users(
 /// audit log, a separate concern from user-management scope). The
 /// `users` module's own routes must never call this directly — see
 /// `get_user_for_caller` for the scoped equivalent they use instead.
-pub(crate) async fn get_user(db: &Database, id: ObjectId) -> AppResult<User> {
+pub(crate) async fn get_user(db: &Db, id: ObjectId) -> AppResult<User> {
     let document = repository::find_user_by_id(db, id)
         .await?
         .ok_or_else(|| AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND))?;
@@ -177,7 +175,7 @@ pub(crate) async fn get_user(db: &Database, id: ObjectId) -> AppResult<User> {
 /// Scoped lookup for `GET /users/{id}` — 404s if `id` resolves to an
 /// account outside `manageable_roles(caller_role)` (see `ensure_manageable`).
 pub(crate) async fn get_user_for_caller(
-    db: &Database,
+    db: &Db,
     id: ObjectId,
     caller_role: Role,
 ) -> AppResult<User> {
@@ -198,7 +196,7 @@ pub(crate) async fn get_user_for_caller(
 /// caller (see `manageable_roles`). Enforces the single-Admin invariant
 /// this deployment assumes: creating a second Admin is rejected outright,
 /// including on a `seed_admin` re-run with a different email.
-pub async fn create_user(db: &Database, body: CreateUserRequest) -> AppResult<User> {
+pub async fn create_user(db: &Db, body: CreateUserRequest) -> AppResult<User> {
     if body.name.trim().is_empty() {
         return Err(AppError::validation("Name is required"));
     }
@@ -215,50 +213,49 @@ pub async fn create_user(db: &Database, body: CreateUserRequest) -> AppResult<Us
 
     let email = normalize_email(&body.email);
     if repository::find_user_by_email(db, &email).await?.is_some() {
-        return Err(AppError::custom(
-            StatusCode::CONFLICT,
+        return Err(AppError::conflict(
             codes::EMAIL_ALREADY_EXISTS,
             format!("A user with email '{email}' already exists"),
         ));
     }
 
-    if let Some(employee_key) = &body.employee_key {
-        // Resolves before insert (404 if it doesn't exist), matching the
-        // "reach another module through its service, fail before any write"
-        // rule `billing::service::sale` applies to `productKey`/`customerKey`.
-        employees::service::get_employee_by_key(db, employee_key).await?;
-        if repository::find_user_by_employee_key(db, employee_key)
-            .await?
-            .is_some()
-        {
-            return Err(AppError::conflict(
-                codes::EMPLOYEE_ALREADY_HAS_LOGIN,
-                "This employee already has a login account",
-            ));
+    let employee_key = match body.employee_key.as_deref().map(str::trim) {
+        None | Some("") => None,
+        Some(employee_key) => {
+            employees::service::get_employee_by_key(db, employee_key).await?;
+
+            if repository::find_user_by_employee_key(db, employee_key)
+                .await?
+                .is_some()
+            {
+                return Err(AppError::conflict(
+                    codes::EMPLOYEE_ALREADY_HAS_LOGIN,
+                    "This employee already has a login account",
+                ));
+            }
+
+            Some(employee_key.to_string())
         }
-    }
+    };
 
     let password_hash = hash_password(&body.password)?;
     let now = BsonDateTime::now();
     let document = UserDocument {
         id: None,
         key: generate_id(prefixes::USER),
-        name: body.name,
+        name: body.name.trim().to_string(),
         email,
         password_hash,
         role: body.role,
         is_active: true,
-        employee_key: body.employee_key,
+        employee_key: employee_key.clone(),
         created_at: now,
         updated_at: now,
     };
 
     let inserted = repository::insert_user(db, document).await?;
 
-    if let Some(employee_key) = &inserted.employee_key {
-        // Bumps the employee's `updated_at`/`version` so the next sync
-        // delta re-delivers it with `login` now populated — see
-        // `employees::service::touch_by_key`'s doc comment.
+    if let Some(employee_key) = &employee_key {
         employees::service::touch_by_key(db, employee_key).await?;
     }
 
@@ -270,7 +267,7 @@ pub async fn create_user(db: &Database, body: CreateUserRequest) -> AppResult<Us
 /// `manageable_roles(caller_role)`, e.g. a Manager trying to create another
 /// Manager, or anyone trying to create an Admin.
 pub(crate) async fn create_user_for_caller(
-    db: &Database,
+    db: &Db,
     body: CreateUserRequest,
     caller_role: Role,
 ) -> AppResult<User> {
@@ -298,7 +295,7 @@ pub(crate) async fn create_user_for_caller(
 /// otherwise) — so a Manager can never promote a Staff account to Manager,
 /// and no one can ever promote anything to Admin through this endpoint.
 pub(crate) async fn update_user(
-    db: &Database,
+    db: &Db,
     id: ObjectId,
     body: UpdateUserRequest,
     caller_role: Role,
@@ -401,7 +398,7 @@ pub(crate) async fn update_user(
 /// in its own `manageable_roles` set (Admin doesn't manage Admin, Manager
 /// doesn't manage Manager); a dedicated self-delete guard is therefore
 /// unnecessary and was removed rather than kept as unreachable code.
-pub(crate) async fn delete_user(db: &Database, id: ObjectId, caller_role: Role) -> AppResult<User> {
+pub(crate) async fn delete_user(db: &Db, id: ObjectId, caller_role: Role) -> AppResult<User> {
     let existing = repository::find_user_by_id(db, id)
         .await?
         .ok_or_else(|| AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND))?;
@@ -426,11 +423,7 @@ pub(crate) async fn delete_user(db: &Database, id: ObjectId, caller_role: Role) 
 /// enumeration); a correct password against a deactivated account gets its
 /// own 401 `USER_INACTIVE`, since at that point the caller has already
 /// proven they know the real password.
-pub(crate) async fn verify_credentials(
-    db: &Database,
-    email: &str,
-    password: &str,
-) -> AppResult<User> {
+pub(crate) async fn verify_credentials(db: &Db, email: &str, password: &str) -> AppResult<User> {
     let normalized = normalize_email(email);
     let document = repository::find_user_by_email(db, &normalized)
         .await?
@@ -474,7 +467,7 @@ fn to_login_summary(document: UserDocument) -> EmployeeLoginSummary {
 /// "does this employee already have a login" — on create/update validation
 /// and on `delete_employee`'s `EMPLOYEE_HAS_LOGIN` guard.
 pub(crate) async fn find_user_summary_by_employee_key(
-    db: &Database,
+    db: &Db,
     employee_key: &str,
 ) -> AppResult<Option<EmployeeLoginSummary>> {
     Ok(repository::find_user_by_employee_key(db, employee_key)
@@ -487,7 +480,7 @@ pub(crate) async fn find_user_summary_by_employee_key(
 /// `hydrate_sync_documents` to enrich a whole page of employees with their
 /// login summary in one query instead of one lookup per row.
 pub(crate) async fn find_user_summaries_by_employee_keys(
-    db: &Database,
+    db: &Db,
     employee_keys: &[String],
 ) -> AppResult<HashMap<String, EmployeeLoginSummary>> {
     let documents = repository::find_users_by_employee_keys(db, employee_keys).await?;

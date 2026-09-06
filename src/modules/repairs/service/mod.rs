@@ -3,12 +3,10 @@
 // `mark_delivered` cross-module hook. Delegates all Mongo access to
 // `super::repository`.
 
-use mongodb::{
-    Database,
-    bson::{DateTime as BsonDateTime, Document, doc},
-};
+use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
 
 use crate::{
+    clients::db::Db,
     core::{
         constants::{codes, prefixes},
         error::{AppError, AppResult},
@@ -130,7 +128,7 @@ fn validate_price_required_for_status(
     Ok(())
 }
 
-pub async fn list_repairs(db: &Database, query: RepairListQuery) -> AppResult<RepairListResponse> {
+pub async fn list_repairs(db: &Db, query: RepairListQuery) -> AppResult<RepairListResponse> {
     let mut and_clauses: Vec<Document> = Vec::new();
 
     if let Some(search) = query.search.filter(|s| !s.trim().is_empty()) {
@@ -185,7 +183,7 @@ pub async fn list_repairs(db: &Database, query: RepairListQuery) -> AppResult<Re
 
 /// Computes the KPI cards for the Repair Jobs screen. See `today_utc_range`
 /// for how "today" is bounded.
-pub async fn get_repair_stats(db: &Database) -> AppResult<RepairStats> {
+pub async fn get_repair_stats(db: &Db) -> AppResult<RepairStats> {
     let (today_start, today_end) = today_utc_range();
     let agg = repository::aggregate_stats(db, today_start, today_end).await?;
 
@@ -203,7 +201,7 @@ pub async fn get_repair_stats(db: &Database) -> AppResult<RepairStats> {
     })
 }
 
-pub async fn get_repair(db: &Database, id_or_key: &str) -> AppResult<Repair> {
+pub async fn get_repair(db: &Db, id_or_key: &str) -> AppResult<Repair> {
     let document = repository::find_by_id_or_key(db, id_or_key)
         .await?
         .ok_or_else(|| {
@@ -219,7 +217,7 @@ pub async fn get_repair(db: &Database, id_or_key: &str) -> AppResult<Repair> {
 /// (a walk-in with no linked account). Mirrors
 /// `billing::service::sale::complete_sale`'s customer-key resolution.
 async fn resolve_customer_name_phone(
-    db: &Database,
+    db: &Db,
     customer_key: Option<&str>,
     fallback_name: String,
     fallback_phone: String,
@@ -242,7 +240,7 @@ async fn resolve_customer_name_phone(
 /// (`EMPLOYEE_NOT_FOUND`) before any write. Absent `assigned_employee_id`
 /// leaves the ticket unassigned — no employee module lookup happens.
 async fn resolve_assignment_employee_name(
-    db: &Database,
+    db: &Db,
     assigned_employee_id: Option<&str>,
 ) -> AppResult<Option<String>> {
     match assigned_employee_id {
@@ -255,7 +253,7 @@ async fn resolve_assignment_employee_name(
 }
 
 pub async fn create_repair(
-    db: &Database,
+    db: &Db,
     body: CreateRepairRequest,
     device_id: Option<String>,
 ) -> AppResult<Repair> {
@@ -337,7 +335,7 @@ pub async fn create_repair(
 }
 
 pub async fn update_repair(
-    db: &Database,
+    db: &Db,
     id_or_key: &str,
     body: UpdateRepairRequest,
     device_id: Option<String>,
@@ -433,7 +431,7 @@ pub async fn update_repair(
 }
 
 pub async fn delete_repair(
-    db: &Database,
+    db: &Db,
     id_or_key: &str,
     device_id: Option<String>,
 ) -> AppResult<Repair> {
@@ -459,7 +457,7 @@ pub async fn delete_repair(
 /// `status`, never touches cost/assignment fields, since a sale completing
 /// shouldn't silently rewrite ticket details a technician entered.
 #[allow(dead_code)]
-pub(crate) async fn mark_delivered(db: &Database, key: &str) -> AppResult<Repair> {
+pub(crate) async fn mark_delivered(db: &Db, key: &str) -> AppResult<Repair> {
     let updated = repository::set_status_by_key(db, key, "delivered")
         .await?
         .ok_or_else(|| {

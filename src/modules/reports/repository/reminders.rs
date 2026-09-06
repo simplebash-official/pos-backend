@@ -15,7 +15,10 @@ use mongodb::{
     bson::{Document, doc, oid::ObjectId},
 };
 
+use sqlx::Row;
+
 use crate::{
+    clients::{db::Db, sqlite::map_sqlite_row_to_document},
     core::error::AppResult,
     domain::reports::{ReminderEntry, ReminderKind},
 };
@@ -67,7 +70,7 @@ enum Bucket {
 }
 
 pub(crate) async fn list_reminders(
-    db: &Database,
+    db: &Db,
     due_within_days: u32,
     page: u64,
     limit: u64,
@@ -93,33 +96,104 @@ pub(crate) async fn list_reminders(
         total_pages: 1,
     };
 
-    // ---- Credit invoices ---------------------------------------------------
-    let mut invoice_cursor = collection(db, "invoices")
-        .find(doc! {
-            "status": { "$in": ["pending", "partially_paid"] },
-            "due_date": { "$ne": null },
-        })
-        .await?;
-    let mut invoice_docs = Vec::new();
-    let mut invoice_keys = Vec::new();
-    while let Some(doc) = invoice_cursor.try_next().await? {
-        if let Ok(k) = doc.get_str("key") {
-            invoice_keys.push(k.to_string());
-        }
-        invoice_docs.push(doc);
-    }
-
-    let mut paid_by_invoice: HashMap<String, i64> = HashMap::new();
-    if !invoice_keys.is_empty() {
-        let mut p_cursor = collection(db, "payments")
-            .find(doc! { "invoice_key": { "$in": &invoice_keys } })
-            .await?;
-        while let Some(p) = p_cursor.try_next().await? {
-            if let (Ok(ik), Ok(amt)) = (p.get_str("invoice_key"), p.get_i64("amount_cents")) {
-                *paid_by_invoice.entry(ik.to_string()).or_insert(0) += amt;
+    let (invoice_docs, paid_by_invoice, repair_docs, print_job_docs) = match db {
+        Db::Mongo(db) => {
+            let mut invoice_cursor = collection(db, "invoices")
+                .find(doc! {
+                    "status": { "$in": ["pending", "partially_paid"] },
+                    "due_date": { "$ne": null },
+                })
+                .await?;
+            let mut invoice_docs = Vec::new();
+            let mut invoice_keys = Vec::new();
+            while let Some(doc) = invoice_cursor.try_next().await? {
+                if let Ok(k) = doc.get_str("key") {
+                    invoice_keys.push(k.to_string());
+                }
+                invoice_docs.push(doc);
             }
+
+            let mut paid_by_invoice: HashMap<String, i64> = HashMap::new();
+            if !invoice_keys.is_empty() {
+                let mut p_cursor = collection(db, "payments")
+                    .find(doc! { "invoice_key": { "$in": &invoice_keys } })
+                    .await?;
+                while let Some(p) = p_cursor.try_next().await? {
+                    if let (Ok(ik), Ok(amt)) = (p.get_str("invoice_key"), p.get_i64("amount_cents"))
+                    {
+                        *paid_by_invoice.entry(ik.to_string()).or_insert(0) += amt;
+                    }
+                }
+            }
+
+            let mut repair_docs = Vec::new();
+            let mut r_cursor = collection(db, "repairs")
+                .find(doc! {
+                    "promised_ready_at": { "$ne": null },
+                    "status": { "$nin": CLOSED_JOB_STATUSES.to_vec() },
+                    "deleted_at": { "$exists": false },
+                })
+                .await?;
+            while let Some(doc) = r_cursor.try_next().await? {
+                repair_docs.push(doc);
+            }
+
+            let mut print_job_docs = Vec::new();
+            let mut pj_cursor = collection(db, "print_jobs")
+                .find(doc! {
+                    "promised_ready_at": { "$ne": null },
+                    "status": { "$nin": CLOSED_JOB_STATUSES.to_vec() },
+                    "deleted_at": { "$exists": false },
+                })
+                .await?;
+            while let Some(doc) = pj_cursor.try_next().await? {
+                print_job_docs.push(doc);
+            }
+
+            (invoice_docs, paid_by_invoice, repair_docs, print_job_docs)
         }
-    }
+        Db::Sqlite(pool) => {
+            let inv_rows = sqlx::query(
+                "SELECT * FROM invoices WHERE status IN ('pending', 'partially_paid') AND due_date IS NOT NULL",
+            )
+            .fetch_all(pool)
+            .await?;
+            let mut invoice_docs = Vec::new();
+            for r in inv_rows {
+                invoice_docs.push(map_sqlite_row_to_document(&r));
+            }
+
+            let p_rows = sqlx::query(
+                "SELECT invoice_key, SUM(amount_cents) as total FROM payments GROUP BY invoice_key",
+            )
+            .fetch_all(pool)
+            .await?;
+            let mut paid_by_invoice = HashMap::new();
+            for r in p_rows {
+                let ik: String = r.get("invoice_key");
+                let tot: i64 = r.get("total");
+                paid_by_invoice.insert(ik, tot);
+            }
+
+            let rep_rows = sqlx::query(
+                "SELECT * FROM repairs WHERE promised_ready_at IS NOT NULL AND status NOT IN ('delivered', 'cancelled') AND deleted_at IS NULL",
+            )
+            .fetch_all(pool)
+            .await?;
+            let repair_docs: Vec<Document> =
+                rep_rows.iter().map(map_sqlite_row_to_document).collect();
+
+            let pj_rows = sqlx::query(
+                "SELECT * FROM print_jobs WHERE promised_ready_at IS NOT NULL AND status NOT IN ('delivered', 'cancelled') AND deleted_at IS NULL",
+            )
+            .fetch_all(pool)
+            .await?;
+            let print_job_docs: Vec<Document> =
+                pj_rows.iter().map(map_sqlite_row_to_document).collect();
+
+            (invoice_docs, paid_by_invoice, repair_docs, print_job_docs)
+        }
+    };
 
     for doc in invoice_docs {
         let Ok(due_date) = doc.get_str("due_date") else {
@@ -187,18 +261,11 @@ pub(crate) async fn list_reminders(
     }
 
     // ---- Repair & print jobs ---------------------------------------------
-    for (collection_name, route, is_repair) in [
-        ("repairs", "/repairs", true),
-        ("print_jobs", "/print-jobs", false),
+    for (docs, route, is_repair) in [
+        (repair_docs, "/repairs", true),
+        (print_job_docs, "/print-jobs", false),
     ] {
-        let mut cursor = collection(db, collection_name)
-            .find(doc! {
-                "promised_ready_at": { "$ne": null },
-                "status": { "$nin": CLOSED_JOB_STATUSES.to_vec() },
-                "deleted_at": { "$exists": false },
-            })
-            .await?;
-        while let Some(doc) = cursor.try_next().await? {
+        for doc in docs {
             let Ok(promised) = doc.get_str("promised_ready_at") else {
                 continue;
             };

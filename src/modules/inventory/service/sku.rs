@@ -3,9 +3,7 @@
 // staff never have to invent product codes by hand. See `repository::sku_counter`
 // for the atomic sequence that guarantees uniqueness.
 
-use mongodb::Database;
-
-use crate::{core::error::AppResult, modules::inventory::repository};
+use crate::{clients::db::Db, core::error::AppResult, modules::inventory::repository};
 
 /// Reduces a name to a 3-letter uppercase code: keeps only ASCII letters,
 /// takes the first 3, and pads with 'X' if the name has fewer than 3
@@ -34,11 +32,7 @@ fn derive_code(name: &str) -> String {
 /// and needs no uniqueness retry loop. Callers should validate
 /// `category`/`subcategory` before calling this — a discarded sequence
 /// number for a rejected request is otherwise harmless but wasteful.
-pub(crate) async fn generate_sku(
-    db: &Database,
-    category: &str,
-    subcategory: &str,
-) -> AppResult<String> {
+pub(crate) async fn generate_sku(db: &Db, category: &str, subcategory: &str) -> AppResult<String> {
     let prefix = format!("{}-{}", derive_code(category), derive_code(subcategory));
     let seq = repository::sku_counter::next_sequence(db, &prefix).await?;
 

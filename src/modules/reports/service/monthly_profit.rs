@@ -1,9 +1,7 @@
-// Business logic for Monthly Profit & Financial Intelligence report.
-
 use chrono::{Datelike, NaiveDate, Utc};
-use mongodb::Database;
 
 use crate::{
+    clients::db::Db,
     core::error::{AppError, AppResult},
     domain::reports::{MonthlyProfitDayEntry, MonthlyProfitQuery, MonthlyProfitReportResponse},
     modules::reports::repository,
@@ -12,7 +10,7 @@ use crate::{
 /// Generates monthly profit and financial intelligence metrics including gross/net profit,
 /// commissions, and refund impact.
 pub(crate) async fn get_monthly_profit_report(
-    db: &Database,
+    db: &Db,
     query: MonthlyProfitQuery,
 ) -> AppResult<MonthlyProfitReportResponse> {
     let now = Utc::now();

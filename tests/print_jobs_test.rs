@@ -588,7 +588,8 @@ async fn print_jobs_stats_endpoint_returns_today_job_count_revenue_pending_count
     // Backdated cancelled job — excluded from pending entirely.
     seed_print_job_with(&db, "cancelled", 1000, yesterday).await;
 
-    let stats = jana2u_pos_backend::modules::print_jobs::service::get_print_job_stats(&db)
+    let db_handle = jana2u_pos_backend::clients::db::Db::Mongo(db.clone());
+    let stats = jana2u_pos_backend::modules::print_jobs::service::get_print_job_stats(&db_handle)
         .await
         .expect("get_print_job_stats should succeed");
 

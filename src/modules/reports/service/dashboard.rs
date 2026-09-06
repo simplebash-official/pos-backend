@@ -1,9 +1,6 @@
-// Business logic for the Reports & Profit Intelligence dashboard overview.
-
-use mongodb::Database;
-
 use super::dates;
 use crate::{
+    clients::db::Db,
     core::error::AppResult,
     domain::reports::{ReportDateRangeQuery, ReportsDashboardResponse},
     modules::reports::repository,
@@ -12,7 +9,7 @@ use crate::{
 /// Computes unified executive KPI metrics across sales, revenue streams, commissions,
 /// profit calculations, and credit receivables.
 pub(crate) async fn get_dashboard_overview(
-    db: &Database,
+    db: &Db,
     query: ReportDateRangeQuery,
 ) -> AppResult<ReportsDashboardResponse> {
     let (start, end) = dates::parse_date_range(

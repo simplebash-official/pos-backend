@@ -7,6 +7,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
+use crate::core::error::AppError;
+
 /// A product as returned to API clients. `id` (the Mongo `ObjectId` as a
 /// hex string) is the stable route/lookup key; `key` is the human-shareable
 /// prefixed id (see `core::id::generate_id`) — both are exposed since
@@ -415,6 +417,26 @@ pub enum BarcodeSource {
     Manual,
 }
 
+impl BarcodeSource {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Generated => "generated",
+            Self::Manual => "manual",
+        }
+    }
+}
+
+impl std::str::FromStr for BarcodeSource {
+    type Err = AppError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "generated" => Ok(Self::Generated),
+            "manual" => Ok(Self::Manual),
+            _ => Err(AppError::validation(format!("Invalid barcode source: {s}"))),
+        }
+    }
+}
+
 /// Why a stock movement happened. Every adjustment (manual or automated)
 /// gets recorded as a `StockMovement` tagged with one of these, so the
 /// movement history stays auditable even once the originating request is
@@ -439,6 +461,40 @@ pub enum StockMovementType {
     ReturnWriteOff,
     /// A credit-note line in `Damaged` condition with disposition `ReturnToSupplier` — audit-only, no quantity change.
     ReturnSupplierRma,
+}
+
+impl StockMovementType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Sale => "sale",
+            Self::PurchaseReceipt => "purchase_receipt",
+            Self::RepairPartConsumption => "repair_part_consumption",
+            Self::ManualAdjustment => "manual_adjustment",
+            Self::InvoiceVoidReversal => "invoice_void_reversal",
+            Self::ReturnRestock => "return_restock",
+            Self::ReturnWriteOff => "return_write_off",
+            Self::ReturnSupplierRma => "return_supplier_rma",
+        }
+    }
+}
+
+impl std::str::FromStr for StockMovementType {
+    type Err = AppError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "sale" => Ok(Self::Sale),
+            "purchase_receipt" => Ok(Self::PurchaseReceipt),
+            "repair_part_consumption" => Ok(Self::RepairPartConsumption),
+            "manual_adjustment" => Ok(Self::ManualAdjustment),
+            "invoice_void_reversal" => Ok(Self::InvoiceVoidReversal),
+            "return_restock" => Ok(Self::ReturnRestock),
+            "return_write_off" => Ok(Self::ReturnWriteOff),
+            "return_supplier_rma" => Ok(Self::ReturnSupplierRma),
+            _ => Err(AppError::validation(format!(
+                "Invalid stock movement type: {s}"
+            ))),
+        }
+    }
 }
 
 /// A single recorded stock change (the audit trail entry behind a
@@ -679,6 +735,34 @@ pub enum SerialStatus {
     ReturnedFaulty,
     UnderWarrantyClaim,
     WrittenOff,
+}
+
+impl SerialStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::InStock => "in_stock",
+            Self::Sold => "sold",
+            Self::ReturnedResalable => "returned_resalable",
+            Self::ReturnedFaulty => "returned_faulty",
+            Self::UnderWarrantyClaim => "under_warranty_claim",
+            Self::WrittenOff => "written_off",
+        }
+    }
+}
+
+impl std::str::FromStr for SerialStatus {
+    type Err = AppError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "in_stock" => Ok(Self::InStock),
+            "sold" => Ok(Self::Sold),
+            "returned_resalable" => Ok(Self::ReturnedResalable),
+            "returned_faulty" => Ok(Self::ReturnedFaulty),
+            "under_warranty_claim" => Ok(Self::UnderWarrantyClaim),
+            "written_off" => Ok(Self::WrittenOff),
+            _ => Err(AppError::validation(format!("Invalid serial status: {s}"))),
+        }
+    }
 }
 
 /// One physical serialized unit of a serialized product.

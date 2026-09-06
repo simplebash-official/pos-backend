@@ -7,7 +7,7 @@
 use mongodb::{Collection, Database, bson::doc, options::ReturnDocument};
 use serde::{Deserialize, Serialize};
 
-use crate::core::error::AppResult;
+use crate::{clients::db::Db, core::error::AppResult};
 
 /// Mongo document shape tracking auto-increment SKU sequence per prefix.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,18 +24,33 @@ fn sku_counters(db: &Database) -> Collection<SkuCounterDocument> {
 }
 
 /// Atomically increments and returns the next sequence number for `code`,
-/// creating the counter starting at 1 if it doesn't exist yet. `$inc` on a
-/// single document is atomic in MongoDB, so concurrent product creations
-/// under the same derived prefix never receive the same sequence number —
-/// this is what `service::sku::generate_sku` relies on for SKU uniqueness.
-pub(crate) async fn next_sequence(db: &Database, code: &str) -> AppResult<i64> {
-    let updated = sku_counters(db)
-        .find_one_and_update(doc! { "_id": code }, doc! { "$inc": { "seq": 1i64 } })
-        .upsert(true)
-        .return_document(ReturnDocument::After)
-        .await?;
+/// creating the counter starting at 1 if it doesn't exist yet.
+pub(crate) async fn next_sequence(db: &Db, code: &str) -> AppResult<i64> {
+    match db {
+        Db::Mongo(db) => {
+            let updated = sku_counters(db)
+                .find_one_and_update(doc! { "_id": code }, doc! { "$inc": { "seq": 1i64 } })
+                .upsert(true)
+                .return_document(ReturnDocument::After)
+                .await?;
 
-    Ok(updated
-        .expect("upsert guarantees find_one_and_update returns a document")
-        .seq)
+            Ok(updated
+                .expect("upsert guarantees find_one_and_update returns a document")
+                .seq)
+        }
+        Db::Sqlite(pool) => {
+            let seq: i64 = sqlx::query_scalar(
+                r#"
+                INSERT INTO sku_counters (prefix, seq) VALUES (?, 1)
+                ON CONFLICT(prefix) DO UPDATE SET seq = seq + 1
+                RETURNING seq
+                "#,
+            )
+            .bind(code)
+            .fetch_one(pool)
+            .await?;
+
+            Ok(seq)
+        }
+    }
 }

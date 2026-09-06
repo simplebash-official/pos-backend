@@ -4,12 +4,10 @@
 // `repository::product`/`repository::category`/`repository::subcategory`.
 
 use axum::http::StatusCode;
-use mongodb::{
-    Database,
-    bson::{DateTime as BsonDateTime, Document, doc, oid::ObjectId},
-};
+use mongodb::bson::{DateTime as BsonDateTime, Document, doc, oid::ObjectId};
 
 use crate::{
+    clients::db::Db,
     core::{
         constants::{codes, prefixes},
         error::{AppError, AppResult},
@@ -75,7 +73,7 @@ fn validate_product_numbers(
 /// pre-existing class of risk here, not one this validation newly guards
 /// against.
 async fn ensure_valid_category(
-    db: &Database,
+    db: &Db,
     category_key: &str,
     subcategory_key: &str,
 ) -> AppResult<(String, String)> {
@@ -100,7 +98,7 @@ async fn ensure_valid_category(
 /// this never fails; a key that no longer resolves (e.g. stale data) just
 /// falls back to displaying the key itself rather than 500ing a read.
 async fn resolve_display_names(
-    db: &Database,
+    db: &Db,
     category_key: &str,
     subcategory_key: &str,
 ) -> AppResult<(String, String)> {
@@ -120,10 +118,7 @@ async fn resolve_display_names(
 /// calls this (never `inventory::repository` directly, which is private to
 /// this module) to enrich a page of purchase history with product display
 /// data in one query instead of one `get_product_by_key` call per row.
-pub(crate) async fn get_products_by_keys(
-    db: &Database,
-    keys: &[String],
-) -> AppResult<Vec<Product>> {
+pub(crate) async fn get_products_by_keys(db: &Db, keys: &[String]) -> AppResult<Vec<Product>> {
     if keys.is_empty() {
         return Ok(Vec::new());
     }
@@ -143,10 +138,7 @@ pub(crate) async fn get_products_by_keys(
 /// free-text search across name/sku/barcode/category/subcategory, and the low-stock flag) and
 /// delegates execution + pagination math to `repository::product::list_products_with_display_names`.
 /// Joining categories and subcategories happens inside MongoDB via `$lookup` in a single query.
-pub async fn list_products(
-    db: &Database,
-    query: ProductListQuery,
-) -> AppResult<ProductListResponse> {
+pub async fn list_products(db: &Db, query: ProductListQuery) -> AppResult<ProductListResponse> {
     let mut and_clauses: Vec<Document> = Vec::new();
 
     if let Some(category_key) = query.category_key.filter(|s| !s.is_empty()) {
@@ -217,7 +209,7 @@ pub async fn list_products(
 
 /// Fetch by id, 404ing with the module-specific `PRODUCT_NOT_FOUND` code
 /// rather than the generic `NOT_FOUND`.
-pub(crate) async fn get_product(db: &Database, id: ObjectId) -> AppResult<Product> {
+pub(crate) async fn get_product(db: &Db, id: ObjectId) -> AppResult<Product> {
     let document = repository::product::find_product_by_id(db, id)
         .await?
         .ok_or_else(|| {
@@ -235,7 +227,7 @@ pub(crate) async fn get_product(db: &Database, id: ObjectId) -> AppResult<Produc
 /// a `productKey` and to enrich their own responses with product display
 /// data, since those modules can't reach `inventory::repository` directly
 /// (only `inventory::service` is `pub`).
-pub(crate) async fn get_product_by_key(db: &Database, key: &str) -> AppResult<Product> {
+pub(crate) async fn get_product_by_key(db: &Db, key: &str) -> AppResult<Product> {
     let document = repository::product::find_product_by_key(db, key)
         .await?
         .ok_or_else(|| {
@@ -252,7 +244,7 @@ pub(crate) async fn get_product_by_key(db: &Database, key: &str) -> AppResult<Pr
 /// `barcode`, 404ing with `PRODUCT_NOT_FOUND` when none does. Unlike the
 /// `search` list param (a substring regex that can return several rows) this
 /// is an anchored equality match, so a scanner gets an unambiguous result.
-pub(crate) async fn get_product_by_barcode(db: &Database, barcode: &str) -> AppResult<Product> {
+pub(crate) async fn get_product_by_barcode(db: &Db, barcode: &str) -> AppResult<Product> {
     let document = repository::product::find_product_by_barcode(db, barcode)
         .await?
         .ok_or_else(|| {
@@ -285,7 +277,7 @@ fn validate_manual_barcode(value: &str) -> AppResult<()> {
 /// `barcode`. Used both for a real, expected-to-sometimes-fire manual-entry
 /// collision and as a defensive check after generation (which should never
 /// actually fire, mirroring the SKU defensive check below).
-async fn ensure_barcode_available(db: &Database, barcode: &str) -> AppResult<()> {
+async fn ensure_barcode_available(db: &Db, barcode: &str) -> AppResult<()> {
     if repository::product::find_product_by_barcode(db, barcode)
         .await?
         .is_some()
@@ -304,7 +296,7 @@ async fn ensure_barcode_available(db: &Database, barcode: &str) -> AppResult<()>
 /// auto-generation are mutually exclusive. A product supplying neither is fine,
 /// since a barcode can never be added later (it's immutable after creation).
 async fn resolve_barcode(
-    db: &Database,
+    db: &Db,
     barcode: Option<String>,
     auto_generate_barcode: bool,
 ) -> AppResult<(Option<String>, Option<BarcodeSource>)> {
@@ -338,7 +330,7 @@ async fn resolve_barcode(
 /// membership, and any optional supplier intake list, then generates the product's
 /// SKU from its category/subcategory names (see `service::sku::generate_sku`) —
 /// validation runs first so an invalid category/supplier never consumes a sequence number.
-pub async fn create_product(db: &Database, body: CreateProductRequest) -> AppResult<Product> {
+pub async fn create_product(db: &Db, body: CreateProductRequest) -> AppResult<Product> {
     if body.name.trim().is_empty() {
         return Err(AppError::validation("Product name is required"));
     }
@@ -477,7 +469,7 @@ pub async fn create_product(db: &Database, body: CreateProductRequest) -> AppRes
 /// back to the existing document's value before the merged result is
 /// re-validated (numbers, category) as if it were a fresh `create`.
 pub(crate) async fn update_product(
-    db: &Database,
+    db: &Db,
     id: ObjectId,
     body: UpdateProductRequest,
     expected_version: Option<i64>,
@@ -648,7 +640,7 @@ pub(crate) async fn update_product(
 /// mirrors the category/subcategory cascade in `service::category`, just
 /// across a module boundary rather than within one.
 pub(crate) async fn delete_product(
-    db: &Database,
+    db: &Db,
     id: ObjectId,
     expected_version: Option<i64>,
     device_id: Option<String>,
@@ -702,7 +694,7 @@ pub(crate) async fn delete_product(
 /// ones deleted instead of an all-or-nothing rejection. Cascades
 /// `supplier_products` link cleanup for every product actually deleted,
 /// same as the single-delete path.
-pub(crate) async fn delete_products(db: &Database, product_ids: Vec<String>) -> AppResult<u64> {
+pub(crate) async fn delete_products(db: &Db, product_ids: Vec<String>) -> AppResult<u64> {
     let object_ids: Vec<ObjectId> = product_ids
         .iter()
         .filter_map(|id| ObjectId::parse_str(id).ok())
@@ -737,7 +729,7 @@ pub(crate) async fn delete_products(db: &Database, product_ids: Vec<String>) -> 
 /// category/subcategory collections are small reference data) rather than
 /// the per-row `resolve_display_names` used by single-document reads.
 pub(crate) async fn hydrate_sync_documents(
-    db: &Database,
+    db: &Db,
     documents: Vec<Document>,
 ) -> AppResult<Vec<Product>> {
     if documents.is_empty() {

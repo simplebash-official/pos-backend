@@ -681,7 +681,8 @@ async fn repairs_stats_endpoint_returns_today_job_count_revenue_pending_count_an
     // Backdated cancelled ticket — excluded from pending entirely.
     seed_repair_with(&db, "cancelled", Some(1000), yesterday).await;
 
-    let stats = jana2u_pos_backend::modules::repairs::service::get_repair_stats(&db)
+    let db_handle = jana2u_pos_backend::clients::db::Db::Mongo(db.clone());
+    let stats = jana2u_pos_backend::modules::repairs::service::get_repair_stats(&db_handle)
         .await
         .expect("get_repair_stats should succeed");
 

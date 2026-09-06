@@ -1,8 +1,5 @@
-// Business rules and lifecycle management for import batches.
-
-use mongodb::Database;
-
 use crate::{
+    clients::db::Db,
     core::{
         constants::{codes, prefixes},
         error::{AppError, AppResult},
@@ -24,7 +21,7 @@ use crate::{
 };
 
 pub(crate) async fn process_import(
-    db: &Database,
+    db: &Db,
     user: &CurrentUser,
     body: ProcessImportRequest,
 ) -> AppResult<ImportBatch> {
@@ -123,7 +120,7 @@ pub(crate) async fn process_import(
     Ok(updated_doc.into_import_batch())
 }
 
-pub(crate) async fn get_import_batch(db: &Database, key: &str) -> AppResult<ImportBatch> {
+pub(crate) async fn get_import_batch(db: &Db, key: &str) -> AppResult<ImportBatch> {
     let doc = repository::batch::find_batch_by_key(db, key)
         .await?
         .ok_or_else(|| {
@@ -134,7 +131,7 @@ pub(crate) async fn get_import_batch(db: &Database, key: &str) -> AppResult<Impo
 }
 
 pub(crate) async fn list_import_batches(
-    db: &Database,
+    db: &Db,
     query: ImportBatchListQuery,
 ) -> AppResult<ImportBatchListResponse> {
     let (page, limit, skip) = calculate_pagination(query.page, query.limit, 20, 100);

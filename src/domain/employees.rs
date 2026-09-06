@@ -37,6 +37,19 @@ impl EmployeeRole {
     }
 }
 
+impl std::str::FromStr for EmployeeRole {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "technician" => Ok(EmployeeRole::Technician),
+            "printer" => Ok(EmployeeRole::Printer),
+            "sales" => Ok(EmployeeRole::Sales),
+            "general" => Ok(EmployeeRole::General),
+            other => Err(format!("Unknown employee role: {other}")),
+        }
+    }
+}
+
 /// How an employee's commission on a job is calculated: a percentage of
 /// profit, or a fixed amount per job.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -55,6 +68,17 @@ impl SplitType {
     }
 }
 
+impl std::str::FromStr for SplitType {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "percentage" => Ok(SplitType::Percentage),
+            "fixed" => Ok(SplitType::Fixed),
+            other => Err(format!("Unknown split type: {other}")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum EmployeeStatus {
@@ -67,6 +91,17 @@ impl EmployeeStatus {
         match self {
             EmployeeStatus::Active => "active",
             EmployeeStatus::Inactive => "inactive",
+        }
+    }
+}
+
+impl std::str::FromStr for EmployeeStatus {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "active" => Ok(EmployeeStatus::Active),
+            "inactive" => Ok(EmployeeStatus::Inactive),
+            other => Err(format!("Unknown employee status: {other}")),
         }
     }
 }

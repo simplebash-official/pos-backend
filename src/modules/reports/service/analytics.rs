@@ -5,10 +5,10 @@
 // `/reports/analytics/*` handlers return.
 
 use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, Utc};
-use mongodb::Database;
 
 use super::dates::{self, report_tz};
 use crate::{
+    clients::db::Db,
     core::error::AppResult,
     domain::reports::{
         AgingBucket, AgingDebtor, AnalyticsKpiDeltas, AnalyticsKpis,
@@ -127,7 +127,7 @@ fn bucket_label(bucket_start: DateTime<Utc>, gran: Granularity, tz: FixedOffset)
 // ---------------------------------------------------------------------------
 
 pub(crate) async fn get_analytics_summary(
-    db: &Database,
+    db: &Db,
     query: AnalyticsRangeQuery,
 ) -> AppResult<AnalyticsSummaryResponse> {
     let (start, end) = dates::parse_date_range_tz(
@@ -168,7 +168,7 @@ pub(crate) async fn get_analytics_summary(
 
 /// The full KPI block for one `[start, end)` window.
 async fn compute_kpis(
-    db: &Database,
+    db: &Db,
     start: DateTime<Utc>,
     end: DateTime<Utc>,
 ) -> AppResult<AnalyticsKpis> {
@@ -224,7 +224,7 @@ async fn compute_kpis(
 // ---------------------------------------------------------------------------
 
 pub(crate) async fn get_analytics_timeseries(
-    db: &Database,
+    db: &Db,
     query: AnalyticsRangeQuery,
 ) -> AppResult<TimeSeriesResponse> {
     let (start, end) = dates::parse_date_range_tz(
@@ -363,7 +363,7 @@ fn range(q: &AnalyticsRangeQuery) -> AppResult<(DateTime<Utc>, DateTime<Utc>)> {
 // ---------------------------------------------------------------------------
 
 pub(crate) async fn get_analytics_payment_methods(
-    db: &Database,
+    db: &Db,
     query: AnalyticsRangeQuery,
 ) -> AppResult<AnalyticsPaymentMethodsResponse> {
     let (start, end) = range(&query)?;
@@ -382,7 +382,7 @@ pub(crate) async fn get_analytics_payment_methods(
 // ---------------------------------------------------------------------------
 
 pub(crate) async fn get_analytics_top_customers(
-    db: &Database,
+    db: &Db,
     query: TopCustomersQuery,
 ) -> AppResult<TopCustomersResponse> {
     let (start, end) = dates::parse_date_range_tz(
@@ -443,7 +443,7 @@ pub(crate) async fn get_analytics_top_customers(
 // ---------------------------------------------------------------------------
 
 pub(crate) async fn get_analytics_sales_by_category(
-    db: &Database,
+    db: &Db,
     query: SalesByCategoryQuery,
 ) -> AppResult<SalesByCategoryResponse> {
     let (start, end) = dates::parse_date_range_tz(
@@ -509,7 +509,7 @@ pub(crate) async fn get_analytics_sales_by_category(
 // ---------------------------------------------------------------------------
 
 pub(crate) async fn get_analytics_cashier_performance(
-    db: &Database,
+    db: &Db,
     query: AnalyticsRangeQuery,
 ) -> AppResult<CashierPerformanceResponse> {
     let (start, end) = range(&query)?;
@@ -562,7 +562,7 @@ pub(crate) async fn get_analytics_cashier_performance(
 const WEEKDAY_LABELS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 pub(crate) async fn get_analytics_sales_patterns(
-    db: &Database,
+    db: &Db,
     query: AnalyticsRangeQuery,
 ) -> AppResult<SalesPatternsResponse> {
     let (start, end) = range(&query)?;
@@ -636,7 +636,7 @@ pub(crate) async fn get_analytics_sales_patterns(
 // ---------------------------------------------------------------------------
 
 pub(crate) async fn get_analytics_receivables_aging(
-    db: &Database,
+    db: &Db,
     query: ReceivablesAgingQuery,
 ) -> AppResult<ReceivablesAgingResponse> {
     let as_of = match query.as_of.as_deref().filter(|s| !s.trim().is_empty()) {
@@ -715,7 +715,7 @@ pub(crate) async fn get_analytics_receivables_aging(
 // ---------------------------------------------------------------------------
 
 pub(crate) async fn get_analytics_discounts(
-    db: &Database,
+    db: &Db,
     query: AnalyticsRangeQuery,
 ) -> AppResult<DiscountAnalyticsResponse> {
     let (start, end) = range(&query)?;
@@ -783,7 +783,7 @@ pub(crate) async fn get_analytics_discounts(
 // ---------------------------------------------------------------------------
 
 pub(crate) async fn get_analytics_refunds(
-    db: &Database,
+    db: &Db,
     query: AnalyticsRangeQuery,
 ) -> AppResult<RefundAnalyticsResponse> {
     let (start, end) = range(&query)?;

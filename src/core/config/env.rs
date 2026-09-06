@@ -1,10 +1,19 @@
 use std::env;
 
+/// Database engine type selected via environment configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DatabaseType {
+    Mongo,
+    Sqlite,
+}
+
 /// Resolved application configuration. Built once in `main.rs` via
 /// `Config::from_env()` and shared through `AppState` — nothing downstream
 /// reads environment variables directly.
 #[derive(Debug, Clone)]
 pub struct Config {
+    pub database_type: DatabaseType,
+    pub database_url: String,
     pub mongodb_uri: String,
     pub mongodb_db_name: String,
     pub jwt_secret: String,
@@ -43,8 +52,42 @@ impl Config {
     /// Parses and validates all required configuration once, at startup.
     /// Fails fast so a misconfigured deployment never reaches request-serving code.
     pub fn from_env() -> Result<Self, ConfigError> {
-        let mongodb_uri = required("MONGODB_URI")?;
-        let mongodb_db_name = required("MONGODB_DB_NAME")?;
+        let db_type_var = env::var("DATABASE_TYPE").ok();
+        let db_url_var = env::var("DATABASE_URL").ok();
+        let mongo_uri_var = env::var("MONGODB_URI").ok();
+
+        let database_type = match db_type_var.as_deref() {
+            Some("sqlite") => DatabaseType::Sqlite,
+            Some("mongodb") | Some("mongo") => DatabaseType::Mongo,
+            _ => {
+                if let Some(ref url) = db_url_var
+                    && (url.starts_with("sqlite:") || url.ends_with(".db"))
+                {
+                    DatabaseType::Sqlite
+                } else if mongo_uri_var.is_some() {
+                    DatabaseType::Mongo
+                } else {
+                    // Default to SQLite if neither is explicitly requested
+                    DatabaseType::Sqlite
+                }
+            }
+        };
+
+        let (database_url, mongodb_uri, mongodb_db_name) = match database_type {
+            DatabaseType::Sqlite => {
+                let url = db_url_var.unwrap_or_else(|| "sqlite://data/pos.db?mode=rwc".to_string());
+                let mongo_uri = mongo_uri_var.unwrap_or_default();
+                let mongo_db = env::var("MONGODB_DB_NAME").unwrap_or_default();
+                (url, mongo_uri, mongo_db)
+            }
+            DatabaseType::Mongo => {
+                let mongo_uri = required("MONGODB_URI")?;
+                let mongo_db = required("MONGODB_DB_NAME")?;
+                let url = db_url_var.unwrap_or_default();
+                (url, mongo_uri, mongo_db)
+            }
+        };
+
         let jwt_secret = required("JWT_SECRET")?;
 
         let port = env::var("PORT")
@@ -70,6 +113,8 @@ impl Config {
             .unwrap_or(30);
 
         Ok(Self {
+            database_type,
+            database_url,
             mongodb_uri,
             mongodb_db_name,
             jwt_secret,

@@ -4,12 +4,10 @@
 // guard that blocks deleting an employee while a login account still
 // references it. Delegates all Mongo access to `super::repository`.
 
-use mongodb::{
-    Database,
-    bson::{DateTime as BsonDateTime, Document, doc, oid::ObjectId},
-};
+use mongodb::bson::{DateTime as BsonDateTime, Document, doc, oid::ObjectId};
 
 use crate::{
+    clients::db::Db,
     core::{
         constants::{codes, prefixes},
         error::{AppError, AppResult},
@@ -56,10 +54,7 @@ fn validate_required_fields(name: &str, phone: &str, default_split_value: f64) -
 /// name/phone/nicOrId, plus exact role/status filters) — same construction
 /// style as `suppliers::service::list_suppliers`. Not paginated: a shop's
 /// staff roster is small enough to return in full.
-pub async fn list_employees(
-    db: &Database,
-    query: EmployeeListQuery,
-) -> AppResult<EmployeesResponse> {
+pub async fn list_employees(db: &Db, query: EmployeeListQuery) -> AppResult<EmployeesResponse> {
     let mut and_clauses: Vec<Document> = Vec::new();
 
     if let Some(search) = query.search.filter(|s| !s.is_empty()) {
@@ -102,7 +97,7 @@ pub async fn list_employees(
 
 /// Fetch by id, 404ing with the module-specific `EMPLOYEE_NOT_FOUND` code
 /// rather than the generic `NOT_FOUND`.
-pub(crate) async fn get_employee(db: &Database, id: ObjectId) -> AppResult<Employee> {
+pub(crate) async fn get_employee(db: &Db, id: ObjectId) -> AppResult<Employee> {
     let document = repository::find_employee_by_id(db, id)
         .await?
         .ok_or_else(|| {
@@ -116,7 +111,7 @@ pub(crate) async fn get_employee(db: &Database, id: ObjectId) -> AppResult<Emplo
 /// Same as `get_employee`, looked up by `key` instead of `ObjectId` — the
 /// cross-module entry point `repairs`/`print_jobs` call to resolve an
 /// `assignedEmployeeId` and derive its display name server-side.
-pub(crate) async fn get_employee_by_key(db: &Database, key: &str) -> AppResult<Employee> {
+pub(crate) async fn get_employee_by_key(db: &Db, key: &str) -> AppResult<Employee> {
     let document = repository::find_employee_by_key(db, key)
         .await?
         .ok_or_else(|| {
@@ -133,7 +128,7 @@ pub(crate) async fn get_employee_by_key(db: &Database, key: &str) -> AppResult<E
 /// Silently does nothing if `key` no longer resolves to a live employee
 /// (e.g. the employee was deleted between the two operations); that's not
 /// this caller's problem to raise.
-pub(crate) async fn touch_by_key(db: &Database, key: &str) -> AppResult<()> {
+pub(crate) async fn touch_by_key(db: &Db, key: &str) -> AppResult<()> {
     repository::touch_employee_by_key(db, key).await
 }
 
@@ -142,10 +137,7 @@ pub(crate) async fn touch_by_key(db: &Database, key: &str) -> AppResult<()> {
 /// keyed by `assignedEmployeeId`, in one query instead of one lookup per row
 /// (the "reach another module through its service, never $lookup across a
 /// module boundary" pattern `purchases`/`supplier_products` already use).
-pub(crate) async fn get_employees_by_keys(
-    db: &Database,
-    keys: &[String],
-) -> AppResult<Vec<Employee>> {
+pub(crate) async fn get_employees_by_keys(db: &Db, keys: &[String]) -> AppResult<Vec<Employee>> {
     let documents = repository::find_employees_by_keys(db, keys).await?;
     let doc_keys: Vec<String> = documents.iter().map(|d| d.key.clone()).collect();
     let mut logins = users::service::find_user_summaries_by_employee_keys(db, &doc_keys).await?;
@@ -159,7 +151,7 @@ pub(crate) async fn get_employees_by_keys(
         .collect())
 }
 
-pub async fn create_employee(db: &Database, body: CreateEmployeeRequest) -> AppResult<Employee> {
+pub async fn create_employee(db: &Db, body: CreateEmployeeRequest) -> AppResult<Employee> {
     validate_required_fields(&body.name, &body.phone, body.default_split_value)?;
 
     let now = BsonDateTime::now();
@@ -191,7 +183,7 @@ pub async fn create_employee(db: &Database, body: CreateEmployeeRequest) -> AppR
 /// fields (nicOrId/notes) are only touched when explicitly provided (same
 /// convention as `suppliers::service::update_supplier`).
 pub(crate) async fn update_employee(
-    db: &Database,
+    db: &Db,
     id: ObjectId,
     body: UpdateEmployeeRequest,
     expected_version: Option<i64>,
@@ -284,7 +276,7 @@ pub(crate) async fn update_employee(
 /// has a linked login account — the login must be removed first, mirroring
 /// `suppliers::service::delete_supplier`'s `SUPPLIER_HAS_PURCHASES` guard.
 pub(crate) async fn delete_employee(
-    db: &Database,
+    db: &Db,
     id: ObjectId,
     device_id: Option<String>,
 ) -> AppResult<Employee> {
@@ -318,7 +310,7 @@ pub(crate) async fn delete_employee(
 /// blocked by the `EMPLOYEE_HAS_LOGIN` guard are silently skipped rather
 /// than failing the whole request — same "valid ones still succeed"
 /// semantics as `suppliers::service::delete_suppliers`.
-pub(crate) async fn delete_employees(db: &Database, ids: Vec<String>) -> AppResult<u64> {
+pub(crate) async fn delete_employees(db: &Db, ids: Vec<String>) -> AppResult<u64> {
     let mut deleted_count = 0u64;
     for id in ids {
         if let Ok(object_id) = ObjectId::parse_str(&id)
@@ -338,7 +330,7 @@ pub(crate) async fn delete_employees(db: &Database, ids: Vec<String>) -> AppResu
 /// `suppliers::service::hydrate_sync_documents` for why the delta and
 /// snapshot feeds must otherwise produce identical rows.
 pub(crate) async fn hydrate_sync_documents(
-    db: &Database,
+    db: &Db,
     documents: Vec<Document>,
 ) -> AppResult<Vec<Employee>> {
     let docs: Vec<EmployeeDocument> = documents

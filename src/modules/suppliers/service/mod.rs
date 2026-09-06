@@ -4,12 +4,10 @@
 // still point at it by key. Delegates all Mongo access to `super::repository`.
 
 use axum::http::StatusCode;
-use mongodb::{
-    Database,
-    bson::{DateTime as BsonDateTime, Document, doc, oid::ObjectId},
-};
+use mongodb::bson::{DateTime as BsonDateTime, Document, doc, oid::ObjectId};
 
 use crate::{
+    clients::db::Db,
     core::{
         constants::{codes, prefixes},
         error::{AppError, AppResult},
@@ -90,10 +88,7 @@ fn validate_email(email: &str) -> AppResult<()> {
 /// membership filter) — same construction style as
 /// `inventory::service::product::list_products`. Not paginated: a shop's
 /// supplier list is small enough to return in full.
-pub async fn list_suppliers(
-    db: &Database,
-    query: SupplierListQuery,
-) -> AppResult<SuppliersResponse> {
+pub async fn list_suppliers(db: &Db, query: SupplierListQuery) -> AppResult<SuppliersResponse> {
     let mut and_clauses: Vec<Document> = Vec::new();
 
     if let Some(search) = query.search.filter(|s| !s.is_empty()) {
@@ -128,7 +123,7 @@ pub async fn list_suppliers(
 
 /// Fetch by id, 404ing with the module-specific `SUPPLIER_NOT_FOUND` code
 /// rather than the generic `NOT_FOUND`.
-pub(crate) async fn get_supplier(db: &Database, id: ObjectId) -> AppResult<Supplier> {
+pub(crate) async fn get_supplier(db: &Db, id: ObjectId) -> AppResult<Supplier> {
     let document = repository::find_supplier_by_id(db, id)
         .await?
         .ok_or_else(|| {
@@ -141,7 +136,7 @@ pub(crate) async fn get_supplier(db: &Database, id: ObjectId) -> AppResult<Suppl
 /// Same as `get_supplier`, looked up by `key` instead of `ObjectId` — the
 /// cross-module entry point `supplier_products`/`purchases` call to
 /// validate a `supplierKey` and enrich their own responses.
-pub(crate) async fn get_supplier_by_key(db: &Database, key: &str) -> AppResult<Supplier> {
+pub(crate) async fn get_supplier_by_key(db: &Db, key: &str) -> AppResult<Supplier> {
     let document = repository::find_supplier_by_key(db, key)
         .await?
         .ok_or_else(|| {
@@ -154,10 +149,7 @@ pub(crate) async fn get_supplier_by_key(db: &Database, key: &str) -> AppResult<S
 /// Cross-module batch lookup — `purchases::service::purchase::list_purchases`
 /// calls this to enrich a page of purchase history with supplier display
 /// data in one query instead of one `get_supplier_by_key` call per row.
-pub(crate) async fn get_suppliers_by_keys(
-    db: &Database,
-    keys: &[String],
-) -> AppResult<Vec<Supplier>> {
+pub(crate) async fn get_suppliers_by_keys(db: &Db, keys: &[String]) -> AppResult<Vec<Supplier>> {
     let documents = repository::find_suppliers_by_keys(db, keys).await?;
     Ok(documents
         .into_iter()
@@ -165,7 +157,7 @@ pub(crate) async fn get_suppliers_by_keys(
         .collect())
 }
 
-pub async fn create_supplier(db: &Database, body: CreateSupplierRequest) -> AppResult<Supplier> {
+pub async fn create_supplier(db: &Db, body: CreateSupplierRequest) -> AppResult<Supplier> {
     validate_required_fields(
         &body.name,
         &body.contact_person,
@@ -206,7 +198,7 @@ pub async fn create_supplier(db: &Database, body: CreateSupplierRequest) -> AppR
 /// the previous value in place. Contrast with `update_supplier` (PATCH),
 /// where an omitted optional field is left untouched.
 pub(crate) async fn replace_supplier(
-    db: &Database,
+    db: &Db,
     id: ObjectId,
     body: CreateSupplierRequest,
     expected_version: Option<i64>,
@@ -304,7 +296,7 @@ pub(crate) async fn replace_supplier(
 /// `barcode` handling) — an omitted one keeps whatever value was already
 /// stored rather than being cleared.
 pub(crate) async fn update_supplier(
-    db: &Database,
+    db: &Db,
     id: ObjectId,
     body: UpdateSupplierRequest,
     expected_version: Option<i64>,
@@ -431,7 +423,7 @@ pub(crate) async fn update_supplier(
 /// every `supplier_products` link for this supplier — those are pure
 /// linking metadata, not audit history, so no data of lasting value is lost.
 pub(crate) async fn delete_supplier(
-    db: &Database,
+    db: &Db,
     id: ObjectId,
     expected_version: Option<i64>,
     device_id: Option<String>,
@@ -492,7 +484,7 @@ pub(crate) async fn delete_supplier(
 /// blocked by the purchase-history guard are silently skipped rather than
 /// failing the whole request — same "valid ones still succeed" semantics as
 /// `inventory::service::product::delete_products`.
-pub(crate) async fn delete_suppliers(db: &Database, ids: Vec<String>) -> AppResult<u64> {
+pub(crate) async fn delete_suppliers(db: &Db, ids: Vec<String>) -> AppResult<u64> {
     let mut deleted_count = 0u64;
     for id in ids {
         if let Ok(object_id) = ObjectId::parse_str(&id)
@@ -507,9 +499,7 @@ pub(crate) async fn delete_suppliers(db: &Database, ids: Vec<String>) -> AppResu
 /// Every distinct tag currently in use across all suppliers'
 /// `suppliedCategories`, sorted for stable output — backs
 /// `GET /suppliers/categories`.
-pub(crate) async fn get_supplier_categories(
-    db: &Database,
-) -> AppResult<SupplierCategoriesResponse> {
+pub(crate) async fn get_supplier_categories(db: &Db) -> AppResult<SupplierCategoriesResponse> {
     let mut categories = repository::distinct_supplied_categories(db).await?;
     categories.sort();
     categories.dedup();
@@ -517,7 +507,7 @@ pub(crate) async fn get_supplier_categories(
 }
 
 /// Computes the KPI cards for the Suppliers screen.
-pub async fn get_supplier_stats(db: &Database) -> AppResult<SupplierStats> {
+pub async fn get_supplier_stats(db: &Db) -> AppResult<SupplierStats> {
     let (total_suppliers, direct_contacts_count) = repository::count_stats(db).await?;
     let supply_categories_count = repository::distinct_supplied_categories(db).await?.len() as u64;
 

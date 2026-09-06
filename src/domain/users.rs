@@ -29,6 +29,23 @@ impl Role {
             Role::Staff => "staff",
         }
     }
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "admin" => Some(Role::Admin),
+            "manager" => Some(Role::Manager),
+            "staff" => Some(Role::Staff),
+            _ => None,
+        }
+    }
+}
+
+impl std::str::FromStr for Role {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Role::from_str(s).ok_or(())
+    }
 }
 
 /// A user account as returned to API clients. `id` (the Mongo `ObjectId` as

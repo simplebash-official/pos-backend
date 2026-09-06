@@ -1,8 +1,5 @@
-// Business logic for Credit Receivables and Aging reports.
-
-use mongodb::Database;
-
 use crate::{
+    clients::db::Db,
     core::{error::AppResult, utils::calculate_pagination},
     domain::reports::{OutstandingReceivablesQuery, OutstandingReceivablesResponse},
     modules::reports::repository,
@@ -10,7 +7,7 @@ use crate::{
 
 /// Retrieves the total uncollected credit, overdue amounts, and paginated unpaid invoices.
 pub(crate) async fn get_outstanding_report(
-    db: &Database,
+    db: &Db,
     query: OutstandingReceivablesQuery,
 ) -> AppResult<OutstandingReceivablesResponse> {
     let (page, limit, skip) = calculate_pagination(query.page, query.limit, 20, 200);

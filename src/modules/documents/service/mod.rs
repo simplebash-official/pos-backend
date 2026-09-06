@@ -6,10 +6,10 @@
 
 use std::path::Path;
 
-use mongodb::{Database, bson::DateTime as BsonDateTime};
+use mongodb::bson::DateTime as BsonDateTime;
 
 use crate::{
-    clients::document_server::DocumentServerClient,
+    clients::{db::Db, document_server::DocumentServerClient},
     core::{constants::prefixes, error::AppResult, id::generate_id},
     modules::documents::{model::GeneratedDocumentDocument, repository},
 };
@@ -51,7 +51,7 @@ pub(crate) async fn render_uncached(
 /// deletes the stale metadata row; that's an acceptable, easily-cleaned-up
 /// inconsistency rather than a reason to fail a print request.
 pub(crate) async fn get_or_render(
-    db: &Database,
+    db: &Db,
     doc_server: &DocumentServerClient,
     generated_documents_dir: &str,
     entity_key: &str,

@@ -62,8 +62,8 @@ RUN groupadd -g 10001 appuser && \
 
 WORKDIR /app
 
-# Prepare directory for generated invoice/receipt PDFs and bin tools with write permission
-RUN mkdir -p /app/generated_documents /app/bin && \
+# Prepare directory for generated invoice/receipt PDFs, persistent SQLite data, and bin tools with write permission
+RUN mkdir -p /app/generated_documents /app/data /app/bin && \
     chown -R appuser:appuser /app
 
 # Copy stripped binaries from builder stage
@@ -72,11 +72,12 @@ COPY --from=builder --chown=appuser:appuser /app/target/release/bins/ /app/bin/
 
 # Environment defaults
 ENV PORT=8080 \
+    DATABASE_URL=sqlite:///app/data/pos.db?mode=rwc \
     GENERATED_DOCUMENTS_DIR=/app/generated_documents \
     RUST_LOG=jana2u_pos_backend=info,tower_http=info,info
 
-# Declare persistent volume for generated invoice/receipt PDF storage
-VOLUME ["/app/generated_documents"]
+# Declare persistent volumes for generated invoice/receipt PDF storage and SQLite database
+VOLUME ["/app/generated_documents", "/app/data"]
 
 USER appuser
 

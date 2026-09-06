@@ -1,9 +1,6 @@
-// Business logic for one employee's itemized commission history.
-
-use mongodb::Database;
-
 use super::dates;
 use crate::{
+    clients::db::Db,
     core::error::AppResult,
     domain::{employees::EmployeeEarningsResponse, reports::EmployeeCommissionsQuery},
     modules::{employees, reports::repository},
@@ -13,7 +10,7 @@ use crate::{
 /// employee. 404s via `employees::service::get_employee_by_key` if the key
 /// doesn't resolve, before doing any repair/print-job lookups.
 pub(crate) async fn get_employee_earnings(
-    db: &Database,
+    db: &Db,
     employee_key: &str,
     query: EmployeeCommissionsQuery,
 ) -> AppResult<EmployeeEarningsResponse> {

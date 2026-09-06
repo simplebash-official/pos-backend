@@ -6,12 +6,10 @@
 
 use chrono::{Duration, Utc};
 use jsonwebtoken::{EncodingKey, Header, encode};
-use mongodb::{
-    Database,
-    bson::{Document, doc, oid::ObjectId},
-};
+use mongodb::bson::{Document, doc, oid::ObjectId};
 
 use crate::{
+    clients::db::Db,
     core::{
         config::Config,
         constants::{codes, prefixes, roles},
@@ -38,7 +36,7 @@ use crate::{
 /// broken `login_sessions` write blocks login rather than silently losing
 /// the record.
 pub(crate) async fn login(
-    db: &Database,
+    db: &Db,
     config: &Config,
     body: LoginRequest,
     ip_address: Option<String>,
@@ -77,7 +75,7 @@ pub(crate) async fn login(
 }
 
 async fn record_login_session(
-    db: &Database,
+    db: &Db,
     user: &User,
     ip_address: Option<String>,
     user_agent: Option<String>,
@@ -106,7 +104,7 @@ async fn record_login_session(
 /// one place a caller can discover mid-session that their account was
 /// deactivated (or deleted) *since* their token was issued, since there is
 /// no revocation/blacklist infra to push that information any other way.
-pub(crate) async fn me(db: &Database, user_id: &str) -> AppResult<User> {
+pub(crate) async fn me(db: &Db, user_id: &str) -> AppResult<User> {
     let object_id = ObjectId::parse_str(user_id)
         .map_err(|_| AppError::unauthorized("Invalid token subject"))?;
 
@@ -133,7 +131,7 @@ pub(crate) async fn me(db: &Database, user_id: &str) -> AppResult<User> {
 /// lists) since this is an append-only log with unbounded growth. `user_id`
 /// filters to one account's `key` when the caller supplies it.
 pub(crate) async fn list_sessions(
-    db: &Database,
+    db: &Db,
     query: LoginSessionListQuery,
 ) -> AppResult<LoginSessionsResponse> {
     let (page, limit, skip) = calculate_pagination(query.page, query.limit, 20, 100);

@@ -9,12 +9,10 @@
 use std::collections::HashMap;
 
 use futures_util::future::try_join_all;
-use mongodb::{
-    Database,
-    bson::{DateTime as BsonDateTime, Document, doc, oid::ObjectId},
-};
+use mongodb::bson::{DateTime as BsonDateTime, Document, doc, oid::ObjectId};
 
 use crate::{
+    clients::db::Db,
     core::{
         config::Config,
         constants::{codes, prefixes},
@@ -46,7 +44,7 @@ use crate::{
 /// pre-Credit-Note `returns` module: an exchange replacement item is
 /// resolved exactly like a normal sale line.
 async fn resolve_exchange_items(
-    db: &Database,
+    db: &Db,
     items: &[CreateSaleItemRequest],
 ) -> AppResult<(Vec<InvoiceItem>, HashMap<String, Product>)> {
     let retail_product_keys: Vec<String> = items
@@ -72,7 +70,7 @@ async fn resolve_exchange_items(
 }
 
 async fn resolve_exchange_item(
-    db: &Database,
+    db: &Db,
     item: &CreateSaleItemRequest,
     products: &HashMap<String, Product>,
 ) -> AppResult<InvoiceItem> {
@@ -232,7 +230,7 @@ fn validate_condition_disposition(
 /// price (there is no invoice line to read an original price from), or a
 /// client-supplied name/price for a line with no `productKey` at all.
 async fn resolve_no_receipt_item(
-    db: &Database,
+    db: &Db,
     item_req: &CreateCreditNoteItemRequest,
 ) -> AppResult<CreditNoteItem> {
     validate_condition_disposition(item_req.condition, item_req.disposition)?;
@@ -326,7 +324,7 @@ struct RefundShape {
 
 #[allow(clippy::too_many_arguments)]
 async fn compute_refund_shape(
-    db: &Database,
+    db: &Db,
     invoice_key: Option<&str>,
     return_subtotal_cents: i64,
     exchange_items_req: &Option<Vec<CreateSaleItemRequest>>,
@@ -438,7 +436,7 @@ async fn compute_refund_shape(
 /// movement at all (parked — out of scope for this pass, see
 /// `CreditNoteStatus::AwaitingResolution`'s doc comment).
 async fn apply_return_stock_movement(
-    db: &Database,
+    db: &Db,
     item: &CreditNoteItem,
     credit_note_key: &str,
     credit_note_number: &str,
@@ -493,7 +491,7 @@ async fn apply_return_stock_movement(
 /// `Damaged`+`WriteOffScrap` -> `WrittenOff`; `Damaged`+`RepairPending` or
 /// `PendingInspection` -> `ReturnedFaulty`. Best-effort, same as the stock
 /// movement it accompanies — never fails the whole credit note.
-async fn transition_returned_serial(db: &Database, item: &CreditNoteItem, credit_note_key: &str) {
+async fn transition_returned_serial(db: &Db, item: &CreditNoteItem, credit_note_key: &str) {
     let (Some(product_key), Some(serial_number)) = (&item.product_key, &item.serial_number) else {
         return;
     };
@@ -558,7 +556,7 @@ async fn transition_returned_serial(db: &Database, item: &CreditNoteItem, credit
 /// ultimately can't be satisfied, and no concurrent request can double-claim
 /// the same quantity.
 pub async fn create_credit_note(
-    db: &Database,
+    db: &Db,
     config: &Config,
     body: CreateCreditNoteRequest,
     cashier_id: String,
@@ -948,7 +946,7 @@ pub async fn create_credit_note(
 /// refund/extra-payment leg(s), and persists the `CreditNoteDocument`.
 #[allow(clippy::too_many_arguments)]
 async fn finish_create_credit_note(
-    db: &Database,
+    db: &Db,
     invoice_ref: Option<(String, String)>,
     resolved_return_items: Vec<CreditNoteItem>,
     return_subtotal_cents: i64,
@@ -1103,7 +1101,7 @@ async fn finish_create_credit_note(
 /// (out of scope for this pass — voiding an exchange's replacement item sale
 /// is not a returns flow).
 pub async fn void_credit_note(
-    db: &Database,
+    db: &Db,
     id_or_key: &str,
     body: VoidCreditNoteRequest,
     voided_by: String,
@@ -1241,7 +1239,7 @@ pub async fn void_credit_note(
 }
 
 /// Look up a single credit note by its hex ObjectId or unique model key (`cn_...`).
-pub async fn get_credit_note(db: &Database, id_or_key: &str) -> AppResult<CreditNote> {
+pub async fn get_credit_note(db: &Db, id_or_key: &str) -> AppResult<CreditNote> {
     let document = repository::credit_notes::find_credit_note_by_id_or_key(db, id_or_key)
         .await?
         .ok_or_else(|| {
@@ -1252,7 +1250,7 @@ pub async fn get_credit_note(db: &Database, id_or_key: &str) -> AppResult<Credit
 
 /// List credit notes matching query filters with pagination.
 pub async fn list_credit_notes(
-    db: &Database,
+    db: &Db,
     query: CreditNoteListQuery,
 ) -> AppResult<CreditNoteListResponse> {
     let mut and_clauses: Vec<Document> = Vec::new();

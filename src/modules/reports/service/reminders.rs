@@ -1,10 +1,5 @@
-// Business logic for the dashboard reminders feed — clamps the query
-// parameters and assembles the `RemindersResponse` from the repository's
-// merged list + headline counts.
-
-use mongodb::Database;
-
 use crate::{
+    clients::db::Db,
     core::{error::AppResult, utils::calculate_pagination},
     domain::reports::{RemindersQuery, RemindersResponse},
     modules::reports::repository,
@@ -13,10 +8,7 @@ use crate::{
 const DEFAULT_DUE_WITHIN_DAYS: u32 = 7;
 const DEFAULT_LIMIT: u64 = 20;
 
-pub(crate) async fn get_reminders(
-    db: &Database,
-    query: RemindersQuery,
-) -> AppResult<RemindersResponse> {
+pub(crate) async fn get_reminders(db: &Db, query: RemindersQuery) -> AppResult<RemindersResponse> {
     let due_within_days = query
         .due_within_days
         .unwrap_or(DEFAULT_DUE_WITHIN_DAYS)

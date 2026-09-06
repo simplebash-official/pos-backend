@@ -7,12 +7,10 @@
 // in this codebase follows.
 
 use chrono::{Duration, Utc};
-use mongodb::{
-    Database,
-    bson::{DateTime as BsonDateTime, Document, doc, oid::ObjectId},
-};
+use mongodb::bson::{DateTime as BsonDateTime, Document, doc, oid::ObjectId};
 
 use crate::{
+    clients::db::Db,
     core::{
         constants::{codes, prefixes},
         error::{AppError, AppResult},
@@ -26,7 +24,7 @@ use crate::{
 /// Backs `GET /products/{key}/serials`, used both by a sale-time "pick a
 /// unit to sell" picker (`status=in_stock`) and a return-time lookup.
 pub(crate) async fn list_serials_for_product(
-    db: &Database,
+    db: &Db,
     product_key: &str,
     status: Option<SerialStatus>,
 ) -> AppResult<Vec<ProductSerial>> {
@@ -49,12 +47,12 @@ pub(crate) async fn list_serials_for_product(
         .collect())
 }
 
-/// Mints one `InStock` serial record per number in `serial_numbers` for a
-/// purchase receipt of a serialized product. Rejects (409
-/// `SERIAL_ALREADY_EXISTS`) if any given number is already tracked anywhere
-/// — serial numbers are unique across the whole shop, not just per product.
+/// Mints `ProductSerialDocument`s for units received on a purchase receipt.
+/// Verifies no serial is already known (across ANY product — serials are
+/// globally unique); fails fast with `SERIAL_ALREADY_EXISTS` before
+/// inserting anything so a duplicate stops the whole purchase.
 pub(crate) async fn create_serials_for_purchase(
-    db: &Database,
+    db: &Db,
     product_key: &str,
     serial_numbers: &[String],
 ) -> AppResult<()> {
@@ -97,7 +95,7 @@ pub(crate) async fn create_serials_for_purchase(
 /// current lifecycle status — used by a credit-note return, which needs to
 /// transition a unit that's currently `Sold` (not `InStock`).
 pub(crate) async fn find_serial_id(
-    db: &Database,
+    db: &Db,
     product_key: &str,
     serial_number: &str,
 ) -> AppResult<ObjectId> {
@@ -122,7 +120,7 @@ pub(crate) async fn find_serial_id(
 /// a sale line — 404 `SERIAL_NOT_FOUND` if unknown/wrong product, 409
 /// `SERIAL_ALREADY_SOLD` if it exists but isn't `InStock`.
 pub(crate) async fn resolve_in_stock_serial(
-    db: &Database,
+    db: &Db,
     product_key: &str,
     serial_number: &str,
 ) -> AppResult<ProductSerialDocument> {
@@ -154,7 +152,7 @@ pub(crate) async fn resolve_in_stock_serial(
 /// `warranty_months` (if any). Called post-commit, mirroring how
 /// `apply_stock_delta` runs after the invoice itself is already inserted.
 pub(crate) async fn mark_serial_sold(
-    db: &Database,
+    db: &Db,
     serial_id: ObjectId,
     invoice_key: &str,
     warranty_months: Option<i64>,
@@ -183,7 +181,7 @@ pub(crate) async fn mark_serial_sold(
 /// `invoice_key` — used when a credit-note line references a serialized
 /// invoice line, to confirm the returned unit really was part of that sale.
 pub(crate) async fn resolve_sold_serial_for_invoice(
-    db: &Database,
+    db: &Db,
     product_key: &str,
     serial_number: &str,
     invoice_key: &str,
@@ -226,7 +224,7 @@ pub(crate) fn is_within_warranty(serial: &ProductSerialDocument) -> Option<bool>
 /// `Damaged`+`WriteOffScrap` -> `WrittenOff`;
 /// `Damaged`+`RepairPending` or `PendingInspection` -> `ReturnedFaulty`.
 pub(crate) async fn transition_serial_on_return(
-    db: &Database,
+    db: &Db,
     serial_id: ObjectId,
     new_status: SerialStatus,
     credit_note_key: &str,

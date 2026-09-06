@@ -272,7 +272,7 @@ async fn single_admin_invariant_and_admin_invisible_via_users_api() {
 
     let email = format!("only-admin-{}@example.com", Uuid::new_v4());
     let first = create_user(
-        &app.db,
+        &app.db_handle,
         CreateUserRequest {
             name: "Only Admin".to_string(),
             email: email.clone(),
@@ -285,7 +285,7 @@ async fn single_admin_invariant_and_admin_invisible_via_users_api() {
     assert!(first.is_ok(), "{first:?}");
 
     let second = create_user(
-        &app.db,
+        &app.db_handle,
         CreateUserRequest {
             name: "Second Admin".to_string(),
             email: format!("second-admin-{}@example.com", Uuid::new_v4()),

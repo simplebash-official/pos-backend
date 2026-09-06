@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use axum::{Json, Router, http::Method, middleware};
-use mongodb::Database;
 use tower_http::{
     LatencyUnit,
     cors::CorsLayer,
@@ -13,7 +12,7 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::{
-    clients::document_server::DocumentServerClient,
+    clients::{db::Db, document_server::DocumentServerClient},
     core::{
         config::Config, middleware::timing::add_processing_time_to_body, openapi::ApiDoc,
         response::ApiResponse,
@@ -24,8 +23,8 @@ use crate::{
 
 /// Shared application state injected into every handler via Axum's
 /// `State` extractor. `Arc<Config>` because `Config` is read-only after
-/// startup and cloned into every request's extensions; `Database` is
-/// already an internally-`Arc`'d handle in the Mongo driver, so cloning it
+/// startup and cloned into every request's extensions; `Db` is
+/// an internally-`Arc`'d handle (either Mongo or SQLite pool), so cloning it
 /// per-request is cheap. `document_server` is behind its own `Arc` since
 /// `DocumentServerClient` holds a `reqwest::Client` (already internally
 /// `Arc`'d) plus a mutable template-key cache that must be shared, not
@@ -33,7 +32,7 @@ use crate::{
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<Config>,
-    pub db: Database,
+    pub db: Db,
     pub document_server: Arc<DocumentServerClient>,
     pub reports_engine: Arc<modules::reports::engine::AnalyticsEngine>,
 }

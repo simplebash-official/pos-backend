@@ -13,8 +13,12 @@ use mongodb::{
     bson::{DateTime as BsonDateTime, Document, doc},
 };
 
-use super::commissions::{compute_earned_cents, get_i64_flexible};
-use crate::{core::error::AppResult, domain::employees::EmployeeEarningRecord};
+use crate::{
+    clients::{db::Db, sqlite::map_sqlite_row_to_document},
+    core::error::AppResult,
+    domain::employees::EmployeeEarningRecord,
+    modules::reports::repository::commissions::{compute_earned_cents, get_i64_flexible},
+};
 
 fn repairs(db: &Database) -> Collection<Document> {
     db.collection("repairs")
@@ -71,50 +75,87 @@ fn to_record(
 /// Every completed/delivered repair and print job assigned to `employee_key`
 /// within `[start, end)`, newest first.
 pub(crate) async fn list_employee_earnings(
-    db: &Database,
+    db: &Db,
     employee_key: &str,
     start: DateTime<Utc>,
     end: DateTime<Utc>,
 ) -> AppResult<Vec<EmployeeEarningRecord>> {
     let mut records = Vec::new();
 
-    let repair_match = doc! {
-        "deleted_at": null,
-        "assigned_employee_id": employee_key,
-        "status": { "$in": ["completed", "delivered", "ready_for_pickup"] },
-        "created_at": {
-            "$gte": BsonDateTime::from_chrono(start),
-            "$lt": BsonDateTime::from_chrono(end),
-        }
-    };
-    let mut cursor = repairs(db)
-        .find(repair_match)
-        .sort(doc! { "created_at": -1 })
-        .await?;
-    while let Some(doc) = cursor.try_next().await? {
-        let description = doc
-            .get_str("issue_description")
-            .unwrap_or_default()
-            .to_string();
-        records.push(to_record(&doc, "repair", description));
-    }
+    match db {
+        Db::Mongo(db) => {
+            let repair_match = doc! {
+                "deleted_at": null,
+                "assigned_employee_id": employee_key,
+                "status": { "$in": ["completed", "delivered", "ready_for_pickup"] },
+                "created_at": {
+                    "$gte": BsonDateTime::from_chrono(start),
+                    "$lt": BsonDateTime::from_chrono(end),
+                }
+            };
+            let mut cursor = repairs(db)
+                .find(repair_match)
+                .sort(doc! { "created_at": -1 })
+                .await?;
+            while let Some(doc) = cursor.try_next().await? {
+                let description = doc
+                    .get_str("issue_description")
+                    .unwrap_or_default()
+                    .to_string();
+                records.push(to_record(&doc, "repair", description));
+            }
 
-    let print_match = doc! {
-        "deleted_at": null,
-        "assigned_employee_id": employee_key,
-        "status": { "$in": ["completed", "delivered", "ready_for_pickup"] },
-        "created_at": {
-            "$gte": BsonDateTime::from_chrono(start),
-            "$lt": BsonDateTime::from_chrono(end),
+            let print_match = doc! {
+                "deleted_at": null,
+                "assigned_employee_id": employee_key,
+                "status": { "$in": ["completed", "delivered", "ready_for_pickup"] },
+                "created_at": {
+                    "$gte": BsonDateTime::from_chrono(start),
+                    "$lt": BsonDateTime::from_chrono(end),
+                }
+            };
+            let mut cursor = print_jobs(db)
+                .find(print_match)
+                .sort(doc! { "created_at": -1 })
+                .await?;
+            while let Some(doc) = cursor.try_next().await? {
+                let description = doc.get_str("job_type").unwrap_or_default().to_string();
+                records.push(to_record(&doc, "print", description));
+            }
         }
-    };
-    let mut cursor = print_jobs(db)
-        .find(print_match)
-        .sort(doc! { "created_at": -1 })
-        .await?;
-    while let Some(doc) = cursor.try_next().await? {
-        let description = doc.get_str("job_type").unwrap_or_default().to_string();
-        records.push(to_record(&doc, "print", description));
+        Db::Sqlite(pool) => {
+            let start_iso = start.to_rfc3339();
+            let end_iso = end.to_rfc3339();
+
+            let repair_query = "SELECT * FROM repairs WHERE deleted_at IS NULL AND assigned_employee_id = ? AND status IN ('completed', 'delivered', 'ready_for_pickup') AND created_at >= ? AND created_at < ? ORDER BY created_at DESC";
+            let repair_rows = sqlx::query(repair_query)
+                .bind(employee_key)
+                .bind(&start_iso)
+                .bind(&end_iso)
+                .fetch_all(pool)
+                .await?;
+            for row in repair_rows {
+                let doc = map_sqlite_row_to_document(&row);
+                let description = doc
+                    .get_str("issue_description")
+                    .unwrap_or_default()
+                    .to_string();
+                records.push(to_record(&doc, "repair", description));
+            }
+
+            let print_query = "SELECT * FROM print_jobs WHERE deleted_at IS NULL AND assigned_employee_id = ? AND status IN ('completed', 'delivered', 'ready_for_pickup') AND created_at >= ? AND created_at < ? ORDER BY created_at DESC";
+            let print_rows = sqlx::query(print_query)
+                .bind(employee_key)
+                .bind(&start_iso)
+                .bind(&end_iso)
+                .fetch_all(pool)
+                .await?;
+            for row in print_rows {
+                let doc = map_sqlite_row_to_document(&row);
+                let description = doc.get_str("job_type").unwrap_or_default().to_string();
+                records.push(to_record(&doc, "print", description));
+            }
+        }
     }
 
     records.sort_by_key(|r| std::cmp::Reverse(r.created_at));

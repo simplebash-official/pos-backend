@@ -16,33 +16,54 @@ use tower::ServiceExt;
 async fn build_test_app() -> axum::Router {
     dotenvy::dotenv().ok();
     let config = Config::from_env().expect("invalid configuration for test run");
-    let parse_res = ClientOptions::parse(&config.mongodb_uri).await;
-    let options = match parse_res {
-        Ok(opts) => opts,
-        Err(_) => match ClientOptions::parse(&config.mongodb_uri)
-            .resolver_config(ResolverConfig::cloudflare())
-            .await
-        {
-            Ok(opts) => opts,
-            Err(_) => ClientOptions::parse(&config.mongodb_uri)
-                .resolver_config(ResolverConfig::google())
-                .await
-                .expect("valid mongodb uri"),
-        },
+    let db_handle = match config.database_type {
+        jana2u_pos_backend::core::config::DatabaseType::Sqlite => {
+            let pool = sqlx::sqlite::SqlitePoolOptions::new()
+                .connect_lazy("sqlite::memory:")
+                .expect("in-memory sqlite pool");
+            jana2u_pos_backend::clients::db::Db::Sqlite(pool)
+        }
+        jana2u_pos_backend::core::config::DatabaseType::Mongo => {
+            let uri = if config.mongodb_uri.is_empty() {
+                "mongodb://localhost:27017"
+            } else {
+                &config.mongodb_uri
+            };
+            let parse_res = ClientOptions::parse(uri).await;
+            let options = match parse_res {
+                Ok(opts) => opts,
+                Err(_) => match ClientOptions::parse(uri)
+                    .resolver_config(ResolverConfig::cloudflare())
+                    .await
+                {
+                    Ok(opts) => opts,
+                    Err(_) => ClientOptions::parse(uri)
+                        .resolver_config(ResolverConfig::google())
+                        .await
+                        .expect("valid mongodb uri"),
+                },
+            };
+            let client = Client::with_options(options).expect("client construction");
+            let db_name = if config.mongodb_db_name.is_empty() {
+                "jana2u_pos_test"
+            } else {
+                &config.mongodb_db_name
+            };
+            let db = client.database(db_name);
+            jana2u_pos_backend::clients::db::Db::Mongo(db)
+        }
     };
-    let client = Client::with_options(options).expect("client construction");
-    let db = client.database(&config.mongodb_db_name);
-
     let config = Arc::new(config);
     let document_server = Arc::new(clients::document_server::DocumentServerClient::new(
         config.document_server_url.clone(),
         config.document_server_api_key.clone(),
     ));
-    let reports_engine =
-        Arc::new(jana2u_pos_backend::modules::reports::engine::AnalyticsEngine::new(db.clone()));
+    let reports_engine = Arc::new(
+        jana2u_pos_backend::modules::reports::engine::AnalyticsEngine::new(db_handle.clone()),
+    );
     let state = AppState {
         config,
-        db,
+        db: db_handle,
         document_server,
         reports_engine,
     };

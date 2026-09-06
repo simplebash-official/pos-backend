@@ -1,24 +1,19 @@
-// Business logic for Inventory Valuation and Top Products reports.
-
-use mongodb::Database;
-
 use super::dates;
 use crate::{
+    clients::db::Db,
     core::error::AppResult,
     domain::reports::{InventoryValuationResponse, TopProductsQuery, TopProductsResponse},
     modules::reports::repository,
 };
 
 /// Computes inventory stock valuation at cost vs retail price, potential profit, and low-stock alerts.
-pub(crate) async fn get_inventory_valuation(
-    db: &Database,
-) -> AppResult<InventoryValuationResponse> {
+pub(crate) async fn get_inventory_valuation(db: &Db) -> AppResult<InventoryValuationResponse> {
     repository::inventory_valuation::aggregate_inventory_valuation(db).await
 }
 
 /// Generates a list of top-selling products ranked by revenue or volume sold.
 pub(crate) async fn get_top_products(
-    db: &Database,
+    db: &Db,
     query: TopProductsQuery,
 ) -> AppResult<TopProductsResponse> {
     let (start, end) = dates::parse_date_range(

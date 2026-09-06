@@ -901,7 +901,8 @@ async fn suppliers_stats_endpoint_returns_totals_categories_and_direct_contacts(
     // Soft-deleted — must be excluded from both counts.
     seed_supplier_with(&db, "Deleted Contact", vec!["Batteries".to_string()], true).await;
 
-    let stats = jana2u_pos_backend::modules::suppliers::service::get_supplier_stats(&db)
+    let db_handle = jana2u_pos_backend::clients::db::Db::Mongo(db.clone());
+    let stats = jana2u_pos_backend::modules::suppliers::service::get_supplier_stats(&db_handle)
         .await
         .expect("get_supplier_stats should succeed");
 

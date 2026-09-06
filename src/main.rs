@@ -29,19 +29,21 @@ async fn main() {
     let port = config.port;
 
     tracing::info!(
-        "Connecting to MongoDB database '{}'...",
-        config.mongodb_db_name
+        database_type = ?config.database_type,
+        "Connecting to database..."
     );
-    let db = clients::mongo::connect(&config.mongodb_uri, &config.mongodb_db_name)
+    let db = clients::db::connect_from_config(&config)
         .await
         .unwrap_or_else(|err| {
-            tracing::error!(%err, "failed to connect to MongoDB");
+            tracing::error!(%err, "failed to connect to database");
             std::process::exit(1);
         });
-    tracing::info!(db = %config.mongodb_db_name, "Successfully connected to MongoDB");
+    tracing::info!(database_type = ?config.database_type, "Successfully connected to database");
 
-    // Best-effort, and deliberately not fatal — see `ensure_indexes`.
-    clients::indexes::ensure_indexes(&db).await;
+    if let Some(mongo_db) = db.as_mongo() {
+        // Best-effort, and deliberately not fatal — see `ensure_indexes`.
+        clients::indexes::ensure_indexes(mongo_db).await;
+    }
 
     let document_server = clients::document_server::DocumentServerClient::new(
         config.document_server_url.clone(),
