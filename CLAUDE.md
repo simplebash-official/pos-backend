@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-The Rust/Axum API backend for **jana2u-pos**, a point-of-sale system for a repair/retail shop (billing, repairs, print jobs, inventory, customers, reports, suppliers). Persistence is MongoDB. The sibling `../frontend` (React + Vite + Mantine) is the client this API serves, expecting endpoints under `env.apiBaseUrl` (`/api` by default).
+The Rust/Axum API backend for **jana2u-pos**, a point-of-sale system for a repair/retail shop (billing, repairs, print jobs, inventory, customers, reports, suppliers). Persistence supports dual database engines: **SQLite** (`DATABASE_TYPE=sqlite`, default, at `pos.db` or via `DATABASE_URL`) and **MongoDB** (`DATABASE_TYPE=mongodb` via `MONGODB_URI`). The sibling `../frontend` (React + Vite + Mantine) is the client this API serves, expecting endpoints under `env.apiBaseUrl` (`/api` by default).
 
 ## Where the rest of the guidance lives
 
@@ -12,8 +12,8 @@ Architecture, code-writing conventions, and module-specific rules are split into
 `CLAUDE.md` files that load automatically when Claude works under those trees — keeping them out of
 context for doc-only / config sessions:
 
-- **`src/CLAUDE.md`** — architecture (binary/library split, request flow, every feature module's
-  layering and rationale, `core/`/`domain/`/`clients/`), MongoDB aggregation-pipeline policy, and
+- **`src/CLAUDE.md`** — architecture (binary/library split, request flow, database abstraction, every feature module's
+  layering and rationale, `core/`/`domain/`/`clients/`), aggregation-pipeline policy, and
   the dashboard-stats-endpoint pattern.
 - **`src/modules/CLAUDE.md`** — the required pattern for adding/changing routes (OpenAPI/`utoipa`
   wiring) and the rule that `postman/backend.postman_collection.json` is updated in the same change.
@@ -24,14 +24,16 @@ The invariants below apply everywhere and are easy to violate, so they stay resi
 
 ## Commands
 
-- `cargo run` — run the server (equivalent to `cargo run --bin jana2u_pos_backend`; required explicitly if disambiguating from the seed binaries)
-- `cargo test` — run all tests. Several `tests/*.rs` files require a reachable MongoDB (see config note below); `tests/openapi_test.rs` and `tests/response_format_test.rs` do not.
+- `cargo run` — run the server (equivalent to `cargo run --bin jana2u_pos_backend`; required explicitly if disambiguating from the seed binaries). Respects `AUTO_SEED=true` to automatically run seeders on startup.
+- `cargo test` — run all tests. `tests/sqlite_integration_test.rs`, `tests/seeding_test.rs`, `tests/openapi_test.rs`, and `tests/response_format_test.rs` run without live MongoDB; Mongo-specific integration tests require a reachable MongoDB instance.
 - `cargo test --test scenarios_test health_route_returns_success_format` — run a single integration test by name
-- `cargo run --bin seed_api_key` — generate and insert a random API key into the `api_keys` collection
-- `cargo run --bin seed_providers` — upserts the inventory module's default category/subcategory reference data into the `categories`/`subcategories` collections (see `default_categories` in `src/bin/seed_providers.rs`)
-- `cargo run --bin seed_suppliers` — upserts a handful of sample repair/retail suppliers into the `suppliers` collection (see `sample_suppliers` in `src/bin/seed_suppliers.rs`)
-- `cargo run --bin seed_customers` — upserts 20 realistic retail/repair/corporate/print customer profiles into the `customers` collection (see `sample_customers` in `src/bin/seed_customers.rs`)
-- `cargo run --bin seed_admin` — create-if-missing bootstrap of the first Admin account (requires `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD`/`SEED_ADMIN_NAME` to be set — see `.env.example` — fails fast rather than falling back to a hardcoded password), since registration is admin-provisioned only — see **Auth, users & permissions** in `src/CLAUDE.md`
+- `cargo run --bin seed_all` — runs all seeds in dependency order (`admin`, `providers`, `suppliers`, `customers`, `inventory`, `api_key`) across SQLite or MongoDB
+- `cargo run --bin seed_admin` — create-if-missing bootstrap of the first Admin account (`admin@pos.com` / `admin@1234`, name: `"System Admin"`). Optional overrides via `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD`/`SEED_ADMIN_NAME` env vars.
+- `cargo run --bin seed_providers` — upserts default category/subcategory reference data into the `categories`/`subcategories` tables/collections
+- `cargo run --bin seed_suppliers` — upserts sample repair/retail suppliers into the `suppliers` table/collection
+- `cargo run --bin seed_customers` — upserts 20 realistic retail/repair/corporate/print customer profiles into the `customers` table/collection
+- `cargo run --bin seed_inventory` — seeds products, stock movements, and serial numbers into the database
+- `cargo run --bin seed_api_key` — generates and inserts a random API key into the `api_keys` table/collection
 - `make check` (root `Makefile`) — runs `cargo fmt --check`, then `cargo clippy --all-targets --all-features -- -D warnings`, then `cargo test`, stopping at the first failure; `make ci` is an alias for it (the intended CI entrypoint)
 
 **After every change**, run the following and fix anything it reports before considering the work done:
@@ -45,12 +47,14 @@ make check
 
 **Every change must be tested — this is mandatory, not just running the pipeline above.** `cargo test` in that pipeline only re-runs whatever tests already exist; it does not by itself prove a new change works. So for any change:
 1. Find the test file that already covers the part of the code you're touching (see the `tests/*.rs` files below) and extend it with a case for the change.
-2. If no test file covers that part yet, **create one** — follow the existing naming (`tests/<area>_test.rs`) and pick the right style: no-Mongo unit/integration style (`tests/response_format_test.rs`, `tests/openapi_test.rs`) for anything that doesn't need real data, or the full-stack style (`tests/scenarios_test.rs` via `tests/common::spawn_app()`) for anything that does.
+2. If no test file covers that part yet, **create one** — follow the existing naming (`tests/<area>_test.rs`) and pick the right style: no-Mongo unit/integration style (`tests/response_format_test.rs`, `tests/openapi_test.rs`, `tests/sqlite_integration_test.rs`, `tests/seeding_test.rs`) for anything that doesn't need real data or uses SQLite, or the full-stack style (`tests/scenarios_test.rs` via `tests/common::spawn_app()`) for MongoDB tests.
 3. Run it and confirm it passes before considering the change done.
 
-Config is loaded from `.env` (via `dotenvy`) in every binary and integration test. Copy `.env.example` to `.env` and point `MONGODB_URI` at a running MongoDB instance before running or testing — `Config::from_env()` fails fast (process exits) on missing/invalid vars, and the Mongo client pings the server at startup, so a bad connection string is caught immediately rather than on first request.
+Config is loaded from `.env` (via `dotenvy`) in every binary and integration test. Default `DATABASE_TYPE=sqlite` requires no external services (creates `pos.db` automatically). If `DATABASE_TYPE=mongodb`, copy `.env.example` to `.env` and point `MONGODB_URI` at a running MongoDB instance before running or testing — `Config::from_env()` fails fast (process exits) on missing/invalid vars.
 
 The integration test files, each a different tradeoff between speed and realism:
+- `tests/sqlite_integration_test.rs` — tests complete end-to-end POS lifecycle (products, sales, payments, credit notes, stock tracking) directly against in-memory SQLite.
+- `tests/seeding_test.rs` — tests seed idempotency, complete database population, and sale transactions against seeded data.
 - `tests/scenarios_test.rs` (+ `tests/common/mod.rs::spawn_app()`) — builds the real router against a **real** MongoDB (no mocking), using `MONGODB_TEST_DB_NAME` (defaults to `jana2u_pos_test`) instead of the dev database so it never touches dev data. Use for anything that actually reads/writes Mongo.
 - `tests/inventory_test.rs` / `tests/suppliers_test.rs` / `tests/auth_test.rs` / `tests/users_test.rs` / `tests/reports_test.rs` / etc. — the same `spawn_app()` real-Mongo style as `scenarios_test.rs`, just split into their own files per feature area. Follow this pattern (own `tests/<area>_test.rs` file, `mod common;`, `send`/`send_authed` request helpers, `common::mint_token` for hand-minted role/permission tokens) when a new module needs real-Mongo coverage.
 - `tests/openapi_test.rs` — builds the real router with a `mongodb::Client` that is never pinged (still needs `MONGODB_URI` to be a syntactically valid connection string via `.env`, but no live Mongo needed). Asserts the OpenAPI spec lists every module path and Swagger UI serves. Use for anything about routing/docs wiring rather than data.
