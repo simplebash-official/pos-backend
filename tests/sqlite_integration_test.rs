@@ -55,6 +55,7 @@ async fn setup_sqlite_app() -> SqliteTestContext {
         mongodb_db_name: String::new(),
         jwt_secret: "test-sqlite-jwt-secret-key-that-is-long-enough".to_string(),
         port: 8080,
+        bind_addr: "127.0.0.1".to_string(),
         jwt_expiry_hours: 12,
         document_server_url: mock_doc_server_url,
         document_server_api_key: "test-doc-key".to_string(),

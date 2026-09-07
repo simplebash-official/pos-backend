@@ -27,6 +27,7 @@ async fn main() {
         std::process::exit(1);
     });
     let port = config.port;
+    let bind_addr = config.bind_addr.clone();
 
     tracing::info!(
         database_type = ?config.database_type,
@@ -73,14 +74,20 @@ async fn main() {
         "Checking document-server at {}...",
         config.document_server_url
     );
-    document_server
-        .wait_until_ready(5)
-        .await
-        .unwrap_or_else(|err| {
-            tracing::error!(%err, "document-server not reachable");
-            std::process::exit(1);
-        });
-    tracing::info!("Successfully connected to document-server");
+    // Poll generously: a cold document-server does a blocking Typst engine
+    // warm-up (font parsing + trial compiles) before it answers /health,
+    // which can take a few seconds on first launch of the desktop bundle.
+    // A failure here is logged, not fatal — the only thing that needs
+    // document-server is invoice/receipt printing, and the process
+    // supervisor (compose healthcheck / Tauri sidecar gate) already
+    // orders startup.
+    match document_server.wait_until_ready(40).await {
+        Ok(()) => tracing::info!("Successfully connected to document-server"),
+        Err(err) => tracing::warn!(
+            %err,
+            "document-server not reachable at startup — document rendering will fail until it is up"
+        ),
+    }
 
     let reports_engine =
         Arc::new(jana2u_pos_backend::modules::reports::engine::AnalyticsEngine::new(db.clone()));
@@ -94,13 +101,13 @@ async fn main() {
     };
     let router = app::build_router(state);
 
-    // Bound to 0.0.0.0 (not localhost) so the container/host can route
-    // external traffic to it — the frontend and any reverse proxy sit
-    // outside this process.
-    let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
+    // Defaults to 0.0.0.0 so a container/reverse proxy can route external
+    // traffic in; `BIND_ADDR=127.0.0.1` restricts it to loopback (used by
+    // the Tauri desktop bundle, where the frontend runs in the same host).
+    let listener = tokio::net::TcpListener::bind((bind_addr.as_str(), port))
         .await
         .unwrap_or_else(|err| {
-            tracing::error!(%err, "failed to bind listener");
+            tracing::error!(%err, %bind_addr, "failed to bind listener");
             std::process::exit(1);
         });
 

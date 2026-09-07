@@ -18,6 +18,11 @@ pub struct Config {
     pub mongodb_db_name: String,
     pub jwt_secret: String,
     pub port: u16,
+    /// Address the HTTP listener binds to. Defaults to `0.0.0.0` (all
+    /// interfaces) so a container or reverse proxy can route external
+    /// traffic in. The Tauri desktop bundle sets this to `127.0.0.1` to
+    /// keep the API on loopback only.
+    pub bind_addr: String,
     pub jwt_expiry_hours: i64,
     /// Base URL of the sibling document-server (see `clients::document_server`).
     /// No default — a misconfigured deployment should fail startup rather
@@ -98,6 +103,8 @@ impl Config {
             .parse::<u16>()
             .map_err(|_| ConfigError::Invalid("PORT"))?;
 
+        let bind_addr = env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0".to_string());
+
         // How long a login's JWT stays valid (there is no refresh-token or
         // revocation flow; a caller just re-authenticates via login once
         // this expires) — required, not defaulted, so an operator makes an
@@ -125,6 +132,7 @@ impl Config {
             mongodb_db_name,
             jwt_secret,
             port,
+            bind_addr,
             jwt_expiry_hours,
             document_server_url,
             document_server_api_key,
