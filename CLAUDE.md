@@ -50,7 +50,10 @@ make check
 2. If no test file covers that part yet, **create one** — follow the existing naming (`tests/<area>_test.rs`) and pick the right style: no-Mongo unit/integration style (`tests/response_format_test.rs`, `tests/openapi_test.rs`, `tests/sqlite_integration_test.rs`, `tests/seeding_test.rs`) for anything that doesn't need real data or uses SQLite, or the full-stack style (`tests/scenarios_test.rs` via `tests/common::spawn_app()`) for MongoDB tests.
 3. Run it and confirm it passes before considering the change done.
 
-Config is loaded from `.env` (via `dotenvy`) in every binary and integration test. Default `DATABASE_TYPE=sqlite` requires no external services (creates `pos.db` automatically). If `DATABASE_TYPE=mongodb`, copy `.env.example` to `.env` and point `MONGODB_URI` at a running MongoDB instance before running or testing — `Config::from_env()` fails fast (process exits) on missing/invalid vars.
+Config is loaded from `.env` (via `dotenvy`) in every binary and integration test. Two dedicated configuration templates are provided:
+- `.env.desktop.example`: Configures embedded SQLite (`DATABASE_TYPE=sqlite`), loopback listener (`BIND_ADDR=127.0.0.1`), and local document-server for desktop/Tauri operations.
+- `.env.web.example`: Configures MongoDB cluster persistence (`DATABASE_TYPE=mongodb`, `MONGODB_URI`), multi-interface listener (`BIND_ADDR=0.0.0.0`), and containerized document-server for web/server deployments.
+Default `DATABASE_TYPE=sqlite` requires no external services (creates `pos.db` automatically). If `DATABASE_TYPE=mongodb`, copy `.env.web.example` to `.env` and point `MONGODB_URI` at a running MongoDB instance before running or testing — `Config::from_env()` fails fast (process exits) on missing/invalid vars.
 
 The integration test files, each a different tradeoff between speed and realism:
 - `tests/sqlite_integration_test.rs` — tests complete end-to-end POS lifecycle (products, sales, payments, credit notes, stock tracking) directly against in-memory SQLite.

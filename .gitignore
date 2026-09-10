@@ -1,5 +1,8 @@
 /target
 .env
+.env.desktop
+.env.web
+!.env*.example
 
 # Generated invoice/receipt PDFs (see clients::document_server /
 # modules::documents::service) — runtime artifacts, never committed. Only
