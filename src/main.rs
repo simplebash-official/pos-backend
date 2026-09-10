@@ -13,7 +13,7 @@ use tracing_subscriber::EnvFilter;
 async fn main() {
     // `.ok()`: a missing `.env` is fine in prod (real env vars are already
     // set); `Config::from_env()` below is what actually enforces the
-    // required variables are present.
+    // required variables are present..
     dotenvy::dotenv().ok();
     tracing_subscriber::fmt()
         .with_env_filter(
