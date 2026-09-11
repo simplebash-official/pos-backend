@@ -1,46 +1,67 @@
 // SQLite repository for full database export and transactional restore.
 
 use sqlx::{Column, Row, SqlitePool, TypeInfo, ValueRef};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-/// Explicit list of all persistent tables included in system backups.
-/// Excludes temporary caches (e.g. `idempotency_keys`) by design so stale
-/// in-flight locks are not restored into a newly restored system.
-pub const BACKUP_TABLES: &[&str] = &[
-    "categories",
-    "subcategories",
-    "products",
-    "suppliers",
-    "supplier_products",
-    "purchases",
-    "stock_movements",
-    "customers",
-    "employees",
-    "repairs",
-    "print_jobs",
-    "invoices",
-    "payments",
-    "credit_notes",
-    "product_serials",
-    "users",
-    "login_sessions",
-    "sku_counters",
-    "barcode_counters",
-    "sequence_counters",
-    "sequence_blocks",
-    "import_batches",
-    "generated_documents",
-    "api_keys",
-];
+/// Tables excluded from backups by design (ephemeral locks, query caches, migrations metadata).
+const EXCLUDED_TABLES: &[&str] = &["idempotency_keys", "_sqlx_migrations"];
 
-/// Exports all rows from each registered SQLite table, dynamically translating
+/// Discovers all persistent user/application tables in the SQLite database dynamically.
+pub(crate) async fn get_database_tables(pool: &SqlitePool) -> Result<Vec<String>, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_sqlx_%' ORDER BY name;",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let tables: Vec<String> = rows
+        .into_iter()
+        .map(|r| r.get::<String, _>(0))
+        .filter(|name| !EXCLUDED_TABLES.contains(&name.as_str()))
+        .collect();
+
+    Ok(tables)
+}
+
+/// Discovers all persistent user/application tables within an active transaction.
+async fn get_database_tables_tx(
+    tx: &mut sqlx::SqliteConnection,
+) -> Result<Vec<String>, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_sqlx_%' ORDER BY name;",
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+
+    let tables: Vec<String> = rows
+        .into_iter()
+        .map(|r| r.get::<String, _>(0))
+        .filter(|name| !EXCLUDED_TABLES.contains(&name.as_str()))
+        .collect();
+
+    Ok(tables)
+}
+
+/// Fetches the set of existing column names for a given table within an active transaction.
+async fn get_table_columns_tx(
+    table: &str,
+    tx: &mut sqlx::SqliteConnection,
+) -> Result<HashSet<String>, sqlx::Error> {
+    let sql = format!("PRAGMA table_info(\"{}\");", table);
+    let rows = sqlx::query(&sql).fetch_all(&mut *tx).await?;
+    let cols = rows.into_iter().map(|r| r.get::<String, _>(1)).collect();
+    Ok(cols)
+}
+
+/// Exports all rows from each discovered SQLite table, dynamically translating
 /// column values to JSON objects.
 pub(crate) async fn export_all_tables_sqlite(
     pool: &SqlitePool,
 ) -> Result<HashMap<String, Vec<serde_json::Value>>, sqlx::Error> {
+    let tables = get_database_tables(pool).await?;
     let mut table_map = HashMap::new();
 
-    for table in BACKUP_TABLES {
+    for table in &tables {
         let sql = format!("SELECT * FROM \"{}\"", table);
         let rows = sqlx::query(&sql).fetch_all(pool).await?;
         let mut row_values = Vec::with_capacity(rows.len());
@@ -77,7 +98,7 @@ pub(crate) async fn export_all_tables_sqlite(
             row_values.push(serde_json::Value::Object(map));
         }
 
-        table_map.insert(table.to_string(), row_values);
+        table_map.insert(table.clone(), row_values);
     }
 
     Ok(table_map)
@@ -86,6 +107,12 @@ pub(crate) async fn export_all_tables_sqlite(
 /// Restores all tables inside a single atomic transaction. Disables foreign keys
 /// during truncation and insertion, then re-enables and validates foreign key
 /// constraints before committing to protect against corrupted data.
+///
+/// Supports future schema evolution:
+/// - Any table in the backup that no longer exists in the current database is skipped gracefully.
+/// - Any table in the current database that has data in the backup is truncated and restored.
+/// - Only columns that currently exist in SQLite are inserted; columns that were deprecated/removed
+///   are ignored, and newly added columns receive their default value or NULL.
 pub(crate) async fn restore_all_tables_sqlite(
     pool: &SqlitePool,
     tables: &HashMap<String, Vec<serde_json::Value>>,
@@ -98,61 +125,82 @@ pub(crate) async fn restore_all_tables_sqlite(
         .execute(&mut *tx)
         .await?;
 
-    // Truncate tables in reverse order.
-    for table in BACKUP_TABLES.iter().rev() {
+    // Discover current tables in the database schema.
+    let current_tables = get_database_tables_tx(&mut tx).await?;
+    let current_tables_set: HashSet<String> = current_tables.iter().cloned().collect();
+
+    // Truncate existing tables in reverse order.
+    for table in current_tables.iter().rev() {
         let sql = format!("DELETE FROM \"{}\";", table);
         sqlx::query(&sql).execute(&mut *tx).await?;
     }
 
     let mut restored_counts = HashMap::new();
 
-    // Insert records for each table provided in the backup.
-    for table in BACKUP_TABLES {
-        if let Some(rows) = tables.get(*table) {
-            let mut count = 0;
-            for row_val in rows {
-                if let Some(obj) = row_val.as_object() {
-                    if obj.is_empty() {
-                        continue;
-                    }
-                    let cols: Vec<&str> = obj.keys().map(|k| k.as_str()).collect();
-                    let escaped_cols: Vec<String> =
-                        cols.iter().map(|c| format!("\"{}\"", c)).collect();
-                    let placeholders: Vec<String> =
-                        (1..=cols.len()).map(|i| format!("?{}", i)).collect();
-                    let sql = format!(
-                        "INSERT INTO \"{}\" ({}) VALUES ({});",
-                        table,
-                        escaped_cols.join(", "),
-                        placeholders.join(", ")
-                    );
-                    let mut query = sqlx::query(&sql);
-                    for col in &cols {
-                        let val = &obj[*col];
-                        query = match val {
-                            serde_json::Value::Null => query.bind(None::<String>),
-                            serde_json::Value::Bool(b) => query.bind(if *b { 1i64 } else { 0i64 }),
-                            serde_json::Value::Number(n) => {
-                                if let Some(i) = n.as_i64() {
-                                    query.bind(i)
-                                } else if let Some(f) = n.as_f64() {
-                                    query.bind(f)
-                                } else {
-                                    query.bind(None::<String>)
-                                }
-                            }
-                            serde_json::Value::String(s) => query.bind(s.as_str()),
-                            serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
-                                query.bind(val.to_string())
-                            }
-                        };
-                    }
-                    query.execute(&mut *tx).await?;
-                    count += 1;
-                }
-            }
-            restored_counts.insert(table.to_string(), count);
+    // Insert records for each table provided in the backup that exists in the database.
+    for (table, rows) in tables {
+        if !current_tables_set.contains(table) {
+            tracing::warn!(
+                "Table '{}' from backup does not exist in current database schema; skipping.",
+                table
+            );
+            continue;
         }
+
+        let live_columns = get_table_columns_tx(table, &mut tx).await?;
+        let mut count = 0;
+
+        for row_val in rows {
+            if let Some(obj) = row_val.as_object() {
+                if obj.is_empty() {
+                    continue;
+                }
+                // Filter to only columns that actually exist in the current database table.
+                let cols: Vec<&str> = obj
+                    .keys()
+                    .map(|k| k.as_str())
+                    .filter(|k| live_columns.contains(*k))
+                    .collect();
+
+                if cols.is_empty() {
+                    continue;
+                }
+
+                let escaped_cols: Vec<String> = cols.iter().map(|c| format!("\"{}\"", c)).collect();
+                let placeholders: Vec<String> =
+                    (1..=cols.len()).map(|i| format!("?{}", i)).collect();
+                let sql = format!(
+                    "INSERT INTO \"{}\" ({}) VALUES ({});",
+                    table,
+                    escaped_cols.join(", "),
+                    placeholders.join(", ")
+                );
+                let mut query = sqlx::query(&sql);
+                for col in &cols {
+                    let val = &obj[*col];
+                    query = match val {
+                        serde_json::Value::Null => query.bind(None::<String>),
+                        serde_json::Value::Bool(b) => query.bind(if *b { 1i64 } else { 0i64 }),
+                        serde_json::Value::Number(n) => {
+                            if let Some(i) = n.as_i64() {
+                                query.bind(i)
+                            } else if let Some(f) = n.as_f64() {
+                                query.bind(f)
+                            } else {
+                                query.bind(None::<String>)
+                            }
+                        }
+                        serde_json::Value::String(s) => query.bind(s.as_str()),
+                        serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
+                            query.bind(val.to_string())
+                        }
+                    };
+                }
+                query.execute(&mut *tx).await?;
+                count += 1;
+            }
+        }
+        restored_counts.insert(table.clone(), count);
     }
 
     // Re-enable foreign keys and verify complete referential integrity before committing.

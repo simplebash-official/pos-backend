@@ -319,3 +319,73 @@ async fn restore_rejects_incompatible_version() {
 
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn restore_handles_future_schema_evolution_tables_and_columns() {
+    let ctx = setup_sqlite_app().await;
+    let admin_perms = roles::default_permissions(Role::Admin);
+    let admin_token = common::mint_token(&ctx.config, Some(Role::Admin), admin_perms);
+
+    // Create a backup that contains:
+    // 1. A table that does not exist in the current database (`deprecated_future_table`)
+    // 2. A column in `categories` that does not exist (`obsolete_removed_column`)
+    let evolving_backup = json!({
+        "version": 1,
+        "exportedAt": "2026-01-01T00:00:00Z",
+        "appVersion": "0.1.0",
+        "environment": "desktop",
+        "totalTables": 2,
+        "totalRecords": 2,
+        "tables": {
+            "categories": [
+                {
+                    "key": "cat_evolve_1",
+                    "id": "65f1a1a1a1a1a1a1a1a1a1a1",
+                    "name": "Evolving Category",
+                    "icon": "box",
+                    "color": "#10b981",
+                    "version": 1,
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "updated_at": "2026-01-01T00:00:00Z",
+                    "obsolete_removed_column": "should be ignored safely"
+                }
+            ],
+            "deprecated_future_table": [
+                {
+                    "some_key": "val_1",
+                    "some_data": 123
+                }
+            ]
+        }
+    });
+
+    let res = ctx
+        .router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/backup/import")
+                .header(AUTHORIZATION, format!("Bearer {admin_token}"))
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "backup": evolving_backup }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::OK);
+    let body_bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let restore_res: Value = serde_json::from_slice(&body_bytes).unwrap();
+    assert!(restore_res["success"].as_bool().unwrap());
+
+    // Verify category was restored successfully and the nonexistent table was skipped
+    let restored_cat: (String, String) =
+        sqlx::query_as("SELECT key, name FROM categories WHERE key = 'cat_evolve_1'")
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
+    assert_eq!(restored_cat.1, "Evolving Category");
+}
