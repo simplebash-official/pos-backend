@@ -97,3 +97,40 @@ Rules:
 - If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
 - Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
 - After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+
+## Recent Features & Evolution (Last 30 Days)
+
+### Landed Features & Architecture
+1. **Dynamic Database Backup & Restore (`src/modules/backup/`)**:
+   - `POST /api/backup/export`: Queries `sqlite_master` to dynamically discover and serialize all non-ephemeral application tables to JSON.
+   - `POST /api/backup/import`: Executes transactional restore. Drops and repopulates tables with `PRAGMA foreign_keys = OFF;`, escapes column identifiers, restores data, re-enables `PRAGMA foreign_keys = ON;`, and executes `PRAGMA foreign_key_check;` before commit.
+   - Schema Evolution: Dynamically filters row fields through `PRAGMA table_info` so obsolete columns in old backups are safely omitted and newly added columns receive their default value.
+   - Body Limit: Wrapped with `axum::extract::DefaultBodyLimit::max(50 * 1024 * 1024)` to support 50MB backups.
+   - Guarded by `AdminUser` (`role: admin` claim).
+2. **Dual Database Engine Support (SQLite + MongoDB)**:
+   - Embedded SQLite (`DATABASE_TYPE=sqlite`) is the primary desktop persistence mode; MongoDB (`DATABASE_TYPE=mongodb`) powers server/web deployments.
+   - Seeding utilities (`seed_all`, `seed_admin`, `seed_inventory`, etc.) execute seamlessly across both engines.
+3. **High-Performance Analytics Engine (`src/modules/reports/`)**:
+   - Time-series bucketing with empty-bucket pruning and local timezone offset adjustments.
+   - Active cache invalidation via `state.reports_engine.invalidate_active()`.
+4. **Returns & Credit Notes Flow (`src/modules/credit_notes/`)**:
+   - Returns are tracked as distinct credit note documents with explicit allocations against invoices, preserving immutable sales ledger history.
+
+### Future Implementation Rules
+- **New Tables & Dynamic Discovery**: When adding a new table, define it in `src/clients/sqlite_schema.sql` and add it to `src/bin/reset_db.rs`. The backup module dynamically queries `sqlite_master` (excluding `idempotency_keys` and `_sqlx_migrations`), so new tables are automatically backed up without altering backup repository code.
+- **Report Cache Invalidation**: Any operation that performs mass mutation or restores historical sales data must call `state.reports_engine.invalidate_active()` to clear live dashboard caches.
+- **Route Registration Invariants**:
+  - Every route must use `routes!()` with OpenAPI `#[utoipa::path]` annotations.
+  - Every new route must be mirrored in `postman/backend.postman_collection.json`.
+  - Unauthenticated routes must be explicitly added to `PUBLIC_ROUTES` in `tests/authorization_test.rs`.
+
+### How Agents Can Help
+- **Route & Auth Audit**:
+  - Run `cargo test --test openapi_test` to verify all route paths are documented in Swagger/OpenAPI.
+  - Run `cargo test --test authorization_test` to ensure no handler inadvertently omits `CurrentUser` or `AdminUser`.
+- **Database & Backup Testing**:
+  - Run `cargo test --test backup_test` when modifying database schemas or backup routines to verify roundtrip export/restore and schema evolution tolerance.
+  - Run `cargo test --test sqlite_integration_test` to ensure core POS flows succeed in SQLite mode.
+- **Quality Gates**:
+  - Always run `make check` (or `cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo test`) before finalizing any backend changes.
+
