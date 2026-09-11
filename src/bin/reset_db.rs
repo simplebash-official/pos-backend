@@ -1,6 +1,6 @@
+use jana2u_pos_backend::{clients, core::config::Config, seeds};
 use std::fs;
 use std::path::Path;
-use jana2u_pos_backend::{clients, core::config::Config, seeds};
 
 #[tokio::main]
 async fn main() {
@@ -17,7 +17,10 @@ async fn main() {
     println!("============================================================");
 
     if let Some(mongo) = db.as_mongo() {
-        println!("Dropping all MongoDB collections in '{}'...", config.mongodb_db_name);
+        println!(
+            "Dropping all MongoDB collections in '{}'...",
+            config.mongodb_db_name
+        );
         let collections = mongo
             .list_collection_names()
             .await
@@ -82,7 +85,10 @@ async fn main() {
     };
 
     if target_dir.exists() {
-        println!("🧹 Cleaning generated documents directory: {:?}", target_dir);
+        println!(
+            "🧹 Cleaning generated documents directory: {:?}",
+            target_dir
+        );
         if let Ok(entries) = fs::read_dir(&target_dir) {
             let mut count = 0;
             for entry in entries.flatten() {
@@ -108,8 +114,14 @@ async fn main() {
                 "📂 Providers: {} categories, {} subcategories created",
                 summary.providers.categories_created, summary.providers.subcategories_created
             );
-            println!("🏢 Suppliers: {} created", summary.suppliers.suppliers_created);
-            println!("👥 Customers: {} created", summary.customers.customers_created);
+            println!(
+                "🏢 Suppliers: {} created",
+                summary.suppliers.suppliers_created
+            );
+            println!(
+                "👥 Customers: {} created",
+                summary.customers.customers_created
+            );
             println!(
                 "📦 Inventory: {} categories, {} subcategories, {} products created",
                 summary.inventory.categories_created,

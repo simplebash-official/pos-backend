@@ -166,6 +166,10 @@ pub fn build_router(state: AppState) -> Router {
         .nest(
             &format!("/{}", mod_names::IMPORTS),
             modules::imports::routes::router(),
+        )
+        .nest(
+            &format!("/{}", mod_names::BACKUP),
+            modules::backup::routes::router(),
         );
 
     let (router, openapi) = OpenApiRouter::<AppState>::with_openapi(ApiDoc::openapi())

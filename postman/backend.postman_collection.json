@@ -4221,6 +4221,80 @@
           "response": []
         }
       ]
+    },
+    {
+      "name": "Backup",
+      "item": [
+        {
+          "name": "Export Backup",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"includeSettings\": true,\n  \"settings\": {\n    \"shopProfile\": {\n      \"tradingName\": \"Jana2u Tech\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/backup/export",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "backup",
+                "export"
+              ]
+            },
+            "description": "Exports a full snapshot of all SQLite tables and optional client settings in JSON format. Desktop-only backup feature.\n\n**Requires Admin JWT** (`role: admin` claim) — returns 401 if unauthenticated or 403 `ADMIN_REQUIRED` for non-admin."
+          },
+          "response": []
+        },
+        {
+          "name": "Restore Backup",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"backup\": {\n    \"version\": 1,\n    \"exportedAt\": \"2026-09-11T10:00:00Z\",\n    \"appVersion\": \"0.2.1\",\n    \"environment\": \"desktop\",\n    \"totalTables\": 0,\n    \"totalRecords\": 0,\n    \"tables\": {},\n    \"settings\": {}\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/backup/import",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "backup",
+                "import"
+              ]
+            },
+            "description": "Atomically restores all tables from a provided backup JSON payload under an SQLite transaction. Validates foreign keys and clears report caches. Desktop-only restore feature.\n\n**Requires Admin JWT** (`role: admin` claim) — returns 401 if unauthenticated or 403 `ADMIN_REQUIRED` for non-admin."
+          },
+          "response": []
+        }
+      ],
+      "description": "Desktop-only backup and restore endpoints for exporting and restoring full SQLite database state and app settings."
     }
   ],
   "auth": {
