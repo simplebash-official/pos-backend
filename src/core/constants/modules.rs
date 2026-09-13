@@ -15,3 +15,4 @@ pub const SYNC: &str = "sync";
 pub const SEQUENCES: &str = "sequences";
 pub const IMPORTS: &str = "imports";
 pub const BACKUP: &str = "backup";
+pub const SYSTEM: &str = "system";

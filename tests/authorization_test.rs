@@ -56,6 +56,8 @@ const PUBLIC_ROUTES: &[(&str, &str)] = &[
     ("GET", "/api/billing"),
     ("GET", "/api/inventory"),
     ("GET", "/api/reports"),
+    ("GET", "/api/system/setup-status"),
+    ("POST", "/api/system/setup"),
 ];
 
 async fn build_test_app() -> axum::Router {

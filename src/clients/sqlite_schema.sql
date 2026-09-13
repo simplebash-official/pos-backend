@@ -477,3 +477,20 @@ CREATE TABLE IF NOT EXISTS api_keys (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS system_installations (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    installation_id TEXT NOT NULL UNIQUE,
+    app_version TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    installed_at TEXT NOT NULL,
+    setup_completed INTEGER NOT NULL DEFAULT 0,
+    setup_completed_at TEXT,
+    sample_data_loaded INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_system_installations_id ON system_installations(installation_id);
+

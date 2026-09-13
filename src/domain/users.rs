@@ -55,7 +55,7 @@ impl std::str::FromStr for Role {
 /// holding its `ObjectId`. Never carries the password hash — that field
 /// only exists on `modules::users::model::UserDocument`, which this type is
 /// converted from, and this type is never constructed from raw user input.
-#[derive(Debug, Clone, Serialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct User {
     /// MongoDB hex ID.

@@ -120,16 +120,18 @@ pub(crate) fn parse_date_range(
             Ok((start, end))
         }
         Some("custom") | None => {
-            let start = if let Some(f) = from.filter(|s| !s.trim().is_empty()) {
-                parse_iso_or_ymd(f.trim(), false)?
-            } else {
-                today_start
-            };
-
             let end = if let Some(t) = to.filter(|s| !s.trim().is_empty()) {
                 parse_iso_or_ymd(t.trim(), true)?
             } else {
                 today_start + Duration::days(1)
+            };
+
+            let start = if let Some(f) = from.filter(|s| !s.trim().is_empty()) {
+                parse_iso_or_ymd(f.trim(), false)?
+            } else if end < today_start {
+                end - Duration::days(30)
+            } else {
+                today_start
             };
 
             if start > end {
@@ -247,13 +249,20 @@ pub(crate) fn parse_date_range_tz(
             ))
         }
         Some("custom") | None => {
-            let start = match from.filter(|s| !s.trim().is_empty()) {
-                Some(f) => parse_local_or_rfc3339(f.trim(), false, &local_midnight)?,
-                None => local_midnight(today),
-            };
             let end = match to.filter(|s| !s.trim().is_empty()) {
                 Some(t) => parse_local_or_rfc3339(t.trim(), true, &local_midnight)?,
                 None => local_midnight(today + Duration::days(1)),
+            };
+            let start = match from.filter(|s| !s.trim().is_empty()) {
+                Some(f) => parse_local_or_rfc3339(f.trim(), false, &local_midnight)?,
+                None => {
+                    let default_start = local_midnight(today);
+                    if end < default_start {
+                        end - Duration::days(30)
+                    } else {
+                        default_start
+                    }
+                }
             };
             if start > end {
                 return Err(AppError::validation("Start date cannot be after end date"));

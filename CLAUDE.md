@@ -115,6 +115,11 @@ Rules:
    - Active cache invalidation via `state.reports_engine.invalidate_active()`.
 4. **Returns & Credit Notes Flow (`src/modules/credit_notes/`)**:
    - Returns are tracked as distinct credit note documents with explicit allocations against invoices, preserving immutable sales ledger history.
+5. **System Setup & Initial Installation Module (`src/modules/system/`)**:
+   - `system_installations` SQLite table tracks `installation_id`, `installed_at`, `app_version`, `platform`, `setup_completed`, `setup_completed_at`, and `sample_data_loaded`.
+   - `GET /api/system/setup-status`: Public endpoint returning whether the system has been initialized.
+   - `POST /api/system/setup`: Public bootstrap endpoint that initializes the database, creates the primary administrator (`admin@pos.com` / `admin@1234` or custom credentials), seeds API keys, and conditionally populates sample demo data (categories, products, suppliers, customers) if `load_sample_data: true`. If `load_sample_data: false`, leaves all 25 tables completely empty. Issues a JWT token for immediate auto-login.
+   - `GET /api/system/installation`: Admin-guarded endpoint to inspect workstation installation metadata.
 
 ### Future Implementation Rules
 - **New Tables & Dynamic Discovery**: When adding a new table, define it in `src/clients/sqlite_schema.sql` and add it to `src/bin/reset_db.rs`. The backup module dynamically queries `sqlite_master` (excluding `idempotency_keys` and `_sqlx_migrations`), so new tables are automatically backed up without altering backup repository code.

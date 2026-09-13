@@ -27,6 +27,8 @@ use utoipa::{
         (name = "supplier_products", description = "Supplier-product links"),
         (name = "purchases", description = "Supplier purchase/stock-intake history"),
         (name = "users", description = "User accounts & role management"),
+        (name = "backup", description = "Data backup and restore"),
+        (name = "system", description = "Initial installation, onboarding and system setup"),
     )
 )]
 pub struct ApiDoc;

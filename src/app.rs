@@ -81,6 +81,8 @@ pub fn build_router(state: AppState) -> Router {
     // The complete set of intentionally-public routes is:
     //   GET  /api/health              liveness probe, static payload
     //   POST /api/auth/login          issues the token
+    //   GET  /api/system/setup-status query initial installation and setup status
+    //   POST /api/system/setup        bootstrap administrator and initialize database
     //   GET  /docs, /api-docs/openapi.json   Swagger UI
     //   GET  /api/{inventory,billing,reports}
     //                                 static module-status stubs
@@ -170,6 +172,10 @@ pub fn build_router(state: AppState) -> Router {
         .nest(
             &format!("/{}", mod_names::BACKUP),
             modules::backup::routes::router(),
+        )
+        .nest(
+            &format!("/{}", mod_names::SYSTEM),
+            modules::system::routes::router(),
         );
 
     let (router, openapi) = OpenApiRouter::<AppState>::with_openapi(ApiDoc::openapi())

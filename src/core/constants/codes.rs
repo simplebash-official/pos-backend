@@ -7,6 +7,7 @@ pub const UNAUTHORIZED: &str = "UNAUTHORIZED";
 pub const FORBIDDEN: &str = "FORBIDDEN";
 pub const ADMIN_REQUIRED: &str = "ADMIN_REQUIRED";
 pub const INTERNAL_SERVER_ERROR: &str = "INTERNAL_SERVER_ERROR";
+pub const SETUP_ALREADY_COMPLETED: &str = "SETUP_ALREADY_COMPLETED";
 
 // Products Status Codes
 pub const PRODUCT_NOT_FOUND: &str = "PRODUCT_NOT_FOUND";

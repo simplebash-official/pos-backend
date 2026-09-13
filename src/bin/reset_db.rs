@@ -67,6 +67,7 @@ async fn main() {
             "sku_counters",
             "idempotency_keys",
             "import_batches",
+            "system_installations",
         ];
         for t in tables {
             let _ = sqlx::query(&format!("DELETE FROM {t}")).execute(pool).await;

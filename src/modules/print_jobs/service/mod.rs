@@ -28,6 +28,21 @@ use crate::{
 };
 
 const VALID_STATUSES: &[&str] = &["received", "in_progress", "ready", "delivered", "cancelled"];
+const VALID_JOB_TYPES: &[&str] = &["mug", "t-shirt", "handbill", "banner", "custom"];
+
+fn validate_job_type(job_type: &str) -> AppResult<()> {
+    if VALID_JOB_TYPES.contains(&job_type) {
+        Ok(())
+    } else {
+        Err(AppError::validation_with_code(
+            format!(
+                "Invalid job type '{job_type}'. Must be one of: {}",
+                VALID_JOB_TYPES.join(", ")
+            ),
+            codes::INVALID_JOB_TYPE,
+        ))
+    }
+}
 
 fn validate_status(status: &str) -> AppResult<()> {
     if VALID_STATUSES.contains(&status) {
@@ -200,6 +215,7 @@ pub async fn create_print_job(
 ) -> AppResult<PrintJob> {
     let status = body.status.unwrap_or_else(|| "received".to_string());
     validate_status(&status)?;
+    validate_job_type(&body.job_type)?;
     validate_promised_ready_at(body.promised_ready_at.as_deref())?;
 
     let (customer_name, customer_phone) = resolve_customer_name_phone(
@@ -307,6 +323,7 @@ pub async fn update_print_job(
     let status = body.status.unwrap_or(existing.status);
 
     validate_status(&status)?;
+    validate_job_type(&job_type)?;
     validate_promised_ready_at(body.promised_ready_at.as_deref())?;
     validate_required_fields(&customer_name, &job_type, quantity, estimated_cost_cents)?;
 
