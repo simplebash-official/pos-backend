@@ -23,6 +23,7 @@ pub struct ProductDocument {
     #[serde(default)]
     pub key: String,
     /// Human-readable SKU code (e.g. PHO-SCR-0001).
+    #[serde(default)]
     pub sku: String,
     /// Barcode string for scanning (e.g. EAN-13), if any.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -31,18 +32,25 @@ pub struct ProductDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub barcode_source: Option<BarcodeSource>,
     /// Product name or title.
+    #[serde(default)]
     pub name: String,
     /// Foreign key referencing the parent category.
+    #[serde(default)]
     pub category_key: String,
     /// Foreign key referencing the subcategory.
+    #[serde(default)]
     pub subcategory_key: String,
     /// Cost/wholesale price in cents.
+    #[serde(default)]
     pub cost_price_cents: i64,
     /// Retail selling price in cents.
+    #[serde(default)]
     pub selling_price_cents: i64,
     /// Current number of units in inventory stock.
+    #[serde(default)]
     pub stock_quantity: i64,
     /// Minimum threshold count for low-stock warning alerts.
+    #[serde(default)]
     pub min_stock_threshold: i64,
     /// True when units of this product are tracked individually by serial number.
     #[serde(default)]
@@ -57,6 +65,7 @@ pub struct ProductDocument {
     #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
     /// Timestamp when product was last updated.
+    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
     /// Timestamp when product was soft-deleted, if applicable.
     #[serde(skip_serializing_if = "Option::is_none")]
