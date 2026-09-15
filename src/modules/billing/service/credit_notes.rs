@@ -564,77 +564,339 @@ pub async fn create_credit_note(
     caller_role: Option<Role>,
     device_id: Option<String>,
 ) -> AppResult<CreditNote> {
-    if body.returned_items.is_empty() {
-        return Err(AppError::validation("At least one item must be returned"));
-    }
-    for item_req in &body.returned_items {
-        if item_req.quantity < 1 {
-            return Err(AppError::validation(
-                "Return item quantity must be at least 1",
-            ));
+    crate::core::logging::domain::tracked("billing.credit_note_created", async move {
+        if body.returned_items.is_empty() {
+            return Err(AppError::validation("At least one item must be returned"));
         }
-        validate_condition_disposition(item_req.condition, item_req.disposition)?;
-    }
-    if body.no_receipt && body.invoice_key.is_some() {
-        return Err(AppError::validation(
-            "A no-receipt credit note cannot also reference an invoiceKey",
-        ));
-    }
-    if !body.no_receipt && body.invoice_key.is_none() {
-        return Err(AppError::validation(
-            "invoiceKey is required unless noReceipt is true",
-        ));
-    }
-
-    let is_admin = caller_role == Some(Role::Admin);
-    let has_override_reason = body
-        .override_reason
-        .as_ref()
-        .is_some_and(|r| !r.trim().is_empty());
-
-    // ---- No-receipt path: no invoice to match against, current-price valuation ----
-    if body.no_receipt {
-        if !has_override_reason {
-            return Err(AppError::validation(
-                "overrideReason is required for a no-receipt credit note",
-            ));
-        }
-        if !is_admin {
-            return Err(AppError::forbidden_with_code(
-                "A manager must approve a no-receipt return",
-                codes::MANAGER_OVERRIDE_REQUIRED,
-            ));
-        }
-
-        let mut resolved_return_items = Vec::new();
-        let mut return_subtotal_cents: i64 = 0;
         for item_req in &body.returned_items {
-            let resolved = resolve_no_receipt_item(db, item_req).await?;
-            return_subtotal_cents += resolved.total_cents;
-            resolved_return_items.push(resolved);
+            if item_req.quantity < 1 {
+                return Err(AppError::validation(
+                    "Return item quantity must be at least 1",
+                ));
+            }
+            validate_condition_disposition(item_req.condition, item_req.disposition)?;
+        }
+        if body.no_receipt && body.invoice_key.is_some() {
+            return Err(AppError::validation(
+                "A no-receipt credit note cannot also reference an invoiceKey",
+            ));
+        }
+        if !body.no_receipt && body.invoice_key.is_none() {
+            return Err(AppError::validation(
+                "invoiceKey is required unless noReceipt is true",
+            ));
         }
 
-        let refund_shape = compute_refund_shape(
-            db,
-            None,
-            return_subtotal_cents,
-            &body.exchange_items,
-            body.payment_method.as_deref().unwrap_or("cash"),
-            &body.refund_breakdown,
-            true,
-            0,
-        )
-        .await?;
+        let is_admin = caller_role == Some(Role::Admin);
+        let has_override_reason = body
+            .override_reason
+            .as_ref()
+            .is_some_and(|r| !r.trim().is_empty());
 
-        return finish_create_credit_note(
-            db,
-            None,
+        // ---- No-receipt path: no invoice to match against, current-price valuation ----
+        if body.no_receipt {
+            if !has_override_reason {
+                return Err(AppError::validation(
+                    "overrideReason is required for a no-receipt credit note",
+                ));
+            }
+            if !is_admin {
+                return Err(AppError::forbidden_with_code(
+                    "A manager must approve a no-receipt return",
+                    codes::MANAGER_OVERRIDE_REQUIRED,
+                ));
+            }
+
+            let mut resolved_return_items = Vec::new();
+            let mut return_subtotal_cents: i64 = 0;
+            for item_req in &body.returned_items {
+                let resolved = resolve_no_receipt_item(db, item_req).await?;
+                return_subtotal_cents += resolved.total_cents;
+                resolved_return_items.push(resolved);
+            }
+
+            let refund_shape = compute_refund_shape(
+                db,
+                None,
+                return_subtotal_cents,
+                &body.exchange_items,
+                body.payment_method.as_deref().unwrap_or("cash"),
+                &body.refund_breakdown,
+                true,
+                0,
+            )
+            .await?;
+
+            return finish_create_credit_note(
+                db,
+                None,
+                resolved_return_items,
+                return_subtotal_cents,
+                refund_shape,
+                true,
+                true,
+                Some(cashier_id.clone()),
+                body.override_reason,
+                body.notes,
+                cashier_id,
+                cashier_name,
+                device_id,
+            )
+            .await;
+        }
+
+        // ---- Normal path: matched against an existing invoice ----
+        // Claim the returned quantity against the invoice FIRST, atomically and
+        // version-guarded, before any other durable write (stock movements,
+        // payment inserts, sequence reservation, the credit-note document
+        // itself) — see this function's doc comment for why. A version conflict
+        // (a concurrent write already bumped the invoice) re-fetches and
+        // re-validates from scratch and retries, bounded to a few attempts.
+        let invoice_key = body.invoice_key.as_ref().expect("checked above").clone();
+        const MAX_CLAIM_ATTEMPTS: u32 = 3;
+        let mut attempt = 0;
+
+        let (
+            invoice_id,
+            invoice_key_owned,
+            invoice_number,
+            customer_key,
             resolved_return_items,
             return_subtotal_cents,
             refund_shape,
-            true,
-            true,
-            Some(cashier_id.clone()),
+            is_manager_override,
+        ) = loop {
+            attempt += 1;
+
+            let invoice = repository::find_invoice_by_id_or_key(db, &invoice_key)
+                .await?
+                .ok_or_else(|| {
+                    AppError::not_found_with_code("Invoice not found", codes::INVOICE_NOT_FOUND)
+                })?;
+
+            if invoice.status == InvoiceStatus::Voided {
+                return Err(AppError::conflict(
+                    codes::INVOICE_NOT_ELIGIBLE_FOR_CREDIT_NOTE,
+                    "A voided invoice cannot have a credit note created against it",
+                ));
+            }
+
+            let days_since_sale = (chrono::Utc::now() - invoice.created_at.to_chrono()).num_days();
+            let mut is_manager_override = false;
+            if days_since_sale > config.return_window_days {
+                if !has_override_reason {
+                    return Err(AppError::conflict(
+                        codes::RETURN_WINDOW_EXPIRED,
+                        format!(
+                            "This sale was made {days_since_sale} days ago, outside the {}-day return window",
+                            config.return_window_days
+                        ),
+                    ));
+                }
+                if !is_admin {
+                    return Err(AppError::forbidden_with_code(
+                        "A manager must approve a return outside the normal return window",
+                        codes::MANAGER_OVERRIDE_REQUIRED,
+                    ));
+                }
+                is_manager_override = true;
+            }
+
+            let mut updated_invoice_items = invoice.items.clone();
+            let mut resolved_return_items = Vec::new();
+            let mut return_subtotal_cents: i64 = 0;
+
+            for item_req in &body.returned_items {
+                let matched_idx = updated_invoice_items
+                    .iter()
+                    .position(|item| {
+                        if let (Some(req_pk), Some(item_pk)) =
+                            (&item_req.product_key, &item.product_key)
+                            && req_pk == item_pk
+                        {
+                            return true;
+                        }
+                        if let (Some(req_stk), Some(item_stk)) =
+                            (&item_req.source_ticket_key, &item.source_ticket_key)
+                            && req_stk == item_stk
+                        {
+                            return true;
+                        }
+                        if let Some(req_name) = &item_req.name
+                            && req_name.eq_ignore_ascii_case(&item.name)
+                        {
+                            return true;
+                        }
+                        if updated_invoice_items.len() == 1 && body.returned_items.len() == 1 {
+                            return true;
+                        }
+                        false
+                    })
+                    .ok_or_else(|| {
+                        AppError::validation_with_code(
+                            format!(
+                                "Item '{}' was not found on invoice {}",
+                                item_req.name.as_deref().unwrap_or("unknown"),
+                                invoice.invoice_number
+                            ),
+                            codes::VALIDATION_ERROR,
+                        )
+                    })?;
+
+                let inv_item = &mut updated_invoice_items[matched_idx];
+                let available_qty = inv_item.quantity - inv_item.returned_quantity;
+
+                if item_req.quantity > available_qty {
+                    return Err(AppError::custom(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        codes::CREDIT_NOTE_QUANTITY_EXCEEDED,
+                        format!(
+                            "Return quantity ({}) exceeds available returnable quantity ({}) for item '{}'",
+                            item_req.quantity, available_qty, inv_item.name
+                        ),
+                    ));
+                }
+
+                let unit_price_cents = if inv_item.quantity > 0 {
+                    inv_item.total_cents / inv_item.quantity
+                } else {
+                    inv_item.unit_price_cents
+                };
+                let line_total_cents = unit_price_cents * item_req.quantity;
+                return_subtotal_cents += line_total_cents;
+                inv_item.returned_quantity += item_req.quantity;
+
+                // A serialized invoice line must return a specific unit — resolve
+                // it against the sold serial before this credit note is created
+                // (fail before any write, same D4-style rule sale resolution uses)
+                // and compute `withinWarranty` from it for the response/document.
+                let within_warranty = if !inv_item.serial_numbers.is_empty() {
+                    let serial_number = item_req.serial_number.as_deref().ok_or_else(|| {
+                        AppError::validation(format!(
+                            "'{}' is a serialized item — serialNumber is required",
+                            inv_item.name
+                        ))
+                    })?;
+                    let product_key = inv_item.product_key.as_deref().ok_or_else(|| {
+                        AppError::validation(format!(
+                            "'{}' has no productKey and cannot be resolved as a serialized item",
+                            inv_item.name
+                        ))
+                    })?;
+                    let serial = inventory::service::product_serial::resolve_sold_serial_for_invoice(
+                        db,
+                        product_key,
+                        serial_number,
+                        &invoice.key,
+                    )
+                    .await?;
+                    inventory::service::product_serial::is_within_warranty(&serial)
+                } else {
+                    None
+                };
+
+                resolved_return_items.push(CreditNoteItem {
+                    product_key: inv_item.product_key.clone(),
+                    name: inv_item.name.clone(),
+                    sku: inv_item.sku.clone(),
+                    quantity: item_req.quantity,
+                    unit_price_cents,
+                    total_cents: line_total_cents,
+                    reason: item_req.reason,
+                    condition: item_req.condition,
+                    disposition: item_req.disposition,
+                    serial_number: item_req.serial_number.clone(),
+                    within_warranty,
+                    notes: item_req.notes.clone(),
+                    source_type: Some(inv_item.source_type.clone()),
+                    source_ticket_key: inv_item.source_ticket_key.clone(),
+                    source_ticket_number: inv_item.source_ticket_number.clone(),
+                });
+            }
+
+            let already_paid_cents: i64 = repository::list_payments_for_invoice(db, &invoice.key)
+                .await?
+                .iter()
+                .map(|p| p.amount_cents)
+                .sum();
+
+            // Pure computation, no durable writes — resolves exchange items,
+            // the partial-payment refund cap, and the refund-method allocation,
+            // so the exact `refunded_cents` delta to claim is known before the
+            // atomic claim below.
+            let refund_shape = compute_refund_shape(
+                db,
+                Some(&invoice.key),
+                return_subtotal_cents,
+                &body.exchange_items,
+                body.payment_method
+                    .as_deref()
+                    .unwrap_or(&invoice.payment_method),
+                &body.refund_breakdown,
+                false,
+                already_paid_cents,
+            )
+            .await?;
+
+            let refunded_cents_delta =
+                refund_shape.refund_cash_cents.max(0) + refund_shape.balance_reduction_cents.max(0);
+            let invoice_id = invoice
+                .id
+                .expect("persisted invoice document must have an _id");
+
+            match repository::invoice::update_invoice_credit_note_progress(
+                db,
+                invoice_id,
+                updated_invoice_items,
+                refunded_cents_delta,
+                1,
+                invoice.version,
+            )
+            .await?
+            {
+                Some(_) => {
+                    break (
+                        invoice_id,
+                        invoice.key.clone(),
+                        invoice.invoice_number.clone(),
+                        invoice.customer_key.clone(),
+                        resolved_return_items,
+                        return_subtotal_cents,
+                        refund_shape,
+                        is_manager_override,
+                    );
+                }
+                None => {
+                    if attempt >= MAX_CLAIM_ATTEMPTS {
+                        return Err(AppError::conflict(
+                            codes::CREDIT_NOTE_CONTENTION,
+                            "This invoice was updated by another request just now — please try again",
+                        ));
+                    }
+                    // Version mismatch: a concurrent write already claimed
+                    // against this invoice. Loop back and re-fetch/re-validate
+                    // fresh rather than retrying with stale data.
+                }
+            }
+        };
+
+        // The quantity claim is now durably committed — nothing else has been
+        // written yet. Proceed to the remaining side effects (sequence
+        // reservation, stock movements, payment inserts, the credit-note
+        // document itself).
+        let result = finish_create_credit_note(
+            db,
+            Some((invoice_key_owned, invoice_number)),
+            resolved_return_items,
+            return_subtotal_cents,
+            refund_shape,
+            is_manager_override,
+            false,
+            if is_manager_override {
+                Some(cashier_id.clone())
+            } else {
+                None
+            },
             body.override_reason,
             body.notes,
             cashier_id,
@@ -642,300 +904,41 @@ pub async fn create_credit_note(
             device_id,
         )
         .await;
-    }
 
-    // ---- Normal path: matched against an existing invoice ----
-    // Claim the returned quantity against the invoice FIRST, atomically and
-    // version-guarded, before any other durable write (stock movements,
-    // payment inserts, sequence reservation, the credit-note document
-    // itself) — see this function's doc comment for why. A version conflict
-    // (a concurrent write already bumped the invoice) re-fetches and
-    // re-validates from scratch and retries, bounded to a few attempts.
-    let invoice_key = body.invoice_key.as_ref().expect("checked above").clone();
-    const MAX_CLAIM_ATTEMPTS: u32 = 3;
-    let mut attempt = 0;
-
-    let (
-        invoice_id,
-        invoice_key_owned,
-        invoice_number,
-        customer_key,
-        resolved_return_items,
-        return_subtotal_cents,
-        refund_shape,
-        is_manager_override,
-    ) = loop {
-        attempt += 1;
-
-        let invoice = repository::find_invoice_by_id_or_key(db, &invoice_key)
-            .await?
-            .ok_or_else(|| {
-                AppError::not_found_with_code("Invoice not found", codes::INVOICE_NOT_FOUND)
-            })?;
-
-        if invoice.status == InvoiceStatus::Voided {
-            return Err(AppError::conflict(
-                codes::INVOICE_NOT_ELIGIBLE_FOR_CREDIT_NOTE,
-                "A voided invoice cannot have a credit note created against it",
-            ));
-        }
-
-        let days_since_sale = (chrono::Utc::now() - invoice.created_at.to_chrono()).num_days();
-        let mut is_manager_override = false;
-        if days_since_sale > config.return_window_days {
-            if !has_override_reason {
-                return Err(AppError::conflict(
-                    codes::RETURN_WINDOW_EXPIRED,
-                    format!(
-                        "This sale was made {days_since_sale} days ago, outside the {}-day return window",
-                        config.return_window_days
-                    ),
-                ));
-            }
-            if !is_admin {
-                return Err(AppError::forbidden_with_code(
-                    "A manager must approve a return outside the normal return window",
-                    codes::MANAGER_OVERRIDE_REQUIRED,
-                ));
-            }
-            is_manager_override = true;
-        }
-
-        let mut updated_invoice_items = invoice.items.clone();
-        let mut resolved_return_items = Vec::new();
-        let mut return_subtotal_cents: i64 = 0;
-
-        for item_req in &body.returned_items {
-            let matched_idx = updated_invoice_items
-                .iter()
-                .position(|item| {
-                    if let (Some(req_pk), Some(item_pk)) =
-                        (&item_req.product_key, &item.product_key)
-                        && req_pk == item_pk
-                    {
-                        return true;
-                    }
-                    if let (Some(req_stk), Some(item_stk)) =
-                        (&item_req.source_ticket_key, &item.source_ticket_key)
-                        && req_stk == item_stk
-                    {
-                        return true;
-                    }
-                    if let Some(req_name) = &item_req.name
-                        && req_name.eq_ignore_ascii_case(&item.name)
-                    {
-                        return true;
-                    }
-                    if updated_invoice_items.len() == 1 && body.returned_items.len() == 1 {
-                        return true;
-                    }
-                    false
-                })
-                .ok_or_else(|| {
-                    AppError::validation_with_code(
-                        format!(
-                            "Item '{}' was not found on invoice {}",
-                            item_req.name.as_deref().unwrap_or("unknown"),
-                            invoice.invoice_number
-                        ),
-                        codes::VALIDATION_ERROR,
+        match &result {
+            Ok(created) => {
+                if let Some(customer_key) = &customer_key
+                    && created.refund_cash_cents != 0
+                    && let Err(err) = customers::service::apply_financial_delta(
+                        db,
+                        customer_key,
+                        -created.refund_cash_cents,
+                        0,
                     )
-                })?;
-
-            let inv_item = &mut updated_invoice_items[matched_idx];
-            let available_qty = inv_item.quantity - inv_item.returned_quantity;
-
-            if item_req.quantity > available_qty {
-                return Err(AppError::custom(
-                    axum::http::StatusCode::BAD_REQUEST,
-                    codes::CREDIT_NOTE_QUANTITY_EXCEEDED,
-                    format!(
-                        "Return quantity ({}) exceeds available returnable quantity ({}) for item '{}'",
-                        item_req.quantity, available_qty, inv_item.name
-                    ),
-                ));
+                    .await
+                {
+                    tracing::warn!(customer_key, error = %err, "could not adjust customer balance on credit note");
+                }
             }
-
-            let unit_price_cents = if inv_item.quantity > 0 {
-                inv_item.total_cents / inv_item.quantity
-            } else {
-                inv_item.unit_price_cents
-            };
-            let line_total_cents = unit_price_cents * item_req.quantity;
-            return_subtotal_cents += line_total_cents;
-            inv_item.returned_quantity += item_req.quantity;
-
-            // A serialized invoice line must return a specific unit — resolve
-            // it against the sold serial before this credit note is created
-            // (fail before any write, same D4-style rule sale resolution uses)
-            // and compute `withinWarranty` from it for the response/document.
-            let within_warranty = if !inv_item.serial_numbers.is_empty() {
-                let serial_number = item_req.serial_number.as_deref().ok_or_else(|| {
-                    AppError::validation(format!(
-                        "'{}' is a serialized item — serialNumber is required",
-                        inv_item.name
-                    ))
-                })?;
-                let product_key = inv_item.product_key.as_deref().ok_or_else(|| {
-                    AppError::validation(format!(
-                        "'{}' has no productKey and cannot be resolved as a serialized item",
-                        inv_item.name
-                    ))
-                })?;
-                let serial = inventory::service::product_serial::resolve_sold_serial_for_invoice(
-                    db,
-                    product_key,
-                    serial_number,
-                    &invoice.key,
-                )
-                .await?;
-                inventory::service::product_serial::is_within_warranty(&serial)
-            } else {
-                None
-            };
-
-            resolved_return_items.push(CreditNoteItem {
-                product_key: inv_item.product_key.clone(),
-                name: inv_item.name.clone(),
-                sku: inv_item.sku.clone(),
-                quantity: item_req.quantity,
-                unit_price_cents,
-                total_cents: line_total_cents,
-                reason: item_req.reason,
-                condition: item_req.condition,
-                disposition: item_req.disposition,
-                serial_number: item_req.serial_number.clone(),
-                within_warranty,
-                notes: item_req.notes.clone(),
-                source_type: Some(inv_item.source_type.clone()),
-                source_ticket_key: inv_item.source_ticket_key.clone(),
-                source_ticket_number: inv_item.source_ticket_number.clone(),
-            });
-        }
-
-        let already_paid_cents: i64 = repository::list_payments_for_invoice(db, &invoice.key)
-            .await?
-            .iter()
-            .map(|p| p.amount_cents)
-            .sum();
-
-        // Pure computation, no durable writes — resolves exchange items,
-        // the partial-payment refund cap, and the refund-method allocation,
-        // so the exact `refunded_cents` delta to claim is known before the
-        // atomic claim below.
-        let refund_shape = compute_refund_shape(
-            db,
-            Some(&invoice.key),
-            return_subtotal_cents,
-            &body.exchange_items,
-            body.payment_method
-                .as_deref()
-                .unwrap_or(&invoice.payment_method),
-            &body.refund_breakdown,
-            false,
-            already_paid_cents,
-        )
-        .await?;
-
-        let refunded_cents_delta =
-            refund_shape.refund_cash_cents.max(0) + refund_shape.balance_reduction_cents.max(0);
-        let invoice_id = invoice
-            .id
-            .expect("persisted invoice document must have an _id");
-
-        match repository::invoice::update_invoice_credit_note_progress(
-            db,
-            invoice_id,
-            updated_invoice_items,
-            refunded_cents_delta,
-            1,
-            invoice.version,
-        )
-        .await?
-        {
-            Some(_) => {
-                break (
-                    invoice_id,
-                    invoice.key.clone(),
-                    invoice.invoice_number.clone(),
-                    invoice.customer_key.clone(),
-                    resolved_return_items,
-                    return_subtotal_cents,
-                    refund_shape,
-                    is_manager_override,
+            Err(err) => {
+                // The invoice's returned_quantity/refunded_cents/credit_note_count
+                // claim already committed above (by design — see this function's
+                // doc comment) but the credit note document itself failed to
+                // materialize. Rare (only non-validation failures reach here,
+                // e.g. a transient DB error during sequence reservation or the
+                // document insert) but worth surfacing loudly: the invoice now
+                // shows quantity claimed with no corresponding credit note.
+                tracing::error!(
+                    invoice_id = %invoice_id,
+                    error = %err,
+                    "invoice quantity claimed but credit note creation failed after the claim"
                 );
             }
-            None => {
-                if attempt >= MAX_CLAIM_ATTEMPTS {
-                    return Err(AppError::conflict(
-                        codes::CREDIT_NOTE_CONTENTION,
-                        "This invoice was updated by another request just now — please try again",
-                    ));
-                }
-                // Version mismatch: a concurrent write already claimed
-                // against this invoice. Loop back and re-fetch/re-validate
-                // fresh rather than retrying with stale data.
-            }
         }
-    };
 
-    // The quantity claim is now durably committed — nothing else has been
-    // written yet. Proceed to the remaining side effects (sequence
-    // reservation, stock movements, payment inserts, the credit-note
-    // document itself).
-    let result = finish_create_credit_note(
-        db,
-        Some((invoice_key_owned, invoice_number)),
-        resolved_return_items,
-        return_subtotal_cents,
-        refund_shape,
-        is_manager_override,
-        false,
-        if is_manager_override {
-            Some(cashier_id.clone())
-        } else {
-            None
-        },
-        body.override_reason,
-        body.notes,
-        cashier_id,
-        cashier_name,
-        device_id,
-    )
-    .await;
-
-    match &result {
-        Ok(created) => {
-            if let Some(customer_key) = &customer_key
-                && created.refund_cash_cents != 0
-                && let Err(err) = customers::service::apply_financial_delta(
-                    db,
-                    customer_key,
-                    -created.refund_cash_cents,
-                    0,
-                )
-                .await
-            {
-                tracing::warn!(customer_key, error = %err, "could not adjust customer balance on credit note");
-            }
-        }
-        Err(err) => {
-            // The invoice's returned_quantity/refunded_cents/credit_note_count
-            // claim already committed above (by design — see this function's
-            // doc comment) but the credit note document itself failed to
-            // materialize. Rare (only non-validation failures reach here,
-            // e.g. a transient DB error during sequence reservation or the
-            // document insert) but worth surfacing loudly: the invoice now
-            // shows quantity claimed with no corresponding credit note.
-            tracing::error!(
-                invoice_id = %invoice_id,
-                error = %err,
-                "invoice quantity claimed but credit note creation failed after the claim"
-            );
-        }
-    }
-
-    result
+        result
+    })
+    .await
 }
 
 /// Shared tail of `create_credit_note`'s no-receipt and normal paths: takes
@@ -1106,136 +1109,139 @@ pub async fn void_credit_note(
     body: VoidCreditNoteRequest,
     voided_by: String,
 ) -> AppResult<CreditNote> {
-    if body.reason.trim().is_empty() {
-        return Err(AppError::validation(
-            "A reason is required to void a credit note",
-        ));
-    }
-
-    let existing = repository::credit_notes::find_credit_note_by_id_or_key(db, id_or_key)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Credit note not found", codes::CREDIT_NOTE_NOT_FOUND)
-        })?;
-
-    if existing.status == CreditNoteStatus::Voided {
-        return Err(AppError::conflict(
-            codes::CREDIT_NOTE_ALREADY_VOIDED,
-            "This credit note has already been voided",
-        ));
-    }
-
-    for item in &existing.returned_items {
-        if item.condition != ItemCondition::Resalable
-            && item.condition != ItemCondition::OpenBoxDiscount
-        {
-            continue;
+    crate::core::logging::domain::tracked("billing.credit_note_voided", async move {
+        if body.reason.trim().is_empty() {
+            return Err(AppError::validation(
+                "A reason is required to void a credit note",
+            ));
         }
-        let Some(product_key) = &item.product_key else {
-            continue;
-        };
-        if let Ok(product) = inventory::service::product::get_product_by_key(db, product_key).await
-            && let Ok(product_object_id) = ObjectId::parse_str(&product.id)
-            && let Err(err) = inventory::service::stock::apply_stock_delta(
-                db,
-                product_object_id,
-                -item.quantity,
-                StockMovementType::ReturnRestock,
-                Some(existing.key.clone()),
-                Some(format!(
-                    "Void of credit note {}",
-                    existing.credit_note_number
-                )),
-            )
-            .await
-        {
-            tracing::warn!(product_key, error = %err, "could not reverse credit note restock");
-        }
-    }
 
-    for payment_key in &existing.refund_payment_keys {
-        if let Ok(Some(original)) = repository::find_payment_by_key(db, payment_key).await {
-            let now = BsonDateTime::now();
-            let reversal = PaymentDocument {
-                id: None,
-                key: generate_id(prefixes::PAYMENT),
-                invoice_key: original.invoice_key.clone(),
-                amount_cents: -original.amount_cents,
-                payment_method: original.payment_method.clone(),
-                notes: Some(format!(
-                    "Reversal of credit note {} (voided)",
-                    existing.credit_note_number
-                )),
-                recorded_by_user_id: voided_by.clone(),
-                recorded_by_name_snapshot: voided_by.clone(),
-                recorded_at: now,
-                version: 1,
-                created_at: now,
-                updated_at: now,
+        let existing = repository::credit_notes::find_credit_note_by_id_or_key(db, id_or_key)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Credit note not found", codes::CREDIT_NOTE_NOT_FOUND)
+            })?;
+
+        if existing.status == CreditNoteStatus::Voided {
+            return Err(AppError::conflict(
+                codes::CREDIT_NOTE_ALREADY_VOIDED,
+                "This credit note has already been voided",
+            ));
+        }
+
+        for item in &existing.returned_items {
+            if item.condition != ItemCondition::Resalable
+                && item.condition != ItemCondition::OpenBoxDiscount
+            {
+                continue;
+            }
+            let Some(product_key) = &item.product_key else {
+                continue;
             };
-            if let Err(err) = repository::insert_payment(db, reversal).await {
-                tracing::warn!(payment_key, error = %err, "could not reverse credit note refund payment");
+            if let Ok(product) = inventory::service::product::get_product_by_key(db, product_key).await
+                && let Ok(product_object_id) = ObjectId::parse_str(&product.id)
+                && let Err(err) = inventory::service::stock::apply_stock_delta(
+                    db,
+                    product_object_id,
+                    -item.quantity,
+                    StockMovementType::ReturnRestock,
+                    Some(existing.key.clone()),
+                    Some(format!(
+                        "Void of credit note {}",
+                        existing.credit_note_number
+                    )),
+                )
+                .await
+            {
+                tracing::warn!(product_key, error = %err, "could not reverse credit note restock");
             }
         }
-    }
 
-    if let Some(invoice_key) = &existing.invoice_key
-        && let Ok(Some(invoice)) = repository::find_invoice_by_id_or_key(db, invoice_key).await
-        && let Some(invoice_id) = invoice.id
-    {
-        let invoice_version = invoice.version;
-        let restored_items: Vec<InvoiceItem> = invoice
-            .items
-            .into_iter()
-            .map(|mut inv_item| {
-                if let Some(returned) = existing.returned_items.iter().find(|ri| {
-                    ri.product_key == inv_item.product_key
-                        && ri.source_ticket_key == inv_item.source_ticket_key
-                        && ri.name.eq_ignore_ascii_case(&inv_item.name)
-                }) {
-                    inv_item.returned_quantity =
-                        (inv_item.returned_quantity - returned.quantity).max(0);
+        for payment_key in &existing.refund_payment_keys {
+            if let Ok(Some(original)) = repository::find_payment_by_key(db, payment_key).await {
+                let now = BsonDateTime::now();
+                let reversal = PaymentDocument {
+                    id: None,
+                    key: generate_id(prefixes::PAYMENT),
+                    invoice_key: original.invoice_key.clone(),
+                    amount_cents: -original.amount_cents,
+                    payment_method: original.payment_method.clone(),
+                    notes: Some(format!(
+                        "Reversal of credit note {} (voided)",
+                        existing.credit_note_number
+                    )),
+                    recorded_by_user_id: voided_by.clone(),
+                    recorded_by_name_snapshot: voided_by.clone(),
+                    recorded_at: now,
+                    version: 1,
+                    created_at: now,
+                    updated_at: now,
+                };
+                if let Err(err) = repository::insert_payment(db, reversal).await {
+                    tracing::warn!(payment_key, error = %err, "could not reverse credit note refund payment");
                 }
-                inv_item
-            })
-            .collect();
-        let refunded_delta =
-            -(existing.refund_cash_cents.max(0) + existing.balance_reduction_cents.max(0));
-        // A version mismatch here (`Ok(None)`) is treated as a best-effort
-        // miss, not retried — voiding is a much lower-stakes reversal than
-        // creation, and a concurrent write losing this decrement is already
-        // logged for investigation rather than silently accepted.
-        if let Err(err) = repository::invoice::update_invoice_credit_note_progress(
-            db,
-            invoice_id,
-            restored_items,
-            refunded_delta,
-            -1,
-            invoice_version,
-        )
-        .await
-        {
-            tracing::warn!(invoice_key, error = %err, "could not reverse invoice credit-note progress on void");
+            }
         }
-    }
 
-    let object_id = existing
-        .id
-        .expect("persisted credit note document must have an _id");
-    let set_doc = doc! {
-        "status": "voided",
-        "voided_at": BsonDateTime::now(),
-        "voided_by": &voided_by,
-        "voided_reason": &body.reason,
-        "updated_at": BsonDateTime::now(),
-    };
-    let updated = repository::credit_notes::update_credit_note_status(db, object_id, set_doc)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Credit note not found", codes::CREDIT_NOTE_NOT_FOUND)
-        })?;
+        if let Some(invoice_key) = &existing.invoice_key
+            && let Ok(Some(invoice)) = repository::find_invoice_by_id_or_key(db, invoice_key).await
+            && let Some(invoice_id) = invoice.id
+        {
+            let invoice_version = invoice.version;
+            let restored_items: Vec<InvoiceItem> = invoice
+                .items
+                .into_iter()
+                .map(|mut inv_item| {
+                    if let Some(returned) = existing.returned_items.iter().find(|ri| {
+                        ri.product_key == inv_item.product_key
+                            && ri.source_ticket_key == inv_item.source_ticket_key
+                            && ri.name.eq_ignore_ascii_case(&inv_item.name)
+                    }) {
+                        inv_item.returned_quantity =
+                            (inv_item.returned_quantity - returned.quantity).max(0);
+                    }
+                    inv_item
+                })
+                .collect();
+            let refunded_delta =
+                -(existing.refund_cash_cents.max(0) + existing.balance_reduction_cents.max(0));
+            // A version mismatch here (`Ok(None)`) is treated as a best-effort
+            // miss, not retried — voiding is a much lower-stakes reversal than
+            // creation, and a concurrent write losing this decrement is already
+            // logged for investigation rather than silently accepted.
+            if let Err(err) = repository::invoice::update_invoice_credit_note_progress(
+                db,
+                invoice_id,
+                restored_items,
+                refunded_delta,
+                -1,
+                invoice_version,
+            )
+            .await
+            {
+                tracing::warn!(invoice_key, error = %err, "could not reverse invoice credit-note progress on void");
+            }
+        }
 
-    Ok(updated.into_credit_note())
+        let object_id = existing
+            .id
+            .expect("persisted credit note document must have an _id");
+        let set_doc = doc! {
+            "status": "voided",
+            "voided_at": BsonDateTime::now(),
+            "voided_by": &voided_by,
+            "voided_reason": &body.reason,
+            "updated_at": BsonDateTime::now(),
+        };
+        let updated = repository::credit_notes::update_credit_note_status(db, object_id, set_doc)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Credit note not found", codes::CREDIT_NOTE_NOT_FOUND)
+            })?;
+
+        Ok(updated.into_credit_note())
+    })
+    .await
 }
 
 /// Look up a single credit note by its hex ObjectId or unique model key (`cn_...`).

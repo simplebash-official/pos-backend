@@ -150,6 +150,7 @@ impl DocumentServerClient {
         let response = self
             .http
             .get(&url)
+            .headers(forwarded_headers())
             .send()
             .await
             .map_err(document_server_unreachable)?;
@@ -200,10 +201,12 @@ impl DocumentServerClient {
         validate_payload(info.data_schema.as_ref(), &data)?;
 
         let url = format!("{}/api/render/{}", self.base_url, info.key);
+        let started = std::time::Instant::now();
 
         let response = self
             .http
             .post(&url)
+            .headers(forwarded_headers())
             .header("X-Internal-Api-Key", &self.api_key)
             .json(&data)
             .send()
@@ -212,14 +215,36 @@ impl DocumentServerClient {
 
         let status = response.status();
         if !status.is_success() {
+            tracing::warn!(
+                category = "http",
+                event = "outbound",
+                service = "document-server",
+                url = %url,
+                template = template_slug,
+                status = status.as_u16(),
+                latency_ms = started.elapsed().as_millis() as u64,
+                "document-server render failed"
+            );
             return Err(map_error_body(status, response).await);
         }
 
-        response
+        let bytes = response
             .bytes()
             .await
             .map(|b| b.to_vec())
-            .map_err(document_server_unreachable)
+            .map_err(document_server_unreachable)?;
+        tracing::info!(
+            category = "http",
+            event = "outbound",
+            service = "document-server",
+            url = %url,
+            template = template_slug,
+            status = status.as_u16(),
+            pdf_bytes = bytes.len(),
+            latency_ms = started.elapsed().as_millis() as u64,
+            "document-server render completed"
+        );
+        Ok(bytes)
     }
 }
 
@@ -270,6 +295,18 @@ fn validate_payload(
             violations.join("; ")
         ),
     ))
+}
+
+/// Carries the current request's id to document-server so its log lines
+/// join the same trace as the frontend click and this backend request.
+fn forwarded_headers() -> reqwest::header::HeaderMap {
+    let mut headers = reqwest::header::HeaderMap::new();
+    if let Some(id) = crate::core::logging::request::current_request_id()
+        && let Ok(value) = reqwest::header::HeaderValue::from_str(&id)
+    {
+        headers.insert(crate::core::logging::request::REQUEST_ID_HEADER, value);
+    }
+    headers
 }
 
 fn document_server_unreachable(err: reqwest::Error) -> AppError {

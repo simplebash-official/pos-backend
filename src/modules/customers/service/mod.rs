@@ -151,55 +151,58 @@ pub async fn create_customer(
     body: CreateCustomerRequest,
     device_id: Option<String>,
 ) -> AppResult<Customer> {
-    let name = body.name.trim().to_string();
-    if name.chars().count() < 2 {
-        return Err(AppError::validation(
-            "Customer name must be at least 2 characters",
-        ));
-    }
-    validate_phone_number(&body.primary_phone, "Primary phone")?;
-    let primary_phone = body.primary_phone.trim().to_string();
+    crate::core::logging::domain::tracked("customers.created", async move {
+        let name = body.name.trim().to_string();
+        if name.chars().count() < 2 {
+            return Err(AppError::validation(
+                "Customer name must be at least 2 characters",
+            ));
+        }
+        validate_phone_number(&body.primary_phone, "Primary phone")?;
+        let primary_phone = body.primary_phone.trim().to_string();
 
-    let contact_person = sanitize_string(body.contact_person);
-    let secondary_phone = sanitize_string(body.secondary_phone);
-    if let Some(ref sec_phone) = secondary_phone {
-        validate_phone_number(sec_phone, "Secondary phone")?;
-    }
+        let contact_person = sanitize_string(body.contact_person);
+        let secondary_phone = sanitize_string(body.secondary_phone);
+        if let Some(ref sec_phone) = secondary_phone {
+            validate_phone_number(sec_phone, "Secondary phone")?;
+        }
 
-    let email = sanitize_string(body.email);
-    if let Some(ref e) = email {
-        validate_email(e)?;
-    }
+        let email = sanitize_string(body.email);
+        if let Some(ref e) = email {
+            validate_email(e)?;
+        }
 
-    let address = sanitize_string(body.address);
-    let notes = sanitize_string(body.notes);
-    let tags = sanitize_tags(body.tags);
+        let address = sanitize_string(body.address);
+        let notes = sanitize_string(body.notes);
+        let tags = sanitize_tags(body.tags);
 
-    let key = generate_id(prefixes::CUSTOMER);
-    let now = BsonDateTime::now();
+        let key = generate_id(prefixes::CUSTOMER);
+        let now = BsonDateTime::now();
 
-    let document = CustomerDocument {
-        id: None,
-        key,
-        name,
-        contact_person,
-        primary_phone,
-        secondary_phone,
-        email,
-        address,
-        tags,
-        notes,
-        outstanding_balance_cents: 0,
-        total_purchases_cents: 0,
-        version: 1,
-        created_at: now,
-        updated_at: now,
-        deleted_at: None,
-        updated_by_device: device_id,
-    };
+        let document = CustomerDocument {
+            id: None,
+            key,
+            name,
+            contact_person,
+            primary_phone,
+            secondary_phone,
+            email,
+            address,
+            tags,
+            notes,
+            outstanding_balance_cents: 0,
+            total_purchases_cents: 0,
+            version: 1,
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+            updated_by_device: device_id,
+        };
 
-    let inserted = repository::insert_customer(db, document).await?;
-    Ok(inserted.into_customer())
+        let inserted = repository::insert_customer(db, document).await?;
+        Ok(inserted.into_customer())
+    })
+    .await
 }
 
 pub async fn replace_customer(
@@ -209,103 +212,106 @@ pub async fn replace_customer(
     expected_version: Option<i64>,
     device_id: Option<String>,
 ) -> AppResult<Customer> {
-    let existing = repository::find_customer_by_id_or_key(db, id_or_key)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Customer not found", codes::CUSTOMER_NOT_FOUND)
-        })?;
+    crate::core::logging::domain::tracked("customers.replaced", async move {
+        let existing = repository::find_customer_by_id_or_key(db, id_or_key)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Customer not found", codes::CUSTOMER_NOT_FOUND)
+            })?;
 
-    let object_id = existing
-        .id
-        .expect("persisted customer document must have an _id");
+        let object_id = existing
+            .id
+            .expect("persisted customer document must have an _id");
 
-    if let Some(expected) = expected_version
-        && existing.version != expected
-    {
-        return Err(AppError::conflict_with_details(
-            codes::VERSION_CONFLICT,
-            "This customer was changed on another device.",
-            serde_json::json!({
-                "expectedVersion": expected,
-                "serverVersion": existing.version,
-                "updatedByDevice": existing.updated_by_device,
-                "server": existing.into_customer(),
-            }),
-        ));
-    }
+        if let Some(expected) = expected_version
+            && existing.version != expected
+        {
+            return Err(AppError::conflict_with_details(
+                codes::VERSION_CONFLICT,
+                "This customer was changed on another device.",
+                serde_json::json!({
+                    "expectedVersion": expected,
+                    "serverVersion": existing.version,
+                    "updatedByDevice": existing.updated_by_device,
+                    "server": existing.into_customer(),
+                }),
+            ));
+        }
 
-    let name = body.name.trim().to_string();
-    if name.chars().count() < 2 {
-        return Err(AppError::validation(
-            "Customer name must be at least 2 characters",
-        ));
-    }
-    validate_phone_number(&body.primary_phone, "Primary phone")?;
-    let primary_phone = body.primary_phone.trim().to_string();
+        let name = body.name.trim().to_string();
+        if name.chars().count() < 2 {
+            return Err(AppError::validation(
+                "Customer name must be at least 2 characters",
+            ));
+        }
+        validate_phone_number(&body.primary_phone, "Primary phone")?;
+        let primary_phone = body.primary_phone.trim().to_string();
 
-    let contact_person = sanitize_string(body.contact_person);
-    let secondary_phone = sanitize_string(body.secondary_phone);
-    if let Some(ref sec_phone) = secondary_phone {
-        validate_phone_number(sec_phone, "Secondary phone")?;
-    }
+        let contact_person = sanitize_string(body.contact_person);
+        let secondary_phone = sanitize_string(body.secondary_phone);
+        if let Some(ref sec_phone) = secondary_phone {
+            validate_phone_number(sec_phone, "Secondary phone")?;
+        }
 
-    let email = sanitize_string(body.email);
-    if let Some(ref e) = email {
-        validate_email(e)?;
-    }
+        let email = sanitize_string(body.email);
+        if let Some(ref e) = email {
+            validate_email(e)?;
+        }
 
-    let address = sanitize_string(body.address);
-    let notes = sanitize_string(body.notes);
-    let tags = sanitize_tags(body.tags);
+        let address = sanitize_string(body.address);
+        let notes = sanitize_string(body.notes);
+        let tags = sanitize_tags(body.tags);
 
-    let mut set_doc = doc! {
-        "name": &name,
-        "primary_phone": &primary_phone,
-        "tags": &tags,
-        "updated_at": BsonDateTime::now(),
-    };
+        let mut set_doc = doc! {
+            "name": &name,
+            "primary_phone": &primary_phone,
+            "tags": &tags,
+            "updated_at": BsonDateTime::now(),
+        };
 
-    if let Some(cp) = contact_person {
-        set_doc.insert("contact_person", cp);
-    } else {
-        set_doc.insert("contact_person", mongodb::bson::Bson::Null);
-    }
+        if let Some(cp) = contact_person {
+            set_doc.insert("contact_person", cp);
+        } else {
+            set_doc.insert("contact_person", mongodb::bson::Bson::Null);
+        }
 
-    if let Some(sp) = secondary_phone {
-        set_doc.insert("secondary_phone", sp);
-    } else {
-        set_doc.insert("secondary_phone", mongodb::bson::Bson::Null);
-    }
+        if let Some(sp) = secondary_phone {
+            set_doc.insert("secondary_phone", sp);
+        } else {
+            set_doc.insert("secondary_phone", mongodb::bson::Bson::Null);
+        }
 
-    if let Some(em) = email {
-        set_doc.insert("email", em);
-    } else {
-        set_doc.insert("email", mongodb::bson::Bson::Null);
-    }
+        if let Some(em) = email {
+            set_doc.insert("email", em);
+        } else {
+            set_doc.insert("email", mongodb::bson::Bson::Null);
+        }
 
-    if let Some(addr) = address {
-        set_doc.insert("address", addr);
-    } else {
-        set_doc.insert("address", mongodb::bson::Bson::Null);
-    }
+        if let Some(addr) = address {
+            set_doc.insert("address", addr);
+        } else {
+            set_doc.insert("address", mongodb::bson::Bson::Null);
+        }
 
-    if let Some(n) = notes {
-        set_doc.insert("notes", n);
-    } else {
-        set_doc.insert("notes", mongodb::bson::Bson::Null);
-    }
+        if let Some(n) = notes {
+            set_doc.insert("notes", n);
+        } else {
+            set_doc.insert("notes", mongodb::bson::Bson::Null);
+        }
 
-    if let Some(device) = device_id {
-        set_doc.insert("updated_by_device", device);
-    }
+        if let Some(device) = device_id {
+            set_doc.insert("updated_by_device", device);
+        }
 
-    let updated = repository::update_customer(db, object_id, set_doc)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Customer not found", codes::CUSTOMER_NOT_FOUND)
-        })?;
+        let updated = repository::update_customer(db, object_id, set_doc)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Customer not found", codes::CUSTOMER_NOT_FOUND)
+            })?;
 
-    Ok(updated.into_customer())
+        Ok(updated.into_customer())
+    })
+    .await
 }
 
 pub async fn update_customer(
@@ -315,142 +321,145 @@ pub async fn update_customer(
     expected_version: Option<i64>,
     device_id: Option<String>,
 ) -> AppResult<Customer> {
-    let existing = repository::find_customer_by_id_or_key(db, id_or_key)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Customer not found", codes::CUSTOMER_NOT_FOUND)
-        })?;
+    crate::core::logging::domain::tracked("customers.updated", async move {
+        let existing = repository::find_customer_by_id_or_key(db, id_or_key)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Customer not found", codes::CUSTOMER_NOT_FOUND)
+            })?;
 
-    let object_id = existing
-        .id
-        .expect("persisted customer document must have an _id");
+        let object_id = existing
+            .id
+            .expect("persisted customer document must have an _id");
 
-    if let Some(expected) = expected_version
-        && existing.version != expected
-    {
-        return Err(AppError::conflict_with_details(
-            codes::VERSION_CONFLICT,
-            "This customer was changed on another device.",
-            serde_json::json!({
-                "expectedVersion": expected,
-                "serverVersion": existing.version,
-                "updatedByDevice": existing.updated_by_device,
-                "server": existing.into_customer(),
-            }),
-        ));
-    }
+        if let Some(expected) = expected_version
+            && existing.version != expected
+        {
+            return Err(AppError::conflict_with_details(
+                codes::VERSION_CONFLICT,
+                "This customer was changed on another device.",
+                serde_json::json!({
+                    "expectedVersion": expected,
+                    "serverVersion": existing.version,
+                    "updatedByDevice": existing.updated_by_device,
+                    "server": existing.into_customer(),
+                }),
+            ));
+        }
 
-    let name = match body.name {
-        Some(ref n) => {
-            let trimmed = n.trim().to_string();
-            if trimmed.chars().count() < 2 {
-                return Err(AppError::validation(
-                    "Customer name must be at least 2 characters",
-                ));
+        let name = match body.name {
+            Some(ref n) => {
+                let trimmed = n.trim().to_string();
+                if trimmed.chars().count() < 2 {
+                    return Err(AppError::validation(
+                        "Customer name must be at least 2 characters",
+                    ));
+                }
+                trimmed
             }
-            trimmed
-        }
-        None => existing.name,
-    };
+            None => existing.name,
+        };
 
-    let primary_phone = match body.primary_phone {
-        Some(ref p) => {
-            validate_phone_number(p, "Primary phone")?;
-            p.trim().to_string()
-        }
-        None => existing.primary_phone,
-    };
-
-    let contact_person = match body.contact_person {
-        Some(cp) => sanitize_string(Some(cp)),
-        None => existing.contact_person,
-    };
-
-    let secondary_phone = match body.secondary_phone {
-        Some(sp) => {
-            let sanitized = sanitize_string(Some(sp));
-            if let Some(ref s) = sanitized {
-                validate_phone_number(s, "Secondary phone")?;
+        let primary_phone = match body.primary_phone {
+            Some(ref p) => {
+                validate_phone_number(p, "Primary phone")?;
+                p.trim().to_string()
             }
-            sanitized
-        }
-        None => existing.secondary_phone,
-    };
+            None => existing.primary_phone,
+        };
 
-    let email = match body.email {
-        Some(e) => {
-            let sanitized = sanitize_string(Some(e));
-            if let Some(ref mail) = sanitized {
-                validate_email(mail)?;
+        let contact_person = match body.contact_person {
+            Some(cp) => sanitize_string(Some(cp)),
+            None => existing.contact_person,
+        };
+
+        let secondary_phone = match body.secondary_phone {
+            Some(sp) => {
+                let sanitized = sanitize_string(Some(sp));
+                if let Some(ref s) = sanitized {
+                    validate_phone_number(s, "Secondary phone")?;
+                }
+                sanitized
             }
-            sanitized
+            None => existing.secondary_phone,
+        };
+
+        let email = match body.email {
+            Some(e) => {
+                let sanitized = sanitize_string(Some(e));
+                if let Some(ref mail) = sanitized {
+                    validate_email(mail)?;
+                }
+                sanitized
+            }
+            None => existing.email,
+        };
+
+        let address = match body.address {
+            Some(a) => sanitize_string(Some(a)),
+            None => existing.address,
+        };
+
+        let notes = match body.notes {
+            Some(n) => sanitize_string(Some(n)),
+            None => existing.notes,
+        };
+
+        let tags = match body.tags {
+            Some(t) => sanitize_tags(t),
+            None => existing.tags,
+        };
+
+        let mut set_doc = doc! {
+            "name": &name,
+            "primary_phone": &primary_phone,
+            "tags": &tags,
+            "updated_at": BsonDateTime::now(),
+        };
+
+        if let Some(cp) = contact_person {
+            set_doc.insert("contact_person", cp);
+        } else {
+            set_doc.insert("contact_person", mongodb::bson::Bson::Null);
         }
-        None => existing.email,
-    };
 
-    let address = match body.address {
-        Some(a) => sanitize_string(Some(a)),
-        None => existing.address,
-    };
+        if let Some(sp) = secondary_phone {
+            set_doc.insert("secondary_phone", sp);
+        } else {
+            set_doc.insert("secondary_phone", mongodb::bson::Bson::Null);
+        }
 
-    let notes = match body.notes {
-        Some(n) => sanitize_string(Some(n)),
-        None => existing.notes,
-    };
+        if let Some(em) = email {
+            set_doc.insert("email", em);
+        } else {
+            set_doc.insert("email", mongodb::bson::Bson::Null);
+        }
 
-    let tags = match body.tags {
-        Some(t) => sanitize_tags(t),
-        None => existing.tags,
-    };
+        if let Some(addr) = address {
+            set_doc.insert("address", addr);
+        } else {
+            set_doc.insert("address", mongodb::bson::Bson::Null);
+        }
 
-    let mut set_doc = doc! {
-        "name": &name,
-        "primary_phone": &primary_phone,
-        "tags": &tags,
-        "updated_at": BsonDateTime::now(),
-    };
+        if let Some(n) = notes {
+            set_doc.insert("notes", n);
+        } else {
+            set_doc.insert("notes", mongodb::bson::Bson::Null);
+        }
 
-    if let Some(cp) = contact_person {
-        set_doc.insert("contact_person", cp);
-    } else {
-        set_doc.insert("contact_person", mongodb::bson::Bson::Null);
-    }
+        if let Some(device) = device_id {
+            set_doc.insert("updated_by_device", device);
+        }
 
-    if let Some(sp) = secondary_phone {
-        set_doc.insert("secondary_phone", sp);
-    } else {
-        set_doc.insert("secondary_phone", mongodb::bson::Bson::Null);
-    }
+        let updated = repository::update_customer(db, object_id, set_doc)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Customer not found", codes::CUSTOMER_NOT_FOUND)
+            })?;
 
-    if let Some(em) = email {
-        set_doc.insert("email", em);
-    } else {
-        set_doc.insert("email", mongodb::bson::Bson::Null);
-    }
-
-    if let Some(addr) = address {
-        set_doc.insert("address", addr);
-    } else {
-        set_doc.insert("address", mongodb::bson::Bson::Null);
-    }
-
-    if let Some(n) = notes {
-        set_doc.insert("notes", n);
-    } else {
-        set_doc.insert("notes", mongodb::bson::Bson::Null);
-    }
-
-    if let Some(device) = device_id {
-        set_doc.insert("updated_by_device", device);
-    }
-
-    let updated = repository::update_customer(db, object_id, set_doc)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Customer not found", codes::CUSTOMER_NOT_FOUND)
-        })?;
-
-    Ok(updated.into_customer())
+        Ok(updated.into_customer())
+    })
+    .await
 }
 
 pub async fn delete_customer(
@@ -459,59 +468,65 @@ pub async fn delete_customer(
     expected_version: Option<i64>,
     device_id: Option<String>,
 ) -> AppResult<Customer> {
-    let existing = repository::find_customer_by_id_or_key(db, id_or_key)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Customer not found", codes::CUSTOMER_NOT_FOUND)
-        })?;
+    crate::core::logging::domain::tracked("customers.deleted", async move {
+        let existing = repository::find_customer_by_id_or_key(db, id_or_key)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Customer not found", codes::CUSTOMER_NOT_FOUND)
+            })?;
 
-    let object_id = existing
-        .id
-        .expect("persisted customer document must have an _id");
+        let object_id = existing
+            .id
+            .expect("persisted customer document must have an _id");
 
-    if let Some(expected) = expected_version
-        && existing.version != expected
-    {
-        return Err(AppError::conflict_with_details(
-            codes::VERSION_CONFLICT,
-            "This customer was changed on another device.",
-            serde_json::json!({
-                "expectedVersion": expected,
-                "serverVersion": existing.version,
-                "updatedByDevice": existing.updated_by_device,
-                "server": existing.into_customer(),
-            }),
-        ));
-    }
+        if let Some(expected) = expected_version
+            && existing.version != expected
+        {
+            return Err(AppError::conflict_with_details(
+                codes::VERSION_CONFLICT,
+                "This customer was changed on another device.",
+                serde_json::json!({
+                    "expectedVersion": expected,
+                    "serverVersion": existing.version,
+                    "updatedByDevice": existing.updated_by_device,
+                    "server": existing.into_customer(),
+                }),
+            ));
+        }
 
-    if existing.outstanding_balance_cents != 0 {
-        return Err(AppError::custom(
-            StatusCode::CONFLICT,
-            codes::CUSTOMER_HAS_OUTSTANDING_BALANCE,
-            format!(
-                "Cannot delete customer '{}' with an outstanding balance of {} cents",
-                existing.name, existing.outstanding_balance_cents
-            ),
-        ));
-    }
+        if existing.outstanding_balance_cents != 0 {
+            return Err(AppError::custom(
+                StatusCode::CONFLICT,
+                codes::CUSTOMER_HAS_OUTSTANDING_BALANCE,
+                format!(
+                    "Cannot delete customer '{}' with an outstanding balance of {} cents",
+                    existing.name, existing.outstanding_balance_cents
+                ),
+            ));
+        }
 
-    let deleted = repository::delete_customer(db, object_id, device_id)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Customer not found", codes::CUSTOMER_NOT_FOUND)
-        })?;
+        let deleted = repository::delete_customer(db, object_id, device_id)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Customer not found", codes::CUSTOMER_NOT_FOUND)
+            })?;
 
-    Ok(deleted.into_customer())
+        Ok(deleted.into_customer())
+    })
+    .await
 }
 
 pub async fn delete_customers(db: &Db, ids: Vec<String>) -> AppResult<u64> {
-    let mut deleted_count = 0u64;
-    for id in ids {
-        if delete_customer(db, &id, None, None).await.is_ok() {
-            deleted_count += 1;
+    crate::core::logging::domain::tracked("customers.bulk_deleted", async move {
+        let mut deleted_count = 0u64;
+        for id in ids {
+            if delete_customer(db, &id, None, None).await.is_ok() {
+                deleted_count += 1;
+            }
         }
-    }
-    Ok(deleted_count)
+        Ok(deleted_count)
+    })
+    .await
 }
 
 pub async fn get_customer_tags(db: &Db) -> AppResult<CustomerTagsResponse> {

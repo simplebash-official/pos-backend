@@ -42,36 +42,39 @@ pub(crate) async fn login(
     ip_address: Option<String>,
     user_agent: Option<String>,
 ) -> AppResult<LoginResponse> {
-    if body.email.trim().is_empty() || body.password.is_empty() {
-        return Err(AppError::validation("Email and password are required"));
-    }
+    crate::core::logging::domain::tracked("auth.login", async move {
+        if body.email.trim().is_empty() || body.password.is_empty() {
+            return Err(AppError::validation("Email and password are required"));
+        }
 
-    let user = users_service::verify_credentials(db, &body.email, &body.password).await?;
+        let user = users_service::verify_credentials(db, &body.email, &body.password).await?;
 
-    let permissions: Vec<String> = roles::default_permissions(user.role)
-        .iter()
-        .map(|p| p.to_string())
-        .collect();
-    let exp = (Utc::now() + Duration::hours(config.jwt_expiry_hours)).timestamp() as usize;
-    let claims = Claims {
-        sub: user.id.clone(),
-        exp,
-        role: Some(user.role),
-        permissions,
-    };
-    let token = encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(config.jwt_secret.as_bytes()),
-    )?;
+        let permissions: Vec<String> = roles::default_permissions(user.role)
+            .iter()
+            .map(|p| p.to_string())
+            .collect();
+        let exp = (Utc::now() + Duration::hours(config.jwt_expiry_hours)).timestamp() as usize;
+        let claims = Claims {
+            sub: user.id.clone(),
+            exp,
+            role: Some(user.role),
+            permissions,
+        };
+        let token = encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(config.jwt_secret.as_bytes()),
+        )?;
 
-    record_login_session(db, &user, ip_address, user_agent).await?;
+        record_login_session(db, &user, ip_address, user_agent).await?;
 
-    Ok(LoginResponse {
-        token,
-        expires_in: config.jwt_expiry_hours * 3600,
-        user,
+        Ok(LoginResponse {
+            token,
+            expires_in: config.jwt_expiry_hours * 3600,
+            user,
+        })
     })
+    .await
 }
 
 async fn record_login_session(

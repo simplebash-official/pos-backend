@@ -271,16 +271,19 @@ pub(crate) async fn create_user_for_caller(
     body: CreateUserRequest,
     caller_role: Role,
 ) -> AppResult<User> {
-    if !manageable_roles(caller_role).contains(&body.role) {
-        return Err(AppError::forbidden_with_code(
-            format!(
-                "You are not allowed to create a {} account",
-                body.role.as_str()
-            ),
-            codes::PERMISSION_DENIED,
-        ));
-    }
-    create_user(db, body).await
+    crate::core::logging::domain::tracked("users.created", async move {
+        if !manageable_roles(caller_role).contains(&body.role) {
+            return Err(AppError::forbidden_with_code(
+                format!(
+                    "You are not allowed to create a {} account",
+                    body.role.as_str()
+                ),
+                codes::PERMISSION_DENIED,
+            ));
+        }
+        create_user(db, body).await
+    })
+    .await
 }
 
 /// Partial update for `PATCH /users/{id}` — every field in `body` is
@@ -300,96 +303,101 @@ pub(crate) async fn update_user(
     body: UpdateUserRequest,
     caller_role: Role,
 ) -> AppResult<User> {
-    let existing = repository::find_user_by_id(db, id)
-        .await?
-        .ok_or_else(|| AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND))?;
-    ensure_manageable(caller_role, existing.role)?;
+    crate::core::logging::domain::tracked("users.updated", async move {
+        let existing = repository::find_user_by_id(db, id).await?.ok_or_else(|| {
+            AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND)
+        })?;
+        ensure_manageable(caller_role, existing.role)?;
 
-    if let Some(new_role) = body.role
-        && !manageable_roles(caller_role).contains(&new_role)
-    {
-        return Err(AppError::forbidden_with_code(
-            format!("You are not allowed to set role to {}", new_role.as_str()),
-            codes::PERMISSION_DENIED,
-        ));
-    }
+        if let Some(new_role) = body.role
+            && !manageable_roles(caller_role).contains(&new_role)
+        {
+            return Err(AppError::forbidden_with_code(
+                format!("You are not allowed to set role to {}", new_role.as_str()),
+                codes::PERMISSION_DENIED,
+            ));
+        }
 
-    let name = body.name.unwrap_or(existing.name);
-    if name.trim().is_empty() {
-        return Err(AppError::validation("Name is required"));
-    }
+        let name = body.name.unwrap_or(existing.name);
+        if name.trim().is_empty() {
+            return Err(AppError::validation("Name is required"));
+        }
 
-    let email = match body.email {
-        Some(email) => {
-            validate_email(&email)?;
-            let normalized = normalize_email(&email);
-            if normalized != existing.email
-                && repository::find_user_by_email(db, &normalized)
+        let email = match body.email {
+            Some(email) => {
+                validate_email(&email)?;
+                let normalized = normalize_email(&email);
+                if normalized != existing.email
+                    && repository::find_user_by_email(db, &normalized)
+                        .await?
+                        .is_some()
+                {
+                    return Err(AppError::custom(
+                        StatusCode::CONFLICT,
+                        codes::EMAIL_ALREADY_EXISTS,
+                        format!("A user with email '{normalized}' already exists"),
+                    ));
+                }
+                normalized
+            }
+            None => existing.email,
+        };
+
+        let mut set_doc = doc! {
+            "name": &name,
+            "email": &email,
+            "updated_at": BsonDateTime::now(),
+        };
+        if let Some(password) = body.password {
+            validate_password_strength(&password)?;
+            set_doc.insert("password_hash", hash_password(&password)?);
+        }
+        if let Some(role) = body.role {
+            set_doc.insert("role", role.as_str());
+        }
+        if let Some(is_active) = body.is_active {
+            set_doc.insert("is_active", is_active);
+        }
+        let old_employee_key = existing.employee_key.clone();
+        let mut new_employee_key: Option<String> = None;
+        if let Some(employee_key) = body.employee_key {
+            if Some(&employee_key) != existing.employee_key.as_ref() {
+                employees::service::get_employee_by_key(db, &employee_key).await?;
+                if repository::find_user_by_employee_key(db, &employee_key)
                     .await?
                     .is_some()
-            {
-                return Err(AppError::custom(
-                    StatusCode::CONFLICT,
-                    codes::EMAIL_ALREADY_EXISTS,
-                    format!("A user with email '{normalized}' already exists"),
-                ));
+                {
+                    return Err(AppError::conflict(
+                        codes::EMPLOYEE_ALREADY_HAS_LOGIN,
+                        "This employee already has a login account",
+                    ));
+                }
             }
-            normalized
+            new_employee_key = Some(employee_key.clone());
+            set_doc.insert("employee_key", employee_key);
         }
-        None => existing.email,
-    };
 
-    let mut set_doc = doc! {
-        "name": &name,
-        "email": &email,
-        "updated_at": BsonDateTime::now(),
-    };
-    if let Some(password) = body.password {
-        validate_password_strength(&password)?;
-        set_doc.insert("password_hash", hash_password(&password)?);
-    }
-    if let Some(role) = body.role {
-        set_doc.insert("role", role.as_str());
-    }
-    if let Some(is_active) = body.is_active {
-        set_doc.insert("is_active", is_active);
-    }
-    let old_employee_key = existing.employee_key.clone();
-    let mut new_employee_key: Option<String> = None;
-    if let Some(employee_key) = body.employee_key {
-        if Some(&employee_key) != existing.employee_key.as_ref() {
-            employees::service::get_employee_by_key(db, &employee_key).await?;
-            if repository::find_user_by_employee_key(db, &employee_key)
-                .await?
-                .is_some()
-            {
-                return Err(AppError::conflict(
-                    codes::EMPLOYEE_ALREADY_HAS_LOGIN,
-                    "This employee already has a login account",
-                ));
+        let updated = repository::update_user(db, id, set_doc)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND)
+            })?;
+
+        // Bump both the old and new linked employee's `updated_at`/`version` so
+        // the next sync delta re-delivers each with its `login` field current —
+        // see `employees::service::touch_by_key`'s doc comment.
+        if new_employee_key.is_some() && new_employee_key != old_employee_key {
+            if let Some(key) = &new_employee_key {
+                employees::service::touch_by_key(db, key).await?;
+            }
+            if let Some(key) = &old_employee_key {
+                employees::service::touch_by_key(db, key).await?;
             }
         }
-        new_employee_key = Some(employee_key.clone());
-        set_doc.insert("employee_key", employee_key);
-    }
 
-    let updated = repository::update_user(db, id, set_doc)
-        .await?
-        .ok_or_else(|| AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND))?;
-
-    // Bump both the old and new linked employee's `updated_at`/`version` so
-    // the next sync delta re-delivers each with its `login` field current —
-    // see `employees::service::touch_by_key`'s doc comment.
-    if new_employee_key.is_some() && new_employee_key != old_employee_key {
-        if let Some(key) = &new_employee_key {
-            employees::service::touch_by_key(db, key).await?;
-        }
-        if let Some(key) = &old_employee_key {
-            employees::service::touch_by_key(db, key).await?;
-        }
-    }
-
-    Ok(updated.into_user())
+        Ok(updated.into_user())
+    })
+    .await
 }
 
 /// 404s if `id` resolves to an account outside `manageable_roles(caller_role)`
@@ -399,22 +407,25 @@ pub(crate) async fn update_user(
 /// doesn't manage Manager); a dedicated self-delete guard is therefore
 /// unnecessary and was removed rather than kept as unreachable code.
 pub(crate) async fn delete_user(db: &Db, id: ObjectId, caller_role: Role) -> AppResult<User> {
-    let existing = repository::find_user_by_id(db, id)
-        .await?
-        .ok_or_else(|| AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND))?;
-    ensure_manageable(caller_role, existing.role)?;
+    crate::core::logging::domain::tracked("users.deleted", async move {
+        let existing = repository::find_user_by_id(db, id).await?.ok_or_else(|| {
+            AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND)
+        })?;
+        ensure_manageable(caller_role, existing.role)?;
 
-    let deleted = repository::delete_user(db, id)
-        .await?
-        .ok_or_else(|| AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND))?;
+        let deleted = repository::delete_user(db, id).await?.ok_or_else(|| {
+            AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND)
+        })?;
 
-    if let Some(employee_key) = &deleted.employee_key {
-        // The employee just lost its login — see
-        // `employees::service::touch_by_key`'s doc comment.
-        employees::service::touch_by_key(db, employee_key).await?;
-    }
+        if let Some(employee_key) = &deleted.employee_key {
+            // The employee just lost its login — see
+            // `employees::service::touch_by_key`'s doc comment.
+            employees::service::touch_by_key(db, employee_key).await?;
+        }
 
-    Ok(deleted.into_user())
+        Ok(deleted.into_user())
+    })
+    .await
 }
 
 /// Cross-module entry point `auth::service::login` calls. "No such email"

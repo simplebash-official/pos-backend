@@ -110,29 +110,32 @@ pub(crate) async fn adjust_stock(
     id: ObjectId,
     body: StockAdjustmentRequest,
 ) -> AppResult<StockAdjustmentResponse> {
-    let (previous_stock_quantity, updated) = apply_stock_delta(
-        db,
-        id,
-        body.delta,
-        StockMovementType::ManualAdjustment,
-        None,
-        body.reason,
-    )
-    .await?;
+    crate::core::logging::domain::tracked("inventory.stock_adjusted", async move {
+        let (previous_stock_quantity, updated) = apply_stock_delta(
+            db,
+            id,
+            body.delta,
+            StockMovementType::ManualAdjustment,
+            None,
+            body.reason,
+        )
+        .await?;
 
-    Ok(StockAdjustmentResponse {
-        id: updated
-            .id
-            .expect("persisted product document must have an id")
-            .to_hex(),
-        key: updated.key,
-        sku: updated.sku,
-        name: updated.name,
-        stock_quantity: updated.stock_quantity,
-        previous_stock_quantity,
-        delta: body.delta,
-        updated_at: updated.updated_at.to_chrono(),
+        Ok(StockAdjustmentResponse {
+            id: updated
+                .id
+                .expect("persisted product document must have an id")
+                .to_hex(),
+            key: updated.key,
+            sku: updated.sku,
+            name: updated.name,
+            stock_quantity: updated.stock_quantity,
+            previous_stock_quantity,
+            delta: body.delta,
+            updated_at: updated.updated_at.to_chrono(),
+        })
     })
+    .await
 }
 
 /// Products at or below their configured reorder threshold.

@@ -194,6 +194,12 @@ pub fn build_router(state: AppState) -> Router {
             crate::core::middleware::sync_headers::add_server_time_header,
         ))
         .layer(middleware::from_fn(add_processing_time_to_body))
+        // Outermost: every layer below and every handler log line runs
+        // inside this request's span (request_id / user_id).
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            crate::core::logging::request::log_requests,
+        ))
         .with_state(state)
 }
 

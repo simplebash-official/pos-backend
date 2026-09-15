@@ -331,138 +331,141 @@ async fn resolve_barcode(
 /// SKU from its category/subcategory names (see `service::sku::generate_sku`) —
 /// validation runs first so an invalid category/supplier never consumes a sequence number.
 pub async fn create_product(db: &Db, body: CreateProductRequest) -> AppResult<Product> {
-    if body.name.trim().is_empty() {
-        return Err(AppError::validation("Product name is required"));
-    }
-    validate_product_numbers(
-        body.selling_price_cents,
-        body.cost_price_cents,
-        body.stock_quantity,
-        body.min_stock_threshold,
-    )?;
-    let (category_name, subcategory_name) =
-        ensure_valid_category(db, &body.category_key, &body.subcategory_key).await?;
-
-    // Fail fast: validate suppliers list upfront
-    if !body.suppliers.is_empty() {
-        let mut seen_keys = std::collections::HashSet::new();
-        for intake in &body.suppliers {
-            if !seen_keys.insert(&intake.supplier_key) {
-                return Err(AppError::validation(format!(
-                    "Duplicate supplierKey '{}' in suppliers list",
-                    intake.supplier_key
-                )));
-            }
-            if intake.quantity < 1 {
-                return Err(AppError::validation(
-                    "Supplier intake quantity must be at least 1",
-                ));
-            }
-            if intake.cost_price_cents < 0 {
-                return Err(AppError::validation(
-                    "Supplier intake cost price cannot be negative",
-                ));
-            }
-            crate::modules::suppliers::service::get_supplier_by_key(db, &intake.supplier_key)
-                .await?;
+    crate::core::logging::domain::tracked("inventory.product_created", async move {
+        if body.name.trim().is_empty() {
+            return Err(AppError::validation("Product name is required"));
         }
-    }
+        validate_product_numbers(
+            body.selling_price_cents,
+            body.cost_price_cents,
+            body.stock_quantity,
+            body.min_stock_threshold,
+        )?;
+        let (category_name, subcategory_name) =
+            ensure_valid_category(db, &body.category_key, &body.subcategory_key).await?;
 
-    let (barcode, barcode_source) =
-        resolve_barcode(db, body.barcode, body.auto_generate_barcode).await?;
+        // Fail fast: validate suppliers list upfront
+        if !body.suppliers.is_empty() {
+            let mut seen_keys = std::collections::HashSet::new();
+            for intake in &body.suppliers {
+                if !seen_keys.insert(&intake.supplier_key) {
+                    return Err(AppError::validation(format!(
+                        "Duplicate supplierKey '{}' in suppliers list",
+                        intake.supplier_key
+                    )));
+                }
+                if intake.quantity < 1 {
+                    return Err(AppError::validation(
+                        "Supplier intake quantity must be at least 1",
+                    ));
+                }
+                if intake.cost_price_cents < 0 {
+                    return Err(AppError::validation(
+                        "Supplier intake cost price cannot be negative",
+                    ));
+                }
+                crate::modules::suppliers::service::get_supplier_by_key(db, &intake.supplier_key)
+                    .await?;
+            }
+        }
 
-    let sku = super::sku::generate_sku(db, &category_name, &subcategory_name).await?;
+        let (barcode, barcode_source) =
+            resolve_barcode(db, body.barcode, body.auto_generate_barcode).await?;
 
-    // Defensive fallback only — `generate_sku`'s atomic per-prefix counter
-    // already guarantees uniqueness, so this should never actually fire.
-    if repository::product::find_product_by_sku(db, &sku)
-        .await?
-        .is_some()
-    {
-        return Err(AppError::custom(
-            StatusCode::CONFLICT,
-            codes::SKU_ALREADY_EXISTS,
-            format!("A product with SKU '{sku}' already exists"),
-        ));
-    }
+        let sku = super::sku::generate_sku(db, &category_name, &subcategory_name).await?;
 
-    let initial_stock = if body.suppliers.is_empty() {
-        body.stock_quantity
-    } else {
-        0
-    };
+        // Defensive fallback only — `generate_sku`'s atomic per-prefix counter
+        // already guarantees uniqueness, so this should never actually fire.
+        if repository::product::find_product_by_sku(db, &sku)
+            .await?
+            .is_some()
+        {
+            return Err(AppError::custom(
+                StatusCode::CONFLICT,
+                codes::SKU_ALREADY_EXISTS,
+                format!("A product with SKU '{sku}' already exists"),
+            ));
+        }
 
-    let default_cost_price = if body.cost_price_cents == 0 && !body.suppliers.is_empty() {
-        body.suppliers[0].cost_price_cents
-    } else {
-        body.cost_price_cents
-    };
+        let initial_stock = if body.suppliers.is_empty() {
+            body.stock_quantity
+        } else {
+            0
+        };
 
-    let now = BsonDateTime::now();
-    let document = ProductDocument {
-        id: None,
-        key: generate_id(prefixes::PRODUCT),
-        sku,
-        barcode,
-        barcode_source,
-        name: body.name,
-        category_key: body.category_key,
-        subcategory_key: body.subcategory_key,
-        cost_price_cents: default_cost_price,
-        selling_price_cents: body.selling_price_cents,
-        stock_quantity: initial_stock,
-        min_stock_threshold: body.min_stock_threshold,
-        is_serialized: body.is_serialized,
-        warranty_months: body.warranty_months,
-        version: 1,
-        created_at: now,
-        updated_at: now,
-        deleted_at: None,
-        updated_by_device: None,
-    };
+        let default_cost_price = if body.cost_price_cents == 0 && !body.suppliers.is_empty() {
+            body.suppliers[0].cost_price_cents
+        } else {
+            body.cost_price_cents
+        };
 
-    let inserted = repository::product::insert_product(db, document).await?;
-    let product_object_id = inserted.id.expect("inserted product must have an id");
+        let now = BsonDateTime::now();
+        let document = ProductDocument {
+            id: None,
+            key: generate_id(prefixes::PRODUCT),
+            sku,
+            barcode,
+            barcode_source,
+            name: body.name,
+            category_key: body.category_key,
+            subcategory_key: body.subcategory_key,
+            cost_price_cents: default_cost_price,
+            selling_price_cents: body.selling_price_cents,
+            stock_quantity: initial_stock,
+            min_stock_threshold: body.min_stock_threshold,
+            is_serialized: body.is_serialized,
+            warranty_months: body.warranty_months,
+            version: 1,
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+            updated_by_device: None,
+        };
 
-    // Process each supplier intake
-    for intake in body.suppliers {
-        crate::modules::supplier_products::service::link::upsert_link(
-            db,
-            crate::domain::supplier_products::UpsertSupplierProductLinkRequest {
-                supplier_key: intake.supplier_key.clone(),
-                product_key: inserted.key.clone(),
-                cost_price_cents: Some(intake.cost_price_cents),
-                notes: intake.notes.clone(),
-            },
-        )
-        .await?;
+        let inserted = repository::product::insert_product(db, document).await?;
+        let product_object_id = inserted.id.expect("inserted product must have an id");
 
-        crate::modules::purchases::service::purchase::record_purchase(
-            db,
-            crate::domain::purchases::CreatePurchaseRequest {
-                supplier_key: intake.supplier_key,
-                product_key: inserted.key.clone(),
-                quantity: intake.quantity,
-                unit_cost_cents: intake.cost_price_cents,
-                date: chrono::Utc::now(),
-                reference_no: intake.reference_no,
-                notes: intake.notes,
-                // A brand-new serialized product's initial supplier intake
-                // has no UI/field for supplying serials yet — creating a
-                // serialized product with bundled initial stock through
-                // this path is out of scope; use a separate purchase-intake
-                // call afterward for a serialized product's first stock.
-                serial_numbers: None,
-            },
-        )
-        .await?;
-    }
+        // Process each supplier intake
+        for intake in body.suppliers {
+            crate::modules::supplier_products::service::link::upsert_link(
+                db,
+                crate::domain::supplier_products::UpsertSupplierProductLinkRequest {
+                    supplier_key: intake.supplier_key.clone(),
+                    product_key: inserted.key.clone(),
+                    cost_price_cents: Some(intake.cost_price_cents),
+                    notes: intake.notes.clone(),
+                },
+            )
+            .await?;
 
-    let final_product = repository::product::find_product_by_id(db, product_object_id)
-        .await?
-        .expect("product was just created and must exist");
+            crate::modules::purchases::service::purchase::record_purchase(
+                db,
+                crate::domain::purchases::CreatePurchaseRequest {
+                    supplier_key: intake.supplier_key,
+                    product_key: inserted.key.clone(),
+                    quantity: intake.quantity,
+                    unit_cost_cents: intake.cost_price_cents,
+                    date: chrono::Utc::now(),
+                    reference_no: intake.reference_no,
+                    notes: intake.notes,
+                    // A brand-new serialized product's initial supplier intake
+                    // has no UI/field for supplying serials yet — creating a
+                    // serialized product with bundled initial stock through
+                    // this path is out of scope; use a separate purchase-intake
+                    // call afterward for a serialized product's first stock.
+                    serial_numbers: None,
+                },
+            )
+            .await?;
+        }
 
-    Ok(final_product.into_product(category_name, subcategory_name))
+        let final_product = repository::product::find_product_by_id(db, product_object_id)
+            .await?
+            .expect("product was just created and must exist");
+
+        Ok(final_product.into_product(category_name, subcategory_name))
+    })
+    .await
 }
 
 /// Partial update — every field in `body` is optional, so each one falls
@@ -475,163 +478,167 @@ pub(crate) async fn update_product(
     expected_version: Option<i64>,
     device_id: Option<String>,
 ) -> AppResult<Product> {
-    let existing = repository::product::find_product_by_id(db, id)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
-        })?;
+    crate::core::logging::domain::tracked("inventory.product_updated", async move {
+        let existing = repository::product::find_product_by_id(db, id)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
+            })?;
 
-    if let Some(expected) = expected_version
-        && existing.version != expected
-    {
-        let mut conflicting = Vec::new();
-        if let Some(ref name) = body.name
-            && name != &existing.name
+        if let Some(expected) = expected_version
+            && existing.version != expected
         {
-            conflicting.push("name");
-        }
-        if let Some(price) = body.selling_price_cents
-            && price != existing.selling_price_cents
-        {
-            conflicting.push("sellingPriceCents");
-        }
-        if let Some(cost) = body.cost_price_cents
-            && cost != existing.cost_price_cents
-        {
-            conflicting.push("costPriceCents");
-        }
-        if let Some(ref cat) = body.category_key
-            && cat != &existing.category_key
-        {
-            conflicting.push("categoryKey");
-        }
-        if let Some(ref subcat) = body.subcategory_key
-            && subcat != &existing.subcategory_key
-        {
-            conflicting.push("subcategoryKey");
-        }
-        if let Some(qty) = body.stock_quantity
-            && qty != existing.stock_quantity
-        {
-            conflicting.push("stockQuantity");
-        }
-        if let Some(min) = body.min_stock_threshold
-            && min != existing.min_stock_threshold
-        {
-            conflicting.push("minStockThreshold");
-        }
-        if let Some(ref barcode) = body.barcode
-            && Some(barcode) != existing.barcode.as_ref()
-        {
-            conflicting.push("barcode");
-        }
-
-        let (category_name, subcategory_name) =
-            resolve_display_names(db, &existing.category_key, &existing.subcategory_key).await?;
-        let server_doc = existing
-            .clone()
-            .into_product(category_name, subcategory_name);
-
-        return Err(AppError::conflict_with_details(
-            codes::VERSION_CONFLICT,
-            "This product was changed on another device.",
-            serde_json::json!({
-                "expectedVersion": expected,
-                "serverVersion": existing.version,
-                "updatedByDevice": existing.updated_by_device,
-                "server": server_doc,
-                "conflictingFields": conflicting,
-            }),
-        ));
-    }
-
-    if let Some(name) = &body.name
-        && name.trim().is_empty()
-    {
-        return Err(AppError::validation("Product name cannot be empty"));
-    }
-
-    // Resolve a barcode edit before `existing` is partially moved below. A
-    // value equal to the current one is a no-op (no needless write, no
-    // `barcode_source` flip); a new value is validated and checked for a
-    // collision against every *other* product.
-    let barcode_change: Option<String> = match body.barcode {
-        Some(ref candidate) if existing.barcode.as_deref() == Some(candidate.as_str()) => None,
-        Some(candidate) => {
-            validate_manual_barcode(&candidate)?;
-            if repository::product::find_product_by_barcode_excluding(db, &candidate, id)
-                .await?
-                .is_some()
+            let mut conflicting = Vec::new();
+            if let Some(ref name) = body.name
+                && name != &existing.name
             {
-                return Err(AppError::custom(
-                    StatusCode::CONFLICT,
-                    codes::BARCODE_ALREADY_EXISTS,
-                    format!("A product with barcode '{candidate}' already exists"),
-                ));
+                conflicting.push("name");
             }
-            Some(candidate)
+            if let Some(price) = body.selling_price_cents
+                && price != existing.selling_price_cents
+            {
+                conflicting.push("sellingPriceCents");
+            }
+            if let Some(cost) = body.cost_price_cents
+                && cost != existing.cost_price_cents
+            {
+                conflicting.push("costPriceCents");
+            }
+            if let Some(ref cat) = body.category_key
+                && cat != &existing.category_key
+            {
+                conflicting.push("categoryKey");
+            }
+            if let Some(ref subcat) = body.subcategory_key
+                && subcat != &existing.subcategory_key
+            {
+                conflicting.push("subcategoryKey");
+            }
+            if let Some(qty) = body.stock_quantity
+                && qty != existing.stock_quantity
+            {
+                conflicting.push("stockQuantity");
+            }
+            if let Some(min) = body.min_stock_threshold
+                && min != existing.min_stock_threshold
+            {
+                conflicting.push("minStockThreshold");
+            }
+            if let Some(ref barcode) = body.barcode
+                && Some(barcode) != existing.barcode.as_ref()
+            {
+                conflicting.push("barcode");
+            }
+
+            let (category_name, subcategory_name) =
+                resolve_display_names(db, &existing.category_key, &existing.subcategory_key)
+                    .await?;
+            let server_doc = existing
+                .clone()
+                .into_product(category_name, subcategory_name);
+
+            return Err(AppError::conflict_with_details(
+                codes::VERSION_CONFLICT,
+                "This product was changed on another device.",
+                serde_json::json!({
+                    "expectedVersion": expected,
+                    "serverVersion": existing.version,
+                    "updatedByDevice": existing.updated_by_device,
+                    "server": server_doc,
+                    "conflictingFields": conflicting,
+                }),
+            ));
         }
-        None => None,
-    };
 
-    let category_key = body.category_key.unwrap_or(existing.category_key);
-    let subcategory_key = body.subcategory_key.unwrap_or(existing.subcategory_key);
-    let selling_price_cents = body
-        .selling_price_cents
-        .unwrap_or(existing.selling_price_cents);
-    let cost_price_cents = body.cost_price_cents.unwrap_or(existing.cost_price_cents);
-    let stock_quantity = body.stock_quantity.unwrap_or(existing.stock_quantity);
-    let min_stock_threshold = body
-        .min_stock_threshold
-        .unwrap_or(existing.min_stock_threshold);
+        if let Some(name) = &body.name
+            && name.trim().is_empty()
+        {
+            return Err(AppError::validation("Product name cannot be empty"));
+        }
 
-    validate_product_numbers(
-        selling_price_cents,
-        cost_price_cents,
-        stock_quantity,
-        min_stock_threshold,
-    )?;
-    let (category_name, subcategory_name) =
-        ensure_valid_category(db, &category_key, &subcategory_key).await?;
+        // Resolve a barcode edit before `existing` is partially moved below. A
+        // value equal to the current one is a no-op (no needless write, no
+        // `barcode_source` flip); a new value is validated and checked for a
+        // collision against every *other* product.
+        let barcode_change: Option<String> = match body.barcode {
+            Some(ref candidate) if existing.barcode.as_deref() == Some(candidate.as_str()) => None,
+            Some(candidate) => {
+                validate_manual_barcode(&candidate)?;
+                if repository::product::find_product_by_barcode_excluding(db, &candidate, id)
+                    .await?
+                    .is_some()
+                {
+                    return Err(AppError::custom(
+                        StatusCode::CONFLICT,
+                        codes::BARCODE_ALREADY_EXISTS,
+                        format!("A product with barcode '{candidate}' already exists"),
+                    ));
+                }
+                Some(candidate)
+            }
+            None => None,
+        };
 
-    let mut set_doc = doc! {
-        "category_key": &category_key,
-        "subcategory_key": &subcategory_key,
-        "selling_price_cents": selling_price_cents,
-        "cost_price_cents": cost_price_cents,
-        "stock_quantity": stock_quantity,
-        "min_stock_threshold": min_stock_threshold,
-        "updated_at": BsonDateTime::now(),
-    };
-    if let Some(name) = body.name {
-        set_doc.insert("name", name);
-    }
-    if let Some(is_serialized) = body.is_serialized {
-        set_doc.insert("is_serialized", is_serialized);
-    }
-    if let Some(warranty_months) = body.warranty_months {
-        set_doc.insert("warranty_months", warranty_months);
-    }
-    if let Some(barcode) = barcode_change {
-        set_doc.insert("barcode", barcode);
-        // A staff-entered barcode is always "manual", even if the product
-        // previously carried a system-generated one. Serialize through serde
-        // so it stays in sync with `BarcodeSource`'s wire form.
-        let source = mongodb::bson::serialize_to_bson(&BarcodeSource::Manual)
-            .expect("BarcodeSource serializes to a plain string");
-        set_doc.insert("barcode_source", source);
-    }
-    if let Some(device) = device_id {
-        set_doc.insert("updated_by_device", device);
-    }
+        let category_key = body.category_key.unwrap_or(existing.category_key);
+        let subcategory_key = body.subcategory_key.unwrap_or(existing.subcategory_key);
+        let selling_price_cents = body
+            .selling_price_cents
+            .unwrap_or(existing.selling_price_cents);
+        let cost_price_cents = body.cost_price_cents.unwrap_or(existing.cost_price_cents);
+        let stock_quantity = body.stock_quantity.unwrap_or(existing.stock_quantity);
+        let min_stock_threshold = body
+            .min_stock_threshold
+            .unwrap_or(existing.min_stock_threshold);
 
-    let updated = repository::product::update_product(db, id, set_doc)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
-        })?;
+        validate_product_numbers(
+            selling_price_cents,
+            cost_price_cents,
+            stock_quantity,
+            min_stock_threshold,
+        )?;
+        let (category_name, subcategory_name) =
+            ensure_valid_category(db, &category_key, &subcategory_key).await?;
 
-    Ok(updated.into_product(category_name, subcategory_name))
+        let mut set_doc = doc! {
+            "category_key": &category_key,
+            "subcategory_key": &subcategory_key,
+            "selling_price_cents": selling_price_cents,
+            "cost_price_cents": cost_price_cents,
+            "stock_quantity": stock_quantity,
+            "min_stock_threshold": min_stock_threshold,
+            "updated_at": BsonDateTime::now(),
+        };
+        if let Some(name) = body.name {
+            set_doc.insert("name", name);
+        }
+        if let Some(is_serialized) = body.is_serialized {
+            set_doc.insert("is_serialized", is_serialized);
+        }
+        if let Some(warranty_months) = body.warranty_months {
+            set_doc.insert("warranty_months", warranty_months);
+        }
+        if let Some(barcode) = barcode_change {
+            set_doc.insert("barcode", barcode);
+            // A staff-entered barcode is always "manual", even if the product
+            // previously carried a system-generated one. Serialize through serde
+            // so it stays in sync with `BarcodeSource`'s wire form.
+            let source = mongodb::bson::serialize_to_bson(&BarcodeSource::Manual)
+                .expect("BarcodeSource serializes to a plain string");
+            set_doc.insert("barcode_source", source);
+        }
+        if let Some(device) = device_id {
+            set_doc.insert("updated_by_device", device);
+        }
+
+        let updated = repository::product::update_product(db, id, set_doc)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
+            })?;
+
+        Ok(updated.into_product(category_name, subcategory_name))
+    })
+    .await
 }
 
 /// Deletes and returns the deleted document (so the handler can echo back
@@ -645,47 +652,54 @@ pub(crate) async fn delete_product(
     expected_version: Option<i64>,
     device_id: Option<String>,
 ) -> AppResult<Product> {
-    let existing = repository::product::find_product_by_id(db, id)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
-        })?;
+    crate::core::logging::domain::tracked("inventory.product_deleted", async move {
+        let existing = repository::product::find_product_by_id(db, id)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
+            })?;
 
-    if let Some(expected) = expected_version
-        && existing.version != expected
-    {
-        let (category_name, subcategory_name) =
-            resolve_display_names(db, &existing.category_key, &existing.subcategory_key).await?;
-        let server_doc = existing
-            .clone()
-            .into_product(category_name, subcategory_name);
+        if let Some(expected) = expected_version
+            && existing.version != expected
+        {
+            let (category_name, subcategory_name) =
+                resolve_display_names(db, &existing.category_key, &existing.subcategory_key)
+                    .await?;
+            let server_doc = existing
+                .clone()
+                .into_product(category_name, subcategory_name);
 
-        return Err(AppError::conflict_with_details(
-            codes::VERSION_CONFLICT,
-            "This product was changed on another device.",
-            serde_json::json!({
-                "expectedVersion": expected,
-                "serverVersion": existing.version,
-                "updatedByDevice": existing.updated_by_device,
-                "server": server_doc,
-                "conflictingFields": Vec::<String>::new(),
-            }),
-        ));
-    }
+            return Err(AppError::conflict_with_details(
+                codes::VERSION_CONFLICT,
+                "This product was changed on another device.",
+                serde_json::json!({
+                    "expectedVersion": expected,
+                    "serverVersion": existing.version,
+                    "updatedByDevice": existing.updated_by_device,
+                    "server": server_doc,
+                    "conflictingFields": Vec::<String>::new(),
+                }),
+            ));
+        }
 
-    let deleted = repository::product::delete_product(db, id, device_id)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
-        })?;
+        let deleted = repository::product::delete_product(db, id, device_id)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
+            })?;
 
-    crate::modules::supplier_products::service::link::delete_links_for_product(db, &deleted.key)
+        crate::modules::supplier_products::service::link::delete_links_for_product(
+            db,
+            &deleted.key,
+        )
         .await?;
 
-    let (category_name, subcategory_name) =
-        resolve_display_names(db, &deleted.category_key, &deleted.subcategory_key).await?;
+        let (category_name, subcategory_name) =
+            resolve_display_names(db, &deleted.category_key, &deleted.subcategory_key).await?;
 
-    Ok(deleted.into_product(category_name, subcategory_name))
+        Ok(deleted.into_product(category_name, subcategory_name))
+    })
+    .await
 }
 
 /// Batch delete. Ids that aren't valid `ObjectId`s are silently dropped
@@ -695,27 +709,30 @@ pub(crate) async fn delete_product(
 /// `supplier_products` link cleanup for every product actually deleted,
 /// same as the single-delete path.
 pub(crate) async fn delete_products(db: &Db, product_ids: Vec<String>) -> AppResult<u64> {
-    let object_ids: Vec<ObjectId> = product_ids
-        .iter()
-        .filter_map(|id| ObjectId::parse_str(id).ok())
-        .collect();
+    crate::core::logging::domain::tracked("inventory.products_bulk_deleted", async move {
+        let object_ids: Vec<ObjectId> = product_ids
+            .iter()
+            .filter_map(|id| ObjectId::parse_str(id).ok())
+            .collect();
 
-    // Keys are needed for the `supplier_products` cascade below, so they
-    // must be read before the delete removes the documents they came from.
-    let keys: Vec<String> = repository::product::find_products_by_ids(db, &object_ids)
-        .await?
-        .into_iter()
-        .map(|document| document.key)
-        .collect();
+        // Keys are needed for the `supplier_products` cascade below, so they
+        // must be read before the delete removes the documents they came from.
+        let keys: Vec<String> = repository::product::find_products_by_ids(db, &object_ids)
+            .await?
+            .into_iter()
+            .map(|document| document.key)
+            .collect();
 
-    let deleted_count = repository::product::delete_products(db, object_ids).await?;
+        let deleted_count = repository::product::delete_products(db, object_ids).await?;
 
-    for key in keys {
-        crate::modules::supplier_products::service::link::delete_links_for_product(db, &key)
-            .await?;
-    }
+        for key in keys {
+            crate::modules::supplier_products::service::link::delete_links_for_product(db, &key)
+                .await?;
+        }
 
-    Ok(deleted_count)
+        Ok(deleted_count)
+    })
+    .await
 }
 
 /// Converts a page of raw `products` documents — as read by the sync

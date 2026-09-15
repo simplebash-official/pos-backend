@@ -152,29 +152,32 @@ pub(crate) async fn get_employees_by_keys(db: &Db, keys: &[String]) -> AppResult
 }
 
 pub async fn create_employee(db: &Db, body: CreateEmployeeRequest) -> AppResult<Employee> {
-    validate_required_fields(&body.name, &body.phone, body.default_split_value)?;
+    crate::core::logging::domain::tracked("employees.created", async move {
+        validate_required_fields(&body.name, &body.phone, body.default_split_value)?;
 
-    let now = BsonDateTime::now();
-    let document = EmployeeDocument {
-        id: None,
-        key: generate_id(prefixes::EMPLOYEE),
-        name: body.name,
-        phone: body.phone,
-        nic_or_id: body.nic_or_id,
-        role: body.role,
-        default_split_type: body.default_split_type,
-        default_split_value: body.default_split_value,
-        status: body.status.unwrap_or(EmployeeStatus::Active),
-        notes: body.notes,
-        version: 1,
-        created_at: now,
-        updated_at: now,
-        deleted_at: None,
-        updated_by_device: None,
-    };
+        let now = BsonDateTime::now();
+        let document = EmployeeDocument {
+            id: None,
+            key: generate_id(prefixes::EMPLOYEE),
+            name: body.name,
+            phone: body.phone,
+            nic_or_id: body.nic_or_id,
+            role: body.role,
+            default_split_type: body.default_split_type,
+            default_split_value: body.default_split_value,
+            status: body.status.unwrap_or(EmployeeStatus::Active),
+            notes: body.notes,
+            version: 1,
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+            updated_by_device: None,
+        };
 
-    let inserted = repository::insert_employee(db, document).await?;
-    Ok(inserted.into_employee(None))
+        let inserted = repository::insert_employee(db, document).await?;
+        Ok(inserted.into_employee(None))
+    })
+    .await
 }
 
 /// Partial update for `PATCH /employees/{id}` — every field in `body` is
@@ -189,87 +192,91 @@ pub(crate) async fn update_employee(
     expected_version: Option<i64>,
     device_id: Option<String>,
 ) -> AppResult<Employee> {
-    let existing = repository::find_employee_by_id(db, id)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Employee not found", codes::EMPLOYEE_NOT_FOUND)
-        })?;
+    crate::core::logging::domain::tracked("employees.updated", async move {
+        let existing = repository::find_employee_by_id(db, id)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Employee not found", codes::EMPLOYEE_NOT_FOUND)
+            })?;
 
-    if let Some(expected) = expected_version
-        && existing.version != expected
-    {
-        let mut conflicting = Vec::new();
-        if let Some(ref name) = body.name
-            && name != &existing.name
+        if let Some(expected) = expected_version
+            && existing.version != expected
         {
-            conflicting.push("name");
+            let mut conflicting = Vec::new();
+            if let Some(ref name) = body.name
+                && name != &existing.name
+            {
+                conflicting.push("name");
+            }
+            if let Some(ref phone) = body.phone
+                && phone != &existing.phone
+            {
+                conflicting.push("phone");
+            }
+            if let Some(ref split_value) = body.default_split_value
+                && *split_value != existing.default_split_value
+            {
+                conflicting.push("defaultSplitValue");
+            }
+
+            let login =
+                users::service::find_user_summary_by_employee_key(db, &existing.key).await?;
+            return Err(AppError::conflict_with_details(
+                codes::VERSION_CONFLICT,
+                "This employee was changed on another device.",
+                serde_json::json!({
+                    "expectedVersion": expected,
+                    "serverVersion": existing.version,
+                    "updatedByDevice": existing.updated_by_device,
+                    "server": existing.into_employee(login),
+                    "conflictingFields": conflicting,
+                }),
+            ));
         }
-        if let Some(ref phone) = body.phone
-            && phone != &existing.phone
-        {
-            conflicting.push("phone");
+
+        let name = body.name.unwrap_or(existing.name);
+        let phone = body.phone.unwrap_or(existing.phone);
+        let default_split_value = body
+            .default_split_value
+            .unwrap_or(existing.default_split_value);
+
+        validate_required_fields(&name, &phone, default_split_value)?;
+
+        let mut set_doc = doc! {
+            "name": &name,
+            "phone": &phone,
+            "default_split_value": default_split_value,
+            "updated_at": BsonDateTime::now(),
+        };
+        if let Some(nic_or_id) = body.nic_or_id {
+            set_doc.insert("nic_or_id", nic_or_id);
         }
-        if let Some(ref split_value) = body.default_split_value
-            && *split_value != existing.default_split_value
-        {
-            conflicting.push("defaultSplitValue");
+        if let Some(role) = body.role {
+            set_doc.insert("role", role.as_str());
+        }
+        if let Some(split_type) = body.default_split_type {
+            set_doc.insert("default_split_type", split_type.as_str());
+        }
+        if let Some(status) = body.status {
+            set_doc.insert("status", status.as_str());
+        }
+        if let Some(notes) = body.notes {
+            set_doc.insert("notes", notes);
+        }
+        if let Some(device) = device_id {
+            set_doc.insert("updated_by_device", device);
         }
 
-        let login = users::service::find_user_summary_by_employee_key(db, &existing.key).await?;
-        return Err(AppError::conflict_with_details(
-            codes::VERSION_CONFLICT,
-            "This employee was changed on another device.",
-            serde_json::json!({
-                "expectedVersion": expected,
-                "serverVersion": existing.version,
-                "updatedByDevice": existing.updated_by_device,
-                "server": existing.into_employee(login),
-                "conflictingFields": conflicting,
-            }),
-        ));
-    }
+        let updated = repository::update_employee(db, id, set_doc)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Employee not found", codes::EMPLOYEE_NOT_FOUND)
+            })?;
+        let login = users::service::find_user_summary_by_employee_key(db, &updated.key).await?;
 
-    let name = body.name.unwrap_or(existing.name);
-    let phone = body.phone.unwrap_or(existing.phone);
-    let default_split_value = body
-        .default_split_value
-        .unwrap_or(existing.default_split_value);
-
-    validate_required_fields(&name, &phone, default_split_value)?;
-
-    let mut set_doc = doc! {
-        "name": &name,
-        "phone": &phone,
-        "default_split_value": default_split_value,
-        "updated_at": BsonDateTime::now(),
-    };
-    if let Some(nic_or_id) = body.nic_or_id {
-        set_doc.insert("nic_or_id", nic_or_id);
-    }
-    if let Some(role) = body.role {
-        set_doc.insert("role", role.as_str());
-    }
-    if let Some(split_type) = body.default_split_type {
-        set_doc.insert("default_split_type", split_type.as_str());
-    }
-    if let Some(status) = body.status {
-        set_doc.insert("status", status.as_str());
-    }
-    if let Some(notes) = body.notes {
-        set_doc.insert("notes", notes);
-    }
-    if let Some(device) = device_id {
-        set_doc.insert("updated_by_device", device);
-    }
-
-    let updated = repository::update_employee(db, id, set_doc)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Employee not found", codes::EMPLOYEE_NOT_FOUND)
-        })?;
-    let login = users::service::find_user_summary_by_employee_key(db, &updated.key).await?;
-
-    Ok(updated.into_employee(login))
+        Ok(updated.into_employee(login))
+    })
+    .await
 }
 
 /// Refuses to delete (409 `EMPLOYEE_HAS_LOGIN`) while this employee still
@@ -280,29 +287,32 @@ pub(crate) async fn delete_employee(
     id: ObjectId,
     device_id: Option<String>,
 ) -> AppResult<Employee> {
-    let existing = repository::find_employee_by_id(db, id)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Employee not found", codes::EMPLOYEE_NOT_FOUND)
-        })?;
+    crate::core::logging::domain::tracked("employees.deleted", async move {
+        let existing = repository::find_employee_by_id(db, id)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Employee not found", codes::EMPLOYEE_NOT_FOUND)
+            })?;
 
-    if users::service::find_user_summary_by_employee_key(db, &existing.key)
-        .await?
-        .is_some()
-    {
-        return Err(AppError::conflict(
-            codes::EMPLOYEE_HAS_LOGIN,
-            "This employee still has a login account. Remove their login first.",
-        ));
-    }
+        if users::service::find_user_summary_by_employee_key(db, &existing.key)
+            .await?
+            .is_some()
+        {
+            return Err(AppError::conflict(
+                codes::EMPLOYEE_HAS_LOGIN,
+                "This employee still has a login account. Remove their login first.",
+            ));
+        }
 
-    let deleted = repository::delete_employee(db, id, device_id)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Employee not found", codes::EMPLOYEE_NOT_FOUND)
-        })?;
+        let deleted = repository::delete_employee(db, id, device_id)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Employee not found", codes::EMPLOYEE_NOT_FOUND)
+            })?;
 
-    Ok(deleted.into_employee(None))
+        Ok(deleted.into_employee(None))
+    })
+    .await
 }
 
 /// Batch delete for `DELETE /employees/batch`. Ids that aren't valid
@@ -311,15 +321,18 @@ pub(crate) async fn delete_employee(
 /// than failing the whole request — same "valid ones still succeed"
 /// semantics as `suppliers::service::delete_suppliers`.
 pub(crate) async fn delete_employees(db: &Db, ids: Vec<String>) -> AppResult<u64> {
-    let mut deleted_count = 0u64;
-    for id in ids {
-        if let Ok(object_id) = ObjectId::parse_str(&id)
-            && delete_employee(db, object_id, None).await.is_ok()
-        {
-            deleted_count += 1;
+    crate::core::logging::domain::tracked("employees.bulk_deleted", async move {
+        let mut deleted_count = 0u64;
+        for id in ids {
+            if let Ok(object_id) = ObjectId::parse_str(&id)
+                && delete_employee(db, object_id, None).await.is_ok()
+            {
+                deleted_count += 1;
+            }
         }
-    }
-    Ok(deleted_count)
+        Ok(deleted_count)
+    })
+    .await
 }
 
 /// Converts a page of raw `employees` documents — as read by the sync

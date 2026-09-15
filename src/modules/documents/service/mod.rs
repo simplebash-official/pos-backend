@@ -26,7 +26,10 @@ pub(crate) async fn render_uncached(
     template_slug: &str,
     data: serde_json::Value,
 ) -> AppResult<Vec<u8>> {
-    doc_server.render(template_slug, data).await
+    crate::core::logging::domain::tracked("documents.rendered", async move {
+        doc_server.render(template_slug, data).await
+    })
+    .await
 }
 
 /// Returns the PDF bytes for `(entity_key, cache_key)`, rendering and

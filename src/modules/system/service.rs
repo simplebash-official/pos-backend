@@ -77,94 +77,97 @@ pub(crate) async fn perform_setup(
     config: &Config,
     body: SetupSystemRequest,
 ) -> AppResult<SetupSystemResponse> {
-    let installation = get_or_create_installation(db).await?;
-    let users_count = repository::count_users(db).await?;
+    crate::core::logging::domain::tracked("system.setup_performed", async move {
+        let installation = get_or_create_installation(db).await?;
+        let users_count = repository::count_users(db).await?;
 
-    if installation.setup_completed && users_count > 0 {
-        return Err(AppError::conflict(
-            codes::SETUP_ALREADY_COMPLETED,
-            "System setup has already been completed",
-        ));
-    }
+        if installation.setup_completed && users_count > 0 {
+            return Err(AppError::conflict(
+                codes::SETUP_ALREADY_COMPLETED,
+                "System setup has already been completed",
+            ));
+        }
 
-    let admin_email = body
-        .admin_email
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or("admin@pos.com");
+        let admin_email = body
+            .admin_email
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("admin@pos.com");
 
-    let admin_password = body
-        .admin_password
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or("admin@1234");
+        let admin_password = body
+            .admin_password
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("admin@1234");
 
-    let admin_name = body
-        .admin_name
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or("System Admin");
+        let admin_name = body
+            .admin_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("System Admin");
 
-    // 1. Bootstrap the Admin user account
-    seeds::admin::seed_admin(
-        db,
-        Some(admin_email),
-        Some(admin_password),
-        Some(admin_name),
-    )
-    .await?;
-
-    // 2. Bootstrap the default API key
-    seeds::api_key::seed_api_key(db).await?;
-
-    // 3. Conditional Seeding: if user requested sample data, seed categories, inventory, suppliers & customers
-    if body.load_sample_data {
-        seeds::providers::seed_providers(db).await?;
-        seeds::suppliers::seed_suppliers(db).await?;
-        seeds::customers::seed_customers(db).await?;
-        seeds::inventory::seed_inventory(db).await?;
-    }
-
-    // 4. Mark setup completed in database
-    repository::complete_installation(db, &installation.installation_id, body.load_sample_data)
+        // 1. Bootstrap the Admin user account
+        seeds::admin::seed_admin(
+            db,
+            Some(admin_email),
+            Some(admin_password),
+            Some(admin_name),
+        )
         .await?;
 
-    // 5. Verify credentials & issue JWT token for immediate auto-login
-    let user = users_service::verify_credentials(db, admin_email, admin_password).await?;
-    let permissions: Vec<String> = roles::default_permissions(user.role)
-        .iter()
-        .map(|p| p.to_string())
-        .collect();
-    let exp = (Utc::now() + chrono::Duration::hours(config.jwt_expiry_hours)).timestamp() as usize;
-    let claims = Claims {
-        sub: user.id.clone(),
-        exp,
-        role: Some(user.role),
-        permissions,
-    };
-    let token = encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(config.jwt_secret.as_bytes()),
-    )
-    .map_err(|e| AppError::internal(format!("Failed to generate authentication token: {e}")))?;
+        // 2. Bootstrap the default API key
+        seeds::api_key::seed_api_key(db).await?;
 
+        // 3. Conditional Seeding: if user requested sample data, seed categories, inventory, suppliers & customers
+        if body.load_sample_data {
+            seeds::providers::seed_providers(db).await?;
+            seeds::suppliers::seed_suppliers(db).await?;
+            seeds::customers::seed_customers(db).await?;
+            seeds::inventory::seed_inventory(db).await?;
+        }
 
-    Ok(SetupSystemResponse {
-        setup_completed: true,
-        sample_data_loaded: body.load_sample_data,
-        admin_email: admin_email.to_string(),
-        token: Some(token),
-        user: Some(user),
-        message: if body.load_sample_data {
-            "System setup completed successfully with sample demo data".to_string()
-        } else {
-            "System setup completed successfully with clean database".to_string()
-        },
+        // 4. Mark setup completed in database
+        repository::complete_installation(db, &installation.installation_id, body.load_sample_data)
+            .await?;
+
+        // 5. Verify credentials & issue JWT token for immediate auto-login
+        let user = users_service::verify_credentials(db, admin_email, admin_password).await?;
+        let permissions: Vec<String> = roles::default_permissions(user.role)
+            .iter()
+            .map(|p| p.to_string())
+            .collect();
+        let exp =
+            (Utc::now() + chrono::Duration::hours(config.jwt_expiry_hours)).timestamp() as usize;
+        let claims = Claims {
+            sub: user.id.clone(),
+            exp,
+            role: Some(user.role),
+            permissions,
+        };
+        let token = encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(config.jwt_secret.as_bytes()),
+        )
+        .map_err(|e| AppError::internal(format!("Failed to generate authentication token: {e}")))?;
+
+        Ok(SetupSystemResponse {
+            setup_completed: true,
+            sample_data_loaded: body.load_sample_data,
+            admin_email: admin_email.to_string(),
+            token: Some(token),
+            user: Some(user),
+            message: if body.load_sample_data {
+                "System setup completed successfully with sample demo data".to_string()
+            } else {
+                "System setup completed successfully with clean database".to_string()
+            },
+        })
     })
+    .await
 }
 
 /// Retrieves the complete installation metadata record for system inspection.

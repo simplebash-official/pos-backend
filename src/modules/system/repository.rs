@@ -55,7 +55,10 @@ pub(crate) async fn get_installation(db: &Db) -> AppResult<Option<SystemInstalla
                 Ok(Some(SystemInstallation {
                     key: doc.get_str("key").unwrap_or_default().to_string(),
                     id: doc.get_str("id").unwrap_or_default().to_string(),
-                    installation_id: doc.get_str("installation_id").unwrap_or_default().to_string(),
+                    installation_id: doc
+                        .get_str("installation_id")
+                        .unwrap_or_default()
+                        .to_string(),
                     app_version: doc.get_str("app_version").unwrap_or_default().to_string(),
                     platform: doc.get_str("platform").unwrap_or_default().to_string(),
                     installed_at: doc.get_str("installed_at").unwrap_or_default().to_string(),
@@ -73,10 +76,7 @@ pub(crate) async fn get_installation(db: &Db) -> AppResult<Option<SystemInstalla
 }
 
 /// Creates a new system installation record.
-pub(crate) async fn create_installation(
-    db: &Db,
-    record: &SystemInstallation,
-) -> AppResult<()> {
+pub(crate) async fn create_installation(db: &Db, record: &SystemInstallation) -> AppResult<()> {
     match db {
         Db::Sqlite(pool) => {
             sqlx::query(

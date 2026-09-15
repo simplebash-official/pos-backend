@@ -253,6 +253,16 @@ impl IntoResponse for AppError {
             // Sanitize message so technical driver strings, SQL errors, or stack details never leak to clients
             sanitize_server_error_message(&message)
         } else {
+            // 4xx is the caller's mistake, but still part of what happened
+            // (failed logins, validation rejections, missing records).
+            tracing::warn!(
+                category = "error",
+                event = "client_error",
+                status = status.as_u16(),
+                code = %code,
+                error = %message,
+                "request rejected"
+            );
             message
         };
 

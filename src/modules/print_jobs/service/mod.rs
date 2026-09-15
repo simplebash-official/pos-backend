@@ -213,79 +213,82 @@ pub async fn create_print_job(
     body: CreatePrintJobRequest,
     device_id: Option<String>,
 ) -> AppResult<PrintJob> {
-    let status = body.status.unwrap_or_else(|| "received".to_string());
-    validate_status(&status)?;
-    validate_job_type(&body.job_type)?;
-    validate_promised_ready_at(body.promised_ready_at.as_deref())?;
+    crate::core::logging::domain::tracked("print_jobs.created", async move {
+        let status = body.status.unwrap_or_else(|| "received".to_string());
+        validate_status(&status)?;
+        validate_job_type(&body.job_type)?;
+        validate_promised_ready_at(body.promised_ready_at.as_deref())?;
 
-    let (customer_name, customer_phone) = resolve_customer_name_phone(
-        db,
-        body.customer.customer_key.as_deref(),
-        body.customer.customer_name.unwrap_or_default(),
-        body.customer.customer_phone,
-    )
-    .await?;
+        let (customer_name, customer_phone) = resolve_customer_name_phone(
+            db,
+            body.customer.customer_key.as_deref(),
+            body.customer.customer_name.unwrap_or_default(),
+            body.customer.customer_phone,
+        )
+        .await?;
 
-    validate_required_fields(
-        &customer_name,
-        &body.job_type,
-        body.quantity,
-        body.estimated_cost_cents,
-    )?;
+        validate_required_fields(
+            &customer_name,
+            &body.job_type,
+            body.quantity,
+            body.estimated_cost_cents,
+        )?;
 
-    let assignment = body.assignment.unwrap_or_default();
-    let PrintJobAssignment {
-        assigned_employee_id,
-        split_type,
-        split_value,
-        ..
-    } = assignment;
-    let assigned_employee_name =
-        resolve_assignment_employee_name(db, assigned_employee_id.as_deref()).await?;
+        let assignment = body.assignment.unwrap_or_default();
+        let PrintJobAssignment {
+            assigned_employee_id,
+            split_type,
+            split_value,
+            ..
+        } = assignment;
+        let assigned_employee_name =
+            resolve_assignment_employee_name(db, assigned_employee_id.as_deref()).await?;
 
-    let reservation = sequences::service::reserve_sequence(
-        db,
-        "printjob".to_string(),
-        ReserveSequenceRequest {
-            block_size: Some(1),
-            device_id: device_id.clone(),
-        },
-    )
-    .await?;
-    let ticket_number = format!(
-        "{}{:0width$}",
-        reservation.prefix,
-        reservation.start,
-        width = reservation.padding
-    );
+        let reservation = sequences::service::reserve_sequence(
+            db,
+            "printjob".to_string(),
+            ReserveSequenceRequest {
+                block_size: Some(1),
+                device_id: device_id.clone(),
+            },
+        )
+        .await?;
+        let ticket_number = format!(
+            "{}{:0width$}",
+            reservation.prefix,
+            reservation.start,
+            width = reservation.padding
+        );
 
-    let now = BsonDateTime::now();
-    let document = PrintJobDocument {
-        id: None,
-        key: generate_id(prefixes::PRINT_JOB),
-        ticket_number,
-        customer_key: body.customer.customer_key,
-        customer_name: customer_name.trim().to_string(),
-        customer_phone,
-        job_type: body.job_type,
-        quantity: body.quantity,
-        promised_ready_at: body.promised_ready_at,
-        status,
-        estimated_cost_cents: body.estimated_cost_cents,
-        material_cost_cents: body.material_cost_cents,
-        assigned_employee_id,
-        assigned_employee_name,
-        split_type,
-        split_value,
-        version: 1,
-        created_at: now,
-        updated_at: now,
-        deleted_at: None,
-        updated_by_device: device_id,
-    };
+        let now = BsonDateTime::now();
+        let document = PrintJobDocument {
+            id: None,
+            key: generate_id(prefixes::PRINT_JOB),
+            ticket_number,
+            customer_key: body.customer.customer_key,
+            customer_name: customer_name.trim().to_string(),
+            customer_phone,
+            job_type: body.job_type,
+            quantity: body.quantity,
+            promised_ready_at: body.promised_ready_at,
+            status,
+            estimated_cost_cents: body.estimated_cost_cents,
+            material_cost_cents: body.material_cost_cents,
+            assigned_employee_id,
+            assigned_employee_name,
+            split_type,
+            split_value,
+            version: 1,
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+            updated_by_device: device_id,
+        };
 
-    let inserted = repository::insert(db, document).await?;
-    Ok(inserted.into_print_job())
+        let inserted = repository::insert(db, document).await?;
+        Ok(inserted.into_print_job())
+    })
+    .await
 }
 
 pub async fn update_print_job(
@@ -294,83 +297,86 @@ pub async fn update_print_job(
     body: UpdatePrintJobRequest,
     device_id: Option<String>,
 ) -> AppResult<PrintJob> {
-    let existing = repository::find_by_id_or_key(db, id_or_key)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Print job not found", codes::PRINT_JOB_NOT_FOUND)
-        })?;
-    let object_id = existing
-        .id
-        .expect("persisted print job document must have an _id");
+    crate::core::logging::domain::tracked("print_jobs.updated", async move {
+        let existing = repository::find_by_id_or_key(db, id_or_key)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Print job not found", codes::PRINT_JOB_NOT_FOUND)
+            })?;
+        let object_id = existing
+            .id
+            .expect("persisted print job document must have an _id");
 
-    let customer = body.customer.unwrap_or_default();
-    let effective_customer_key = customer
-        .customer_key
-        .clone()
-        .or(existing.customer_key.clone());
-    let (customer_name, customer_phone) = resolve_customer_name_phone(
-        db,
-        effective_customer_key.as_deref(),
-        customer.customer_name.unwrap_or(existing.customer_name),
-        customer.customer_phone.or(existing.customer_phone),
-    )
-    .await?;
-    let job_type = body.job_type.unwrap_or(existing.job_type);
-    let quantity = body.quantity.unwrap_or(existing.quantity);
-    let estimated_cost_cents = body
-        .estimated_cost_cents
-        .unwrap_or(existing.estimated_cost_cents);
-    let status = body.status.unwrap_or(existing.status);
+        let customer = body.customer.unwrap_or_default();
+        let effective_customer_key = customer
+            .customer_key
+            .clone()
+            .or(existing.customer_key.clone());
+        let (customer_name, customer_phone) = resolve_customer_name_phone(
+            db,
+            effective_customer_key.as_deref(),
+            customer.customer_name.unwrap_or(existing.customer_name),
+            customer.customer_phone.or(existing.customer_phone),
+        )
+        .await?;
+        let job_type = body.job_type.unwrap_or(existing.job_type);
+        let quantity = body.quantity.unwrap_or(existing.quantity);
+        let estimated_cost_cents = body
+            .estimated_cost_cents
+            .unwrap_or(existing.estimated_cost_cents);
+        let status = body.status.unwrap_or(existing.status);
 
-    validate_status(&status)?;
-    validate_job_type(&job_type)?;
-    validate_promised_ready_at(body.promised_ready_at.as_deref())?;
-    validate_required_fields(&customer_name, &job_type, quantity, estimated_cost_cents)?;
+        validate_status(&status)?;
+        validate_job_type(&job_type)?;
+        validate_promised_ready_at(body.promised_ready_at.as_deref())?;
+        validate_required_fields(&customer_name, &job_type, quantity, estimated_cost_cents)?;
 
-    let mut set_doc = doc! {
-        "customer_name": &customer_name,
-        "job_type": &job_type,
-        "quantity": quantity,
-        "estimated_cost_cents": estimated_cost_cents,
-        "status": &status,
-        "updated_at": BsonDateTime::now(),
-    };
-    if let Some(key) = effective_customer_key {
-        set_doc.insert("customer_key", key);
-    }
-    match customer_phone {
-        Some(phone) => set_doc.insert("customer_phone", phone),
-        None => set_doc.insert("customer_phone", mongodb::bson::Bson::Null),
-    };
-    if let Some(promised) = body.promised_ready_at {
-        set_doc.insert("promised_ready_at", promised);
-    }
-    if let Some(mc) = body.material_cost_cents {
-        set_doc.insert("material_cost_cents", mc);
-    }
-    if let Some(assignment) = body.assignment {
-        if let Some(eid) = assignment.assigned_employee_id {
-            let ename = resolve_assignment_employee_name(db, Some(&eid)).await?;
-            set_doc.insert("assigned_employee_id", eid);
-            set_doc.insert("assigned_employee_name", ename);
+        let mut set_doc = doc! {
+            "customer_name": &customer_name,
+            "job_type": &job_type,
+            "quantity": quantity,
+            "estimated_cost_cents": estimated_cost_cents,
+            "status": &status,
+            "updated_at": BsonDateTime::now(),
+        };
+        if let Some(key) = effective_customer_key {
+            set_doc.insert("customer_key", key);
         }
-        if let Some(st) = assignment.split_type {
-            set_doc.insert("split_type", st);
+        match customer_phone {
+            Some(phone) => set_doc.insert("customer_phone", phone),
+            None => set_doc.insert("customer_phone", mongodb::bson::Bson::Null),
+        };
+        if let Some(promised) = body.promised_ready_at {
+            set_doc.insert("promised_ready_at", promised);
         }
-        if let Some(sv) = assignment.split_value {
-            set_doc.insert("split_value", sv);
+        if let Some(mc) = body.material_cost_cents {
+            set_doc.insert("material_cost_cents", mc);
         }
-    }
-    if let Some(device) = device_id {
-        set_doc.insert("updated_by_device", device);
-    }
+        if let Some(assignment) = body.assignment {
+            if let Some(eid) = assignment.assigned_employee_id {
+                let ename = resolve_assignment_employee_name(db, Some(&eid)).await?;
+                set_doc.insert("assigned_employee_id", eid);
+                set_doc.insert("assigned_employee_name", ename);
+            }
+            if let Some(st) = assignment.split_type {
+                set_doc.insert("split_type", st);
+            }
+            if let Some(sv) = assignment.split_value {
+                set_doc.insert("split_value", sv);
+            }
+        }
+        if let Some(device) = device_id {
+            set_doc.insert("updated_by_device", device);
+        }
 
-    let updated = repository::update(db, object_id, set_doc)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Print job not found", codes::PRINT_JOB_NOT_FOUND)
-        })?;
-    Ok(updated.into_print_job())
+        let updated = repository::update(db, object_id, set_doc)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Print job not found", codes::PRINT_JOB_NOT_FOUND)
+            })?;
+        Ok(updated.into_print_job())
+    })
+    .await
 }
 
 pub async fn delete_print_job(
@@ -378,21 +384,24 @@ pub async fn delete_print_job(
     id_or_key: &str,
     device_id: Option<String>,
 ) -> AppResult<PrintJob> {
-    let existing = repository::find_by_id_or_key(db, id_or_key)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Print job not found", codes::PRINT_JOB_NOT_FOUND)
-        })?;
-    let object_id = existing
-        .id
-        .expect("persisted print job document must have an _id");
+    crate::core::logging::domain::tracked("print_jobs.deleted", async move {
+        let existing = repository::find_by_id_or_key(db, id_or_key)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Print job not found", codes::PRINT_JOB_NOT_FOUND)
+            })?;
+        let object_id = existing
+            .id
+            .expect("persisted print job document must have an _id");
 
-    let deleted = repository::delete(db, object_id, device_id)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Print job not found", codes::PRINT_JOB_NOT_FOUND)
-        })?;
-    Ok(deleted.into_print_job())
+        let deleted = repository::delete(db, object_id, device_id)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Print job not found", codes::PRINT_JOB_NOT_FOUND)
+            })?;
+        Ok(deleted.into_print_job())
+    })
+    .await
 }
 
 /// Cross-module hook — called by `billing::service::sale::complete_sale`.
@@ -400,12 +409,15 @@ pub async fn delete_print_job(
 /// deliberately narrow (status only).
 #[allow(dead_code)]
 pub(crate) async fn mark_delivered(db: &Db, key: &str) -> AppResult<PrintJob> {
-    let updated = repository::set_status_by_key(db, key, "delivered")
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Print job not found", codes::PRINT_JOB_NOT_FOUND)
-        })?;
-    Ok(updated.into_print_job())
+    crate::core::logging::domain::tracked("print_jobs.delivered", async move {
+        let updated = repository::set_status_by_key(db, key, "delivered")
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Print job not found", codes::PRINT_JOB_NOT_FOUND)
+            })?;
+        Ok(updated.into_print_job())
+    })
+    .await
 }
 
 /// Converts a page of raw `print_jobs` documents — as read by the sync

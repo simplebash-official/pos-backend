@@ -257,81 +257,84 @@ pub async fn create_repair(
     body: CreateRepairRequest,
     device_id: Option<String>,
 ) -> AppResult<Repair> {
-    let status = body.status.unwrap_or_else(|| "received".to_string());
-    validate_status(&status)?;
-    validate_promised_ready_at(body.promised_ready_at.as_deref())?;
+    crate::core::logging::domain::tracked("repairs.created", async move {
+        let status = body.status.unwrap_or_else(|| "received".to_string());
+        validate_status(&status)?;
+        validate_promised_ready_at(body.promised_ready_at.as_deref())?;
 
-    let (customer_name, customer_phone) = resolve_customer_name_phone(
-        db,
-        body.customer.customer_key.as_deref(),
-        body.customer.customer_name.unwrap_or_default(),
-        body.customer.customer_phone.unwrap_or_default(),
-    )
-    .await?;
+        let (customer_name, customer_phone) = resolve_customer_name_phone(
+            db,
+            body.customer.customer_key.as_deref(),
+            body.customer.customer_name.unwrap_or_default(),
+            body.customer.customer_phone.unwrap_or_default(),
+        )
+        .await?;
 
-    validate_required_fields(
-        &customer_name,
-        &customer_phone,
-        &body.device_model,
-        &body.issue_description,
-        body.estimated_cost_cents,
-    )?;
-    validate_price_required_for_status(&status, body.estimated_cost_cents)?;
+        validate_required_fields(
+            &customer_name,
+            &customer_phone,
+            &body.device_model,
+            &body.issue_description,
+            body.estimated_cost_cents,
+        )?;
+        validate_price_required_for_status(&status, body.estimated_cost_cents)?;
 
-    let assignment = body.assignment.unwrap_or_default();
-    let RepairAssignment {
-        assigned_employee_id,
-        split_type,
-        split_value,
-        ..
-    } = assignment;
-    let assigned_employee_name =
-        resolve_assignment_employee_name(db, assigned_employee_id.as_deref()).await?;
+        let assignment = body.assignment.unwrap_or_default();
+        let RepairAssignment {
+            assigned_employee_id,
+            split_type,
+            split_value,
+            ..
+        } = assignment;
+        let assigned_employee_name =
+            resolve_assignment_employee_name(db, assigned_employee_id.as_deref()).await?;
 
-    let reservation = sequences::service::reserve_sequence(
-        db,
-        "repair".to_string(),
-        ReserveSequenceRequest {
-            block_size: Some(1),
-            device_id: device_id.clone(),
-        },
-    )
-    .await?;
-    let ticket_number = format!(
-        "{}{:0width$}",
-        reservation.prefix,
-        reservation.start,
-        width = reservation.padding
-    );
+        let reservation = sequences::service::reserve_sequence(
+            db,
+            "repair".to_string(),
+            ReserveSequenceRequest {
+                block_size: Some(1),
+                device_id: device_id.clone(),
+            },
+        )
+        .await?;
+        let ticket_number = format!(
+            "{}{:0width$}",
+            reservation.prefix,
+            reservation.start,
+            width = reservation.padding
+        );
 
-    let now = BsonDateTime::now();
-    let document = RepairDocument {
-        id: None,
-        key: generate_id(prefixes::REPAIR),
-        ticket_number,
-        customer_key: body.customer.customer_key,
-        customer_name: customer_name.trim().to_string(),
-        customer_phone: customer_phone.trim().to_string(),
-        device_model: body.device_model,
-        serial_number: body.serial_number,
-        issue_description: body.issue_description,
-        promised_ready_at: body.promised_ready_at,
-        status,
-        estimated_cost_cents: body.estimated_cost_cents,
-        material_cost_cents: body.material_cost_cents,
-        assigned_employee_id,
-        assigned_employee_name,
-        split_type,
-        split_value,
-        version: 1,
-        created_at: now,
-        updated_at: now,
-        deleted_at: None,
-        updated_by_device: device_id,
-    };
+        let now = BsonDateTime::now();
+        let document = RepairDocument {
+            id: None,
+            key: generate_id(prefixes::REPAIR),
+            ticket_number,
+            customer_key: body.customer.customer_key,
+            customer_name: customer_name.trim().to_string(),
+            customer_phone: customer_phone.trim().to_string(),
+            device_model: body.device_model,
+            serial_number: body.serial_number,
+            issue_description: body.issue_description,
+            promised_ready_at: body.promised_ready_at,
+            status,
+            estimated_cost_cents: body.estimated_cost_cents,
+            material_cost_cents: body.material_cost_cents,
+            assigned_employee_id,
+            assigned_employee_name,
+            split_type,
+            split_value,
+            version: 1,
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+            updated_by_device: device_id,
+        };
 
-    let inserted = repository::insert(db, document).await?;
-    Ok(inserted.into_repair())
+        let inserted = repository::insert(db, document).await?;
+        Ok(inserted.into_repair())
+    })
+    .await
 }
 
 pub async fn update_repair(
@@ -340,94 +343,97 @@ pub async fn update_repair(
     body: UpdateRepairRequest,
     device_id: Option<String>,
 ) -> AppResult<Repair> {
-    let existing = repository::find_by_id_or_key(db, id_or_key)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Repair ticket not found", codes::REPAIR_NOT_FOUND)
-        })?;
-    let object_id = existing
-        .id
-        .expect("persisted repair document must have an _id");
+    crate::core::logging::domain::tracked("repairs.updated", async move {
+        let existing = repository::find_by_id_or_key(db, id_or_key)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Repair ticket not found", codes::REPAIR_NOT_FOUND)
+            })?;
+        let object_id = existing
+            .id
+            .expect("persisted repair document must have an _id");
 
-    let customer = body.customer.unwrap_or_default();
-    let effective_customer_key = customer
-        .customer_key
-        .clone()
-        .or(existing.customer_key.clone());
-    let (customer_name, customer_phone) = resolve_customer_name_phone(
-        db,
-        effective_customer_key.as_deref(),
-        customer.customer_name.unwrap_or(existing.customer_name),
-        customer.customer_phone.unwrap_or(existing.customer_phone),
-    )
-    .await?;
-    let device_model = body.device_model.unwrap_or(existing.device_model);
-    let issue_description = body.issue_description.unwrap_or(existing.issue_description);
-    let estimated_cost_cents = body.estimated_cost_cents.or(existing.estimated_cost_cents);
-    let status = body.status.unwrap_or(existing.status);
+        let customer = body.customer.unwrap_or_default();
+        let effective_customer_key = customer
+            .customer_key
+            .clone()
+            .or(existing.customer_key.clone());
+        let (customer_name, customer_phone) = resolve_customer_name_phone(
+            db,
+            effective_customer_key.as_deref(),
+            customer.customer_name.unwrap_or(existing.customer_name),
+            customer.customer_phone.unwrap_or(existing.customer_phone),
+        )
+        .await?;
+        let device_model = body.device_model.unwrap_or(existing.device_model);
+        let issue_description = body.issue_description.unwrap_or(existing.issue_description);
+        let estimated_cost_cents = body.estimated_cost_cents.or(existing.estimated_cost_cents);
+        let status = body.status.unwrap_or(existing.status);
 
-    validate_status(&status)?;
-    validate_promised_ready_at(body.promised_ready_at.as_deref())?;
-    validate_required_fields(
-        &customer_name,
-        &customer_phone,
-        &device_model,
-        &issue_description,
-        estimated_cost_cents,
-    )?;
-    validate_price_required_for_status(&status, estimated_cost_cents)?;
+        validate_status(&status)?;
+        validate_promised_ready_at(body.promised_ready_at.as_deref())?;
+        validate_required_fields(
+            &customer_name,
+            &customer_phone,
+            &device_model,
+            &issue_description,
+            estimated_cost_cents,
+        )?;
+        validate_price_required_for_status(&status, estimated_cost_cents)?;
 
-    let mut set_doc = doc! {
-        "customer_name": &customer_name,
-        "customer_phone": &customer_phone,
-        "device_model": &device_model,
-        "issue_description": &issue_description,
-        "status": &status,
-        "updated_at": BsonDateTime::now(),
-    };
-    match estimated_cost_cents {
-        Some(cost) => {
-            set_doc.insert("estimated_cost_cents", cost);
+        let mut set_doc = doc! {
+            "customer_name": &customer_name,
+            "customer_phone": &customer_phone,
+            "device_model": &device_model,
+            "issue_description": &issue_description,
+            "status": &status,
+            "updated_at": BsonDateTime::now(),
+        };
+        match estimated_cost_cents {
+            Some(cost) => {
+                set_doc.insert("estimated_cost_cents", cost);
+            }
+            None => {
+                set_doc.insert("estimated_cost_cents", mongodb::bson::Bson::Null);
+            }
         }
-        None => {
-            set_doc.insert("estimated_cost_cents", mongodb::bson::Bson::Null);
+        if let Some(key) = effective_customer_key {
+            set_doc.insert("customer_key", key);
         }
-    }
-    if let Some(key) = effective_customer_key {
-        set_doc.insert("customer_key", key);
-    }
-    if let Some(sn) = body.serial_number {
-        set_doc.insert("serial_number", sn);
-    }
-    if let Some(promised) = body.promised_ready_at {
-        set_doc.insert("promised_ready_at", promised);
-    }
-    if let Some(mc) = body.material_cost_cents {
-        set_doc.insert("material_cost_cents", mc);
-    }
-    if let Some(assignment) = body.assignment {
-        if let Some(eid) = assignment.assigned_employee_id {
-            let ename = resolve_assignment_employee_name(db, Some(&eid)).await?;
-            set_doc.insert("assigned_employee_id", eid);
-            set_doc.insert("assigned_employee_name", ename);
+        if let Some(sn) = body.serial_number {
+            set_doc.insert("serial_number", sn);
         }
-        if let Some(st) = assignment.split_type {
-            set_doc.insert("split_type", st);
+        if let Some(promised) = body.promised_ready_at {
+            set_doc.insert("promised_ready_at", promised);
         }
-        if let Some(sv) = assignment.split_value {
-            set_doc.insert("split_value", sv);
+        if let Some(mc) = body.material_cost_cents {
+            set_doc.insert("material_cost_cents", mc);
         }
-    }
-    if let Some(device) = device_id {
-        set_doc.insert("updated_by_device", device);
-    }
+        if let Some(assignment) = body.assignment {
+            if let Some(eid) = assignment.assigned_employee_id {
+                let ename = resolve_assignment_employee_name(db, Some(&eid)).await?;
+                set_doc.insert("assigned_employee_id", eid);
+                set_doc.insert("assigned_employee_name", ename);
+            }
+            if let Some(st) = assignment.split_type {
+                set_doc.insert("split_type", st);
+            }
+            if let Some(sv) = assignment.split_value {
+                set_doc.insert("split_value", sv);
+            }
+        }
+        if let Some(device) = device_id {
+            set_doc.insert("updated_by_device", device);
+        }
 
-    let updated = repository::update(db, object_id, set_doc)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Repair ticket not found", codes::REPAIR_NOT_FOUND)
-        })?;
-    Ok(updated.into_repair())
+        let updated = repository::update(db, object_id, set_doc)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Repair ticket not found", codes::REPAIR_NOT_FOUND)
+            })?;
+        Ok(updated.into_repair())
+    })
+    .await
 }
 
 pub async fn delete_repair(
@@ -435,21 +441,24 @@ pub async fn delete_repair(
     id_or_key: &str,
     device_id: Option<String>,
 ) -> AppResult<Repair> {
-    let existing = repository::find_by_id_or_key(db, id_or_key)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Repair ticket not found", codes::REPAIR_NOT_FOUND)
-        })?;
-    let object_id = existing
-        .id
-        .expect("persisted repair document must have an _id");
+    crate::core::logging::domain::tracked("repairs.deleted", async move {
+        let existing = repository::find_by_id_or_key(db, id_or_key)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Repair ticket not found", codes::REPAIR_NOT_FOUND)
+            })?;
+        let object_id = existing
+            .id
+            .expect("persisted repair document must have an _id");
 
-    let deleted = repository::delete(db, object_id, device_id)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Repair ticket not found", codes::REPAIR_NOT_FOUND)
-        })?;
-    Ok(deleted.into_repair())
+        let deleted = repository::delete(db, object_id, device_id)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Repair ticket not found", codes::REPAIR_NOT_FOUND)
+            })?;
+        Ok(deleted.into_repair())
+    })
+    .await
 }
 
 /// Cross-module hook — called by `billing::service::sale::complete_sale`
@@ -458,12 +467,15 @@ pub async fn delete_repair(
 /// shouldn't silently rewrite ticket details a technician entered.
 #[allow(dead_code)]
 pub(crate) async fn mark_delivered(db: &Db, key: &str) -> AppResult<Repair> {
-    let updated = repository::set_status_by_key(db, key, "delivered")
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Repair ticket not found", codes::REPAIR_NOT_FOUND)
-        })?;
-    Ok(updated.into_repair())
+    crate::core::logging::domain::tracked("repairs.delivered", async move {
+        let updated = repository::set_status_by_key(db, key, "delivered")
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Repair ticket not found", codes::REPAIR_NOT_FOUND)
+            })?;
+        Ok(updated.into_repair())
+    })
+    .await
 }
 
 /// Converts a page of raw `repairs` documents — as read by the sync

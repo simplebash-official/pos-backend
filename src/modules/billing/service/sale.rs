@@ -468,160 +468,198 @@ pub async fn complete_sale(
     cashier_id: String,
     device_id: Option<String>,
 ) -> AppResult<CompleteSaleResponse> {
-    validate_sale_request(&body)?;
+    crate::core::logging::domain::tracked("billing.sale_completed", async move {
+        validate_sale_request(&body)?;
 
-    // Resolve the linked customer, if any, before any write — a bad
-    // customerKey should fail the whole request, not half-complete it.
-    let customer_key = body.customer.as_ref().and_then(|c| c.customer_key.clone());
-    let resolved_customer = match &customer_key {
-        Some(key) => Some(customers::service::get_customer_by_key(db, key).await?),
-        None => None,
-    };
-
-    let (customer_name_snapshot, customer_phone_snapshot, customer_address_snapshot) =
-        match &resolved_customer {
-            Some(customer) => (
-                Some(customer.name.clone()),
-                Some(customer.primary_phone.clone()),
-                customer.address.clone(),
-            ),
-            None => {
-                let customer_ref = body.customer.as_ref();
-                (
-                    customer_ref.and_then(|c| c.customer_name.clone()),
-                    customer_ref.and_then(|c| c.customer_phone.clone()),
-                    customer_ref.and_then(|c| c.customer_address.clone()),
-                )
-            }
+        // Resolve the linked customer, if any, before any write — a bad
+        // customerKey should fail the whole request, not half-complete it.
+        let customer_key = body.customer.as_ref().and_then(|c| c.customer_key.clone());
+        let resolved_customer = match &customer_key {
+            Some(key) => Some(customers::service::get_customer_by_key(db, key).await?),
+            None => None,
         };
 
-    // Same "fail before any write" treatment as the customer lookup above —
-    // an unresolvable productKey/sourceTicketKey can't produce a sensible
-    // line item, so the whole sale is rejected rather than half-completed.
-    let (resolved_items, resolved_products) = resolve_sale_items(db, &body.items).await?;
+        let (customer_name_snapshot, customer_phone_snapshot, customer_address_snapshot) =
+            match &resolved_customer {
+                Some(customer) => (
+                    Some(customer.name.clone()),
+                    Some(customer.primary_phone.clone()),
+                    customer.address.clone(),
+                ),
+                None => {
+                    let customer_ref = body.customer.as_ref();
+                    (
+                        customer_ref.and_then(|c| c.customer_name.clone()),
+                        customer_ref.and_then(|c| c.customer_phone.clone()),
+                        customer_ref.and_then(|c| c.customer_address.clone()),
+                    )
+                }
+            };
 
-    // subtotal/discount/total/change are calculated via the authoritative calculation engine.
-    let (subtotal_cents, discount_type, discount_value, discount_cents, total_cents) =
-        calculations::compute_sale_totals(&resolved_items, body.pricing_adjustments.as_ref());
-    let change_due_cents =
-        calculations::compute_change_due(body.payment.amount_received_cents, total_cents);
+        // Same "fail before any write" treatment as the customer lookup above —
+        // an unresolvable productKey/sourceTicketKey can't produce a sensible
+        // line item, so the whole sale is rejected rather than half-completed.
+        let (resolved_items, resolved_products) = resolve_sale_items(db, &body.items).await?;
 
-    // An up-front partial payment on a credit sale ("pay Rs 500 now, rest on
-    // account"). `0` for a plain credit sale or any non-credit sale.
-    let credit_deposit_cents = resolve_credit_deposit(&body, total_cents)?;
+        // subtotal/discount/total/change are calculated via the authoritative calculation engine.
+        let (subtotal_cents, discount_type, discount_value, discount_cents, total_cents) =
+            calculations::compute_sale_totals(&resolved_items, body.pricing_adjustments.as_ref());
+        let change_due_cents =
+            calculations::compute_change_due(body.payment.amount_received_cents, total_cents);
 
-    if body.payment.payment_method == "split" {
-        let legs = body.payment.split_payments.as_deref().unwrap_or(&[]);
-        calculations::validate_split_payments(total_cents, legs)?;
-    }
+        // An up-front partial payment on a credit sale ("pay Rs 500 now, rest on
+        // account"). `0` for a plain credit sale or any non-credit sale.
+        let credit_deposit_cents = resolve_credit_deposit(&body, total_cents)?;
 
-    let reservation = sequences::service::reserve_sequence(
-        db,
-        "invoice".to_string(),
-        ReserveSequenceRequest {
-            block_size: Some(1),
-            device_id: device_id.clone(),
-        },
-    )
-    .await?;
-    let invoice_number = format!(
-        "{}{:0width$}",
-        reservation.prefix,
-        reservation.start,
-        width = reservation.padding
-    );
+        if body.payment.payment_method == "split" {
+            let legs = body.payment.split_payments.as_deref().unwrap_or(&[]);
+            calculations::validate_split_payments(total_cents, legs)?;
+        }
 
-    let status = if body.payment.is_credit {
-        InvoiceStatus::from_payment_progress(total_cents, credit_deposit_cents)
-    } else {
-        InvoiceStatus::Paid
-    };
-    // Method the deposit leg is recorded under (invoice.payment_method stays
-    // "credit"); also mirrored onto the invoice's card fields when it was a
-    // card deposit so downstream readers (dashboard cash-drawer split) can
-    // tell how the up-front money came in.
-    let deposit_method = body.payment.deposit_method.as_deref().unwrap_or("cash");
-    let deposit_is_card = credit_deposit_cents > 0 && deposit_method == "card";
-    let now = BsonDateTime::now();
+        let reservation = sequences::service::reserve_sequence(
+            db,
+            "invoice".to_string(),
+            ReserveSequenceRequest {
+                block_size: Some(1),
+                device_id: device_id.clone(),
+            },
+        )
+        .await?;
+        let invoice_number = format!(
+            "{}{:0width$}",
+            reservation.prefix,
+            reservation.start,
+            width = reservation.padding
+        );
 
-    let invoice_document = InvoiceDocument {
-        id: None,
-        key: generate_id(prefixes::INVOICE),
-        invoice_number,
-        customer_key: customer_key.clone(),
-        customer_name_snapshot,
-        customer_phone_snapshot,
-        customer_address_snapshot,
-        cashier_id: cashier_id.clone(),
-        cashier_name_snapshot: body.staff.cashier_name.clone(),
-        items: resolved_items.clone(),
-        subtotal_cents,
-        discount_type,
-        discount_value,
-        discount_cents,
-        total_cents,
-        payment_method: body.payment.payment_method.clone(),
-        split_payments: body.payment.split_payments.clone(),
-        is_credit: body.payment.is_credit,
-        amount_received_cents: body.payment.amount_received_cents,
-        change_due_cents,
-        due_date: body.payment.due_date.clone(),
-        card_last4: if body.payment.is_credit && !deposit_is_card {
-            None
+        let status = if body.payment.is_credit {
+            InvoiceStatus::from_payment_progress(total_cents, credit_deposit_cents)
         } else {
-            body.payment.card_last4.clone()
-        },
-        card_ref: body.payment.card_ref.clone(),
-        online_ref: body.payment.online_ref.clone(),
-        online_note: body.payment.online_note.clone(),
-        status,
-        notes: body.notes.clone(),
-        shop_profile_snapshot: body.shop_profile_snapshot.clone(),
-        warranty_terms_snapshot: body.warranty_terms_snapshot.clone(),
-        document_selection: body.document_selection.clone(),
-        voided_at: None,
-        voided_by: None,
-        voided_reason: None,
-        closed_at: None,
-        closed_by: None,
-        refunded_cents: 0,
-        credit_note_count: 0,
-        version: 1,
-        created_at: now,
-        updated_at: now,
-    };
+            InvoiceStatus::Paid
+        };
+        // Method the deposit leg is recorded under (invoice.payment_method stays
+        // "credit"); also mirrored onto the invoice's card fields when it was a
+        // card deposit so downstream readers (dashboard cash-drawer split) can
+        // tell how the up-front money came in.
+        let deposit_method = body.payment.deposit_method.as_deref().unwrap_or("cash");
+        let deposit_is_card = credit_deposit_cents > 0 && deposit_method == "card";
+        let now = BsonDateTime::now();
 
-    // From this point on, the sale is committed: nothing below reports
-    // failure back to the cashier (D4) — every sub-step collects into
-    // `warnings` instead.
-    let inserted_invoice = repository::insert_invoice(db, invoice_document).await?;
-    let mut warnings: Vec<String> = Vec::new();
-
-    let mut payment_documents = Vec::new();
-    if !body.payment.is_credit {
-        // Matches the mock's simplicity (`mockInvoices.ts::createInvoice`):
-        // a non-credit sale is fully paid at completion, regardless of the
-        // tendered/change breakdown recorded for display.
-        let legs: Vec<(String, i64, Option<String>)> = match &body.payment.split_payments {
-            Some(split) if body.payment.payment_method == "split" => split
-                .iter()
-                .map(|leg| (leg.method.clone(), leg.amount_cents, leg.card_last4.clone()))
-                .collect(),
-            _ => vec![(
-                body.payment.payment_method.clone(),
-                total_cents,
-                body.payment.card_last4.clone(),
-            )],
+        let invoice_document = InvoiceDocument {
+            id: None,
+            key: generate_id(prefixes::INVOICE),
+            invoice_number,
+            customer_key: customer_key.clone(),
+            customer_name_snapshot,
+            customer_phone_snapshot,
+            customer_address_snapshot,
+            cashier_id: cashier_id.clone(),
+            cashier_name_snapshot: body.staff.cashier_name.clone(),
+            items: resolved_items.clone(),
+            subtotal_cents,
+            discount_type,
+            discount_value,
+            discount_cents,
+            total_cents,
+            payment_method: body.payment.payment_method.clone(),
+            split_payments: body.payment.split_payments.clone(),
+            is_credit: body.payment.is_credit,
+            amount_received_cents: body.payment.amount_received_cents,
+            change_due_cents,
+            due_date: body.payment.due_date.clone(),
+            card_last4: if body.payment.is_credit && !deposit_is_card {
+                None
+            } else {
+                body.payment.card_last4.clone()
+            },
+            card_ref: body.payment.card_ref.clone(),
+            online_ref: body.payment.online_ref.clone(),
+            online_note: body.payment.online_note.clone(),
+            status,
+            notes: body.notes.clone(),
+            shop_profile_snapshot: body.shop_profile_snapshot.clone(),
+            warranty_terms_snapshot: body.warranty_terms_snapshot.clone(),
+            document_selection: body.document_selection.clone(),
+            voided_at: None,
+            voided_by: None,
+            voided_reason: None,
+            closed_at: None,
+            closed_by: None,
+            refunded_cents: 0,
+            credit_note_count: 0,
+            version: 1,
+            created_at: now,
+            updated_at: now,
         };
 
-        for (method, amount_cents, card_last4) in legs {
-            let payment_document = crate::modules::billing::model::PaymentDocument {
+        // From this point on, the sale is committed: nothing below reports
+        // failure back to the cashier (D4) — every sub-step collects into
+        // `warnings` instead.
+        let inserted_invoice = repository::insert_invoice(db, invoice_document).await?;
+        let mut warnings: Vec<String> = Vec::new();
+
+        let mut payment_documents = Vec::new();
+        if !body.payment.is_credit {
+            // Matches the mock's simplicity (`mockInvoices.ts::createInvoice`):
+            // a non-credit sale is fully paid at completion, regardless of the
+            // tendered/change breakdown recorded for display.
+            let legs: Vec<(String, i64, Option<String>)> = match &body.payment.split_payments {
+                Some(split) if body.payment.payment_method == "split" => split
+                    .iter()
+                    .map(|leg| (leg.method.clone(), leg.amount_cents, leg.card_last4.clone()))
+                    .collect(),
+                _ => vec![(
+                    body.payment.payment_method.clone(),
+                    total_cents,
+                    body.payment.card_last4.clone(),
+                )],
+            };
+
+            for (method, amount_cents, card_last4) in legs {
+                let payment_document = crate::modules::billing::model::PaymentDocument {
+                    id: None,
+                    key: generate_id(prefixes::PAYMENT),
+                    invoice_key: inserted_invoice.key.clone(),
+                    amount_cents,
+                    payment_method: method,
+                    notes: card_last4.map(|last4| format!("Card ending {last4}")),
+                    recorded_by_user_id: cashier_id.clone(),
+                    recorded_by_name_snapshot: body.staff.cashier_name.clone(),
+                    recorded_at: now,
+                    version: 1,
+                    created_at: now,
+                    updated_at: now,
+                };
+                match repository::insert_payment(db, payment_document).await {
+                    Ok(inserted) => payment_documents.push(inserted),
+                    Err(err) => warnings.push(format!(
+                        "Invoice {} was created but a payment record failed to save: {err}",
+                        inserted_invoice.invoice_number
+                    )),
+                }
+            }
+        } else if credit_deposit_cents > 0 {
+            // Up-front deposit on a credit sale. Recorded as a real payment row
+            // so the invoice reads `partially_paid` and the outstanding balance
+            // is derived (total − Σ payments) everywhere, exactly like a later
+            // installment. The customer-balance effect of this deposit is folded
+            // into the single `apply_financial_delta` call below — it must NOT
+            // also go through `service::payments`, or the balance would be
+            // decremented twice.
+            let deposit_document = crate::modules::billing::model::PaymentDocument {
                 id: None,
                 key: generate_id(prefixes::PAYMENT),
                 invoice_key: inserted_invoice.key.clone(),
-                amount_cents,
-                payment_method: method,
-                notes: card_last4.map(|last4| format!("Card ending {last4}")),
+                amount_cents: credit_deposit_cents,
+                payment_method: deposit_method.to_string(),
+                notes: Some(
+                    match (deposit_is_card, body.payment.card_last4.as_deref()) {
+                        (true, Some(last4)) if !last4.is_empty() => {
+                            format!("Deposit at checkout — card ending {last4}")
+                        }
+                        _ => "Deposit at checkout".to_string(),
+                    },
+                ),
                 recorded_by_user_id: cashier_id.clone(),
                 recorded_by_name_snapshot: body.staff.cashier_name.clone(),
                 recorded_at: now,
@@ -629,105 +667,79 @@ pub async fn complete_sale(
                 created_at: now,
                 updated_at: now,
             };
-            match repository::insert_payment(db, payment_document).await {
+            match repository::insert_payment(db, deposit_document).await {
                 Ok(inserted) => payment_documents.push(inserted),
                 Err(err) => warnings.push(format!(
-                    "Invoice {} was created but a payment record failed to save: {err}",
+                    "Invoice {} was created but the deposit payment record failed to save: {err}",
                     inserted_invoice.invoice_number
                 )),
             }
         }
-    } else if credit_deposit_cents > 0 {
-        // Up-front deposit on a credit sale. Recorded as a real payment row
-        // so the invoice reads `partially_paid` and the outstanding balance
-        // is derived (total − Σ payments) everywhere, exactly like a later
-        // installment. The customer-balance effect of this deposit is folded
-        // into the single `apply_financial_delta` call below — it must NOT
-        // also go through `service::payments`, or the balance would be
-        // decremented twice.
-        let deposit_document = crate::modules::billing::model::PaymentDocument {
-            id: None,
-            key: generate_id(prefixes::PAYMENT),
-            invoice_key: inserted_invoice.key.clone(),
-            amount_cents: credit_deposit_cents,
-            payment_method: deposit_method.to_string(),
-            notes: Some(
-                match (deposit_is_card, body.payment.card_last4.as_deref()) {
-                    (true, Some(last4)) if !last4.is_empty() => {
-                        format!("Deposit at checkout — card ending {last4}")
-                    }
-                    _ => "Deposit at checkout".to_string(),
-                },
-            ),
-            recorded_by_user_id: cashier_id.clone(),
-            recorded_by_name_snapshot: body.staff.cashier_name.clone(),
-            recorded_at: now,
-            version: 1,
-            created_at: now,
-            updated_at: now,
-        };
-        match repository::insert_payment(db, deposit_document).await {
-            Ok(inserted) => payment_documents.push(inserted),
-            Err(err) => warnings.push(format!(
-                "Invoice {} was created but the deposit payment record failed to save: {err}",
-                inserted_invoice.invoice_number
-            )),
-        }
-    }
 
-    // Run every line item's stock/ticket side effect concurrently instead of
-    // one-at-a-time — each retail line pays up to 3 sequential Mongo round
-    // trips inside `apply_stock_delta`, so a large cart processed serially
-    // here was the other half (alongside item resolution above) of what
-    // pushed checkout past the frontend's request timeout. Order relative to
-    // `warnings` no longer matters (D4: this section only ever collects
-    // warnings, never fails the request), so collecting results after the
-    // fact is equivalent to the old sequential push.
-    let side_effect_warnings: Vec<Option<String>> = match db {
-        Db::Mongo(_) => {
-            futures_util::future::join_all(resolved_items.iter().map(|item| {
-                apply_line_item_side_effects(db, item, &resolved_products, &inserted_invoice)
-            }))
-            .await
-        }
-        Db::Sqlite(_) => {
-            let mut results = Vec::with_capacity(resolved_items.len());
-            for item in &resolved_items {
-                results.push(
+        // Run every line item's stock/ticket side effect concurrently instead of
+        // one-at-a-time — each retail line pays up to 3 sequential Mongo round
+        // trips inside `apply_stock_delta`, so a large cart processed serially
+        // here was the other half (alongside item resolution above) of what
+        // pushed checkout past the frontend's request timeout. Order relative to
+        // `warnings` no longer matters (D4: this section only ever collects
+        // warnings, never fails the request), so collecting results after the
+        // fact is equivalent to the old sequential push.
+        let side_effect_warnings: Vec<Option<String>> = match db {
+            Db::Mongo(_) => {
+                futures_util::future::join_all(resolved_items.iter().map(|item| {
                     apply_line_item_side_effects(db, item, &resolved_products, &inserted_invoice)
-                        .await,
-                );
-            }
-            results
-        }
-    };
-    warnings.extend(side_effect_warnings.into_iter().flatten());
-
-    if let Some(customer_key) = &customer_key {
-        // Total spend always grows by the full invoice; the owed balance
-        // grows only by the part left on account (total minus any deposit
-        // taken now).
-        let balance_delta = if body.payment.is_credit {
-            total_cents - credit_deposit_cents
-        } else {
-            0
-        };
-        if let Err(err) =
-            customers::service::apply_financial_delta(db, customer_key, total_cents, balance_delta)
+                }))
                 .await
-        {
-            warnings.push(format!("Customer financials could not be updated: {err}"));
-        }
-    }
+            }
+            Db::Sqlite(_) => {
+                let mut results = Vec::with_capacity(resolved_items.len());
+                for item in &resolved_items {
+                    results.push(
+                        apply_line_item_side_effects(
+                            db,
+                            item,
+                            &resolved_products,
+                            &inserted_invoice,
+                        )
+                        .await,
+                    );
+                }
+                results
+            }
+        };
+        warnings.extend(side_effect_warnings.into_iter().flatten());
 
-    Ok(CompleteSaleResponse {
-        invoice: inserted_invoice.into_invoice(),
-        payments: payment_documents
-            .into_iter()
-            .map(|doc| doc.into_payment_record())
-            .collect(),
-        warnings,
+        if let Some(customer_key) = &customer_key {
+            // Total spend always grows by the full invoice; the owed balance
+            // grows only by the part left on account (total minus any deposit
+            // taken now).
+            let balance_delta = if body.payment.is_credit {
+                total_cents - credit_deposit_cents
+            } else {
+                0
+            };
+            if let Err(err) = customers::service::apply_financial_delta(
+                db,
+                customer_key,
+                total_cents,
+                balance_delta,
+            )
+            .await
+            {
+                warnings.push(format!("Customer financials could not be updated: {err}"));
+            }
+        }
+
+        Ok(CompleteSaleResponse {
+            invoice: inserted_invoice.into_invoice(),
+            payments: payment_documents
+                .into_iter()
+                .map(|doc| doc.into_payment_record())
+                .collect(),
+            warnings,
+        })
     })
+    .await
 }
 
 /// Void (D8): reverses retail stock and customer financials, sets
@@ -746,137 +758,140 @@ pub async fn void_invoice(
     body: VoidInvoiceRequest,
     voided_by: String,
 ) -> AppResult<(Invoice, Vec<String>)> {
-    if body.reason.trim().is_empty() {
-        return Err(AppError::validation(
-            "A reason is required to void an invoice",
-        ));
-    }
-
-    let existing = repository::find_invoice_by_id_or_key(db, id_or_key)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Invoice not found", codes::INVOICE_NOT_FOUND)
-        })?;
-
-    if existing.status == InvoiceStatus::Voided {
-        return Err(AppError::conflict(
-            codes::INVOICE_ALREADY_VOIDED,
-            "This invoice has already been voided",
-        ));
-    }
-
-    // How many payment rows `complete_sale` itself would have inserted —
-    // for a credit sale, one if a deposit was taken at checkout else zero;
-    // one per split leg for a split payment; otherwise exactly one. Any
-    // payment beyond that count means a repayment (or credit-note refund)
-    // has since been recorded, which this basic void flow cannot safely
-    // reverse.
-    let expected_payment_count: usize = if existing.is_credit {
-        usize::from(existing.amount_received_cents.unwrap_or(0) > 0)
-    } else if existing.payment_method == "split" {
-        existing
-            .split_payments
-            .as_ref()
-            .map_or(1, |legs| legs.len())
-    } else {
-        1
-    };
-    let payment_count = repository::count_payments_for_invoice(db, &existing.key).await?;
-    if payment_count as usize > expected_payment_count {
-        return Err(AppError::conflict(
-            codes::INVOICE_HAS_PAYMENTS_CANNOT_VOID,
-            "This invoice has payments recorded beyond the original sale and cannot be voided automatically",
-        ));
-    }
-
-    let object_id = existing
-        .id
-        .expect("persisted invoice document must have an _id");
-    let mut warnings: Vec<String> = Vec::new();
-
-    for item in &existing.items {
-        if item.source_type != "retail" {
-            if matches!(item.source_type.as_str(), "repair" | "print") {
-                warnings.push(format!(
-                    "Invoice voided — ticket for '{}' was not reverted and may need manual review",
-                    item.name
-                ));
-            }
-            continue;
+    crate::core::logging::domain::tracked("billing.invoice_voided", async move {
+        if body.reason.trim().is_empty() {
+            return Err(AppError::validation(
+                "A reason is required to void an invoice",
+            ));
         }
-        let Some(product_key) = item.product_key.as_deref() else {
-            continue;
+
+        let existing = repository::find_invoice_by_id_or_key(db, id_or_key)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Invoice not found", codes::INVOICE_NOT_FOUND)
+            })?;
+
+        if existing.status == InvoiceStatus::Voided {
+            return Err(AppError::conflict(
+                codes::INVOICE_ALREADY_VOIDED,
+                "This invoice has already been voided",
+            ));
+        }
+
+        // How many payment rows `complete_sale` itself would have inserted —
+        // for a credit sale, one if a deposit was taken at checkout else zero;
+        // one per split leg for a split payment; otherwise exactly one. Any
+        // payment beyond that count means a repayment (or credit-note refund)
+        // has since been recorded, which this basic void flow cannot safely
+        // reverse.
+        let expected_payment_count: usize = if existing.is_credit {
+            usize::from(existing.amount_received_cents.unwrap_or(0) > 0)
+        } else if existing.payment_method == "split" {
+            existing
+                .split_payments
+                .as_ref()
+                .map_or(1, |legs| legs.len())
+        } else {
+            1
         };
-        match inventory::service::product::get_product_by_key(db, product_key).await {
-            Ok(product) => {
-                let Ok(product_object_id) = ObjectId::parse_str(&product.id) else {
+        let payment_count = repository::count_payments_for_invoice(db, &existing.key).await?;
+        if payment_count as usize > expected_payment_count {
+            return Err(AppError::conflict(
+                codes::INVOICE_HAS_PAYMENTS_CANNOT_VOID,
+                "This invoice has payments recorded beyond the original sale and cannot be voided automatically",
+            ));
+        }
+
+        let object_id = existing
+            .id
+            .expect("persisted invoice document must have an _id");
+        let mut warnings: Vec<String> = Vec::new();
+
+        for item in &existing.items {
+            if item.source_type != "retail" {
+                if matches!(item.source_type.as_str(), "repair" | "print") {
                     warnings.push(format!(
-                        "Product '{}' has an invalid id and its stock was not restored",
-                        item.name
-                    ));
-                    continue;
-                };
-                if let Err(err) = inventory::service::stock::apply_stock_delta(
-                    db,
-                    product_object_id,
-                    item.quantity,
-                    StockMovementType::InvoiceVoidReversal,
-                    Some(existing.key.clone()),
-                    Some(format!("Void of invoice {}", existing.invoice_number)),
-                )
-                .await
-                {
-                    warnings.push(format!(
-                        "Stock for '{}' could not be restored: {err}",
+                        "Invoice voided — ticket for '{}' was not reverted and may need manual review",
                         item.name
                     ));
                 }
+                continue;
             }
-            Err(err) => warnings.push(format!(
-                "Product '{}' (key {product_key}) was not found; its stock was not restored: {err}",
-                item.name
-            )),
+            let Some(product_key) = item.product_key.as_deref() else {
+                continue;
+            };
+            match inventory::service::product::get_product_by_key(db, product_key).await {
+                Ok(product) => {
+                    let Ok(product_object_id) = ObjectId::parse_str(&product.id) else {
+                        warnings.push(format!(
+                            "Product '{}' has an invalid id and its stock was not restored",
+                            item.name
+                        ));
+                        continue;
+                    };
+                    if let Err(err) = inventory::service::stock::apply_stock_delta(
+                        db,
+                        product_object_id,
+                        item.quantity,
+                        StockMovementType::InvoiceVoidReversal,
+                        Some(existing.key.clone()),
+                        Some(format!("Void of invoice {}", existing.invoice_number)),
+                    )
+                    .await
+                    {
+                        warnings.push(format!(
+                            "Stock for '{}' could not be restored: {err}",
+                            item.name
+                        ));
+                    }
+                }
+                Err(err) => warnings.push(format!(
+                    "Product '{}' (key {product_key}) was not found; its stock was not restored: {err}",
+                    item.name
+                )),
+            }
         }
-    }
 
-    if let Some(customer_key) = &existing.customer_key {
-        // Only the amount that actually landed on the customer's account
-        // (total minus any checkout deposit) was ever added to their owed
-        // balance, so only that much is reversed. The deposit payment row
-        // itself is left in place (same as a voided cash sale keeps its
-        // sale-time payment row).
-        let balance_delta = if existing.is_credit {
-            -(existing.total_cents - existing.amount_received_cents.unwrap_or(0))
-        } else {
-            0
+        if let Some(customer_key) = &existing.customer_key {
+            // Only the amount that actually landed on the customer's account
+            // (total minus any checkout deposit) was ever added to their owed
+            // balance, so only that much is reversed. The deposit payment row
+            // itself is left in place (same as a voided cash sale keeps its
+            // sale-time payment row).
+            let balance_delta = if existing.is_credit {
+                -(existing.total_cents - existing.amount_received_cents.unwrap_or(0))
+            } else {
+                0
+            };
+            if let Err(err) = customers::service::apply_financial_delta(
+                db,
+                customer_key,
+                -existing.total_cents,
+                balance_delta,
+            )
+            .await
+            {
+                warnings.push(format!("Customer financials could not be reversed: {err}"));
+            }
+        }
+
+        let set_doc = doc! {
+            "status": InvoiceStatus::Voided.as_str(),
+            "voided_at": BsonDateTime::now(),
+            "voided_by": &voided_by,
+            "voided_reason": &body.reason,
+            "updated_at": BsonDateTime::now(),
         };
-        if let Err(err) = customers::service::apply_financial_delta(
-            db,
-            customer_key,
-            -existing.total_cents,
-            balance_delta,
-        )
-        .await
-        {
-            warnings.push(format!("Customer financials could not be reversed: {err}"));
-        }
-    }
 
-    let set_doc = doc! {
-        "status": InvoiceStatus::Voided.as_str(),
-        "voided_at": BsonDateTime::now(),
-        "voided_by": &voided_by,
-        "voided_reason": &body.reason,
-        "updated_at": BsonDateTime::now(),
-    };
+        let updated = repository::update_invoice_status(db, object_id, set_doc)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Invoice not found", codes::INVOICE_NOT_FOUND)
+            })?;
 
-    let updated = repository::update_invoice_status(db, object_id, set_doc)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Invoice not found", codes::INVOICE_NOT_FOUND)
-        })?;
-
-    Ok((updated.into_invoice(), warnings))
+        Ok((updated.into_invoice(), warnings))
+    })
+    .await
 }
 
 /// Marks a fully paid invoice `Closed` — a manual, explicit "done, nothing
@@ -885,43 +900,47 @@ pub async fn void_invoice(
 /// against it; re-queries `credit_notes` live for that guard rather than
 /// trusting `Invoice.credit_note_count` alone.
 pub async fn close_invoice(db: &Db, id_or_key: &str, closed_by: String) -> AppResult<Invoice> {
-    let existing = repository::find_invoice_by_id_or_key(db, id_or_key)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Invoice not found", codes::INVOICE_NOT_FOUND)
-        })?;
+    crate::core::logging::domain::tracked("billing.invoice_closed", async move {
+        let existing = repository::find_invoice_by_id_or_key(db, id_or_key)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Invoice not found", codes::INVOICE_NOT_FOUND)
+            })?;
 
-    if existing.status != InvoiceStatus::Paid {
-        return Err(AppError::conflict(
-            codes::INVOICE_NOT_CLOSABLE,
-            "Only a fully paid invoice can be closed",
-        ));
-    }
+        if existing.status != InvoiceStatus::Paid {
+            return Err(AppError::conflict(
+                codes::INVOICE_NOT_CLOSABLE,
+                "Only a fully paid invoice can be closed",
+            ));
+        }
 
-    let open_credit_notes =
-        repository::credit_notes::count_open_credit_notes_for_invoice(db, &existing.key).await?;
-    if open_credit_notes > 0 {
-        return Err(AppError::conflict(
-            codes::INVOICE_NOT_CLOSABLE,
-            "This invoice has an open credit note — void or resolve it before closing",
-        ));
-    }
+        let open_credit_notes =
+            repository::credit_notes::count_open_credit_notes_for_invoice(db, &existing.key)
+                .await?;
+        if open_credit_notes > 0 {
+            return Err(AppError::conflict(
+                codes::INVOICE_NOT_CLOSABLE,
+                "This invoice has an open credit note — void or resolve it before closing",
+            ));
+        }
 
-    let object_id = existing
-        .id
-        .expect("persisted invoice document must have an _id");
-    let set_doc = doc! {
-        "status": InvoiceStatus::Closed.as_str(),
-        "closed_at": BsonDateTime::now(),
-        "closed_by": &closed_by,
-        "updated_at": BsonDateTime::now(),
-    };
+        let object_id = existing
+            .id
+            .expect("persisted invoice document must have an _id");
+        let set_doc = doc! {
+            "status": InvoiceStatus::Closed.as_str(),
+            "closed_at": BsonDateTime::now(),
+            "closed_by": &closed_by,
+            "updated_at": BsonDateTime::now(),
+        };
 
-    let updated = repository::update_invoice_status(db, object_id, set_doc)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Invoice not found", codes::INVOICE_NOT_FOUND)
-        })?;
+        let updated = repository::update_invoice_status(db, object_id, set_doc)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Invoice not found", codes::INVOICE_NOT_FOUND)
+            })?;
 
-    Ok(updated.into_invoice())
+        Ok(updated.into_invoice())
+    })
+    .await
 }

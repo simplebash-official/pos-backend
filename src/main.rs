@@ -6,8 +6,7 @@
 
 use std::sync::Arc;
 
-use jana2u_pos_backend::{app, app::AppState, clients, core::config::Config};
-use tracing_subscriber::EnvFilter;
+use jana2u_pos_backend::{app, app::AppState, clients, core::config::Config, core::logging};
 
 #[tokio::main]
 async fn main() {
@@ -15,12 +14,7 @@ async fn main() {
     // set); `Config::from_env()` below is what actually enforces the
     // required variables are present..
     dotenvy::dotenv().ok();
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("jana2u_pos_backend=info,tower_http=info,info")),
-        )
-        .init();
+    logging::init("jana2u_pos_backend=info,tower_http=info,info");
 
     let config = Config::from_env().unwrap_or_else(|err| {
         tracing::error!(%err, "invalid configuration");
@@ -28,6 +22,19 @@ async fn main() {
     });
     let port = config.port;
     let bind_addr = config.bind_addr.clone();
+    tracing::info!(
+        category = "lifecycle",
+        event = "startup.config",
+        version = env!("CARGO_PKG_VERSION"),
+        database_type = ?config.database_type,
+        bind_addr = %config.bind_addr,
+        port = config.port,
+        auto_seed = config.auto_seed,
+        document_server_url = %config.document_server_url,
+        generated_documents_dir = %config.generated_documents_dir,
+        log_settings = ?logging::settings(),
+        "backend configuration loaded"
+    );
 
     tracing::info!(
         database_type = ?config.database_type,

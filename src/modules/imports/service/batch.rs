@@ -25,99 +25,103 @@ pub(crate) async fn process_import(
     user: &CurrentUser,
     body: ProcessImportRequest,
 ) -> AppResult<ImportBatch> {
-    let target = body.target.trim().to_lowercase();
-    let file_name = body.file_name.trim().to_string();
-    let file_type = body.file_type.trim().to_lowercase();
+    crate::core::logging::domain::tracked("imports.processed", async move {
+        let target = body.target.trim().to_lowercase();
+        let file_name = body.file_name.trim().to_string();
+        let file_type = body.file_type.trim().to_lowercase();
 
-    if target.is_empty() {
-        return Err(AppError::validation("Target module is required"));
-    }
-    if file_name.is_empty() {
-        return Err(AppError::validation("File name is required"));
-    }
-    if body.rows.is_empty() {
-        return Err(AppError::validation(
-            "Cannot import empty file: no rows provided",
-        ));
-    }
-
-    // Permission check based on target
-    match target.as_str() {
-        "inventory" => {
-            user.require_permission(crate::core::constants::permissions::INVENTORY_WRITE)?;
+        if target.is_empty() {
+            return Err(AppError::validation("Target module is required"));
         }
-        _ => {
-            return Err(AppError::custom(
-                axum::http::StatusCode::BAD_REQUEST,
-                codes::IMPORT_TARGET_UNSUPPORTED,
-                format!("Import target '{target}' is not supported"),
+        if file_name.is_empty() {
+            return Err(AppError::validation("File name is required"));
+        }
+        if body.rows.is_empty() {
+            return Err(AppError::validation(
+                "Cannot import empty file: no rows provided",
             ));
         }
-    }
 
-    let batch_key = generate_id(prefixes::IMPORT_BATCH);
-    let total_rows = body.rows.len() as u64;
-    let now = mongodb::bson::DateTime::now();
-
-    // 1. Initial batch insertion with status "processing"
-    let initial_doc = ImportBatchDocument {
-        id: None,
-        key: batch_key.clone(),
-        target: target.clone(),
-        file_name: file_name.clone(),
-        file_type: file_type.clone(),
-        file_size_bytes: body.file_size_bytes,
-        total_rows,
-        successful_rows: 0,
-        failed_rows: 0,
-        status: "processing".to_string(),
-        errors: Vec::new(),
-        created_by_user_key: Some(user.user_id.clone()),
-        created_by_user_name: None,
-        created_at: now,
-        updated_at: now,
-    };
-
-    let inserted_doc = repository::batch::insert_batch(db, initial_doc).await?;
-
-    let options = body.options.unwrap_or_default();
-
-    // 2. Dispatch to target handler
-    let (successful_count, failed_count, errors) = match target.as_str() {
-        "inventory" => {
-            let res =
-                process_inventory_import(db, &body.rows, &options, &file_name, &batch_key).await?;
-            (res.successful_count, res.failed_count, res.errors)
+        // Permission check based on target
+        match target.as_str() {
+            "inventory" => {
+                user.require_permission(crate::core::constants::permissions::INVENTORY_WRITE)?;
+            }
+            _ => {
+                return Err(AppError::custom(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    codes::IMPORT_TARGET_UNSUPPORTED,
+                    format!("Import target '{target}' is not supported"),
+                ));
+            }
         }
-        _ => unreachable!(),
-    };
 
-    // 3. Determine final status
-    let status = if failed_count == 0 {
-        "completed".to_string()
-    } else if successful_count == 0 {
-        "failed".to_string()
-    } else {
-        "partially_completed".to_string()
-    };
+        let batch_key = generate_id(prefixes::IMPORT_BATCH);
+        let total_rows = body.rows.len() as u64;
+        let now = mongodb::bson::DateTime::now();
 
-    let doc_errors = errors
-        .into_iter()
-        .map(ImportRowErrorDocument::from_row_error)
-        .collect();
+        // 1. Initial batch insertion with status "processing"
+        let initial_doc = ImportBatchDocument {
+            id: None,
+            key: batch_key.clone(),
+            target: target.clone(),
+            file_name: file_name.clone(),
+            file_type: file_type.clone(),
+            file_size_bytes: body.file_size_bytes,
+            total_rows,
+            successful_rows: 0,
+            failed_rows: 0,
+            status: "processing".to_string(),
+            errors: Vec::new(),
+            created_by_user_key: Some(user.user_id.clone()),
+            created_by_user_name: None,
+            created_at: now,
+            updated_at: now,
+        };
 
-    let updated_doc = repository::batch::update_batch_result(
-        db,
-        &batch_key,
-        successful_count,
-        failed_count,
-        &status,
-        doc_errors,
-    )
-    .await?
-    .unwrap_or(inserted_doc);
+        let inserted_doc = repository::batch::insert_batch(db, initial_doc).await?;
 
-    Ok(updated_doc.into_import_batch())
+        let options = body.options.unwrap_or_default();
+
+        // 2. Dispatch to target handler
+        let (successful_count, failed_count, errors) = match target.as_str() {
+            "inventory" => {
+                let res =
+                    process_inventory_import(db, &body.rows, &options, &file_name, &batch_key)
+                        .await?;
+                (res.successful_count, res.failed_count, res.errors)
+            }
+            _ => unreachable!(),
+        };
+
+        // 3. Determine final status
+        let status = if failed_count == 0 {
+            "completed".to_string()
+        } else if successful_count == 0 {
+            "failed".to_string()
+        } else {
+            "partially_completed".to_string()
+        };
+
+        let doc_errors = errors
+            .into_iter()
+            .map(ImportRowErrorDocument::from_row_error)
+            .collect();
+
+        let updated_doc = repository::batch::update_batch_result(
+            db,
+            &batch_key,
+            successful_count,
+            failed_count,
+            &status,
+            doc_errors,
+        )
+        .await?
+        .unwrap_or(inserted_doc);
+
+        Ok(updated_doc.into_import_batch())
+    })
+    .await
 }
 
 pub(crate) async fn get_import_batch(db: &Db, key: &str) -> AppResult<ImportBatch> {

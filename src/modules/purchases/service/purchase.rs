@@ -39,81 +39,88 @@ use crate::{
 /// reusing the one place stock is ever mutated rather than duplicating that
 /// invariant here.
 pub async fn record_purchase(db: &Db, body: CreatePurchaseRequest) -> AppResult<Purchase> {
-    if body.quantity < 1 {
-        return Err(AppError::validation("Quantity must be at least 1"));
-    }
-    if body.unit_cost_cents < 0 {
-        return Err(AppError::validation("Unit cost cannot be negative"));
-    }
+    crate::core::logging::domain::tracked("purchases.recorded", async move {
+        if body.quantity < 1 {
+            return Err(AppError::validation("Quantity must be at least 1"));
+        }
+        if body.unit_cost_cents < 0 {
+            return Err(AppError::validation("Unit cost cannot be negative"));
+        }
 
-    let supplier = supplier_service::get_supplier_by_key(db, &body.supplier_key).await?;
-    let product = inventory_product::get_product_by_key(db, &body.product_key).await?;
+        let supplier = supplier_service::get_supplier_by_key(db, &body.supplier_key).await?;
+        let product = inventory_product::get_product_by_key(db, &body.product_key).await?;
 
-    let serial_numbers = body.serial_numbers.clone().unwrap_or_default();
-    if product.is_serialized && serial_numbers.len() as i64 != body.quantity {
-        return Err(AppError::validation(format!(
-            "This product is serialized — provide exactly {} serial number(s), got {}",
+        let serial_numbers = body.serial_numbers.clone().unwrap_or_default();
+        if product.is_serialized && serial_numbers.len() as i64 != body.quantity {
+            return Err(AppError::validation(format!(
+                "This product is serialized — provide exactly {} serial number(s), got {}",
+                body.quantity,
+                serial_numbers.len()
+            )));
+        }
+
+        let now = BsonDateTime::now();
+        let key = generate_id(prefixes::PURCHASE);
+        let document = PurchaseDocument {
+            id: None,
+            key: key.clone(),
+            supplier_key: body.supplier_key,
+            product_key: body.product_key,
+            quantity: body.quantity,
+            unit_cost_cents: body.unit_cost_cents,
+            date: BsonDateTime::from_chrono(body.date),
+            reference_no: body.reference_no.clone(),
+            notes: body.notes,
+            version: 1,
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+            updated_by_device: None,
+        };
+
+        let inserted = repository::insert_purchase(db, document).await?;
+
+        let product_object_id = ObjectId::parse_str(&product.id).expect(
+            "Product.id returned from get_product_by_key is always a valid ObjectId hex string",
+        );
+        inventory_stock::apply_stock_delta(
+            db,
+            product_object_id,
             body.quantity,
-            serial_numbers.len()
-        )));
-    }
+            StockMovementType::PurchaseReceipt,
+            Some(key),
+            body.reference_no,
+        )
+        .await?;
 
-    let now = BsonDateTime::now();
-    let key = generate_id(prefixes::PURCHASE);
-    let document = PurchaseDocument {
-        id: None,
-        key: key.clone(),
-        supplier_key: body.supplier_key,
-        product_key: body.product_key,
-        quantity: body.quantity,
-        unit_cost_cents: body.unit_cost_cents,
-        date: BsonDateTime::from_chrono(body.date),
-        reference_no: body.reference_no.clone(),
-        notes: body.notes,
-        version: 1,
-        created_at: now,
-        updated_at: now,
-        deleted_at: None,
-        updated_by_device: None,
-    };
-
-    let inserted = repository::insert_purchase(db, document).await?;
-
-    let product_object_id = ObjectId::parse_str(&product.id).expect(
-        "Product.id returned from get_product_by_key is always a valid ObjectId hex string",
-    );
-    inventory_stock::apply_stock_delta(
-        db,
-        product_object_id,
-        body.quantity,
-        StockMovementType::PurchaseReceipt,
-        Some(key),
-        body.reference_no,
-    )
-    .await?;
-
-    if product.is_serialized {
-        inventory_product_serial::create_serials_for_purchase(db, &product.key, &serial_numbers)
+        if product.is_serialized {
+            inventory_product_serial::create_serials_for_purchase(
+                db,
+                &product.key,
+                &serial_numbers,
+            )
             .await?;
-    }
+        }
 
-    let supplier_summary = SupplierSummary {
-        id: supplier.id,
-        key: supplier.key,
-        name: supplier.name,
-        contact_person: supplier.contact_person,
-        primary_phone: supplier.primary_phone,
-    };
-    let product_summary = ProductSummary {
-        id: product.id,
-        key: product.key,
-        sku: product.sku,
-        name: product.name,
-        category: product.category,
-        subcategory: product.subcategory,
-    };
+        let supplier_summary = SupplierSummary {
+            id: supplier.id,
+            key: supplier.key,
+            name: supplier.name,
+            contact_person: supplier.contact_person,
+            primary_phone: supplier.primary_phone,
+        };
+        let product_summary = ProductSummary {
+            id: product.id,
+            key: product.key,
+            sku: product.sku,
+            name: product.name,
+            category: product.category,
+            subcategory: product.subcategory,
+        };
 
-    Ok(inserted.into_purchase(Some(supplier_summary), Some(product_summary)))
+        Ok(inserted.into_purchase(Some(supplier_summary), Some(product_summary)))
+    })
+    .await
 }
 
 /// Lists purchases scoped to a supplier, a product, their intersection, or all purchases paginated.

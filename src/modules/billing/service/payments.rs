@@ -34,81 +34,86 @@ pub async fn record_payment(
     recorded_by_user_id: String,
     recorded_by_name: String,
 ) -> AppResult<PaymentRecord> {
-    if body.amount_cents <= 0 {
-        return Err(AppError::validation("Payment amount must be positive"));
-    }
+    crate::core::logging::domain::tracked("billing.payment_recorded", async move {
+        if body.amount_cents <= 0 {
+            return Err(AppError::validation("Payment amount must be positive"));
+        }
 
-    let invoice = repository::find_invoice_by_key(db, invoice_key)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Invoice not found", codes::INVOICE_NOT_FOUND)
-        })?;
+        let invoice = repository::find_invoice_by_key(db, invoice_key)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Invoice not found", codes::INVOICE_NOT_FOUND)
+            })?;
 
-    if invoice.status == InvoiceStatus::Voided {
-        return Err(AppError::conflict(
-            codes::INVOICE_ALREADY_VOIDED,
-            "Cannot record a payment against a voided invoice",
-        ));
-    }
+        if invoice.status == InvoiceStatus::Voided {
+            return Err(AppError::conflict(
+                codes::INVOICE_ALREADY_VOIDED,
+                "Cannot record a payment against a voided invoice",
+            ));
+        }
 
-    let existing_payments = repository::list_payments_for_invoice(db, invoice_key).await?;
-    let already_paid: i64 = existing_payments.iter().map(|p| p.amount_cents).sum();
-    let outstanding = invoice.total_cents - already_paid;
-    if body.amount_cents > outstanding {
-        return Err(AppError::conflict_with_details(
-            codes::PAYMENT_EXCEEDS_BALANCE,
-            format!(
-                "This payment ({} cents) exceeds the outstanding balance ({} cents)",
-                body.amount_cents, outstanding
-            ),
-            serde_json::json!({ "outstandingCents": outstanding }),
-        ));
-    }
+        let existing_payments = repository::list_payments_for_invoice(db, invoice_key).await?;
+        let already_paid: i64 = existing_payments.iter().map(|p| p.amount_cents).sum();
+        let outstanding = invoice.total_cents - already_paid;
+        if body.amount_cents > outstanding {
+            return Err(AppError::conflict_with_details(
+                codes::PAYMENT_EXCEEDS_BALANCE,
+                format!(
+                    "This payment ({} cents) exceeds the outstanding balance ({} cents)",
+                    body.amount_cents, outstanding
+                ),
+                serde_json::json!({ "outstandingCents": outstanding }),
+            ));
+        }
 
-    let now = BsonDateTime::now();
-    let payment_document = PaymentDocument {
-        id: None,
-        key: generate_id(prefixes::PAYMENT),
-        invoice_key: invoice_key.to_string(),
-        amount_cents: body.amount_cents,
-        payment_method: body.payment_method,
-        notes: body.notes,
-        recorded_by_user_id,
-        recorded_by_name_snapshot: recorded_by_name,
-        recorded_at: now,
-        version: 1,
-        created_at: now,
-        updated_at: now,
-    };
-    let inserted = repository::insert_payment(db, payment_document).await?;
+        let now = BsonDateTime::now();
+        let payment_document = PaymentDocument {
+            id: None,
+            key: generate_id(prefixes::PAYMENT),
+            invoice_key: invoice_key.to_string(),
+            amount_cents: body.amount_cents,
+            payment_method: body.payment_method,
+            notes: body.notes,
+            recorded_by_user_id,
+            recorded_by_name_snapshot: recorded_by_name,
+            recorded_at: now,
+            version: 1,
+            created_at: now,
+            updated_at: now,
+        };
+        let inserted = repository::insert_payment(db, payment_document).await?;
 
-    let new_total_paid = already_paid + inserted.amount_cents;
-    let new_status = InvoiceStatus::from_payment_progress(invoice.total_cents, new_total_paid);
-    if new_status != invoice.status
-        && let Some(invoice_id) = invoice.id
-        && let Err(err) = repository::update_invoice_status(
-            db,
-            invoice_id,
-            doc! { "status": new_status.as_str(), "updated_at": BsonDateTime::now() },
-        )
-        .await
-    {
-        tracing::error!(invoice_key, new_status = new_status.as_str(), error = %err, "payment recorded but invoice status update failed");
-    }
+        let new_total_paid = already_paid + inserted.amount_cents;
+        let new_status = InvoiceStatus::from_payment_progress(invoice.total_cents, new_total_paid);
+        if new_status != invoice.status
+            && let Some(invoice_id) = invoice.id
+            && let Err(err) = repository::update_invoice_status(
+                db,
+                invoice_id,
+                doc! { "status": new_status.as_str(), "updated_at": BsonDateTime::now() },
+            )
+            .await
+        {
+            tracing::error!(invoice_key, new_status = new_status.as_str(), error = %err, "payment recorded but invoice status update failed");
+        }
 
-    if let Some(customer_key) = &invoice.customer_key
-        && let Err(err) = crate::modules::customers::service::apply_financial_delta(
-            db,
-            customer_key,
-            0,
-            -inserted.amount_cents,
-        )
-        .await
-    {
-        tracing::error!(invoice_key, customer_key, error = %err, "payment recorded but customer balance update failed");
-    }
+        if let Some(customer_key) = &invoice.customer_key
+            && let Err(err) = crate::modules::customers::service::apply_financial_delta(
+                db,
+                customer_key,
+                0,
+                -inserted.amount_cents,
+            )
+            .await
+        {
+            tracing::error!(invoice_key, customer_key, error = %err, "payment recorded but customer balance update failed");
+        }
 
-    Ok(inserted.into_payment_record())
+        Ok(inserted.into_payment_record())
+
+    })
+
+    .await
 }
 
 pub async fn list_payments(db: &Db, invoice_key: &str) -> AppResult<Vec<PaymentRecord>> {
