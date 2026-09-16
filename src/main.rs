@@ -15,6 +15,8 @@ async fn main() {
     // required variables are present..
     dotenvy::dotenv().ok();
     logging::init("jana2u_pos_backend=info,tower_http=info,info");
+    // Desktop only: lets the shell change logging while we run.
+    logging::control::spawn_stdin_control();
 
     let config = Config::from_env().unwrap_or_else(|err| {
         tracing::error!(%err, "invalid configuration");
