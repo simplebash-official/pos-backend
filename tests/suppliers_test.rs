@@ -7,7 +7,7 @@ use axum::{
         header::{AUTHORIZATION, CONTENT_TYPE},
     },
 };
-use jana2u_pos_backend::{
+use myrologic_pos_backend::{
     core::{config::Config, constants::roles, id::generate_id},
     domain::users::Role,
     modules::inventory::model::{CategoryDocument, SubcategoryDocument},
@@ -885,7 +885,7 @@ async fn suppliers_stats_endpoint_returns_totals_categories_and_direct_contacts(
     // stats tests.
     let app = common::spawn_app().await;
     let db_name = format!("jtstats_{}", &Uuid::new_v4().simple().to_string()[..24]);
-    let db = jana2u_pos_backend::clients::mongo::connect(&app.config.mongodb_uri, &db_name)
+    let db = myrologic_pos_backend::clients::mongo::connect(&app.config.mongodb_uri, &db_name)
         .await
         .expect("failed to connect to isolated stats test database");
 
@@ -901,8 +901,8 @@ async fn suppliers_stats_endpoint_returns_totals_categories_and_direct_contacts(
     // Soft-deleted — must be excluded from both counts.
     seed_supplier_with(&db, "Deleted Contact", vec!["Batteries".to_string()], true).await;
 
-    let db_handle = jana2u_pos_backend::clients::db::Db::Mongo(db.clone());
-    let stats = jana2u_pos_backend::modules::suppliers::service::get_supplier_stats(&db_handle)
+    let db_handle = myrologic_pos_backend::clients::db::Db::Mongo(db.clone());
+    let stats = myrologic_pos_backend::modules::suppliers::service::get_supplier_stats(&db_handle)
         .await
         .expect("get_supplier_stats should succeed");
 

@@ -7,7 +7,7 @@ use axum::{
         header::{AUTHORIZATION, CONTENT_TYPE},
     },
 };
-use jana2u_pos_backend::{
+use myrologic_pos_backend::{
     core::{
         constants::{codes, roles},
         error::AppError,
@@ -71,7 +71,7 @@ async fn send_authed(
     execute(router, request).await
 }
 
-fn admin_token(config: &jana2u_pos_backend::core::config::Config) -> String {
+fn admin_token(config: &myrologic_pos_backend::core::config::Config) -> String {
     common::mint_token(
         config,
         Some(Role::Admin),
@@ -79,7 +79,7 @@ fn admin_token(config: &jana2u_pos_backend::core::config::Config) -> String {
     )
 }
 
-fn manager_token(config: &jana2u_pos_backend::core::config::Config) -> String {
+fn manager_token(config: &myrologic_pos_backend::core::config::Config) -> String {
     common::mint_token(
         config,
         Some(Role::Manager),
@@ -90,7 +90,7 @@ fn manager_token(config: &jana2u_pos_backend::core::config::Config) -> String {
 /// A caller authenticated as Staff — a real role, but Staff's default
 /// permission set has neither `users:manage` nor `users:manage:staff`, so
 /// every `users` write/read route should reject this token with 403.
-fn staff_token(config: &jana2u_pos_backend::core::config::Config) -> String {
+fn staff_token(config: &myrologic_pos_backend::core::config::Config) -> String {
     common::mint_token(
         config,
         Some(Role::Staff),

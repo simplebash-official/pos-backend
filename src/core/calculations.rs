@@ -1,4 +1,4 @@
-// Centralized monetary & financial calculations engine for jana2u-pos backend.
+// Centralized monetary & financial calculations engine for myrologic-pos backend.
 //
 // Provides pure mathematical functions with 100% precision in integer cents:
 // - Line item totals & discounts

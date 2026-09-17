@@ -8,7 +8,7 @@ use axum::{
     },
 };
 use chrono::{Duration, Utc};
-use jana2u_pos_backend::{
+use myrologic_pos_backend::{
     core::{constants::roles, id::generate_id},
     domain::{
         billing::{InvoiceItem, InvoiceStatus},

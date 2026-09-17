@@ -4,7 +4,7 @@ use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
-use jana2u_pos_backend::seeds;
+use myrologic_pos_backend::seeds;
 use serde_json::json;
 use tower::ServiceExt;
 
@@ -222,7 +222,7 @@ async fn test_seeded_data_works_in_sale_transaction() {
             "amountReceivedCents": unit_price_cents * 2
         },
         "shopProfileSnapshot": {
-            "name": "Jana2u POS",
+            "name": "MyroLogic POS",
             "address": "Colombo"
         }
     });

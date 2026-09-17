@@ -10,7 +10,7 @@ use utoipa::{
 #[openapi(
     modifiers(&SecurityAddon),
     info(
-        title = "jana2u-pos API",
+        title = "MyroLogic POS API",
         description = "POS backend for a repair/retail shop: billing, repairs, print jobs, inventory, customers, reports.",
         version = "0.1.0"
     ),

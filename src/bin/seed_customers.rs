@@ -1,4 +1,4 @@
-use jana2u_pos_backend::{clients, core::config::Config, seeds};
+use myrologic_pos_backend::{clients, core::config::Config, seeds};
 
 /// Seeds the customers collection/table with 20 realistic sample customers.
 /// Upserts idempotently, safe to run against SQLite or MongoDB.

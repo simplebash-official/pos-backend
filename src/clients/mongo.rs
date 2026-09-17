@@ -33,7 +33,7 @@ pub async fn connect(uri: &str, db_name: &str) -> mongodb::error::Result<Databas
                 continue;
             }
         };
-        options.app_name = Some("jana2u-pos-backend".to_string());
+        options.app_name = Some("myrologic-pos-backend".to_string());
 
         let client = match Client::with_options(options) {
             Ok(c) => c,

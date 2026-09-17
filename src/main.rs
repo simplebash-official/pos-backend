@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use jana2u_pos_backend::{app, app::AppState, clients, core::config::Config, core::logging};
+use myrologic_pos_backend::{app, app::AppState, clients, core::config::Config, core::logging};
 
 #[tokio::main]
 async fn main() {
@@ -14,7 +14,7 @@ async fn main() {
     // set); `Config::from_env()` below is what actually enforces the
     // required variables are present..
     dotenvy::dotenv().ok();
-    logging::init("jana2u_pos_backend=info,tower_http=info,info");
+    logging::init("myrologic_pos_backend=info,tower_http=info,info");
     // Desktop only: lets the shell change logging while we run.
     logging::control::spawn_stdin_control();
 
@@ -57,7 +57,7 @@ async fn main() {
 
     if config.auto_seed {
         tracing::info!("AUTO_SEED is enabled — checking and seeding database...");
-        match jana2u_pos_backend::seeds::seed_all(&db).await {
+        match myrologic_pos_backend::seeds::seed_all(&db).await {
             Ok(summary) => {
                 tracing::info!(
                     admin = %summary.admin.message,
@@ -99,7 +99,7 @@ async fn main() {
     }
 
     let reports_engine =
-        Arc::new(jana2u_pos_backend::modules::reports::engine::AnalyticsEngine::new(db.clone()));
+        Arc::new(myrologic_pos_backend::modules::reports::engine::AnalyticsEngine::new(db.clone()));
     reports_engine.init().await;
 
     let state = AppState {

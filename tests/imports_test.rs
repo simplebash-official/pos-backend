@@ -7,7 +7,7 @@ use axum::{
         header::{AUTHORIZATION, CONTENT_TYPE},
     },
 };
-use jana2u_pos_backend::{
+use myrologic_pos_backend::{
     core::{
         config::Config,
         constants::{codes, roles},

@@ -7,7 +7,7 @@ use axum::{
         header::{AUTHORIZATION, CONTENT_TYPE},
     },
 };
-use jana2u_pos_backend::{
+use myrologic_pos_backend::{
     core::{constants::roles, middleware::auth::Claims},
     domain::users::Role,
 };
@@ -68,7 +68,7 @@ async fn send_authed(
     execute(router, request).await
 }
 
-fn admin_token(config: &jana2u_pos_backend::core::config::Config) -> String {
+fn admin_token(config: &myrologic_pos_backend::core::config::Config) -> String {
     common::mint_token(
         config,
         Some(Role::Admin),

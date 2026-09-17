@@ -6,7 +6,7 @@ use axum::{
 };
 use bson::DateTime as BsonDateTime;
 use chrono::Utc;
-use jana2u_pos_backend::{
+use myrologic_pos_backend::{
     core::{
         config::Config,
         constants::{prefixes, roles},
@@ -831,7 +831,7 @@ async fn sync_changes_employees_match_the_rest_dto_shape() {
         .find(|item| item["key"] == serde_json::json!(employee_key))
         .expect("the seeded employee must appear in the delta feed");
 
-    let typed: jana2u_pos_backend::domain::employees::Employee =
+    let typed: myrologic_pos_backend::domain::employees::Employee =
         serde_json::from_value(item.clone())
             .expect("a sync item must deserialize as the REST Employee DTO");
     assert_eq!(typed.name, employee_name);

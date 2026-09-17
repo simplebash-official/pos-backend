@@ -1,4 +1,4 @@
--- SQLite schema for jana2u-pos backend
+-- SQLite schema for myrologic-pos backend
 -- All tables maintain custom unique key, timestamps, version, and soft deletion.
 
 CREATE TABLE IF NOT EXISTS products (

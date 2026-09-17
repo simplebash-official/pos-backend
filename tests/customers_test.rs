@@ -7,7 +7,7 @@ use axum::{
         header::{AUTHORIZATION, CONTENT_TYPE},
     },
 };
-use jana2u_pos_backend::{
+use myrologic_pos_backend::{
     core::{
         config::Config,
         constants::{codes, roles},
@@ -625,7 +625,7 @@ async fn customers_stats_endpoint_returns_totals_balance_and_debtor_count() {
     // stats tests.
     let app = common::spawn_app().await;
     let db_name = format!("jtstats_{}", &Uuid::new_v4().simple().to_string()[..24]);
-    let db = jana2u_pos_backend::clients::mongo::connect(&app.config.mongodb_uri, &db_name)
+    let db = myrologic_pos_backend::clients::mongo::connect(&app.config.mongodb_uri, &db_name)
         .await
         .expect("failed to connect to isolated stats test database");
 
@@ -635,8 +635,8 @@ async fn customers_stats_endpoint_returns_totals_balance_and_debtor_count() {
     // Soft-deleted with a balance — must be excluded entirely.
     seed_customer_with(&db, 9000, true).await;
 
-    let db_handle = jana2u_pos_backend::clients::db::Db::Mongo(db.clone());
-    let stats = jana2u_pos_backend::modules::customers::service::get_customer_stats(&db_handle)
+    let db_handle = myrologic_pos_backend::clients::db::Db::Mongo(db.clone());
+    let stats = myrologic_pos_backend::modules::customers::service::get_customer_stats(&db_handle)
         .await
         .expect("get_customer_stats should succeed");
 

@@ -1,7 +1,7 @@
 use chrono::Utc;
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
-use jana2u_pos_backend::domain::reports::{CategorySalesRow, PatternCell, TimeSeriesPoint};
-use jana2u_pos_backend::modules::reports::engine::charts::{
+use myrologic_pos_backend::domain::reports::{CategorySalesRow, PatternCell, TimeSeriesPoint};
+use myrologic_pos_backend::modules::reports::engine::charts::{
     analyze_sales_patterns, enrich_timeseries, top_categories_with_other,
 };
 

@@ -14,7 +14,7 @@
 // MUST run before deploying the new backend binary in any environment that
 // has pre-existing data — the new code has no compat shim for the old shape.
 
-use jana2u_pos_backend::{
+use myrologic_pos_backend::{
     clients, core::config::Config, core::constants::prefixes, core::id::generate_id,
 };
 use mongodb::{

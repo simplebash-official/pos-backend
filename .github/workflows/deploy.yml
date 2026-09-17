@@ -6,7 +6,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: jana2u-pos-system/jana2u-backend
+  IMAGE_NAME: myrologic/backend
 
 jobs:
   build-and-push:
@@ -44,7 +44,7 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
-            cd /opt/jana2u
+            cd /opt/myrologic
             
             # Pull the latest backend image
             docker compose pull backend

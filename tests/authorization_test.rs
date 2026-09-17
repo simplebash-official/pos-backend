@@ -28,7 +28,7 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
-use jana2u_pos_backend::{app, app::AppState, clients, core::config::Config};
+use myrologic_pos_backend::{app, app::AppState, clients, core::config::Config};
 use mongodb::Client;
 use mongodb::options::{ClientOptions, ResolverConfig};
 use tower::ServiceExt;
@@ -64,13 +64,13 @@ async fn build_test_app() -> axum::Router {
     dotenvy::dotenv().ok();
     let config = Config::from_env().expect("invalid configuration for test run");
     let db_handle = match config.database_type {
-        jana2u_pos_backend::core::config::DatabaseType::Sqlite => {
+        myrologic_pos_backend::core::config::DatabaseType::Sqlite => {
             let pool = sqlx::sqlite::SqlitePoolOptions::new()
                 .connect_lazy("sqlite::memory:")
                 .expect("in-memory sqlite pool");
-            jana2u_pos_backend::clients::db::Db::Sqlite(pool)
+            myrologic_pos_backend::clients::db::Db::Sqlite(pool)
         }
-        jana2u_pos_backend::core::config::DatabaseType::Mongo => {
+        myrologic_pos_backend::core::config::DatabaseType::Mongo => {
             let uri = if config.mongodb_uri.is_empty() {
                 "mongodb://localhost:27017"
             } else {
@@ -92,12 +92,12 @@ async fn build_test_app() -> axum::Router {
             };
             let client = Client::with_options(options).expect("client construction");
             let db_name = if config.mongodb_db_name.is_empty() {
-                "jana2u_pos_test"
+                "myrologic_pos_test"
             } else {
                 &config.mongodb_db_name
             };
             let db = client.database(db_name);
-            jana2u_pos_backend::clients::db::Db::Mongo(db)
+            myrologic_pos_backend::clients::db::Db::Mongo(db)
         }
     };
 
@@ -107,7 +107,7 @@ async fn build_test_app() -> axum::Router {
         config.document_server_api_key.clone(),
     ));
     let reports_engine = Arc::new(
-        jana2u_pos_backend::modules::reports::engine::AnalyticsEngine::new(db_handle.clone()),
+        myrologic_pos_backend::modules::reports::engine::AnalyticsEngine::new(db_handle.clone()),
     );
     let state = AppState {
         config,

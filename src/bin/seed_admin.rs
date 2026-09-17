@@ -1,4 +1,4 @@
-use jana2u_pos_backend::{clients, core::config::Config, seeds};
+use myrologic_pos_backend::{clients, core::config::Config, seeds};
 
 /// Bootstraps the first Admin account with default credentials `admin@pos.com` / `admin@1234`.
 ///

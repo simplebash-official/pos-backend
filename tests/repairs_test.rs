@@ -7,7 +7,7 @@ use axum::{
         header::{AUTHORIZATION, CONTENT_TYPE},
     },
 };
-use jana2u_pos_backend::{
+use myrologic_pos_backend::{
     core::{constants::roles, id::generate_id},
     domain::users::Role,
     modules::repairs::model::RepairDocument,
@@ -68,7 +68,7 @@ async fn send_authed(
     execute(router, request).await
 }
 
-fn staff_token(config: &jana2u_pos_backend::core::config::Config) -> String {
+fn staff_token(config: &myrologic_pos_backend::core::config::Config) -> String {
     common::mint_token(
         config,
         Some(Role::Staff),
@@ -76,7 +76,7 @@ fn staff_token(config: &jana2u_pos_backend::core::config::Config) -> String {
     )
 }
 
-fn unprivileged_token(config: &jana2u_pos_backend::core::config::Config) -> String {
+fn unprivileged_token(config: &myrologic_pos_backend::core::config::Config) -> String {
     common::mint_token(config, Some(Role::Staff), &[])
 }
 
@@ -662,7 +662,7 @@ async fn repairs_stats_endpoint_returns_today_job_count_revenue_pending_count_an
         "jtstats_{}",
         &uuid::Uuid::new_v4().simple().to_string()[..24]
     );
-    let db = jana2u_pos_backend::clients::mongo::connect(&app.config.mongodb_uri, &db_name)
+    let db = myrologic_pos_backend::clients::mongo::connect(&app.config.mongodb_uri, &db_name)
         .await
         .expect("failed to connect to isolated stats test database");
 
@@ -681,8 +681,8 @@ async fn repairs_stats_endpoint_returns_today_job_count_revenue_pending_count_an
     // Backdated cancelled ticket — excluded from pending entirely.
     seed_repair_with(&db, "cancelled", Some(1000), yesterday).await;
 
-    let db_handle = jana2u_pos_backend::clients::db::Db::Mongo(db.clone());
-    let stats = jana2u_pos_backend::modules::repairs::service::get_repair_stats(&db_handle)
+    let db_handle = myrologic_pos_backend::clients::db::Db::Mongo(db.clone());
+    let stats = myrologic_pos_backend::modules::repairs::service::get_repair_stats(&db_handle)
         .await
         .expect("get_repair_stats should succeed");
 
@@ -703,7 +703,7 @@ async fn repairs_stats_endpoint_returns_today_job_count_revenue_pending_count_an
 // Employee assignment FK resolution
 // ============================================================================
 
-fn admin_token(config: &jana2u_pos_backend::core::config::Config) -> String {
+fn admin_token(config: &myrologic_pos_backend::core::config::Config) -> String {
     common::mint_token(
         config,
         Some(Role::Admin),

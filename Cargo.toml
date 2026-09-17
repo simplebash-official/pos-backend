@@ -1,8 +1,8 @@
 [package]
-name = "jana2u_pos_backend"
+name = "myrologic_pos_backend"
 version = "0.1.0"
 edition = "2024"
-default-run = "jana2u_pos_backend"
+default-run = "myrologic_pos_backend"
 
 [dependencies]
 argon2 = "0.5.3"

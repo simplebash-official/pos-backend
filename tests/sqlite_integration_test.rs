@@ -7,7 +7,7 @@ use axum::{
         header::{AUTHORIZATION, CONTENT_TYPE},
     },
 };
-use jana2u_pos_backend::{
+use myrologic_pos_backend::{
     app::{self, AppState},
     clients::{self, db::Db},
     core::{
@@ -71,7 +71,7 @@ async fn setup_sqlite_app() -> SqliteTestContext {
     ));
     let db_handle = Db::Sqlite(pool);
     let reports_engine = Arc::new(
-        jana2u_pos_backend::modules::reports::engine::AnalyticsEngine::new(db_handle.clone()),
+        myrologic_pos_backend::modules::reports::engine::AnalyticsEngine::new(db_handle.clone()),
     );
     let state = AppState {
         config: config.clone(),
@@ -435,7 +435,7 @@ async fn test_sqlite_complete_pos_lifecycle() {
                 "amountReceivedCents": 300000
             },
             "shopProfileSnapshot": {
-                "name": "Jana2u Shop",
+                "name": "MyroLogic Shop",
                 "address": "Colombo"
             }
         })),

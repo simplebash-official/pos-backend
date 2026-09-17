@@ -7,7 +7,7 @@ use axum::{
         header::{AUTHORIZATION, CONTENT_TYPE},
     },
 };
-use jana2u_pos_backend::{
+use myrologic_pos_backend::{
     core::{
         config::Config,
         constants::{codes, roles},
@@ -1898,7 +1898,7 @@ async fn inventory_stats_endpoint_returns_totals_and_low_stock_alerts() {
     // as the billing/repairs/print-jobs stats tests.
     let app = common::spawn_app().await;
     let db_name = format!("jtstats_{}", &Uuid::new_v4().simple().to_string()[..24]);
-    let db = jana2u_pos_backend::clients::mongo::connect(&app.config.mongodb_uri, &db_name)
+    let db = myrologic_pos_backend::clients::mongo::connect(&app.config.mongodb_uri, &db_name)
         .await
         .expect("failed to connect to isolated stats test database");
 
@@ -1913,9 +1913,9 @@ async fn inventory_stats_endpoint_returns_totals_and_low_stock_alerts() {
     seed_product_with(&db, &category_key_2, &subcategory_key_2, 50, 5, false).await;
     seed_product_with(&db, &category_key_2, &subcategory_key_2, 1, 5, true).await;
 
-    let db_handle = jana2u_pos_backend::clients::db::Db::Mongo(db.clone());
+    let db_handle = myrologic_pos_backend::clients::db::Db::Mongo(db.clone());
     let stats =
-        jana2u_pos_backend::modules::inventory::service::stats::get_inventory_stats(&db_handle)
+        myrologic_pos_backend::modules::inventory::service::stats::get_inventory_stats(&db_handle)
             .await
             .expect("get_inventory_stats should succeed");
 

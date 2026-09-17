@@ -7,7 +7,7 @@ use axum::{
         header::{AUTHORIZATION, CONTENT_TYPE},
     },
 };
-use jana2u_pos_backend::{
+use myrologic_pos_backend::{
     app::{self, AppState},
     clients::{self, db::Db},
     core::{
@@ -76,7 +76,7 @@ async fn setup_sqlite_app() -> SqliteTestContext {
 
     let db = Db::Sqlite(pool.clone());
     let reports_engine =
-        Arc::new(jana2u_pos_backend::modules::reports::engine::AnalyticsEngine::new(db.clone()));
+        Arc::new(myrologic_pos_backend::modules::reports::engine::AnalyticsEngine::new(db.clone()));
 
     let state = AppState {
         config: config.clone(),

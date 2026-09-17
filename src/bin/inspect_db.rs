@@ -1,4 +1,4 @@
-use jana2u_pos_backend::{
+use myrologic_pos_backend::{
     clients,
     core::config::Config,
     domain::inventory::ProductListQuery,
