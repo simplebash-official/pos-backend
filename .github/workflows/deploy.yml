@@ -6,7 +6,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: simplebash-official/backend
+  IMAGE_NAME: simplebash-official/pos-backend
 
 jobs:
   build-and-push:
