@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-The Rust/Axum API backend for **myrologic-pos**, a point-of-sale system for a repair/retail shop (billing, repairs, print jobs, inventory, customers, reports, suppliers). Persistence supports dual database engines: **SQLite** (`DATABASE_TYPE=sqlite`, default, at `pos.db` or via `DATABASE_URL`) and **MongoDB** (`DATABASE_TYPE=mongodb` via `MONGODB_URI`). The sibling `../frontend` (React + Vite + Mantine) is the client this API serves, expecting endpoints under `env.apiBaseUrl` (`/api` by default).
+The Rust/Axum API backend for **simplebash-pos**, a point-of-sale system for a repair/retail shop (billing, repairs, print jobs, inventory, customers, reports, suppliers). Persistence supports dual database engines: **SQLite** (`DATABASE_TYPE=sqlite`, default, at `pos.db` or via `DATABASE_URL`) and **MongoDB** (`DATABASE_TYPE=mongodb` via `MONGODB_URI`). The sibling `../frontend` (React + Vite + Mantine) is the client this API serves, expecting endpoints under `env.apiBaseUrl` (`/api` by default).
 
 ## Where the rest of the guidance lives
 
@@ -24,7 +24,7 @@ The invariants below apply everywhere and are easy to violate, so they stay resi
 
 ## Commands
 
-- `cargo run` — run the server (equivalent to `cargo run --bin myrologic_pos_backend`; required explicitly if disambiguating from the seed binaries). Respects `AUTO_SEED=true` to automatically run seeders on startup.
+- `cargo run` — run the server (equivalent to `cargo run --bin simplebash_pos_backend`; required explicitly if disambiguating from the seed binaries). Respects `AUTO_SEED=true` to automatically run seeders on startup.
 - `cargo test` — run all tests. `tests/sqlite_integration_test.rs`, `tests/seeding_test.rs`, `tests/openapi_test.rs`, and `tests/response_format_test.rs` run without live MongoDB; Mongo-specific integration tests require a reachable MongoDB instance.
 - `cargo test --test scenarios_test health_route_returns_success_format` — run a single integration test by name
 - `cargo run --bin seed_all` — runs all seeds in dependency order (`admin`, `providers`, `suppliers`, `customers`, `inventory`, `api_key`) across SQLite or MongoDB
@@ -58,7 +58,7 @@ Default `DATABASE_TYPE=sqlite` requires no external services (creates `pos.db` a
 The integration test files, each a different tradeoff between speed and realism:
 - `tests/sqlite_integration_test.rs` — tests complete end-to-end POS lifecycle (products, sales, payments, credit notes, stock tracking) directly against in-memory SQLite.
 - `tests/seeding_test.rs` — tests seed idempotency, complete database population, and sale transactions against seeded data.
-- `tests/scenarios_test.rs` (+ `tests/common/mod.rs::spawn_app()`) — builds the real router against a **real** MongoDB (no mocking), using `MONGODB_TEST_DB_NAME` (defaults to `myrologic_pos_test`) instead of the dev database so it never touches dev data. Use for anything that actually reads/writes Mongo.
+- `tests/scenarios_test.rs` (+ `tests/common/mod.rs::spawn_app()`) — builds the real router against a **real** MongoDB (no mocking), using `MONGODB_TEST_DB_NAME` (defaults to `simplebash_pos_test`) instead of the dev database so it never touches dev data. Use for anything that actually reads/writes Mongo.
 - `tests/inventory_test.rs` / `tests/suppliers_test.rs` / `tests/auth_test.rs` / `tests/users_test.rs` / `tests/reports_test.rs` / etc. — the same `spawn_app()` real-Mongo style as `scenarios_test.rs`, just split into their own files per feature area. Follow this pattern (own `tests/<area>_test.rs` file, `mod common;`, `send`/`send_authed` request helpers, `common::mint_token` for hand-minted role/permission tokens) when a new module needs real-Mongo coverage.
 - `tests/openapi_test.rs` — builds the real router with a `mongodb::Client` that is never pinged (still needs `MONGODB_URI` to be a syntactically valid connection string via `.env`, but no live Mongo needed). Asserts the OpenAPI spec lists every module path and Swagger UI serves. Use for anything about routing/docs wiring rather than data.
 - `tests/authorization_test.rs` — same no-live-Mongo construction as `openapi_test.rs`. Walks **every** operation in the generated OpenAPI document, sends it an unauthenticated request, and asserts 401 unless the route is on its `PUBLIC_ROUTES` allowlist (health, `POST /auth/login`, and the module-status stubs) — plus the converse, that those public routes still answer, and that a route's `security(...)` annotation matches whether it really enforces auth. This is the guard for the fact that auth is opt-in per handler: a new route registered through `routes!()` is audited the moment it exists, with no edit to this file. If it fails, the fix is almost always a missing `CurrentUser`/`AdminUser` handler argument — add to `PUBLIC_ROUTES` only when a route is genuinely meant to be open, and mirror it in `app::build_router`'s comment.

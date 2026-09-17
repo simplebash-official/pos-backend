@@ -1,4 +1,4 @@
-use myrologic_pos_backend::{clients, core::config::Config, seeds};
+use simplebash_pos_backend::{clients, core::config::Config, seeds};
 
 /// Bootstraps the entire POS system database:
 /// 1. Admin account (`admin@pos.com` / `admin@1234`)

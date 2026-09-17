@@ -8,7 +8,7 @@ use axum::{
     },
 };
 use chrono::{Duration, NaiveDate, Utc};
-use myrologic_pos_backend::{
+use simplebash_pos_backend::{
     core::{constants::roles, id::generate_id},
     domain::{billing::InvoiceStatus, users::Role},
     modules::{
@@ -218,7 +218,7 @@ async fn dashboard_overview_and_daily_sales_aggregate_data() {
         cashier_id: "usr_cashier1".to_string(),
         cashier_name_snapshot: "Cashier One".to_string(),
         items: vec![
-            myrologic_pos_backend::domain::billing::InvoiceItem {
+            simplebash_pos_backend::domain::billing::InvoiceItem {
                 product_key: Some("prd_phone_case".to_string()),
                 name: "Phone Case".to_string(),
                 sku: Some("PHO-CAS-0001".to_string()),
@@ -234,7 +234,7 @@ async fn dashboard_overview_and_daily_sales_aggregate_data() {
                 returned_quantity: 0,
                 serial_numbers: vec![],
             },
-            myrologic_pos_backend::domain::billing::InvoiceItem {
+            simplebash_pos_backend::domain::billing::InvoiceItem {
                 product_key: None,
                 name: "Screen Repair Service".to_string(),
                 sku: None,
@@ -294,7 +294,7 @@ async fn dashboard_overview_and_daily_sales_aggregate_data() {
         customer_address_snapshot: None,
         cashier_id: "usr_cashier1".to_string(),
         cashier_name_snapshot: "Cashier One".to_string(),
-        items: vec![myrologic_pos_backend::domain::billing::InvoiceItem {
+        items: vec![simplebash_pos_backend::domain::billing::InvoiceItem {
             product_key: None,
             name: "T-Shirt Sublimation Print".to_string(),
             sku: None,
@@ -354,7 +354,7 @@ async fn dashboard_overview_and_daily_sales_aggregate_data() {
         customer_address_snapshot: None,
         cashier_id: "usr_cashier1".to_string(),
         cashier_name_snapshot: "Cashier One".to_string(),
-        items: vec![myrologic_pos_backend::domain::billing::InvoiceItem {
+        items: vec![simplebash_pos_backend::domain::billing::InvoiceItem {
             product_key: Some("prd_phone_screen".to_string()),
             name: "Replacement Screen Part".to_string(),
             sku: Some("PHO-SCR-0002".to_string()),
@@ -801,7 +801,7 @@ fn analytics_seed_invoice(
     quantity: i64,
     invoice_discount_cents: i64,
 ) -> InvoiceDocument {
-    use myrologic_pos_backend::domain::billing::InvoiceItem;
+    use simplebash_pos_backend::domain::billing::InvoiceItem;
     let net = (line_total_cents - invoice_discount_cents).max(0);
     InvoiceDocument {
         id: None,
@@ -1138,7 +1138,7 @@ async fn analytics_document_returns_a_pdf() {
 // Dashboard reminders feed (GET /api/reports/reminders)
 // ===========================================================================
 
-fn full_access_token(config: &myrologic_pos_backend::core::config::Config) -> String {
+fn full_access_token(config: &simplebash_pos_backend::core::config::Config) -> String {
     common::mint_token(
         config,
         Some(Role::Admin),

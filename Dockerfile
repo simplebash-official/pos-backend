@@ -34,7 +34,7 @@ RUN cargo chef cook --release --recipe-path recipe.json
 # Copy application source and build release binaries
 COPY . .
 RUN cargo build --release && \
-    strip target/release/myrologic_pos_backend && \
+    strip target/release/simplebash_pos_backend && \
     mkdir -p target/release/bins && \
     for src in src/bin/*.rs; do \
       bin=$(basename "$src" .rs); \
@@ -67,14 +67,14 @@ RUN mkdir -p /app/generated_documents /app/data /app/bin && \
     chown -R appuser:appuser /app
 
 # Copy stripped binaries from builder stage
-COPY --from=builder --chown=appuser:appuser /app/target/release/myrologic_pos_backend /app/myrologic_pos_backend
+COPY --from=builder --chown=appuser:appuser /app/target/release/simplebash_pos_backend /app/simplebash_pos_backend
 COPY --from=builder --chown=appuser:appuser /app/target/release/bins/ /app/bin/
 
 # Environment defaults
 ENV PORT=8080 \
     DATABASE_URL=sqlite:///app/data/pos.db?mode=rwc \
     GENERATED_DOCUMENTS_DIR=/app/generated_documents \
-    RUST_LOG=myrologic_pos_backend=info,tower_http=info,info
+    RUST_LOG=simplebash_pos_backend=info,tower_http=info,info
 
 # Declare persistent volumes for generated invoice/receipt PDF storage and SQLite database
 VOLUME ["/app/generated_documents", "/app/data"]
@@ -86,4 +86,4 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8080/api/health || exit 1
 
-CMD ["/app/myrologic_pos_backend"]
+CMD ["/app/simplebash_pos_backend"]

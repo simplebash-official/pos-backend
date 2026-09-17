@@ -1,4 +1,4 @@
-use myrologic_pos_backend::{clients, core::config::Config, seeds};
+use simplebash_pos_backend::{clients, core::config::Config, seeds};
 use std::fs;
 use std::path::Path;
 

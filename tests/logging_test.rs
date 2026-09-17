@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use myrologic_pos_backend::{app, app::AppState, clients, core::config::Config};
+use simplebash_pos_backend::{app, app::AppState, clients, core::config::Config};
 use tower::ServiceExt;
 
 #[derive(Clone, Default)]
@@ -44,7 +44,7 @@ async fn build_test_app() -> axum::Router {
         config.document_server_api_key.clone(),
     ));
     let reports_engine =
-        Arc::new(myrologic_pos_backend::modules::reports::engine::AnalyticsEngine::new(db.clone()));
+        Arc::new(simplebash_pos_backend::modules::reports::engine::AnalyticsEngine::new(db.clone()));
     app::build_router(AppState {
         config,
         db,

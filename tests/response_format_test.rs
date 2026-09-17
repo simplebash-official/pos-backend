@@ -4,7 +4,7 @@
 // response/error envelope itself, not endpoint behavior.
 
 use axum::{http::StatusCode, response::IntoResponse};
-use myrologic_pos_backend::core::{error::AppError, response::ApiResponse};
+use simplebash_pos_backend::core::{error::AppError, response::ApiResponse};
 use serde_json::json;
 
 #[tokio::test]

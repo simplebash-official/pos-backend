@@ -1,4 +1,4 @@
-use myrologic_pos_backend::{
+use simplebash_pos_backend::{
     core::calculations::{
         compute_change_due, compute_line_total, compute_order_discount, compute_sale_totals,
         validate_split_payments,

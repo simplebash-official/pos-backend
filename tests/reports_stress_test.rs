@@ -12,7 +12,7 @@ use axum::{
 };
 use chrono::{Duration, Utc};
 use futures_util::future::join_all;
-use myrologic_pos_backend::{
+use simplebash_pos_backend::{
     core::{constants::roles, id::generate_id},
     domain::{
         billing::{InvoiceItem, InvoiceStatus},

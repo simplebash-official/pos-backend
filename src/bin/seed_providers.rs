@@ -1,4 +1,4 @@
-use myrologic_pos_backend::{clients, core::config::Config, seeds};
+use simplebash_pos_backend::{clients, core::config::Config, seeds};
 
 /// Seeds the categories and subcategories reference data into the database.
 /// Upserts idempotently, safe to run against SQLite or MongoDB.

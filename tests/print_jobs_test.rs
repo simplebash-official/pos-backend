@@ -7,7 +7,7 @@ use axum::{
         header::{AUTHORIZATION, CONTENT_TYPE},
     },
 };
-use myrologic_pos_backend::{
+use simplebash_pos_backend::{
     core::{constants::roles, id::generate_id},
     domain::users::Role,
     modules::print_jobs::model::PrintJobDocument,
@@ -68,7 +68,7 @@ async fn send_authed(
     execute(router, request).await
 }
 
-fn staff_token(config: &myrologic_pos_backend::core::config::Config) -> String {
+fn staff_token(config: &simplebash_pos_backend::core::config::Config) -> String {
     common::mint_token(
         config,
         Some(Role::Staff),
@@ -76,7 +76,7 @@ fn staff_token(config: &myrologic_pos_backend::core::config::Config) -> String {
     )
 }
 
-fn unprivileged_token(config: &myrologic_pos_backend::core::config::Config) -> String {
+fn unprivileged_token(config: &simplebash_pos_backend::core::config::Config) -> String {
     common::mint_token(config, Some(Role::Staff), &[])
 }
 
@@ -570,7 +570,7 @@ async fn print_jobs_stats_endpoint_returns_today_job_count_revenue_pending_count
         "jtstats_{}",
         &uuid::Uuid::new_v4().simple().to_string()[..24]
     );
-    let db = myrologic_pos_backend::clients::mongo::connect(&app.config.mongodb_uri, &db_name)
+    let db = simplebash_pos_backend::clients::mongo::connect(&app.config.mongodb_uri, &db_name)
         .await
         .expect("failed to connect to isolated stats test database");
 
@@ -588,8 +588,8 @@ async fn print_jobs_stats_endpoint_returns_today_job_count_revenue_pending_count
     // Backdated cancelled job — excluded from pending entirely.
     seed_print_job_with(&db, "cancelled", 1000, yesterday).await;
 
-    let db_handle = myrologic_pos_backend::clients::db::Db::Mongo(db.clone());
-    let stats = myrologic_pos_backend::modules::print_jobs::service::get_print_job_stats(&db_handle)
+    let db_handle = simplebash_pos_backend::clients::db::Db::Mongo(db.clone());
+    let stats = simplebash_pos_backend::modules::print_jobs::service::get_print_job_stats(&db_handle)
         .await
         .expect("get_print_job_stats should succeed");
 
@@ -608,7 +608,7 @@ async fn print_jobs_stats_endpoint_returns_today_job_count_revenue_pending_count
 // Employee assignment FK resolution
 // ============================================================================
 
-fn admin_token(config: &myrologic_pos_backend::core::config::Config) -> String {
+fn admin_token(config: &simplebash_pos_backend::core::config::Config) -> String {
     common::mint_token(
         config,
         Some(Role::Admin),

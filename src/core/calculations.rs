@@ -1,4 +1,4 @@
-// Centralized monetary & financial calculations engine for myrologic-pos backend.
+// Centralized monetary & financial calculations engine for simplebash-pos backend.
 //
 // Provides pure mathematical functions with 100% precision in integer cents:
 // - Line item totals & discounts

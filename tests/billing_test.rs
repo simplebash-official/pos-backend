@@ -8,7 +8,7 @@ use axum::{
     },
 };
 use chrono::Utc;
-use myrologic_pos_backend::{
+use simplebash_pos_backend::{
     core::{config::Config, constants::roles, id::generate_id},
     domain::{billing::InvoiceStatus, users::Role},
     modules::{
@@ -1531,7 +1531,7 @@ async fn billing_stats_endpoint_returns_today_sales_invoice_count_outstanding_cr
     let app = common::spawn_app().await;
     // Atlas caps database names at 38 bytes.
     let db_name = format!("jtstats_{}", &Uuid::new_v4().simple().to_string()[..24]);
-    let db = myrologic_pos_backend::clients::mongo::connect(&app.config.mongodb_uri, &db_name)
+    let db = simplebash_pos_backend::clients::mongo::connect(&app.config.mongodb_uri, &db_name)
         .await
         .expect("failed to connect to isolated stats test database");
 
@@ -1550,8 +1550,8 @@ async fn billing_stats_endpoint_returns_today_sales_invoice_count_outstanding_cr
     seed_invoice_with(&db, 10_000, false, "paid", yesterday).await;
     seed_invoice_with(&db, 700, false, "pending", yesterday).await;
 
-    let db_handle = myrologic_pos_backend::clients::db::Db::Mongo(db.clone());
-    let stats = myrologic_pos_backend::modules::billing::service::get_billing_stats(&db_handle)
+    let db_handle = simplebash_pos_backend::clients::db::Db::Mongo(db.clone());
+    let stats = simplebash_pos_backend::modules::billing::service::get_billing_stats(&db_handle)
         .await
         .expect("get_billing_stats should succeed");
 

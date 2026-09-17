@@ -4,8 +4,8 @@ use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
-use myrologic_pos_backend::core::middleware::idempotency::IdempotencyDocument;
-use myrologic_pos_backend::domain::users::Role;
+use simplebash_pos_backend::core::middleware::idempotency::IdempotencyDocument;
+use simplebash_pos_backend::domain::users::Role;
 use mongodb::bson::DateTime as BsonDateTime;
 use tower::ServiceExt;
 use uuid::Uuid;

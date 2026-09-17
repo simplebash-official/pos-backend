@@ -10,7 +10,7 @@ use utoipa::{
 #[openapi(
     modifiers(&SecurityAddon),
     info(
-        title = "MyroLogic POS API",
+        title = "SimpleBash POS API",
         description = "POS backend for a repair/retail shop: billing, repairs, print jobs, inventory, customers, reports.",
         version = "0.1.0"
     ),

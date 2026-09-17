@@ -7,7 +7,7 @@ use axum::{
         header::{AUTHORIZATION, CONTENT_TYPE},
     },
 };
-use myrologic_pos_backend::{core::constants::roles, domain::users::Role};
+use simplebash_pos_backend::{core::constants::roles, domain::users::Role};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -46,7 +46,7 @@ async fn send_authed(
     execute(router, request).await
 }
 
-fn admin_token(config: &myrologic_pos_backend::core::config::Config) -> String {
+fn admin_token(config: &simplebash_pos_backend::core::config::Config) -> String {
     common::mint_token(
         config,
         Some(Role::Admin),
@@ -54,7 +54,7 @@ fn admin_token(config: &myrologic_pos_backend::core::config::Config) -> String {
     )
 }
 
-fn manager_token(config: &myrologic_pos_backend::core::config::Config) -> String {
+fn manager_token(config: &simplebash_pos_backend::core::config::Config) -> String {
     common::mint_token(
         config,
         Some(Role::Manager),
@@ -65,7 +65,7 @@ fn manager_token(config: &myrologic_pos_backend::core::config::Config) -> String
 /// Staff's default permission set has `employees:read` but not
 /// `employees:write` — every write route should 403 this token, every read
 /// route should succeed.
-fn staff_token(config: &myrologic_pos_backend::core::config::Config) -> String {
+fn staff_token(config: &simplebash_pos_backend::core::config::Config) -> String {
     common::mint_token(
         config,
         Some(Role::Staff),

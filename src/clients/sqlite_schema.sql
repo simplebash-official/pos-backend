@@ -1,4 +1,4 @@
--- SQLite schema for myrologic-pos backend
+-- SQLite schema for simplebash-pos backend
 -- All tables maintain custom unique key, timestamps, version, and soft deletion.
 
 CREATE TABLE IF NOT EXISTS products (

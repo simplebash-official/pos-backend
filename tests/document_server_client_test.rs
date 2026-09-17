@@ -9,7 +9,7 @@ use std::sync::{
 };
 
 use axum::{Json, Router, http::StatusCode, response::IntoResponse, routing::get};
-use myrologic_pos_backend::clients::document_server::DocumentServerClient;
+use simplebash_pos_backend::clients::document_server::DocumentServerClient;
 use serde_json::json;
 
 async fn spawn(app: Router) -> String {

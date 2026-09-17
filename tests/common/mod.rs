@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::Router;
-use myrologic_pos_backend::{
+use simplebash_pos_backend::{
     app, app::AppState, clients, core::config::Config, core::middleware::auth::Claims,
     domain::users::Role,
 };
@@ -19,7 +19,7 @@ pub struct TestApp {
     #[allow(dead_code)]
     pub db: Database,
     #[allow(dead_code)]
-    pub db_handle: myrologic_pos_backend::clients::db::Db,
+    pub db_handle: simplebash_pos_backend::clients::db::Db,
     #[allow(dead_code)]
     pub config: Arc<Config>,
 }
@@ -216,7 +216,7 @@ pub async fn spawn_app_with_document_server_url(document_server_url: String) -> 
 
     let mut config = Config::from_env().expect("invalid configuration for test run");
     config.mongodb_db_name =
-        std::env::var("MONGODB_TEST_DB_NAME").unwrap_or_else(|_| "myrologic_pos_test".to_string());
+        std::env::var("MONGODB_TEST_DB_NAME").unwrap_or_else(|_| "simplebash_pos_test".to_string());
 
     let db = clients::mongo::connect(&config.mongodb_uri, &config.mongodb_db_name)
         .await
@@ -229,9 +229,9 @@ pub async fn spawn_app_with_document_server_url(document_server_url: String) -> 
         config.document_server_url.clone(),
         config.document_server_api_key.clone(),
     ));
-    let db_handle = myrologic_pos_backend::clients::db::Db::Mongo(db.clone());
+    let db_handle = simplebash_pos_backend::clients::db::Db::Mongo(db.clone());
     let reports_engine = Arc::new(
-        myrologic_pos_backend::modules::reports::engine::AnalyticsEngine::new(db_handle.clone()),
+        simplebash_pos_backend::modules::reports::engine::AnalyticsEngine::new(db_handle.clone()),
     );
     let state = AppState {
         config: config.clone(),
@@ -261,8 +261,8 @@ pub async fn spawn_app_sqlite_with_document_server_url(document_server_url: Stri
     dotenvy::dotenv().ok();
 
     let mut config = Config::from_env().expect("invalid configuration for test run");
-    config.database_type = myrologic_pos_backend::core::config::DatabaseType::Sqlite;
-    let test_id = myrologic_pos_backend::core::id::generate_id("test");
+    config.database_type = simplebash_pos_backend::core::config::DatabaseType::Sqlite;
+    let test_id = simplebash_pos_backend::core::id::generate_id("test");
     let test_db_path = format!("data/test_{test_id}.db");
     config.database_url = format!("sqlite://{test_db_path}?mode=rwc");
 
@@ -277,7 +277,7 @@ pub async fn spawn_app_sqlite_with_document_server_url(document_server_url: Stri
         config.document_server_api_key.clone(),
     ));
     let reports_engine = Arc::new(
-        myrologic_pos_backend::modules::reports::engine::AnalyticsEngine::new(db_handle.clone()),
+        simplebash_pos_backend::modules::reports::engine::AnalyticsEngine::new(db_handle.clone()),
     );
     let state = AppState {
         config: config.clone(),
@@ -292,7 +292,7 @@ pub async fn spawn_app_sqlite_with_document_server_url(document_server_url: Stri
             .await
             .expect("fallback mongo client"),
     };
-    let db = mongo_client.database("myrologic_pos_test");
+    let db = mongo_client.database("simplebash_pos_test");
 
     TestApp {
         router: app::build_router(state),

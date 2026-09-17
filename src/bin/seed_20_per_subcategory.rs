@@ -1,4 +1,4 @@
-use myrologic_pos_backend::{
+use simplebash_pos_backend::{
     clients,
     core::config::Config,
     domain::inventory::{CreateProductRequest, ProductListQuery},

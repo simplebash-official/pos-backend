@@ -7,7 +7,7 @@ use axum::{
         header::{AUTHORIZATION, CONTENT_TYPE},
     },
 };
-use myrologic_pos_backend::{
+use simplebash_pos_backend::{
     core::{
         config::Config,
         constants::{codes, roles},
