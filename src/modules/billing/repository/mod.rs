@@ -6,12 +6,10 @@
 pub(crate) mod credit_notes;
 pub(crate) mod invoice;
 
+use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use chrono::{DateTime, Utc};
 use futures_util::TryStreamExt;
-use mongodb::{
-    Collection, Database,
-    bson::{DateTime as BsonDateTime, Document, doc, oid::ObjectId},
-};
+use mongodb::bson::{DateTime as BsonDateTime, Document, doc, oid::ObjectId};
 use sqlx::Row;
 
 use crate::{
@@ -28,11 +26,11 @@ use crate::{
     },
 };
 
-fn invoices(db: &Database) -> Collection<InvoiceDocument> {
+fn invoices(db: &TenantDatabase) -> ScopedCollection<InvoiceDocument> {
     db.collection("invoices")
 }
 
-fn payments(db: &Database) -> Collection<PaymentDocument> {
+fn payments(db: &TenantDatabase) -> ScopedCollection<PaymentDocument> {
     db.collection("payments")
 }
 

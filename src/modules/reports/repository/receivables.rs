@@ -1,11 +1,9 @@
 // MongoDB aggregation queries for credit receivables and overdue balance tracking.
 
+use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use chrono::{NaiveDate, Utc};
 use futures_util::TryStreamExt;
-use mongodb::{
-    Collection, Database,
-    bson::{DateTime as BsonDateTime, Document, doc, oid::ObjectId},
-};
+use mongodb::bson::{DateTime as BsonDateTime, Document, doc, oid::ObjectId};
 
 use sqlx::Row;
 
@@ -15,11 +13,11 @@ use crate::{
     domain::reports::OutstandingInvoiceEntry,
 };
 
-fn invoices(db: &Database) -> Collection<Document> {
+fn invoices(db: &TenantDatabase) -> ScopedCollection<Document> {
     db.collection("invoices")
 }
 
-fn payments(db: &Database) -> Collection<Document> {
+fn payments(db: &TenantDatabase) -> ScopedCollection<Document> {
     db.collection("payments")
 }
 

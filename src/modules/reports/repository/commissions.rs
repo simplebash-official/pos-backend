@@ -9,14 +9,12 @@
 // `service::commissions::get_employee_commissions_report`, which calls
 // `employees::service::get_employees_by_keys` after this function returns.
 
+use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
 use futures_util::TryStreamExt;
-use mongodb::{
-    Collection, Database,
-    bson::{DateTime as BsonDateTime, Document, doc},
-};
+use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
 
 use crate::{
     clients::{db::Db, sqlite::map_sqlite_row_to_document},
@@ -30,11 +28,11 @@ use crate::{
 pub(crate) const UNASSIGNED_TECHNICIAN: &str = "__unassigned_technician__";
 pub(crate) const UNASSIGNED_PRINTER: &str = "__unassigned_printer__";
 
-fn repairs(db: &Database) -> Collection<Document> {
+fn repairs(db: &TenantDatabase) -> ScopedCollection<Document> {
     db.collection("repairs")
 }
 
-fn print_jobs(db: &Database) -> Collection<Document> {
+fn print_jobs(db: &TenantDatabase) -> ScopedCollection<Document> {
     db.collection("print_jobs")
 }
 

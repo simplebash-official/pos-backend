@@ -707,31 +707,13 @@ pub async fn create_credit_note(
             let mut return_subtotal_cents: i64 = 0;
 
             for item_req in &body.returned_items {
-                let matched_idx = updated_invoice_items
-                    .iter()
-                    .position(|item| {
-                        if let (Some(req_pk), Some(item_pk)) =
-                            (&item_req.product_key, &item.product_key)
-                            && req_pk == item_pk
-                        {
-                            return true;
-                        }
-                        if let (Some(req_stk), Some(item_stk)) =
-                            (&item_req.source_ticket_key, &item.source_ticket_key)
-                            && req_stk == item_stk
-                        {
-                            return true;
-                        }
-                        if let Some(req_name) = &item_req.name
-                            && req_name.eq_ignore_ascii_case(&item.name)
-                        {
-                            return true;
-                        }
-                        if updated_invoice_items.len() == 1 && body.returned_items.len() == 1 {
-                            return true;
-                        }
-                        false
-                    })
+                let matched_idx = line_match(
+                    &updated_invoice_items,
+                    item_req.product_key.as_deref(),
+                    item_req.source_ticket_key.as_deref(),
+                    item_req.name.as_deref(),
+                    updated_invoice_items.len() == 1 && body.returned_items.len() == 1,
+                )
                     .ok_or_else(|| {
                         AppError::validation_with_code(
                             format!(
@@ -1328,4 +1310,35 @@ pub(crate) fn hydrate_sync_documents(documents: Vec<Document>) -> AppResult<Vec<
             Ok(bson::deserialize_from_document::<CreditNoteDocument>(document)?.into_credit_note())
         })
         .collect()
+}
+
+/// Finds the invoice line a returned item refers to: product key, then source
+/// ticket key, then case-insensitive name; a sole line with a sole returned
+/// item always matches. Shared with sync's derived-field recompute so a
+/// replicated credit note updates the same line a local one would.
+pub(crate) fn line_match(
+    items: &[InvoiceItem],
+    product_key: Option<&str>,
+    source_ticket_key: Option<&str>,
+    name: Option<&str>,
+    sole_line_and_sole_return: bool,
+) -> Option<usize> {
+    items.iter().position(|item| {
+        if let (Some(req_pk), Some(item_pk)) = (product_key, item.product_key.as_deref())
+            && req_pk == item_pk
+        {
+            return true;
+        }
+        if let (Some(req_stk), Some(item_stk)) = (source_ticket_key, item.source_ticket_key.as_deref())
+            && req_stk == item_stk
+        {
+            return true;
+        }
+        if let Some(req_name) = name
+            && req_name.eq_ignore_ascii_case(&item.name)
+        {
+            return true;
+        }
+        sole_line_and_sole_return
+    })
 }

@@ -425,6 +425,29 @@ pub async fn create_product(db: &Db, body: CreateProductRequest) -> AppResult<Pr
         let inserted = repository::product::insert_product(db, document).await?;
         let product_object_id = inserted.id.expect("inserted product must have an id");
 
+        // Stock is a ledger (sync recomputes it from movements), so the units a
+        // product is created with need a movement behind them.
+        if initial_stock > 0 {
+            repository::stock::insert_stock_movement(
+                db,
+                crate::modules::inventory::model::StockMovementDocument {
+                    id: None,
+                    key: generate_id(prefixes::STOCK_MOVEMENT),
+                    product_id: product_object_id,
+                    quantity_delta: initial_stock,
+                    movement_type: crate::domain::inventory::StockMovementType::OpeningBalance,
+                    reference_id: Some(inserted.key.clone()),
+                    note: Some("Opening balance".to_string()),
+                    version: 1,
+                    created_at: now,
+                    updated_at: now,
+                    deleted_at: None,
+                    updated_by_device: None,
+                },
+            )
+            .await?;
+        }
+
         // Process each supplier intake
         for intake in body.suppliers {
             crate::modules::supplier_products::service::link::upsert_link(
@@ -579,6 +602,7 @@ pub(crate) async fn update_product(
             None => None,
         };
 
+        let existing_stock = existing.stock_quantity;
         let category_key = body.category_key.unwrap_or(existing.category_key);
         let subcategory_key = body.subcategory_key.unwrap_or(existing.subcategory_key);
         let selling_price_cents = body
@@ -604,10 +628,12 @@ pub(crate) async fn update_product(
             "subcategory_key": &subcategory_key,
             "selling_price_cents": selling_price_cents,
             "cost_price_cents": cost_price_cents,
-            "stock_quantity": stock_quantity,
             "min_stock_threshold": min_stock_threshold,
             "updated_at": BsonDateTime::now(),
         };
+        // A stock edit is recorded as a movement (below) rather than written to
+        // the column, so the ledger always explains the quantity.
+        let stock_delta = stock_quantity - existing_stock;
         if let Some(name) = body.name {
             set_doc.insert("name", name);
         }
@@ -630,11 +656,24 @@ pub(crate) async fn update_product(
             set_doc.insert("updated_by_device", device);
         }
 
-        let updated = repository::product::update_product(db, id, set_doc)
+        let mut updated = repository::product::update_product(db, id, set_doc)
             .await?
             .ok_or_else(|| {
                 AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
             })?;
+
+        if stock_delta != 0 {
+            let (_, adjusted) = super::stock::apply_stock_delta(
+                db,
+                id,
+                stock_delta,
+                crate::domain::inventory::StockMovementType::ManualAdjustment,
+                None,
+                Some("Stock edited on the product".to_string()),
+            )
+            .await?;
+            updated = adjusted;
+        }
 
         Ok(updated.into_product(category_name, subcategory_name))
     })

@@ -2,8 +2,9 @@
 // audit trail behind every stock change. Movements are never updated or
 // deleted here, only inserted and read.
 
+use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use futures_util::TryStreamExt;
-use mongodb::{Collection, Database, bson::doc, bson::oid::ObjectId};
+use mongodb::{bson::doc, bson::oid::ObjectId};
 use sqlx::Row;
 
 use crate::{
@@ -16,7 +17,7 @@ use crate::{
     modules::inventory::model::StockMovementDocument,
 };
 
-fn stock_movements(db: &Database) -> Collection<StockMovementDocument> {
+fn stock_movements(db: &TenantDatabase) -> ScopedCollection<StockMovementDocument> {
     db.collection("stock_movements")
 }
 

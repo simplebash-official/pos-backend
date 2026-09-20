@@ -24,6 +24,7 @@ use crate::{
     },
     modules::{
         auth::{model::LoginSessionDocument, repository},
+        tenants::service as tenants_service,
         users::service as users_service,
     },
 };
@@ -36,6 +37,32 @@ use crate::{
 /// broken `login_sessions` write blocks login rather than silently losing
 /// the record.
 pub(crate) async fn login(
+    db: &Db,
+    config: &Config,
+    body: LoginRequest,
+    ip_address: Option<String>,
+    user_agent: Option<String>,
+) -> AppResult<LoginResponse> {
+    if config.tenant_mode != crate::core::config::TenantMode::Multi {
+        return login_in_scope(db, config, body, ip_address, user_agent).await;
+    }
+
+    // Multi-tenant: the shop code picks the tenant, and everything below - the
+    // credential check, the session record and the token's `tid` - runs inside
+    // that tenant. An unknown code and a wrong password look identical, so the
+    // endpoint cannot be used to enumerate shops.
+    let code = body.shop_code.as_deref().map(str::trim).unwrap_or_default();
+    if code.is_empty() {
+        return Err(AppError::validation("Shop code is required"));
+    }
+    let tenant = tenants_service::lookup_shop_code(db, code)
+        .await?
+        .ok_or_else(|| AppError::unauthorized("Invalid shop code, email or password"))?;
+    crate::core::tenancy::with_tenant(tenant, login_in_scope(db, config, body, ip_address, user_agent))
+        .await
+}
+
+async fn login_in_scope(
     db: &Db,
     config: &Config,
     body: LoginRequest,
@@ -59,6 +86,9 @@ pub(crate) async fn login(
             exp,
             role: Some(user.role),
             permissions,
+            tid: crate::core::tenancy::current_tenant_id(),
+            scope: None,
+            did: None,
         };
         let token = encode(
             &Header::default(),

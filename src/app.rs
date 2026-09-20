@@ -42,8 +42,24 @@ pub struct AppState {
 /// Swagger UI, CORS, and request tracing — this is the one place all of
 /// that gets wired together, called once from `main.rs`.
 pub fn build_router(state: AppState) -> Router {
+    // Multi-tenant deployments only answer browsers from the configured origins;
+    // an empty list allows no cross-origin browser at all (fail closed).
+    let allow_origin = if state.config.tenant_mode == crate::core::config::TenantMode::Multi {
+        let origins: Vec<axum::http::HeaderValue> = state
+            .config
+            .cors_allowed_origins
+            .iter()
+            .filter_map(|o| o.parse().ok())
+            .collect();
+        if origins.is_empty() {
+            tracing::warn!("TENANT_MODE=multi without CORS_ALLOWED_ORIGINS: no browser origin is allowed");
+        }
+        tower_http::cors::AllowOrigin::list(origins)
+    } else {
+        tower_http::cors::AllowOrigin::from(tower_http::cors::Any)
+    };
     let cors = CorsLayer::new()
-        .allow_origin(tower_http::cors::Any)
+        .allow_origin(allow_origin)
         .allow_methods([
             Method::GET,
             Method::POST,
@@ -194,6 +210,12 @@ pub fn build_router(state: AppState) -> Router {
             crate::core::middleware::sync_headers::add_server_time_header,
         ))
         .layer(middleware::from_fn(add_processing_time_to_body))
+        // Puts the caller's tenant in scope (no-op unless TENANT_MODE=multi).
+        // Outside idempotency so its key store is tenant-scoped as well.
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            crate::core::middleware::tenant::tenant_context,
+        ))
         // Outermost: every layer below and every handler log line runs
         // inside this request's span (request_id / user_id).
         .layer(middleware::from_fn_with_state(

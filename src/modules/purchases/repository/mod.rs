@@ -5,11 +5,9 @@
 // call in, but the `mod repository;` declaration in `purchases/mod.rs` is
 // private, so none of this is reachable from outside this module tree.
 
+use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use futures_util::TryStreamExt;
-use mongodb::{
-    Collection, Database,
-    bson::{doc, oid::ObjectId},
-};
+use mongodb::bson::{doc, oid::ObjectId};
 use sqlx::Row;
 
 use crate::{
@@ -21,7 +19,7 @@ use crate::{
     modules::purchases::model::PurchaseDocument,
 };
 
-fn purchases(db: &Database) -> Collection<PurchaseDocument> {
+fn purchases(db: &TenantDatabase) -> ScopedCollection<PurchaseDocument> {
     db.collection("purchases")
 }
 

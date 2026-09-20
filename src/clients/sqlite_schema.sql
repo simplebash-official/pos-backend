@@ -494,3 +494,63 @@ CREATE TABLE IF NOT EXISTS system_installations (
 
 CREATE INDEX IF NOT EXISTS idx_system_installations_id ON system_installations(installation_id);
 
+
+-- ---------------------------------------------------------------------------
+-- Sync v2 (device side). Local-only bookkeeping: none of these tables is ever
+-- synced, and backup export/import skips every `sync_*` table.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS sync_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    device_id TEXT NOT NULL,
+    tenant_id TEXT,
+    linked INTEGER NOT NULL DEFAULT 0,
+    applying INTEGER NOT NULL DEFAULT 0,
+    cloud_cursor INTEGER NOT NULL DEFAULT 0,
+    last_pushed_outbox_seq INTEGER NOT NULL DEFAULT 0,
+    clock_offset_ms INTEGER NOT NULL DEFAULT 0,
+    capture_enabled INTEGER NOT NULL DEFAULT 0,
+    bootstrap_active INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS sync_outbox (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    resource TEXT NOT NULL,
+    key TEXT NOT NULL,
+    op TEXT NOT NULL CHECK (op IN ('upsert', 'delete')),
+    enqueued_at TEXT NOT NULL,
+    UNIQUE (resource, key)
+);
+
+CREATE TABLE IF NOT EXISTS sync_row_meta (
+    resource TEXT NOT NULL,
+    key TEXT NOT NULL,
+    updated_at_ms INTEGER NOT NULL,
+    device_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    PRIMARY KEY (resource, key)
+);
+
+CREATE TABLE IF NOT EXISTS sync_conflicts (
+    key TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    resource TEXT NOT NULL,
+    entity_key TEXT NOT NULL,
+    detail JSON NOT NULL,
+    detected_at TEXT NOT NULL,
+    resolved_at TEXT,
+    resolution TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_conflicts_open ON sync_conflicts(resolved_at, detected_at);
+
+CREATE TABLE IF NOT EXISTS sync_number_blocks (
+    name TEXT NOT NULL,
+    prefix TEXT NOT NULL,
+    padding INTEGER NOT NULL,
+    start_seq INTEGER NOT NULL,
+    end_seq INTEGER NOT NULL,
+    next_seq INTEGER NOT NULL,
+    expires_at TEXT NOT NULL,
+    PRIMARY KEY (name, start_seq)
+);

@@ -7,6 +7,14 @@ pub enum DatabaseType {
     Sqlite,
 }
 
+/// Whether one deployment serves a single shop or many isolated tenants.
+/// `Multi` requires MongoDB and makes every database handle tenant-scoped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TenantMode {
+    Single,
+    Multi,
+}
+
 /// Resolved application configuration. Built once in `main.rs` via
 /// `Config::from_env()` and shared through `AppState` — nothing downstream
 /// reads environment variables directly.
@@ -44,6 +52,16 @@ pub struct Config {
     /// Whether to automatically seed the database on startup if enabled.
     /// Safe and idempotent (never overwrites existing data).
     pub auto_seed: bool,
+    pub tenant_mode: TenantMode,
+    /// Browser origins allowed by CORS when `TENANT_MODE=multi`
+    /// (`CORS_ALLOWED_ORIGINS`, comma separated). Single-shop deployments
+    /// keep the permissive default, since they sit behind their own proxy.
+    pub cors_allowed_origins: Vec<String>,
+    /// JWKS endpoint of the identity service. When set, EdDSA platform tokens
+    /// are accepted alongside local HS256 tokens (see `middleware::platform_jwt`).
+    pub identity_jwks_url: Option<String>,
+    /// Required `iss` of platform tokens; unset skips the issuer check.
+    pub identity_issuer: Option<String>,
 }
 
 /// Why startup configuration failed to load. `main.rs` logs this and exits
@@ -97,6 +115,12 @@ impl Config {
         };
 
         let jwt_secret = required("JWT_SECRET")?;
+        // The .env templates ship a `replace_with_…` placeholder; booting with it
+        // (or any short value) would make every token forgeable by anyone who has
+        // read the public repo.
+        if jwt_secret.starts_with("replace_with") || jwt_secret.len() < 32 {
+            return Err(ConfigError::Invalid("JWT_SECRET"));
+        }
 
         let port = env::var("PORT")
             .unwrap_or_else(|_| "8080".to_string())
@@ -125,6 +149,42 @@ impl Config {
             .map(|v| v.eq_ignore_ascii_case("true") || v == "1" || v.eq_ignore_ascii_case("yes"))
             .unwrap_or(false);
 
+        let tenant_mode = match env::var("TENANT_MODE")
+            .unwrap_or_else(|_| "single".to_string())
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "single" | "" => TenantMode::Single,
+            "multi" => TenantMode::Multi,
+            _ => return Err(ConfigError::Invalid("TENANT_MODE")),
+        };
+        // Tenant isolation is implemented on MongoDB only; the SQLite desktop
+        // database is one shop by construction.
+        if tenant_mode == TenantMode::Multi && database_type != DatabaseType::Mongo {
+            return Err(ConfigError::Invalid("TENANT_MODE"));
+        }
+
+        let cors_allowed_origins = env::var("CORS_ALLOWED_ORIGINS")
+            .unwrap_or_default()
+            .split(',')
+            .map(|o| o.trim().trim_end_matches('/').to_string())
+            .filter(|o| !o.is_empty())
+            .collect();
+
+        let identity_jwks_url = env::var("IDENTITY_JWKS_URL")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+        if let Some(url) = &identity_jwks_url
+            && !(url.starts_with("https://") || url.starts_with("http://"))
+        {
+            return Err(ConfigError::Invalid("IDENTITY_JWKS_URL"));
+        }
+        let identity_issuer = env::var("IDENTITY_ISSUER")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+
         Ok(Self {
             database_type,
             database_url,
@@ -139,6 +199,10 @@ impl Config {
             generated_documents_dir,
             return_window_days,
             auto_seed,
+            tenant_mode,
+            cors_allowed_origins,
+            identity_jwks_url,
+            identity_issuer,
         })
     }
 }

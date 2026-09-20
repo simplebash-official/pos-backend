@@ -1,9 +1,9 @@
 // Dual-engine (Mongo / SQLite) access for the `supplier_products` collection.
 // Functions here return `Option`/`Vec`/counts straight from the driver.
 
+use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use futures_util::TryStreamExt;
 use mongodb::{
-    Collection,
     bson::{DateTime as BsonDateTime, Document, doc, oid::ObjectId},
     options::ReturnDocument,
 };
@@ -50,7 +50,7 @@ impl SupplierProductLinkSqliteRow {
     }
 }
 
-fn supplier_products(db: &mongodb::Database) -> Collection<SupplierProductLinkDocument> {
+fn supplier_products(db: &TenantDatabase) -> ScopedCollection<SupplierProductLinkDocument> {
     db.collection("supplier_products")
 }
 

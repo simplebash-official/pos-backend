@@ -88,19 +88,26 @@ pub(crate) async fn perform_setup(
             ));
         }
 
+        // No built-in fallback credentials: a public default admin login is a
+        // takeover risk on every fresh install, so the caller must choose both.
         let admin_email = body
             .admin_email
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty())
-            .unwrap_or("admin@pos.com");
+            .ok_or_else(|| AppError::validation("Admin email is required"))?;
 
         let admin_password = body
             .admin_password
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty())
-            .unwrap_or("admin@1234");
+            .ok_or_else(|| AppError::validation("Admin password is required"))?;
+        if admin_password.chars().count() < 8 {
+            return Err(AppError::validation(
+                "Admin password must be at least 8 characters",
+            ));
+        }
 
         let admin_name = body
             .admin_name
@@ -146,6 +153,9 @@ pub(crate) async fn perform_setup(
             exp,
             role: Some(user.role),
             permissions,
+            tid: crate::core::tenancy::current_tenant_id(),
+            scope: None,
+            did: None,
         };
         let token = encode(
             &Header::default(),

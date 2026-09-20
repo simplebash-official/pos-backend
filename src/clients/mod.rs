@@ -6,3 +6,5 @@ pub mod document_server;
 pub mod indexes;
 pub mod mongo;
 pub mod sqlite;
+pub mod sync_capture;
+pub mod tenant_db;

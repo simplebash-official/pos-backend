@@ -1,9 +1,10 @@
+use crate::clients::tenant_db::ScopedCollection;
 use crate::{
     clients::db::Db,
     core::error::AppResult,
     modules::sequences::model::{SequenceBlockDocument, SequenceCounterDocument},
 };
-use mongodb::{Collection, bson::doc, options::ReturnDocument};
+use mongodb::{bson::doc, options::ReturnDocument};
 
 pub(crate) async fn reserve_block(
     db: &Db,
@@ -14,12 +15,12 @@ pub(crate) async fn reserve_block(
 ) -> AppResult<(i64, i64)> {
     match db {
         Db::Mongo(db) => {
-            let counters: Collection<SequenceCounterDocument> = db.collection("sequence_counters");
+            let counters: ScopedCollection<SequenceCounterDocument> = db.collection("sequence_counters");
             let now = mongodb::bson::DateTime::now();
 
             let updated = counters
                 .find_one_and_update(
-                    doc! { "_id": name },
+                    doc! { "_id": super::counter_id(db, name) },
                     doc! {
                         "$inc": { "next_val": block_size },
                         "$setOnInsert": { "prefix": prefix, "padding": padding as i32 },
@@ -69,7 +70,7 @@ pub(crate) async fn insert_block(
 ) -> AppResult<SequenceBlockDocument> {
     match db {
         Db::Mongo(db) => {
-            let blocks: Collection<SequenceBlockDocument> = db.collection("sequence_blocks");
+            let blocks: ScopedCollection<SequenceBlockDocument> = db.collection("sequence_blocks");
             blocks.insert_one(&block).await?;
             Ok(block)
         }

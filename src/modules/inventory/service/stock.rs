@@ -211,6 +211,7 @@ pub(crate) async fn list_stock_movements(
             StockMovementType::ReturnRestock => "return_restock",
             StockMovementType::ReturnWriteOff => "return_write_off",
             StockMovementType::ReturnSupplierRma => "return_supplier_rma",
+            StockMovementType::OpeningBalance => "opening_balance",
         };
         filter.insert("movement_type", mtype_str);
     }

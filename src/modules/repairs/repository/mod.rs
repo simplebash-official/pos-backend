@@ -2,10 +2,10 @@
 // miss-as-an-error convention as every other repository in this codebase —
 // `service` decides what a missing row means.
 
+use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use chrono::{DateTime, Utc};
 use futures_util::TryStreamExt;
 use mongodb::{
-    Collection, Database,
     bson::{DateTime as BsonDateTime, Document, doc, oid::ObjectId},
     options::ReturnDocument,
 };
@@ -20,7 +20,7 @@ use crate::{
     modules::repairs::model::RepairDocument,
 };
 
-fn repairs(db: &Database) -> Collection<RepairDocument> {
+fn repairs(db: &TenantDatabase) -> ScopedCollection<RepairDocument> {
     db.collection("repairs")
 }
 

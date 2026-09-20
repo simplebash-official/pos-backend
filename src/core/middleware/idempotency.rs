@@ -81,7 +81,11 @@ mod hex {
 fn is_idempotency_exempt(path: &str) -> bool {
     // Kept as a literal rather than built from `constants::modules::AUTH` so
     // this stays allocation-free on the hot path for every mutating request.
-    path == "/api/auth" || path.starts_with("/api/auth/")
+    path == "/api/auth"
+        || path.starts_with("/api/auth/")
+        // Sync has its own retry-safe protocol (batch ids, idempotent apply).
+        || path == "/api/sync"
+        || path.starts_with("/api/sync/")
 }
 
 /// Identifies the bucket an `Idempotency-Key` is scoped to. A valid token

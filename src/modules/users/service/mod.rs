@@ -262,6 +262,54 @@ pub async fn create_user(db: &Db, body: CreateUserRequest) -> AppResult<User> {
     Ok(inserted.into_user())
 }
 
+/// Rotates the single Admin account's email/password in place. `pub`, not
+/// `pub(crate)`, so `src/bin/reset_admin.rs` can reach it directly — there is
+/// no HTTP path that can do this, since `ensure_manageable` always 404s an
+/// Admin target for every caller (see `manageable_roles`) and this
+/// deployment has no self-service "forgot password" flow. Requires an Admin
+/// to already exist (use `create_user`/`seed_admin` to create the first
+/// one); overwrites the existing Admin's credentials with no undo.
+pub async fn reset_admin_credentials(db: &Db, email: &str, password: &str) -> AppResult<User> {
+    validate_email(email)?;
+    validate_password_strength(password)?;
+
+    let admin = repository::list_users(db, doc! { "role": Role::Admin.as_str() })
+        .await?
+        .into_iter()
+        .next()
+        .ok_or_else(|| {
+            AppError::not_found_with_code(
+                "No Admin account exists yet; run seed_admin first",
+                codes::USER_NOT_FOUND,
+            )
+        })?;
+    let admin_id = admin.id.expect("persisted user document must have an id");
+
+    let normalized_email = normalize_email(email);
+    if normalized_email != admin.email
+        && repository::find_user_by_email(db, &normalized_email)
+            .await?
+            .is_some()
+    {
+        return Err(AppError::conflict(
+            codes::EMAIL_ALREADY_EXISTS,
+            format!("A user with email '{normalized_email}' already exists"),
+        ));
+    }
+
+    let set_doc = doc! {
+        "email": &normalized_email,
+        "password_hash": hash_password(password)?,
+        "updated_at": BsonDateTime::now(),
+    };
+
+    let updated = repository::update_user(db, admin_id, set_doc)
+        .await?
+        .ok_or_else(|| AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND))?;
+
+    Ok(updated.into_user())
+}
+
 /// Scoped creation for `POST /users` — 403s (not 404, since there's no
 /// existing resource to hide) if `body.role` is outside
 /// `manageable_roles(caller_role)`, e.g. a Manager trying to create another

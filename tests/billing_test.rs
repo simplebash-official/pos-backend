@@ -1550,7 +1550,7 @@ async fn billing_stats_endpoint_returns_today_sales_invoice_count_outstanding_cr
     seed_invoice_with(&db, 10_000, false, "paid", yesterday).await;
     seed_invoice_with(&db, 700, false, "pending", yesterday).await;
 
-    let db_handle = simplebash_pos_backend::clients::db::Db::Mongo(db.clone());
+    let db_handle = simplebash_pos_backend::clients::db::Db::from_mongo(db.clone());
     let stats = simplebash_pos_backend::modules::billing::service::get_billing_stats(&db_handle)
         .await
         .expect("get_billing_stats should succeed");

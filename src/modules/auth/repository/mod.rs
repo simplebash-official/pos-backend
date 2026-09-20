@@ -2,11 +2,9 @@
 // Visibility is `pub(crate)` so `service` can call in, but `mod repository;`
 // is private to `modules/auth`.
 
+use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use futures_util::TryStreamExt;
-use mongodb::{
-    Collection,
-    bson::{Document, doc, oid::ObjectId},
-};
+use mongodb::bson::{Document, doc, oid::ObjectId};
 
 use crate::{
     clients::{
@@ -49,7 +47,7 @@ impl LoginSessionSqliteRow {
     }
 }
 
-fn login_sessions(db: &mongodb::Database) -> Collection<LoginSessionDocument> {
+fn login_sessions(db: &TenantDatabase) -> ScopedCollection<LoginSessionDocument> {
     db.collection("login_sessions")
 }
 

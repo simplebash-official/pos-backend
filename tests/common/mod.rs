@@ -229,7 +229,7 @@ pub async fn spawn_app_with_document_server_url(document_server_url: String) -> 
         config.document_server_url.clone(),
         config.document_server_api_key.clone(),
     ));
-    let db_handle = simplebash_pos_backend::clients::db::Db::Mongo(db.clone());
+    let db_handle = simplebash_pos_backend::clients::db::Db::from_mongo(db.clone());
     let reports_engine = Arc::new(
         simplebash_pos_backend::modules::reports::engine::AnalyticsEngine::new(db_handle.clone()),
     );
@@ -314,6 +314,9 @@ pub fn mint_token(config: &Config, role: Option<Role>, permissions: &[&str]) -> 
         exp: 9_999_999_999,
         role,
         permissions: permissions.iter().map(|p| p.to_string()).collect(),
+        tid: None,
+        scope: None,
+        did: None,
     };
     encode(
         &Header::default(),
@@ -321,4 +324,95 @@ pub fn mint_token(config: &Config, role: Option<Role>, permissions: &[&str]) -> 
         &EncodingKey::from_secret(config.jwt_secret.as_bytes()),
     )
     .unwrap()
+}
+
+/// Like `mint_token`, but for a multi-tenant deployment: the token carries the
+/// tenant it was issued for (`tid`). `None` mints a token with no tenant.
+#[allow(dead_code)]
+pub fn mint_token_for_tenant(
+    config: &Config,
+    role: Option<Role>,
+    permissions: &[&str],
+    tid: Option<&str>,
+) -> String {
+    let claims = Claims {
+        sub: "test-user".to_string(),
+        exp: 9_999_999_999,
+        role,
+        permissions: permissions.iter().map(|p| p.to_string()).collect(),
+        tid: tid.map(str::to_string),
+        scope: None,
+        did: None,
+    };
+    encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(config.jwt_secret.as_bytes()),
+    )
+    .unwrap()
+}
+
+/// A token for a registered sync device of `tid` (scope `device`, claim `did`).
+#[allow(dead_code)]
+pub fn mint_device_token(config: &Config, tid: &str, device_id: &str) -> String {
+    let claims = Claims {
+        sub: format!("device-{device_id}"),
+        exp: 9_999_999_999,
+        role: Some(Role::Admin),
+        permissions: Vec::new(),
+        tid: Some(tid.to_string()),
+        scope: Some("device".to_string()),
+        did: Some(device_id.to_string()),
+    };
+    encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(config.jwt_secret.as_bytes()),
+    )
+    .unwrap()
+}
+
+/// Builds the real router in `TENANT_MODE=multi` against a uniquely named
+/// throwaway Atlas database (`jtroute_<uuid24>`, well under Atlas's 38-byte
+/// database-name cap). `TestApp.db` is the raw handle so the caller can inspect
+/// every collection and drop the database when done.
+#[allow(dead_code)]
+pub async fn spawn_app_multi_tenant() -> TestApp {
+    dotenvy::dotenv().ok();
+    let mock_doc_server_url = start_mock_document_server().await;
+
+    let mut config = Config::from_env().expect("invalid configuration for test run");
+    config.database_type = simplebash_pos_backend::core::config::DatabaseType::Mongo;
+    config.tenant_mode = simplebash_pos_backend::core::config::TenantMode::Multi;
+    config.mongodb_db_name = format!("jtroute_{}", &uuid::Uuid::new_v4().simple().to_string()[..24]);
+    config.document_server_url = mock_doc_server_url;
+
+    let db = clients::mongo::connect(&config.mongodb_uri, &config.mongodb_db_name)
+        .await
+        .expect("failed to connect to throwaway multi-tenant MongoDB");
+
+    let config = Arc::new(config);
+    let document_server = Arc::new(clients::document_server::DocumentServerClient::new(
+        config.document_server_url.clone(),
+        config.document_server_api_key.clone(),
+    ));
+    let db_handle = simplebash_pos_backend::clients::db::Db::Mongo(
+        simplebash_pos_backend::clients::tenant_db::TenantDatabase::multi_tenant(db.clone()),
+    );
+    let reports_engine = Arc::new(
+        simplebash_pos_backend::modules::reports::engine::AnalyticsEngine::new(db_handle.clone()),
+    );
+    let state = AppState {
+        config: config.clone(),
+        db: db_handle.clone(),
+        document_server,
+        reports_engine,
+    };
+
+    TestApp {
+        router: app::build_router(state),
+        db,
+        db_handle,
+        config,
+    }
 }

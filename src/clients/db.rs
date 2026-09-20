@@ -3,6 +3,9 @@
 use mongodb::Database as MongoDatabase;
 use sqlx::SqlitePool;
 
+use super::tenant_db::TenantDatabase;
+use crate::core::tenancy::Tenant;
+
 use crate::core::{
     config::{Config, DatabaseType},
     error::AppError,
@@ -13,7 +16,7 @@ use crate::core::{
 /// handles (`Arc`), making `Db` lightweight to clone across requests.
 #[derive(Clone)]
 pub enum Db {
-    Mongo(MongoDatabase),
+    Mongo(TenantDatabase),
     Sqlite(SqlitePool),
 }
 
@@ -28,8 +31,22 @@ impl Db {
         matches!(self, Db::Sqlite(_))
     }
 
-    /// Returns a reference to the inner `mongodb::Database` if running on Mongo.
-    pub fn as_mongo(&self) -> Option<&MongoDatabase> {
+    /// Wraps a raw driver handle as an unscoped (single-tenant) `Db`.
+    pub fn from_mongo(db: MongoDatabase) -> Db {
+        Db::Mongo(TenantDatabase::global(db))
+    }
+
+    /// The same database confined to one tenant. SQLite is always single-tenant
+    /// (the desktop app), so it is returned unchanged.
+    pub fn for_tenant(&self, tenant: Tenant) -> Db {
+        match self {
+            Db::Mongo(db) => Db::Mongo(db.for_tenant(tenant)),
+            Db::Sqlite(pool) => Db::Sqlite(pool.clone()),
+        }
+    }
+
+    /// Returns a reference to the tenant-aware Mongo handle if running on Mongo.
+    pub fn as_mongo(&self) -> Option<&TenantDatabase> {
         match self {
             Db::Mongo(db) => Some(db),
             _ => None,
@@ -37,7 +54,7 @@ impl Db {
     }
 
     /// Returns a reference to the inner `mongodb::Database`, panicking if running on SQLite.
-    pub fn mongo(&self) -> &MongoDatabase {
+    pub fn mongo(&self) -> &TenantDatabase {
         self.as_mongo()
             .expect("Attempted to access MongoDB handle when running in SQLite mode")
     }
@@ -85,7 +102,12 @@ pub async fn connect_from_config(config: &Config) -> Result<Db, AppError> {
                 .await
                 .map_err(|e| AppError::internal(format!("failed to connect to MongoDB: {e}")))?;
             tracing::info!(db = %config.mongodb_db_name, "Successfully connected to MongoDB");
-            Ok(Db::Mongo(mongo_db))
+            Ok(match config.tenant_mode {
+                crate::core::config::TenantMode::Multi => {
+                    Db::Mongo(TenantDatabase::multi_tenant(mongo_db))
+                }
+                crate::core::config::TenantMode::Single => Db::from_mongo(mongo_db),
+            })
         }
     }
 }

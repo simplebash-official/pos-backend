@@ -3,13 +3,14 @@
 // can call in, but the `mod repository;` declaration in `barcode/mod.rs` is
 // private, so none of this is reachable from outside this module tree.
 
-use mongodb::{Collection, bson::doc, options::ReturnDocument};
+use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
+use mongodb::{bson::doc, options::ReturnDocument};
 
 use crate::{
     clients::db::Db, core::error::AppResult, modules::barcode::model::BarcodeCounterDocument,
 };
 
-fn barcode_counters(db: &mongodb::Database) -> Collection<BarcodeCounterDocument> {
+fn barcode_counters(db: &TenantDatabase) -> ScopedCollection<BarcodeCounterDocument> {
     db.collection("barcode_counters")
 }
 
@@ -21,7 +22,10 @@ pub(crate) async fn next_sequence(db: &Db, namespace: &str) -> AppResult<i64> {
     match db {
         Db::Mongo(db) => {
             let updated = barcode_counters(db)
-                .find_one_and_update(doc! { "_id": namespace }, doc! { "$inc": { "seq": 1i64 } })
+                .find_one_and_update(
+                    doc! { "_id": crate::modules::sequences::counter_id(db, namespace) },
+                    doc! { "$inc": { "seq": 1i64 } },
+                )
                 .upsert(true)
                 .return_document(ReturnDocument::After)
                 .await?;
@@ -45,5 +49,36 @@ pub(crate) async fn next_sequence(db: &Db, namespace: &str) -> AppResult<i64> {
             .await?;
             Ok(row.0)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        clients::tenant_db::TenantDatabase,
+        core::tenancy::{Tenant, with_tenant},
+    };
+
+    // Atlas-backed (MONGODB_URI); skipped when unset.
+    #[tokio::test]
+    async fn counters_are_independent_per_tenant() {
+        dotenvy::dotenv().ok();
+        let Ok(uri) = std::env::var("MONGODB_URI") else {
+            eprintln!("MONGODB_URI not set - skipping");
+            return;
+        };
+        let name = format!("jtcnt_{}", &uuid::Uuid::new_v4().simple().to_string()[..24]);
+        let raw = crate::clients::mongo::connect(&uri, &name).await.unwrap();
+        let db = Db::Mongo(TenantDatabase::multi_tenant(raw.clone()));
+
+        // Interleave the tenants: each must count 1, 2, 3 on its own.
+        for round in 1..=3i64 {
+            for t in ["shop_a", "shop_b"] {
+                let n = with_tenant(Tenant::id(t).unwrap(), async { next_sequence(&db, "product").await }).await;
+                assert_eq!(n.unwrap(), round, "{t} round {round}");
+            }
+        }
+        raw.drop().await.ok();
     }
 }

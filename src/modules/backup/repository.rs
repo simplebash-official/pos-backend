@@ -6,6 +6,13 @@ use std::collections::{HashMap, HashSet};
 /// Tables excluded from backups by design (ephemeral locks, query caches, migrations metadata).
 const EXCLUDED_TABLES: &[&str] = &["idempotency_keys", "_sqlx_migrations"];
 
+/// A table that must not travel in a backup: the fixed exclusions plus every
+/// `sync_*` bookkeeping table. Restoring another install's sync state (device
+/// id, outbox, merge metadata) would make two devices share an identity.
+fn is_excluded(name: &str) -> bool {
+    EXCLUDED_TABLES.contains(&name) || name.starts_with("sync_")
+}
+
 /// Discovers all persistent user/application tables in the SQLite database dynamically.
 pub(crate) async fn get_database_tables(pool: &SqlitePool) -> Result<Vec<String>, sqlx::Error> {
     let rows = sqlx::query(
@@ -17,7 +24,7 @@ pub(crate) async fn get_database_tables(pool: &SqlitePool) -> Result<Vec<String>
     let tables: Vec<String> = rows
         .into_iter()
         .map(|r| r.get::<String, _>(0))
-        .filter(|name| !EXCLUDED_TABLES.contains(&name.as_str()))
+        .filter(|name| !is_excluded(name))
         .collect();
 
     Ok(tables)
@@ -36,7 +43,7 @@ async fn get_database_tables_tx(
     let tables: Vec<String> = rows
         .into_iter()
         .map(|r| r.get::<String, _>(0))
-        .filter(|name| !EXCLUDED_TABLES.contains(&name.as_str()))
+        .filter(|name| !is_excluded(name))
         .collect();
 
     Ok(tables)

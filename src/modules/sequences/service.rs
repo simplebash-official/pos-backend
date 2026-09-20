@@ -33,6 +33,26 @@ pub async fn reserve_sequence(
         };
 
         let block_size = req.block_size.unwrap_or(100).clamp(1, 1000) as i64;
+
+        // A linked desktop device takes single document numbers from the
+        // cloud-reserved blocks it holds (or its per-device fallback series),
+        // so offline devices never issue the same invoice number.
+        if block_size == 1
+            && let Some(pool) = db.as_sqlite()
+            && let Some(taken) =
+                crate::modules::sync::blocks::next_number(pool, &name, prefix, padding).await?
+        {
+            return Ok(SequenceReservationResponse {
+                name,
+                block_id: "device-block".to_string(),
+                prefix: taken.prefix,
+                padding,
+                start: taken.number as u64,
+                end: taken.number as u64,
+                expires_at: Utc::now() + Duration::days(7),
+            });
+        }
+
         let (start, end) =
             repository::reserve_block(db, &name, prefix, padding, block_size).await?;
 

@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: ["master"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:7.0
+        ports: ["27017:27017"]
+    env:
+      # Tests load config from the environment (dotenvy is a no-op without a .env file).
+      MONGODB_URI: mongodb://localhost:27017
+      MONGODB_DB_NAME: simplebash_pos
+      JWT_SECRET: ci-only-jwt-secret-0123456789abcdef0123456789abcdef
+      JWT_EXPIRY_HOURS: "12"
+      DOCUMENT_SERVER_URL: http://localhost:8090
+      DOCUMENT_SERVER_API_KEY: ci-only-document-server-key
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      # `cargo fmt --check` is left out until the tree is formatted with the
+      # current rustfmt; add it back once `cargo fmt` has been run repo-wide.
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo test

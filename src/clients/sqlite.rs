@@ -70,6 +70,14 @@ pub async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     migrate_schema(pool).await?;
     pool.execute(SCHEMA_SQL).await?;
     migrate_schema(pool).await?;
+    // Sync v2 device bookkeeping: the single state row and the capture
+    // triggers. Both are inert until sync is enabled (`capture_enabled = 1`).
+    super::sync_capture::ensure_state(pool)
+        .await
+        .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
+    super::sync_capture::install_triggers(pool)
+        .await
+        .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
     tracing::info!("SQLite database schema and indexes initialized");
     Ok(())
 }

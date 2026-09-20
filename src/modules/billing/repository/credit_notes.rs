@@ -3,11 +3,9 @@
 // counts straight from the driver and leave the not-found -> AppError
 // translation to `service`.
 
+use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use futures_util::TryStreamExt;
-use mongodb::{
-    Collection, Database,
-    bson::{Document, doc, oid::ObjectId},
-};
+use mongodb::bson::{Document, doc, oid::ObjectId};
 use sqlx::Row;
 
 use crate::{
@@ -19,7 +17,7 @@ use crate::{
     modules::billing::{model::CreditNoteDocument, repository::credit_note_from_sqlite_row},
 };
 
-fn credit_notes(db: &Database) -> Collection<CreditNoteDocument> {
+fn credit_notes(db: &TenantDatabase) -> ScopedCollection<CreditNoteDocument> {
     db.collection("credit_notes")
 }
 

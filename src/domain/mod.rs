@@ -16,6 +16,8 @@ pub mod sequences;
 pub mod supplier_products;
 pub mod suppliers;
 pub mod sync;
+pub mod sync_local;
+pub mod sync_v2;
 pub mod system;
 pub mod users;
 

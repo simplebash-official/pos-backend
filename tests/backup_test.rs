@@ -66,6 +66,10 @@ async fn setup_sqlite_app() -> SqliteTestContext {
             .into_owned(),
         return_window_days: 30,
         auto_seed: false,
+        tenant_mode: simplebash_pos_backend::core::config::TenantMode::Single,
+        cors_allowed_origins: Vec::new(),
+        identity_jwks_url: None,
+        identity_issuer: None,
     };
 
     let config = Arc::new(config);

@@ -1,7 +1,5 @@
-use mongodb::{
-    Collection,
-    bson::{doc, oid::ObjectId},
-};
+use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
+use mongodb::bson::{doc, oid::ObjectId};
 use sqlx::Row;
 
 use crate::{
@@ -13,7 +11,7 @@ use crate::{
     modules::documents::model::GeneratedDocumentDocument,
 };
 
-fn generated_documents(db: &mongodb::Database) -> Collection<GeneratedDocumentDocument> {
+fn generated_documents(db: &TenantDatabase) -> ScopedCollection<GeneratedDocumentDocument> {
     db.collection("generated_documents")
 }
 

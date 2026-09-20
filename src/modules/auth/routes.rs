@@ -80,8 +80,8 @@ fn extract_user_agent(headers: &HeaderMap) -> Option<String> {
 #[utoipa::path(post, path = "/login", tag = modules::AUTH, request_body = LoginRequest,
     responses(
         (status = 200, description = "Login successful", body = ApiResponse<LoginResponse>),
-        (status = 400, description = "Validation error", body = ErrorResponse),
-        (status = 401, description = "Invalid email or password, or account deactivated", body = ErrorResponse),
+        (status = 400, description = "Validation error (including a missing shopCode when TENANT_MODE=multi)", body = ErrorResponse),
+        (status = 401, description = "Invalid email or password, or account deactivated (in multi-tenant mode also an unknown shopCode)", body = ErrorResponse),
     )
 )]
 async fn login(

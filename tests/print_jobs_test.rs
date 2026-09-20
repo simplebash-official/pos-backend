@@ -588,7 +588,7 @@ async fn print_jobs_stats_endpoint_returns_today_job_count_revenue_pending_count
     // Backdated cancelled job — excluded from pending entirely.
     seed_print_job_with(&db, "cancelled", 1000, yesterday).await;
 
-    let db_handle = simplebash_pos_backend::clients::db::Db::Mongo(db.clone());
+    let db_handle = simplebash_pos_backend::clients::db::Db::from_mongo(db.clone());
     let stats = simplebash_pos_backend::modules::print_jobs::service::get_print_job_stats(&db_handle)
         .await
         .expect("get_print_job_stats should succeed");

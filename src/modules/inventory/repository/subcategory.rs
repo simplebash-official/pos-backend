@@ -3,11 +3,9 @@
 // no opinion on whether that category still exists — that's a `service`
 // concern (see `service::category`).
 
+use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use futures_util::TryStreamExt;
-use mongodb::{
-    Collection, Database,
-    bson::{doc, oid::ObjectId},
-};
+use mongodb::bson::{doc, oid::ObjectId};
 use sqlx::Row;
 
 use crate::{
@@ -19,7 +17,7 @@ use crate::{
     modules::inventory::model::SubcategoryDocument,
 };
 
-fn subcategories(db: &Database) -> Collection<SubcategoryDocument> {
+fn subcategories(db: &TenantDatabase) -> ScopedCollection<SubcategoryDocument> {
     db.collection("subcategories")
 }
 

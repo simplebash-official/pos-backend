@@ -4,7 +4,8 @@
 // (see CLAUDE.md's key-prefix convention). Its `_id` is itself the
 // meaningful key: the derived SKU prefix code (e.g. "PHO-SCR").
 
-use mongodb::{Collection, Database, bson::doc, options::ReturnDocument};
+use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
+use mongodb::{bson::doc, options::ReturnDocument};
 use serde::{Deserialize, Serialize};
 
 use crate::{clients::db::Db, core::error::AppResult};
@@ -19,7 +20,7 @@ struct SkuCounterDocument {
     seq: i64,
 }
 
-fn sku_counters(db: &Database) -> Collection<SkuCounterDocument> {
+fn sku_counters(db: &TenantDatabase) -> ScopedCollection<SkuCounterDocument> {
     db.collection("sku_counters")
 }
 
@@ -29,7 +30,10 @@ pub(crate) async fn next_sequence(db: &Db, code: &str) -> AppResult<i64> {
     match db {
         Db::Mongo(db) => {
             let updated = sku_counters(db)
-                .find_one_and_update(doc! { "_id": code }, doc! { "$inc": { "seq": 1i64 } })
+                .find_one_and_update(
+                    doc! { "_id": crate::modules::sequences::counter_id(db, code) },
+                    doc! { "$inc": { "seq": 1i64 } },
+                )
                 .upsert(true)
                 .return_document(ReturnDocument::After)
                 .await?;
@@ -52,5 +56,36 @@ pub(crate) async fn next_sequence(db: &Db, code: &str) -> AppResult<i64> {
 
             Ok(seq)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        clients::tenant_db::TenantDatabase,
+        core::tenancy::{Tenant, with_tenant},
+    };
+
+    // Atlas-backed (MONGODB_URI); skipped when unset.
+    #[tokio::test]
+    async fn counters_are_independent_per_tenant() {
+        dotenvy::dotenv().ok();
+        let Ok(uri) = std::env::var("MONGODB_URI") else {
+            eprintln!("MONGODB_URI not set - skipping");
+            return;
+        };
+        let name = format!("jtcnt_{}", &uuid::Uuid::new_v4().simple().to_string()[..24]);
+        let raw = crate::clients::mongo::connect(&uri, &name).await.unwrap();
+        let db = Db::Mongo(TenantDatabase::multi_tenant(raw.clone()));
+
+        // Interleave the tenants: each must count 1, 2, 3 on its own.
+        for round in 1..=3i64 {
+            for t in ["shop_a", "shop_b"] {
+                let n = with_tenant(Tenant::id(t).unwrap(), async { next_sequence(&db, "PHO-SCR").await }).await;
+                assert_eq!(n.unwrap(), round, "{t} round {round}");
+            }
+        }
+        raw.drop().await.ok();
     }
 }

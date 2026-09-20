@@ -16,4 +16,5 @@ pub mod supplier_products;
 pub mod suppliers;
 pub mod sync;
 pub mod system;
+pub mod tenants;
 pub mod users;

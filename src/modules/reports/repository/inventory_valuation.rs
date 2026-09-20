@@ -1,10 +1,8 @@
 // MongoDB aggregation queries for stock asset and inventory valuation.
 
+use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use futures_util::TryStreamExt;
-use mongodb::{
-    Collection, Database,
-    bson::{Document, doc},
-};
+use mongodb::bson::{Document, doc};
 
 use sqlx::Row;
 
@@ -14,11 +12,11 @@ use crate::{
     domain::reports::{CategoryValuationEntry, InventoryValuationResponse},
 };
 
-fn products(db: &Database) -> Collection<Document> {
+fn products(db: &TenantDatabase) -> ScopedCollection<Document> {
     db.collection("products")
 }
 
-fn categories_coll(db: &Database) -> Collection<Document> {
+fn categories_coll(db: &TenantDatabase) -> ScopedCollection<Document> {
     db.collection("categories")
 }
 

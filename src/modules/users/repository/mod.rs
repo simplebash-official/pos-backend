@@ -3,9 +3,9 @@
 // straight from the driver and leave the "not found" -> `AppError`
 // translation to `service`.
 
+use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use futures_util::TryStreamExt;
 use mongodb::{
-    Collection,
     bson::{Document, doc, oid::ObjectId},
     options::ReturnDocument,
 };
@@ -21,7 +21,7 @@ use crate::{
     modules::users::model::UserDocument,
 };
 
-fn users(db: &mongodb::Database) -> Collection<UserDocument> {
+fn users(db: &TenantDatabase) -> ScopedCollection<UserDocument> {
     db.collection("users")
 }
 

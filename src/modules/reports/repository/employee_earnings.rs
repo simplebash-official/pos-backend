@@ -6,12 +6,10 @@
 // documents directly, the same cross-collection financial-aggregation
 // responsibility `reports` already owns for `commissions.rs`.
 
+use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use chrono::{DateTime, Utc};
 use futures_util::TryStreamExt;
-use mongodb::{
-    Collection, Database,
-    bson::{DateTime as BsonDateTime, Document, doc},
-};
+use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
 
 use crate::{
     clients::{db::Db, sqlite::map_sqlite_row_to_document},
@@ -20,11 +18,11 @@ use crate::{
     modules::reports::repository::commissions::{compute_earned_cents, get_i64_flexible},
 };
 
-fn repairs(db: &Database) -> Collection<Document> {
+fn repairs(db: &TenantDatabase) -> ScopedCollection<Document> {
     db.collection("repairs")
 }
 
-fn print_jobs(db: &Database) -> Collection<Document> {
+fn print_jobs(db: &TenantDatabase) -> ScopedCollection<Document> {
     db.collection("print_jobs")
 }
 

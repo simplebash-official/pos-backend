@@ -6,14 +6,12 @@
 // invoices + open jobs a shop has at any moment is small. Mirrors the style
 // of `receivables::list_outstanding_invoices`.
 
+use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use std::collections::HashMap;
 
 use chrono::{NaiveDate, Utc};
 use futures_util::TryStreamExt;
-use mongodb::{
-    Collection, Database,
-    bson::{Document, doc, oid::ObjectId},
-};
+use mongodb::bson::{Document, doc, oid::ObjectId};
 
 use sqlx::Row;
 
@@ -23,7 +21,7 @@ use crate::{
     domain::reports::{ReminderEntry, ReminderKind},
 };
 
-fn collection(db: &Database, name: &str) -> Collection<Document> {
+fn collection(db: &TenantDatabase, name: &str) -> ScopedCollection<Document> {
     db.collection(name)
 }
 

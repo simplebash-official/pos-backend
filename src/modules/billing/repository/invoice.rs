@@ -1,10 +1,8 @@
 // Mongo and SQLite access for invoice records, specifically invoice mutation helpers
 // for credit notes, voiding, and closing.
 
-use mongodb::{
-    Collection, Database,
-    bson::{DateTime as BsonDateTime, doc, oid::ObjectId},
-};
+use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
+use mongodb::bson::{DateTime as BsonDateTime, doc, oid::ObjectId};
 
 use crate::{
     clients::{db::Db, sqlite::now_utc_iso},
@@ -13,7 +11,7 @@ use crate::{
     modules::billing::model::InvoiceDocument,
 };
 
-fn invoices(db: &Database) -> Collection<InvoiceDocument> {
+fn invoices(db: &TenantDatabase) -> ScopedCollection<InvoiceDocument> {
     db.collection("invoices")
 }
 

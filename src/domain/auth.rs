@@ -17,6 +17,10 @@ pub struct LoginRequest {
     pub email: String,
     /// User's plain text password.
     pub password: String,
+    /// Shop (tenant) the account belongs to. Required on multi-tenant
+    /// deployments (`TENANT_MODE=multi`), ignored on single-shop ones.
+    #[serde(default, alias = "shop_code")]
+    pub shop_code: Option<String>,
 }
 
 /// Response for `POST /auth/login`. `expires_in` (seconds) lets the

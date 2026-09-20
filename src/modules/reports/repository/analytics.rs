@@ -11,12 +11,10 @@
 // with the shop owner's local calendar — see
 // `service::dates::{REPORT_TZ_MONGO, parse_date_range_tz}`.
 
+use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use chrono::{DateTime, Utc};
 use futures_util::TryStreamExt;
-use mongodb::{
-    Collection, Database,
-    bson::{DateTime as BsonDateTime, Document, doc},
-};
+use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
 
 use crate::{
     clients::{db::Db, sqlite::map_sqlite_row_to_document},
@@ -27,7 +25,7 @@ use crate::{
 use super::super::service::dates::REPORT_TZ_MONGO;
 use super::sales::{self, get_i64_flexible};
 
-fn invoices(db: &Database) -> Collection<Document> {
+fn invoices(db: &TenantDatabase) -> ScopedCollection<Document> {
     db.collection("invoices")
 }
 

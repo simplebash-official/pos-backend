@@ -113,7 +113,11 @@ fn parse_cursors_map(query: &SyncChangesQuery) -> AppResult<HashMap<String, Stri
 /// same resolved display fields, no BSON `$oid`/`$date` wrappers. Serializing
 /// the raw `Document` instead would write structurally different rows for the
 /// same entity depending only on which feed happened to deliver it.
-async fn hydrate(db: &Db, resource: &str, documents: Vec<Document>) -> AppResult<Vec<Value>> {
+pub(crate) async fn hydrate(
+    db: &Db,
+    resource: &str,
+    documents: Vec<Document>,
+) -> AppResult<Vec<Value>> {
     let values = match resource {
         "products" => to_values(inventory_product::hydrate_sync_documents(db, documents).await?)?,
         "categories" => {

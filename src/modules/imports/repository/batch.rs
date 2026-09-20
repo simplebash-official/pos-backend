@@ -1,8 +1,8 @@
 // Mongo and SQLite access for the `import_batches` collection / table.
 
+use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use futures_util::TryStreamExt;
 use mongodb::{
-    Collection, Database,
     bson::{DateTime as BsonDateTime, doc, oid::ObjectId},
     options::ReturnDocument,
 };
@@ -17,7 +17,7 @@ use crate::{
     modules::imports::model::{ImportBatchDocument, ImportRowErrorDocument},
 };
 
-fn import_batches(db: &Database) -> Collection<ImportBatchDocument> {
+fn import_batches(db: &TenantDatabase) -> ScopedCollection<ImportBatchDocument> {
     db.collection("import_batches")
 }
 

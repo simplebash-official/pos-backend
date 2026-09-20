@@ -242,3 +242,38 @@ async fn test_setup_with_snake_case_payload_succeeds() {
     assert_eq!(setup_res["data"]["sampleDataLoaded"], false);
     assert_eq!(setup_res["data"]["adminEmail"], "snake@pos.com");
 }
+
+#[tokio::test]
+async fn test_setup_requires_explicit_admin_credentials() {
+    let app = common::spawn_app_sqlite().await;
+
+    for body in [
+        json!({ "loadSampleData": false }),
+        json!({ "loadSampleData": false, "adminEmail": "owner@shop.test" }),
+        json!({ "loadSampleData": false, "adminPassword": "longenough1" }),
+        json!({ "loadSampleData": false, "adminEmail": "owner@shop.test", "adminPassword": "short" }),
+    ] {
+        let (status, res) =
+            send_request(&app.router, "POST", "/api/system/setup", None, Some(body)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{res}");
+    }
+
+    // A rejected attempt must not consume the one-time setup.
+    let (_, status_res) =
+        send_request(&app.router, "GET", "/api/system/setup-status", None, None).await;
+    assert_eq!(status_res["data"]["setupCompleted"], false);
+
+    let (ok_status, _) = send_request(
+        &app.router,
+        "POST",
+        "/api/system/setup",
+        None,
+        Some(json!({
+            "loadSampleData": false,
+            "adminEmail": "owner@shop.test",
+            "adminPassword": "longenough1"
+        })),
+    )
+    .await;
+    assert_eq!(ok_status, StatusCode::OK);
+}

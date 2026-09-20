@@ -4,11 +4,9 @@
 // supported (a unit's history is kept forever, same rationale as
 // `stock_movements`).
 
+use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use futures_util::TryStreamExt;
-use mongodb::{
-    Collection, Database,
-    bson::{doc, oid::ObjectId},
-};
+use mongodb::bson::{doc, oid::ObjectId};
 use sqlx::Row;
 
 use crate::{
@@ -21,7 +19,7 @@ use crate::{
     modules::inventory::model::ProductSerialDocument,
 };
 
-fn product_serials(db: &Database) -> Collection<ProductSerialDocument> {
+fn product_serials(db: &TenantDatabase) -> ScopedCollection<ProductSerialDocument> {
     db.collection("product_serials")
 }
 

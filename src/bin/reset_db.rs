@@ -16,7 +16,9 @@ async fn main() {
     println!("🗑️  Resetting database for engine: {}", db.engine_name());
     println!("============================================================");
 
-    if let Some(mongo) = db.as_mongo() {
+    if let Some(tenant_db) = db.as_mongo() {
+        // Maintenance binary: intentionally operates on the whole database.
+        let mongo = tenant_db.unscoped();
         println!(
             "Dropping all MongoDB collections in '{}'...",
             config.mongodb_db_name
@@ -36,7 +38,11 @@ async fn main() {
         println!("✅ All MongoDB collections dropped.");
 
         println!("Ensuring MongoDB indexes...");
-        clients::indexes::ensure_indexes(mongo).await;
+        clients::indexes::ensure_indexes(
+            mongo,
+            config.tenant_mode == simplebash_pos_backend::core::config::TenantMode::Multi,
+        )
+        .await;
         println!("✅ Indexes recreated.");
     } else if let Some(pool) = db.as_sqlite() {
         println!("Resetting SQLite tables...");

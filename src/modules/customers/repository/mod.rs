@@ -1,9 +1,9 @@
 // Dual-engine (Mongo / SQLite) access for the `customers` collection.
 // Functions here return `Option`/`Vec`/counts straight from the driver.
 
+use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use futures_util::TryStreamExt;
 use mongodb::{
-    Collection,
     bson::{DateTime as BsonDateTime, Document, doc, oid::ObjectId},
     options::ReturnDocument,
 };
@@ -63,7 +63,7 @@ impl CustomerSqliteRow {
     }
 }
 
-fn customers(db: &mongodb::Database) -> Collection<CustomerDocument> {
+fn customers(db: &TenantDatabase) -> ScopedCollection<CustomerDocument> {
     db.collection("customers")
 }
 

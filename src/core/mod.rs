@@ -12,4 +12,8 @@ pub mod logging;
 pub mod middleware;
 pub mod openapi;
 pub mod response;
+pub mod sync_merge;
+#[cfg(any(test, feature = "sync-sim"))]
+pub mod sync_sim;
+pub mod tenancy;
 pub mod utils;

@@ -1,17 +1,15 @@
 // MongoDB aggregation queries for credit notes and return refunds.
 
+use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use chrono::{DateTime, Utc};
 use futures_util::TryStreamExt;
-use mongodb::{
-    Collection, Database,
-    bson::{DateTime as BsonDateTime, Document, doc},
-};
+use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
 
 use sqlx::Row;
 
 use crate::{clients::db::Db, core::error::AppResult};
 
-fn credit_notes(db: &Database) -> Collection<Document> {
+fn credit_notes(db: &TenantDatabase) -> ScopedCollection<Document> {
     db.collection("credit_notes")
 }
 

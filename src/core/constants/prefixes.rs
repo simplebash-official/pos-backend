@@ -22,3 +22,4 @@ pub const EXCHANGE: &str = "exg";
 pub const PRODUCT_SERIAL: &str = "psn";
 pub const EMPLOYEE: &str = "emp";
 pub const IMPORT_BATCH: &str = "imp";
+pub const TENANT: &str = "tnt";

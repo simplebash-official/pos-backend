@@ -54,6 +54,10 @@ utoipa-swagger-ui = { version = "9.0.2", features = ["axum", "reqwest"] }
 uuid = { version = "1.24.0", features = ["v4", "serde"] }
 sqlx = { version = "0.8.3", features = ["runtime-tokio", "sqlite", "chrono", "uuid", "json"] }
 
+[features]
+# Deterministic in-memory replica model used by the sync convergence harness.
+sync-sim = []
+
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
 

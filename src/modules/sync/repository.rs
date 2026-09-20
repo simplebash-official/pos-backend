@@ -1,13 +1,11 @@
+use crate::clients::tenant_db::ScopedCollection;
 use crate::{
     clients::{db::Db, sqlite::map_sqlite_row_to_document},
     core::error::AppResult,
     modules::sync::cursor::DecodedCursor,
 };
 use futures_util::TryStreamExt;
-use mongodb::{
-    Collection,
-    bson::{DateTime as BsonDateTime, Document, doc},
-};
+use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
 use sqlx::Row;
 
 pub(crate) async fn fetch_collection_changes(
@@ -18,7 +16,7 @@ pub(crate) async fn fetch_collection_changes(
 ) -> AppResult<Vec<Document>> {
     match db {
         Db::Mongo(db) => {
-            let collection: Collection<Document> = db.collection(collection_name);
+            let collection: ScopedCollection<Document> = db.collection(collection_name);
 
             let filter = match cursor {
                 // A snapshot must not carry tombstones: the client has no row to
@@ -115,7 +113,7 @@ pub(crate) async fn fetch_latest_change_marker(
 ) -> AppResult<Option<(BsonDateTime, String)>> {
     match db {
         Db::Mongo(db) => {
-            let collection: Collection<Document> = db.collection(collection_name);
+            let collection: ScopedCollection<Document> = db.collection(collection_name);
             let doc = collection
                 .find_one(doc! { "updated_at": { "$exists": true } })
                 .sort(doc! { "updated_at": -1, "key": -1 })

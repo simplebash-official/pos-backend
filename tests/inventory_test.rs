@@ -1913,7 +1913,7 @@ async fn inventory_stats_endpoint_returns_totals_and_low_stock_alerts() {
     seed_product_with(&db, &category_key_2, &subcategory_key_2, 50, 5, false).await;
     seed_product_with(&db, &category_key_2, &subcategory_key_2, 1, 5, true).await;
 
-    let db_handle = simplebash_pos_backend::clients::db::Db::Mongo(db.clone());
+    let db_handle = simplebash_pos_backend::clients::db::Db::from_mongo(db.clone());
     let stats =
         simplebash_pos_backend::modules::inventory::service::stats::get_inventory_stats(&db_handle)
             .await

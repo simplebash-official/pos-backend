@@ -62,6 +62,10 @@ async fn setup_sqlite_app() -> SqliteTestContext {
         generated_documents_dir: std::env::temp_dir().display().to_string(),
         return_window_days: 30,
         auto_seed: false,
+        tenant_mode: simplebash_pos_backend::core::config::TenantMode::Single,
+        cors_allowed_origins: Vec::new(),
+        identity_jwks_url: None,
+        identity_issuer: None,
     };
 
     let config = Arc::new(config);

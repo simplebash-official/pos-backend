@@ -50,7 +50,7 @@ async fn build_test_app() -> axum::Router {
                 &config.mongodb_db_name
             };
             let db = client.database(db_name);
-            simplebash_pos_backend::clients::db::Db::Mongo(db)
+            simplebash_pos_backend::clients::db::Db::from_mongo(db)
         }
     };
     let config = Arc::new(config);

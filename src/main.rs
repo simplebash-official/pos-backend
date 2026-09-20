@@ -52,10 +52,26 @@ async fn main() {
 
     if let Some(mongo_db) = db.as_mongo() {
         // Best-effort, and deliberately not fatal — see `ensure_indexes`.
-        clients::indexes::ensure_indexes(mongo_db).await;
+        clients::indexes::ensure_indexes(
+            mongo_db.unscoped(),
+            config.tenant_mode == simplebash_pos_backend::core::config::TenantMode::Multi,
+        )
+        .await;
     }
 
-    if config.auto_seed {
+    // A publicly reachable instance must never come up with the well-known
+    // default admin login, so auto-seeding needs an operator-chosen password there.
+    // Loopback (desktop / local dev) keeps the convenience default.
+    let publicly_reachable = config.bind_addr != "127.0.0.1" && config.bind_addr != "localhost";
+    let seed_password_chosen = std::env::var("SEED_ADMIN_PASSWORD")
+        .map(|p| !p.is_empty() && p != "admin@1234")
+        .unwrap_or(false);
+    if config.auto_seed && publicly_reachable && !seed_password_chosen {
+        tracing::error!(
+            "AUTO_SEED skipped: this instance listens on {}, so SEED_ADMIN_PASSWORD must be set to a non-default value",
+            config.bind_addr
+        );
+    } else if config.auto_seed {
         tracing::info!("AUTO_SEED is enabled — checking and seeding database...");
         match simplebash_pos_backend::seeds::seed_all(&db).await {
             Ok(summary) => {
@@ -101,6 +117,14 @@ async fn main() {
     let reports_engine =
         Arc::new(simplebash_pos_backend::modules::reports::engine::AnalyticsEngine::new(db.clone()));
     reports_engine.init().await;
+
+    // Multi-tenant cloud only: the single change-stream consumer that feeds the
+    // per-tenant sync change log (it holds a lease, so extra instances stand by).
+    if config.tenant_mode == simplebash_pos_backend::core::config::TenantMode::Multi {
+        tokio::spawn(simplebash_pos_backend::modules::sync::cloud_capture::run_consumer(
+            db.clone(),
+        ));
+    }
 
     let state = AppState {
         config: Arc::new(config),

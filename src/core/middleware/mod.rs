@@ -4,5 +4,7 @@
 // `auth::AdminUser` (must additionally carry `role: Role::Admin`).
 pub mod auth;
 pub mod idempotency;
+pub mod platform_jwt;
 pub mod sync_headers;
+pub mod tenant;
 pub mod timing;

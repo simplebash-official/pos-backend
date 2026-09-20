@@ -4,9 +4,9 @@
 // (`service::product::ensure_valid_category`) — there is no separate
 // hardcoded category list anywhere else in the codebase.
 
+use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use futures_util::TryStreamExt;
 use mongodb::{
-    Collection, Database,
     bson::{Document, doc, oid::ObjectId},
     options::ReturnDocument,
 };
@@ -22,7 +22,7 @@ use crate::{
     modules::inventory::model::{CategoryDocument, SubcategoryDocument},
 };
 
-fn categories(db: &Database) -> Collection<CategoryDocument> {
+fn categories(db: &TenantDatabase) -> ScopedCollection<CategoryDocument> {
     db.collection("categories")
 }
 

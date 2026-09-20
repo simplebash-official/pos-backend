@@ -1,9 +1,9 @@
+use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use serde::Deserialize;
 use std::collections::HashMap;
 
 use futures_util::TryStreamExt;
 use mongodb::{
-    Collection, Database,
     bson::{DateTime as BsonDateTime, Document, doc, oid::ObjectId},
     options::ReturnDocument,
 };
@@ -19,7 +19,7 @@ use crate::{
     modules::inventory::model::{CategoryDocument, ProductDocument, SubcategoryDocument},
 };
 
-fn products(db: &Database) -> Collection<ProductDocument> {
+fn products(db: &TenantDatabase) -> ScopedCollection<ProductDocument> {
     db.collection("products")
 }
 

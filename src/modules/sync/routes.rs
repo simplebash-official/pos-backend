@@ -20,6 +20,8 @@ pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(get_changes))
         .routes(routes!(sync_status))
+        .merge(crate::modules::sync::routes_v2::router())
+        .merge(crate::modules::sync::routes_local::router())
 }
 
 #[utoipa::path(get, path = "/changes", tag = modules::SYNC, params(SyncChangesQuery),

@@ -635,7 +635,7 @@ async fn customers_stats_endpoint_returns_totals_balance_and_debtor_count() {
     // Soft-deleted with a balance — must be excluded entirely.
     seed_customer_with(&db, 9000, true).await;
 
-    let db_handle = simplebash_pos_backend::clients::db::Db::Mongo(db.clone());
+    let db_handle = simplebash_pos_backend::clients::db::Db::from_mongo(db.clone());
     let stats = simplebash_pos_backend::modules::customers::service::get_customer_stats(&db_handle)
         .await
         .expect("get_customer_stats should succeed");
