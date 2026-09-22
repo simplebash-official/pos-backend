@@ -196,12 +196,25 @@ fn build_document(
     document
 }
 
-/// Renames a colliding unique value on a NEW row, recording the conflict.
+/// Resolves a collision on a unique column deterministically: whichever key
+/// sorts LOWER always keeps the value unchanged; the higher key's row is
+/// always the one suffixed with a device tag. This is computed the same way
+/// regardless of which of the two rows this replica happens to be inserting
+/// right now and regardless of arrival order, so every replica that ever sees
+/// both rows reaches the identical assignment - unlike "whichever arrives
+/// second gets renamed", which depends on push order and lets two replicas
+/// swap which physical row keeps the original value.
+///
+/// When the row that must move aside is the one already stored (the incoming
+/// key is the lower one), it is corrected here rather than left alone: a real
+/// document write, so the change stream (the only thing devices ever learn
+/// from) carries the correction out like any other change.
 async fn resolve_unique_collisions(
     db: &Db,
     spec: &ResourceSpec,
     key: &str,
     document: &mut Document,
+    effective_ms: i64,
     device_id: &str,
     conflicts: &mut Vec<NewConflict>,
 ) -> AppResult<()> {
@@ -210,24 +223,57 @@ async fn resolve_unique_collisions(
         let Ok(value) = document.get_str(column).map(str::to_string) else {
             continue;
         };
-        let clash = collection
+        let Some(clash) = collection
             .find_one(doc! { *column: &value, "key": { "$ne": key }, "deleted_at": Bson::Null })
-            .await?;
-        if clash.is_none() {
+            .await?
+        else {
             continue;
+        };
+        let Ok(clash_key) = clash.get_str("key").map(str::to_string) else {
+            continue;
+        };
+
+        if key < clash_key.as_str() {
+            // The incoming row is the deterministic winner: it keeps `value`
+            // unchanged. The already-stored clash row moves aside instead.
+            let clash_tag = device_tag(clash.get_str("updated_by_device").unwrap_or(device_id));
+            let stored = format!("{value}-{clash_tag}");
+            let clash_version = num_i64(&clash, "version").unwrap_or(1);
+            collection
+                .update_one(
+                    doc! { "key": &clash_key },
+                    doc! { "$set": {
+                        *column: stored.as_str(),
+                        "updated_at": millis(effective_ms),
+                        "updated_by_device": device_id,
+                        "version": clash_version + 1,
+                    }},
+                )
+                .await?;
+            conflicts.push(NewConflict {
+                kind: ConflictKind::UniqueViolation,
+                resource: spec.name.to_string(),
+                entity_key: clash_key,
+                detail: serde_json::json!({
+                    "column": column,
+                    "originalValue": value,
+                    "storedValue": stored,
+                }),
+            });
+        } else {
+            let stored = format!("{value}-{}", device_tag(device_id));
+            document.insert(*column, stored.as_str());
+            conflicts.push(NewConflict {
+                kind: ConflictKind::UniqueViolation,
+                resource: spec.name.to_string(),
+                entity_key: key.to_string(),
+                detail: serde_json::json!({
+                    "column": column,
+                    "originalValue": value,
+                    "storedValue": stored,
+                }),
+            });
         }
-        let stored = format!("{value}-{}", device_tag(device_id));
-        document.insert(*column, stored.as_str());
-        conflicts.push(NewConflict {
-            kind: ConflictKind::UniqueViolation,
-            resource: spec.name.to_string(),
-            entity_key: key.to_string(),
-            detail: serde_json::json!({
-                "column": column,
-                "originalValue": value,
-                "storedValue": stored,
-            }),
-        });
     }
     Ok(())
 }
@@ -249,14 +295,18 @@ pub(crate) async fn apply_upsert(
         .ok_or_else(|| AppError::validation("upsert without payload"))?;
     let encoded = mongo_codec::encode(spec, payload)?;
 
-    // A serial sold on two devices keeps the earlier sale and raises a conflict.
+    // A serial sold on two devices: `decide` (the caller) already picked the
+    // winner using the same `(updated_at_ms, device_id)` tiebreak every other
+    // Lww resource uses - this only ADDS a conflict note for the owner. It must
+    // never override which write actually lands: a separate "first push wins"
+    // rule here would disagree with what a receiving device computes for the
+    // very same two writes via its own `decide`, and the two sides would never
+    // re-converge (the loser would be told `Applied` while nothing was written).
     if spec.name == "productSerials"
         && let Some(existing) = existing
         && let Some(conflict) = serial_double_sale(existing, payload, &record.key)
     {
         conflicts.push(conflict);
-        note_scope(spec, Some(payload), &record.key, &existing.doc, scope);
-        return Ok(WriteOutcome::Unchanged);
     }
 
     let mut document = build_document(spec, record, encoded, existing, effective_ms, device_id);
@@ -269,8 +319,16 @@ pub(crate) async fn apply_upsert(
                 .await?;
         }
         None => {
-            resolve_unique_collisions(db, spec, &record.key, &mut document, device_id, conflicts)
-                .await?;
+            resolve_unique_collisions(
+                db,
+                spec,
+                &record.key,
+                &mut document,
+                effective_ms,
+                device_id,
+                conflicts,
+            )
+            .await?;
             if let Err(err) = collection.insert_one(document.clone()).await {
                 // `_id` is unique across ALL tenants of a collection. A pushed id that is
                 // already taken (by another tenant, or forged) refuses just that change;

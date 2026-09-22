@@ -17,6 +17,7 @@ use axum::{
     },
 };
 use jsonwebtoken::{EncodingKey, Header, encode};
+use mongodb::bson::{Document, doc};
 use serde_json::{Value, json};
 use simplebash_pos_backend::{
     core::{constants::roles, tenancy::Tenant},
@@ -276,6 +277,21 @@ async fn cloud_changes(cloud: &common::TestApp) -> Vec<Value> {
             return all;
         }
     }
+}
+
+/// Conflicts of a given kind the cloud has recorded for `TENANT` (`cloud_capture`
+/// and `push` write to `sync_conflicts` the same way the device applier does).
+async fn cloud_conflicts(cloud: &common::TestApp, kind: &str) -> Vec<Document> {
+    use futures_util::TryStreamExt;
+    cloud
+        .db
+        .collection::<Document>("sync_conflicts")
+        .find(doc! { "tenant_id": TENANT, "kind": kind })
+        .await
+        .unwrap()
+        .try_collect()
+        .await
+        .unwrap()
 }
 
 /// The change-stream consumer is asynchronous: wait until the cloud's log stops growing.
@@ -588,3 +604,472 @@ async fn three_devices_and_the_cloud_converge() {
 
     cloud.db.drop().await.ok();
 }
+
+// ---------------------------------------------------------------------------
+// Hardening: clock skew, injected conflicts, wider operation variety.
+// Each test below opens its own throwaway cloud database, isolated from the
+// scenario above and from each other.
+// ---------------------------------------------------------------------------
+
+/// Persistent per-device clock skew must not stop convergence: `clock_offset_ms`
+/// is baked into every outbound change's `updatedAt` (see `modules::sync::state`
+/// and `modules::sync::outbox`), and the receiving side clamps/monotonically
+/// orders on top of that - this proves the combination actually holds across a
+/// real push/pull/apply round trip, with four devices and a wider operation mix
+/// than the base scenario (adds credit notes and repairs into the rotation).
+#[tokio::test]
+async fn devices_with_persistent_clock_skew_still_converge() {
+    let cloud = common::spawn_app_multi_tenant().await;
+    start_consumer(&cloud).await;
+
+    let mut devices = vec![
+        Device::new(11, &cloud).await,
+        Device::new(12, &cloud).await,
+        Device::new(13, &cloud).await,
+        Device::new(14, &cloud).await,
+    ];
+    for d in &devices {
+        d.sync("POST", "/api/sync/enable", Some(json!({ "tenantId": TENANT, "deviceId": d.id }))).await;
+        reserve_blocks(&cloud, d).await;
+    }
+    // Device 12 runs 90s fast, device 13 runs 60s slow, the rest are on time.
+    devices[1].sync("POST", "/api/sync/state", Some(json!({ "clockOffsetMs": 90_000 }))).await;
+    devices[2].sync("POST", "/api/sync/state", Some(json!({ "clockOffsetMs": -60_000 }))).await;
+
+    let catalog = create_shop(&devices[0]).await;
+    push_all(&cloud, &devices[0]).await;
+    wait_for_cloud_quiet(&cloud).await;
+    for d in devices.iter_mut().skip(1) {
+        bootstrap(&cloud, d).await;
+    }
+
+    let mut rng = Rng(SEED ^ 0xC10C_5CE1);
+    let mut step = 0;
+    for round in 0..5 {
+        for d in &devices {
+            for _ in 0..4 {
+                step += 1;
+                random_op(d, &catalog, &mut rng, step).await;
+            }
+        }
+        let syncing: Vec<usize> = (0..devices.len()).filter(|_| rng.below(3) != 0).collect();
+        for i in syncing {
+            push_all(&cloud, &devices[i]).await;
+            pull_all(&cloud, &mut devices[i]).await;
+        }
+        eprintln!("skew round {round} done");
+    }
+
+    for _ in 0..2 {
+        for d in &devices {
+            push_all(&cloud, d).await;
+        }
+        wait_for_cloud_quiet(&cloud).await;
+        for d in devices.iter_mut() {
+            pull_all(&cloud, d).await;
+        }
+    }
+
+    for table in SYNCED {
+        let base = table_rows(devices[0].pool(), table).await;
+        for d in &devices[1..] {
+            assert_eq!(base, table_rows(d.pool(), table).await, "table {table} differs on {} under clock skew", d.id);
+        }
+    }
+    for d in &devices {
+        let rows = sqlx::query(
+            "SELECT p.key AS key, p.stock_quantity AS stock, COALESCE(SUM(m.quantity_delta), 0) AS ledger \
+             FROM products p LEFT JOIN stock_movements m ON m.product_id = p.id GROUP BY p.id",
+        )
+        .fetch_all(d.pool())
+        .await
+        .unwrap();
+        for row in rows {
+            use sqlx::Row;
+            let (key, stock, ledger): (String, i64, i64) = (row.get("key"), row.get("stock"), row.get("ledger"));
+            assert_eq!(stock, ledger, "stock of {key} is not its ledger on {} under clock skew", d.id);
+        }
+    }
+    let numbers: Vec<String> = sqlx::query_scalar("SELECT invoice_number FROM invoices")
+        .fetch_all(devices[0].pool())
+        .await
+        .unwrap();
+    let distinct: BTreeSet<&String> = numbers.iter().collect();
+    assert_eq!(numbers.len(), distinct.len(), "duplicate invoice numbers under clock skew: {numbers:?}");
+
+    cloud.db.drop().await.ok();
+}
+
+/// Two devices independently sell the SAME physical serial (offline, unaware of
+/// each other) to two different invoices. Both sales must survive the merge -
+/// selling twice is a real-world mistake to flag for a human, not data to
+/// silently drop - and it must be recorded as a `SERIAL_DOUBLE_SOLD` conflict.
+#[tokio::test]
+async fn concurrent_serial_sale_is_flagged_and_both_invoices_survive() {
+    let cloud = common::spawn_app_multi_tenant().await;
+    start_consumer(&cloud).await;
+
+    let mut devices = vec![Device::new(21, &cloud).await, Device::new(22, &cloud).await];
+    for d in &devices {
+        d.sync("POST", "/api/sync/enable", Some(json!({ "tenantId": TENANT, "deviceId": d.id }))).await;
+        reserve_blocks(&cloud, d).await;
+    }
+
+    // Device 1 mints the serialized product, its serial, and pushes them out.
+    let cat = devices[0]
+        .api("POST", "/api/inventory/categories", Some(json!({ "name": "Serial Goods", "icon": "phone", "color": "teal" })))
+        .await;
+    let category_key = cat["data"]["key"].as_str().unwrap().to_string();
+    let sub = devices[0]
+        .api("POST", &format!("/api/inventory/categories/{category_key}/subcategories"), Some(json!({ "name": "Flagship" })))
+        .await;
+    let subcategory_key = sub["data"]["subcategories"][0]["key"].as_str().unwrap().to_string();
+    let product = devices[0]
+        .api(
+            "POST",
+            "/api/inventory/products",
+            Some(json!({
+                "name": "Serial Phone", "categoryKey": category_key, "subcategoryKey": subcategory_key,
+                "sellingPriceCents": 80000, "costPriceCents": 50000, "stockQuantity": 0, "minStockThreshold": 1,
+                "isSerialized": true
+            })),
+        )
+        .await;
+    let product_key = product["data"]["key"].as_str().unwrap().to_string();
+    let supplier = devices[0]
+        .api(
+            "POST",
+            "/api/suppliers",
+            Some(json!({
+                "name": "Serial Supplier", "contactPerson": "Sam", "primaryPhone": "0112345000",
+                "address": "Colombo", "suppliedCategories": ["Serial Goods"]
+            })),
+        )
+        .await;
+    let supplier_key = supplier["data"]["key"].as_str().unwrap().to_string();
+    let serial = format!("SN-{}", Uuid::new_v4());
+    devices[0]
+        .api(
+            "POST",
+            "/api/purchases",
+            Some(json!({
+                "supplierKey": supplier_key, "productKey": product_key, "quantity": 1, "unitCostCents": 50000,
+                "date": chrono::Utc::now().to_rfc3339(), "serialNumbers": [serial]
+            })),
+        )
+        .await;
+    push_all(&cloud, &devices[0]).await;
+    wait_for_cloud_quiet(&cloud).await;
+    bootstrap(&cloud, &mut devices[1]).await;
+
+    // Offline: both devices sell the SAME serial to their own new invoice.
+    let mut invoice_keys = Vec::new();
+    for d in &devices {
+        let sale = d
+            .api(
+                "POST",
+                "/api/billing/sales",
+                Some(json!({
+                    "staff": { "cashierName": "Admin" },
+                    "items": [{ "productKey": product_key, "quantity": 1, "discountCents": 0, "sourceType": "retail", "serialNumbers": [serial] }],
+                    "payment": { "paymentMethod": "cash", "isCredit": false, "amountReceivedCents": 80000 },
+                    "shopProfileSnapshot": { "name": "Shop", "address": "Colombo" }
+                })),
+            )
+            .await;
+        invoice_keys.push(sale["data"]["invoice"]["key"].as_str().unwrap().to_string());
+    }
+    assert_ne!(invoice_keys[0], invoice_keys[1]);
+
+    for _ in 0..2 {
+        for d in &devices {
+            push_all(&cloud, d).await;
+        }
+        wait_for_cloud_quiet(&cloud).await;
+        for d in devices.iter_mut() {
+            pull_all(&cloud, d).await;
+        }
+    }
+
+    // Both sales survive, on every replica, with their own invoice number.
+    for d in &devices {
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM invoices WHERE key IN (?, ?)")
+            .bind(&invoice_keys[0])
+            .bind(&invoice_keys[1])
+            .fetch_one(d.pool())
+            .await
+            .unwrap();
+        assert_eq!(count, 2, "both sales of the double-sold serial must survive on {}", d.id);
+    }
+
+    // The conflict is on record somewhere: on the cloud (it sees the second
+    // push land on top of the first) and/or on whichever device pulled the
+    // other's conflicting change.
+    let cloud_hits = cloud_conflicts(&cloud, "SERIAL_DOUBLE_SOLD").await.len();
+    let mut device_hits = 0i64;
+    for d in &devices {
+        device_hits += sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM sync_conflicts WHERE kind = 'SERIAL_DOUBLE_SOLD'")
+            .fetch_one(d.pool())
+            .await
+            .unwrap();
+    }
+    assert!(cloud_hits + device_hits as usize >= 1, "no SERIAL_DOUBLE_SOLD conflict was recorded anywhere");
+
+    // Fixed bug: `apply_mongo::serial_double_sale` used to keep whichever row was
+    // *already stored*, unconditionally, discarding the incoming write even when
+    // `core::sync_merge::decide` had already picked it as the winner under the
+    // ordinary `(updated_at_ms, device_id)` tiebreak - so a receiving device,
+    // running that same `decide` on its own pull, could reach a different answer
+    // than the cloud ever actually stored. The fix makes the serial rule ADD a
+    // conflict note without ever overriding which write lands, so the cloud's
+    // document and every device's pulled copy are driven by the exact same
+    // tiebreak and must agree. Assert that now, instead of just documenting a
+    // disagreement.
+    let cloud_row = cloud
+        .db
+        .collection::<Document>("product_serials")
+        .find_one(doc! { "tenant_id": TENANT, "serial_number": &serial })
+        .await
+        .unwrap()
+        .expect("the serial must exist on the cloud");
+    let cloud_state = (
+        cloud_row.get_str("status").unwrap().to_string(),
+        cloud_row.get_str("invoice_key").unwrap().to_string(),
+    );
+    assert_eq!(cloud_state.0, "sold");
+    assert!(invoice_keys.contains(&cloud_state.1));
+
+    for d in &devices {
+        let row: (String, String) = sqlx::query_as("SELECT status, invoice_key FROM product_serials WHERE serial_number = ?")
+            .bind(&serial)
+            .fetch_one(d.pool())
+            .await
+            .unwrap();
+        assert_eq!(row, cloud_state, "{} disagrees with the cloud about who owns the serial", d.id);
+    }
+
+    cloud.db.drop().await.ok();
+}
+
+/// Two devices independently refund the SAME invoice in full, offline and
+/// unaware of each other - each looks locally valid at the time. Once merged,
+/// the combined refund exceeds the invoice total: this must be *flagged*, not
+/// silently clamped or corrupted, and neither credit note may be dropped.
+#[tokio::test]
+async fn concurrent_full_refunds_raise_over_refund_not_silent_corruption() {
+    let cloud = common::spawn_app_multi_tenant().await;
+    start_consumer(&cloud).await;
+
+    let mut devices = vec![Device::new(31, &cloud).await, Device::new(32, &cloud).await];
+    for d in &devices {
+        d.sync("POST", "/api/sync/enable", Some(json!({ "tenantId": TENANT, "deviceId": d.id }))).await;
+        reserve_blocks(&cloud, d).await;
+    }
+
+    let catalog = create_shop(&devices[0]).await;
+    let (product_key, _product_id) = catalog.products[0].clone();
+    let sale = devices[0]
+        .api(
+            "POST",
+            "/api/billing/sales",
+            Some(json!({
+                "staff": { "cashierName": "Admin" },
+                "items": [{ "productKey": product_key, "quantity": 2, "discountCents": 0, "sourceType": "retail" }],
+                "payment": { "paymentMethod": "cash", "isCredit": false, "amountReceivedCents": 100_000_000 },
+                "shopProfileSnapshot": { "name": "Shop", "address": "Colombo" }
+            })),
+        )
+        .await;
+    let invoice_key = sale["data"]["invoice"]["key"].as_str().unwrap().to_string();
+    let total_cents = sale["data"]["invoice"]["totalCents"].as_i64().unwrap();
+
+    push_all(&cloud, &devices[0]).await;
+    wait_for_cloud_quiet(&cloud).await;
+    bootstrap(&cloud, &mut devices[1]).await;
+
+    // Offline: both devices independently return the full quantity.
+    let mut credit_note_keys = Vec::new();
+    for d in &devices {
+        let cn = d
+            .api(
+                "POST",
+                "/api/billing/credit-notes",
+                Some(json!({
+                    "invoiceKey": invoice_key,
+                    "returnedItems": [{ "productKey": product_key, "quantity": 2, "condition": "resalable", "reason": "customer_changed_mind" }],
+                    "paymentMethod": "cash"
+                })),
+            )
+            .await;
+        credit_note_keys.push(cn["data"]["key"].as_str().unwrap().to_string());
+    }
+    assert_ne!(credit_note_keys[0], credit_note_keys[1]);
+
+    for _ in 0..2 {
+        for d in &devices {
+            push_all(&cloud, d).await;
+        }
+        wait_for_cloud_quiet(&cloud).await;
+        for d in devices.iter_mut() {
+            pull_all(&cloud, d).await;
+        }
+    }
+
+    // Both credit notes survive, everywhere.
+    for d in &devices {
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM credit_notes WHERE key IN (?, ?)")
+            .bind(&credit_note_keys[0])
+            .bind(&credit_note_keys[1])
+            .fetch_one(d.pool())
+            .await
+            .unwrap();
+        assert_eq!(count, 2, "both credit notes must survive on {}", d.id);
+    }
+
+    // The invoice's refunded_cents is the honest (over-)sum of both notes, not
+    // some clamped/negative/garbage value - and it is flagged as an OVER_REFUND.
+    for d in &devices {
+        let refunded: i64 = sqlx::query_scalar("SELECT refunded_cents FROM invoices WHERE key = ?")
+            .bind(&invoice_key)
+            .fetch_one(d.pool())
+            .await
+            .unwrap();
+        assert!(refunded > total_cents, "{} should show the honest over-refunded total, got {refunded} for a {total_cents}-cent invoice", d.id);
+        assert!(refunded >= 0 && refunded <= total_cents * 3, "{} shows a nonsensical refunded_cents: {refunded}", d.id);
+    }
+
+    let cloud_hits = cloud_conflicts(&cloud, "OVER_REFUND").await.len();
+    let mut device_hits = 0i64;
+    for d in &devices {
+        device_hits += sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM sync_conflicts WHERE kind = 'OVER_REFUND'")
+            .fetch_one(d.pool())
+            .await
+            .unwrap();
+    }
+    assert!(cloud_hits + device_hits as usize >= 1, "no OVER_REFUND conflict was recorded anywhere");
+
+    cloud.db.drop().await.ok();
+}
+
+/// Two devices independently create a category with the SAME name, offline.
+/// Business rules cannot stop this (each device only ever sees its own local
+/// row), so the merge is the last line of defense: the losing name is renamed
+/// with a device-tag suffix and reported, rather than one category silently
+/// overwriting or shadowing the other.
+#[tokio::test]
+async fn concurrent_duplicate_category_names_are_renamed_and_both_survive() {
+    let cloud = common::spawn_app_multi_tenant().await;
+    start_consumer(&cloud).await;
+
+    let mut devices = vec![Device::new(41, &cloud).await, Device::new(42, &cloud).await];
+    for d in &devices {
+        d.sync("POST", "/api/sync/enable", Some(json!({ "tenantId": TENANT, "deviceId": d.id }))).await;
+    }
+    // A shared baseline so both devices have something to bootstrap/converge on.
+    devices[0]
+        .api("POST", "/api/inventory/categories", Some(json!({ "name": "Baseline", "icon": "box", "color": "gray" })))
+        .await;
+    push_all(&cloud, &devices[0]).await;
+    wait_for_cloud_quiet(&cloud).await;
+    bootstrap(&cloud, &mut devices[1]).await;
+
+    // Offline: both devices create a category with the identical name.
+    let mut category_keys = Vec::new();
+    for d in &devices {
+        let cat = d
+            .api("POST", "/api/inventory/categories", Some(json!({ "name": "Accessories", "icon": "tag", "color": "purple" })))
+            .await;
+        category_keys.push(cat["data"]["key"].as_str().unwrap().to_string());
+    }
+    assert_ne!(category_keys[0], category_keys[1]);
+
+    for _ in 0..2 {
+        for d in &devices {
+            push_all(&cloud, d).await;
+        }
+        wait_for_cloud_quiet(&cloud).await;
+        for d in devices.iter_mut() {
+            pull_all(&cloud, d).await;
+        }
+    }
+
+    // Both categories survive on every replica, and their names are now distinct.
+    for d in &devices {
+        let names: Vec<String> = sqlx::query_scalar("SELECT name FROM categories WHERE key IN (?, ?) ORDER BY key")
+            .bind(&category_keys[0])
+            .bind(&category_keys[1])
+            .fetch_all(d.pool())
+            .await
+            .unwrap();
+        assert_eq!(names.len(), 2, "both categories must survive on {}", d.id);
+        assert_ne!(names[0], names[1], "the colliding name must have been renamed apart on {}", d.id);
+    }
+    // Fixed bug: which of the two keys kept the original name and which got the
+    // device-tag suffix used to be decided independently by whichever replica
+    // was CURRENTLY APPLYING when it hit the collision - device A would rename
+    // B's incoming create while device B, applying A's incoming create against
+    // its own already-stored row, renamed A's instead, so both devices ended up
+    // with the same two names as a SET but assigned to SWAPPED keys. The fix
+    // makes the winner deterministic and identical everywhere (the
+    // lexicographically LOWER key always keeps the original value) and
+    // republishes a locally-decided correction from inside the applying
+    // transaction instead of letting it get stuck there. Assert the exact
+    // per-key assignment now agrees everywhere, not just the set of names.
+    let (lower_key, higher_key) = if category_keys[0] < category_keys[1] {
+        (&category_keys[0], &category_keys[1])
+    } else {
+        (&category_keys[1], &category_keys[0])
+    };
+
+    async fn name_of(pool: &SqlitePool, key: &str) -> String {
+        sqlx::query_scalar("SELECT name FROM categories WHERE key = ?")
+            .bind(key)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+    async fn cloud_name_of(cloud: &common::TestApp, key: &str) -> String {
+        cloud
+            .db
+            .collection::<Document>("categories")
+            .find_one(doc! { "tenant_id": TENANT, "key": key })
+            .await
+            .unwrap()
+            .unwrap_or_else(|| panic!("{key} must exist on the cloud"))
+            .get_str("name")
+            .unwrap()
+            .to_string()
+    }
+    let cloud_lower = cloud_name_of(&cloud, lower_key).await;
+    let cloud_higher = cloud_name_of(&cloud, higher_key).await;
+    assert_eq!(cloud_lower, "Accessories", "the lower key must keep the original name");
+    assert_ne!(cloud_higher, "Accessories", "the higher key must have been renamed apart");
+
+    for d in &devices {
+        assert_eq!(
+            name_of(d.pool(), lower_key).await,
+            cloud_lower,
+            "{} disagrees with the cloud on the lower key's name",
+            d.id
+        );
+        assert_eq!(
+            name_of(d.pool(), higher_key).await,
+            cloud_higher,
+            "{} disagrees with the cloud on the higher key's name",
+            d.id
+        );
+    }
+
+    let cloud_hits = cloud_conflicts(&cloud, "UNIQUE_VIOLATION").await.len();
+    let mut device_hits = 0i64;
+    for d in &devices {
+        device_hits += sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM sync_conflicts WHERE kind = 'UNIQUE_VIOLATION'")
+            .fetch_one(d.pool())
+            .await
+            .unwrap();
+    }
+    assert!(cloud_hits + device_hits as usize >= 1, "no UNIQUE_VIOLATION conflict was recorded anywhere");
+
+    cloud.db.drop().await.ok();
+}
+

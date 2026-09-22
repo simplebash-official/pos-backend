@@ -577,6 +577,138 @@ async fn linked_devices_draw_numbers_from_blocks_then_a_unique_fallback() {
     assert_eq!(unique.len(), all.len(), "{all:?}");
 }
 
+/// SKU and barcode draw from the same per-prefix/per-namespace counters a
+/// direct (unlinked, or block-less) generation uses (see
+/// `inventory::service::sku::generate_sku` and
+/// `barcode::service::generator::generate`), so a linked device consuming a
+/// pre-fetched block can never mint the same SKU/barcode as one generated
+/// directly - and once the block runs dry, generation keeps going without a
+/// gap or a collision instead of erroring.
+#[tokio::test]
+async fn linked_devices_draw_skus_and_barcodes_from_blocks_then_a_unique_fallback() {
+    use simplebash_pos_backend::modules::sequences::service::reserve_sequence;
+
+    let dev = Device::new().await;
+    dev.sync("POST", "/api/sync/enable", Some(json!({ "deviceId": "dev_zzzz0000aaaa1111" }))).await;
+
+    let cat = dev
+        .api("POST", "/api/inventory/categories", Some(json!({ "name": "Phone Repairs", "icon": "x", "color": "red" })))
+        .await;
+    let category_key = cat["data"]["key"].as_str().unwrap().to_string();
+    let sub = dev
+        .api("POST", &format!("/api/inventory/categories/{category_key}/subcategories"), Some(json!({ "name": "Screens" })))
+        .await;
+    let subcategory_key = sub["data"]["subcategories"][0]["key"].as_str().unwrap().to_string();
+
+    let new_product = |name: &str| {
+        json!({
+            "name": name, "categoryKey": &category_key, "subcategoryKey": &subcategory_key,
+            "sellingPriceCents": 1000, "costPriceCents": 500, "stockQuantity": 0, "minStockThreshold": 1,
+            "autoGenerateBarcode": true
+        })
+    };
+
+    // --- SKU: PHO-SCR is derived from "Phone Repairs" + "Screens" ----------
+    let sku_block = reserve_sequence(
+        &dev.app.db_handle,
+        "sku:PHO-SCR".to_string(),
+        ReserveSequenceRequest { block_size: Some(2), device_id: None },
+    )
+    .await
+    .unwrap();
+    assert_eq!((sku_block.prefix.as_str(), sku_block.padding, sku_block.start, sku_block.end), ("PHO-SCR-", 4, 1, 2));
+    dev.sync(
+        "POST",
+        "/api/sync/blocks",
+        Some(json!({ "name": "sku:PHO-SCR", "prefix": "PHO-SCR-", "padding": 4, "start": 1, "end": 2, "expiresAt": "2099-01-01T00:00:00Z" })),
+    )
+    .await;
+
+    // --- barcode: one global "product" namespace ----------------------------
+    let barcode_block = reserve_sequence(
+        &dev.app.db_handle,
+        "barcode".to_string(),
+        ReserveSequenceRequest { block_size: Some(2), device_id: None },
+    )
+    .await
+    .unwrap();
+    assert_eq!((barcode_block.start, barcode_block.end), (1, 2));
+    dev.sync(
+        "POST",
+        "/api/sync/blocks",
+        Some(json!({ "name": "barcode", "prefix": "", "padding": 0, "start": 1, "end": 2, "expiresAt": "2099-01-01T00:00:00Z" })),
+    )
+    .await;
+
+    let extract_barcode_seq = |barcode: &str| -> i64 { barcode[2..12].parse().unwrap() };
+
+    // Products 1 and 2 draw the block, in order, exactly once each.
+    let p1 = dev.api("POST", "/api/inventory/products", Some(new_product("Screen A"))).await;
+    assert_eq!(p1["data"]["sku"], "PHO-SCR-0001");
+    assert_eq!(extract_barcode_seq(p1["data"]["barcode"].as_str().unwrap()), 1);
+
+    let p2 = dev.api("POST", "/api/inventory/products", Some(new_product("Screen B"))).await;
+    assert_eq!(p2["data"]["sku"], "PHO-SCR-0002");
+    assert_eq!(extract_barcode_seq(p2["data"]["barcode"].as_str().unwrap()), 2);
+
+    // Both blocks are exhausted now - a third product must still get fresh,
+    // never-seen-before numbers instead of erroring or repeating 1/2.
+    let p3 = dev.api("POST", "/api/inventory/products", Some(new_product("Screen C"))).await;
+    let sku3 = p3["data"]["sku"].as_str().unwrap().to_string();
+    let barcode3_seq = extract_barcode_seq(p3["data"]["barcode"].as_str().unwrap());
+
+    // SKU's exhausted-block fallback is the same device-tagged text series
+    // invoice/etc. already use (see the test above) - a device-local counter,
+    // impossible to collide with the block's PHO-SCR-0001/0002.
+    assert_eq!(sku3, "PHO-SCR-Dzzzz-0001");
+    // Barcode has no room for text in an EAN-13 payload, so its fallback tags
+    // the device numerically instead (see `generator::generate`): the top
+    // digits of the 10-digit sequence field are the device's tag, so a
+    // fallback sequence is always >= 10,000,000 - far outside the 1/2 the
+    // block itself ever handed out, so it can't collide with them.
+    assert!(barcode3_seq >= 10_000_000, "expected a device-tagged fallback sequence, got {barcode3_seq}");
+
+    // Everything actually minted this run is distinct.
+    let skus = [p1["data"]["sku"].as_str().unwrap(), p2["data"]["sku"].as_str().unwrap(), sku3.as_str()];
+    let unique_skus: std::collections::HashSet<_> = skus.iter().collect();
+    assert_eq!(unique_skus.len(), skus.len(), "{skus:?}");
+    let barcodes = [1i64, 2, barcode3_seq];
+    let unique_barcodes: std::collections::HashSet<_> = barcodes.iter().collect();
+    assert_eq!(unique_barcodes.len(), barcodes.len(), "{barcodes:?}");
+}
+
+/// `GET /api/sync/sku-prefixes` is how the desktop agent discovers which
+/// `sku:<prefix>` block families to keep topped up - it has no other way to
+/// know which category+subcategory pairs exist locally.
+#[tokio::test]
+async fn sku_prefixes_lists_the_distinct_local_catalog_prefixes() {
+    let dev = Device::new().await;
+    assert_eq!(dev.sync("GET", "/api/sync/sku-prefixes", None).await["prefixes"], json!([]));
+
+    let mut category_keys = std::collections::HashMap::new();
+    for (category, subcategory) in [("Phone Repairs", "Screens"), ("Phone Repairs", "Batteries"), ("Electronics", "Cables")] {
+        let category_key = match category_keys.get(category) {
+            Some(key) => key,
+            None => {
+                let cat = dev.api("POST", "/api/inventory/categories", Some(json!({ "name": category, "icon": "x", "color": "red" }))).await;
+                let key = cat["data"]["key"].as_str().unwrap().to_string();
+                category_keys.insert(category.to_string(), key);
+                category_keys.get(category).unwrap()
+            }
+        };
+        dev.api("POST", &format!("/api/inventory/categories/{category_key}/subcategories"), Some(json!({ "name": subcategory }))).await;
+    }
+
+    let mut prefixes: Vec<String> = dev.sync("GET", "/api/sync/sku-prefixes", None).await["prefixes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    prefixes.sort();
+    assert_eq!(prefixes, vec!["ELE-CAB", "PHO-BAT", "PHO-SCR"]);
+}
+
 #[tokio::test]
 async fn backups_never_carry_sync_bookkeeping() {
     let dev = Device::new().await;

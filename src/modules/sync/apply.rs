@@ -162,6 +162,10 @@ struct RowWrite<'a> {
 }
 
 struct UniqueFix {
+    /// Row the conflict is reported against - the one that actually got the
+    /// device-tagged suffix, which is not always `w.key` (see
+    /// `upsert_with_unique_retry`).
+    entity_key: String,
     column: String,
     original: String,
     stored: String,
@@ -253,11 +257,28 @@ fn violated_column(err: &sqlx::Error) -> Option<String> {
 
 /// Upserts a row; on a UNIQUE clash with a different row the incoming value is
 /// stored with a device suffix instead of being dropped, and reported.
+/// Upserts a row; on a UNIQUE clash with a different row, whichever key sorts
+/// LOWER always keeps the value unchanged and the higher key is always the
+/// one suffixed with a device tag - the same deterministic rule the Mongo
+/// side uses (`apply_mongo::resolve_unique_collisions`), so every replica
+/// that ever sees both rows reaches the identical assignment regardless of
+/// which one it happens to be applying right now or in what order arrival
+/// happens locally.
+///
+/// When the row that must move aside is the one ALREADY stored (the incoming
+/// key is the lower one), it is corrected here in place - and, because that
+/// correction is this device's own decision made while applying someone
+/// else's change (inside the caller's `applying = 1` window, which normally
+/// silences the capture triggers so a remote change is never echoed back),
+/// it is manually re-queued into this device's own outbox exactly as a
+/// trigger would, so the correction still leaves on the next push instead of
+/// being silently swallowed.
 async fn upsert_with_unique_retry(
     conn: &mut SqliteConnection,
     cols: &[Col],
     w: &RowWrite<'_>,
-    device_tag: &str,
+    resource: &str,
+    own_tag: &str,
 ) -> AppResult<Option<UniqueFix>> {
     // Statement-level failure leaves the transaction usable in SQLite.
     match upsert_row(conn, cols, w).await {
@@ -267,24 +288,115 @@ async fn upsert_with_unique_retry(
                 return Err(err.into());
             };
             let camel = wire_field(w.table, &column);
-            let Some(original) = w.payload.get(&camel).and_then(Value::as_str).map(str::to_owned) else {
+            let Some(value) = w.payload.get(&camel).and_then(Value::as_str).map(str::to_owned) else {
                 return Err(err.into());
             };
-            let stored = format!("{original}-{device_tag}");
-            let mut patched = w.payload.clone();
-            patched.insert(camel, Value::String(stored.clone()));
-            let retry = RowWrite {
-                payload: &patched,
-                ..*w
+
+            let clash: Option<(String, Option<String>)> = sqlx::query_as(&format!(
+                "SELECT key, updated_by_device FROM {} WHERE {} = ? AND key != ?",
+                w.table, column
+            ))
+            .bind(&value)
+            .bind(w.key)
+            .fetch_optional(&mut *conn)
+            .await?;
+            let Some((clash_key, clash_device)) = clash else {
+                // The constraint fired for a reason this rule doesn't cover
+                // (e.g. a race with a write outside sync); surface it as before.
+                return Err(err.into());
             };
-            upsert_row(conn, cols, &retry).await?;
-            Ok(Some(UniqueFix {
-                column,
-                original,
-                stored,
-            }))
+
+            if w.key < clash_key.as_str() {
+                // The incoming row is the deterministic winner: it keeps `value`
+                // unchanged, and the already-stored clash row moves aside.
+                let clash_tag = device_tag(clash_device.as_deref().unwrap_or(own_tag));
+                let stored = format!("{value}-{clash_tag}");
+                rename_stored_row(conn, w.table, &clash_key, &column, &stored, resource).await?;
+                upsert_row(conn, cols, w).await?; // now succeeds - the clash is cleared
+                Ok(Some(UniqueFix {
+                    entity_key: clash_key,
+                    column,
+                    original: value,
+                    stored,
+                }))
+            } else {
+                let stored = format!("{value}-{own_tag}");
+                let mut patched = w.payload.clone();
+                patched.insert(camel, Value::String(stored.clone()));
+                let retry = RowWrite {
+                    payload: &patched,
+                    ..*w
+                };
+                upsert_row(conn, cols, &retry).await?;
+                Ok(Some(UniqueFix {
+                    entity_key: w.key.to_string(),
+                    column,
+                    original: value,
+                    stored,
+                }))
+            }
         }
     }
+}
+
+/// Corrects an already-stored row's colliding column to `new_value` and
+/// manually re-queues it into the local outbox (see `upsert_with_unique_retry`
+/// for why: this write happens inside an `applying = 1` transaction, so the
+/// normal capture trigger for `table` never fires for it).
+async fn rename_stored_row(
+    conn: &mut SqliteConnection,
+    table: &str,
+    key: &str,
+    column: &str,
+    new_value: &str,
+    resource: &str,
+) -> AppResult<()> {
+    let own_device: String = sqlx::query_scalar("SELECT device_id FROM sync_state WHERE id = 1")
+        .fetch_one(&mut *conn)
+        .await?;
+    let ms = local_correction_ms(conn, resource, key).await?;
+    let version: i64 = sqlx::query_scalar(&format!("SELECT version FROM {table} WHERE key = ?"))
+        .bind(key)
+        .fetch_one(&mut *conn)
+        .await?;
+    sqlx::query(&format!(
+        "UPDATE {table} SET {column} = ?, updated_at = ?, updated_by_device = ?, version = ? WHERE key = ?"
+    ))
+    .bind(new_value)
+    .bind(ms_to_datetime(ms).to_rfc3339())
+    .bind(&own_device)
+    .bind(version + 1)
+    .bind(key)
+    .execute(&mut *conn)
+    .await?;
+    save_meta(conn, resource, key, ms, &own_device, version + 1).await?;
+    sqlx::query(
+        "INSERT OR REPLACE INTO sync_outbox (resource, key, op, enqueued_at) \
+         VALUES (?, ?, 'upsert', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+    )
+    .bind(resource)
+    .bind(key)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
+/// The `updated_at_ms` a locally-decided correction gets: this device's own
+/// clock (adjusted the same way the capture triggers compute it) or one past
+/// the row's current meta, whichever is later - so the correction always wins
+/// a future Lww comparison against the state it is replacing.
+async fn local_correction_ms(conn: &mut SqliteConnection, resource: &str, key: &str) -> AppResult<i64> {
+    let offset: i64 = sqlx::query_scalar("SELECT clock_offset_ms FROM sync_state WHERE id = 1")
+        .fetch_one(&mut *conn)
+        .await?;
+    let prior: Option<i64> =
+        sqlx::query_scalar("SELECT updated_at_ms FROM sync_row_meta WHERE resource = ? AND key = ?")
+            .bind(resource)
+            .bind(key)
+            .fetch_optional(&mut *conn)
+            .await?;
+    let now = Utc::now().timestamp_millis() + offset;
+    Ok(now.max(prior.unwrap_or(0) + 1))
 }
 
 fn device_tag(device_id: &str) -> String {
@@ -544,14 +656,21 @@ async fn apply_records_in_tx(
                             device,
                             derived: spec.derived,
                         };
-                        match upsert_with_unique_retry(&mut *conn, &table_cols, &write, &device_tag(&rec.device_id)).await
+                        match upsert_with_unique_retry(
+                            &mut *conn,
+                            &table_cols,
+                            &write,
+                            spec.name,
+                            &device_tag(&rec.device_id),
+                        )
+                        .await
                         {
                             Ok(fix) => {
                                 if let Some(fix) = fix {
                                     conflicts.push(NewConflict {
                                         kind: ConflictKind::UniqueViolation,
                                         resource: spec.name.to_string(),
-                                        entity_key: rec.key.clone(),
+                                        entity_key: fix.entity_key,
                                         detail: serde_json::json!({
                                             "column": fix.column,
                                             "originalValue": fix.original,

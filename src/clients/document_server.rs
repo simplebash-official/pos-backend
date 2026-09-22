@@ -298,13 +298,27 @@ fn validate_payload(
 }
 
 /// Carries the current request's id to document-server so its log lines
-/// join the same trace as the frontend click and this backend request.
+/// join the same trace as the frontend click and this backend request, plus
+/// (in `TENANT_MODE=multi`) the calling tenant. The cloud backend shares one
+/// document-server instance across every tenant, so `X-Tenant-Key` is what
+/// keeps two tenants' stored shop-profile/bank-detail blobs and rendered
+/// documents apart on that side — see document-server's
+/// `core::middleware::auth::TenantKey`. `core::tenancy::current_tenant_id()`
+/// is `None` in single-shop mode (desktop, self-hosted) or for any call
+/// outside a tenant-scoped request, so the header is simply omitted there —
+/// document-server's default (`TenantKey::Single`) is exactly today's
+/// behaviour, unchanged.
 fn forwarded_headers() -> reqwest::header::HeaderMap {
     let mut headers = reqwest::header::HeaderMap::new();
     if let Some(id) = crate::core::logging::request::current_request_id()
         && let Ok(value) = reqwest::header::HeaderValue::from_str(&id)
     {
         headers.insert(crate::core::logging::request::REQUEST_ID_HEADER, value);
+    }
+    if let Some(tenant_id) = crate::core::tenancy::current_tenant_id()
+        && let Ok(value) = reqwest::header::HeaderValue::from_str(&tenant_id)
+    {
+        headers.insert("X-Tenant-Key", value);
     }
     headers
 }

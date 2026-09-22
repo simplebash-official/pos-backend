@@ -21,8 +21,8 @@ use crate::{
     domain::{
         sync_local::{
             ConflictItem, EnableRequest, EnableResponse, OutboxAckRequest, OutboxQuery,
-            OutboxResponse, ResolveConflictRequest, SeedResponse, StoreBlockRequest,
-            SyncStateResponse, UpdateSyncStateRequest,
+            OutboxResponse, ResolveConflictRequest, SeedResponse, SkuPrefixesResponse,
+            StoreBlockRequest, SyncStateResponse, UpdateSyncStateRequest,
         },
         sync_v2::{ApplyRequest, ApplyResponse},
     },
@@ -42,6 +42,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(seed_outbox))
         .routes(routes!(apply_changes))
         .routes(routes!(store_block))
+        .routes(routes!(sku_prefixes))
         .routes(routes!(list_conflicts))
         .routes(routes!(resolve_conflict))
 }
@@ -195,6 +196,24 @@ async fn store_block(
     Ok(Json(ApiResponse::success(
         "stored".to_string(),
         "Number block stored",
+    )))
+}
+
+#[utoipa::path(get, path = "/sku-prefixes", tag = modules::SYNC,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "SKU block families this device's local catalog currently needs", body = ApiResponse<SkuPrefixesResponse>),
+        (status = 401, description = "Missing or invalid service token", body = ErrorResponse),
+    )
+)]
+async fn sku_prefixes(
+    _agent: SyncAgent,
+    State(app): State<AppState>,
+) -> AppResult<Json<ApiResponse<SkuPrefixesResponse>>> {
+    let prefixes = blocks::local_sku_prefixes(&app.db).await?;
+    Ok(Json(ApiResponse::success(
+        SkuPrefixesResponse { prefixes },
+        "SKU prefixes listed",
     )))
 }
 
