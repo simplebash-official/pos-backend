@@ -26,7 +26,7 @@ use simplebash_pos_backend::{
     domain::users::{CreateUserRequest, Role},
     modules::{
         reports::engine::AnalyticsEngine,
-        tenants::service::{create_tenant, resolve_shop_code},
+        tenants::service::{create_tenant, create_tenant_with_key, resolve_shop_code},
         users::service::create_user,
     },
 };
@@ -79,6 +79,23 @@ async fn tenant_directory_and_multi_tenant_login_roundtrip() {
 
     let resolved = resolve_shop_code(&db, "Shop-Alpha").await.unwrap();
     assert_eq!(resolved, Tenant::id(&a.key).unwrap());
+    // A tenant registered under the id the identity service issued keeps that id,
+    // so a staff login by shop code reaches the data the devices sync.
+    let issued = create_tenant_with_key(&db, "tnt_issuedbyidentity1".to_string(), "test-shop", "Test Shop")
+        .await
+        .unwrap();
+    assert_eq!(issued.key, "tnt_issuedbyidentity1");
+    assert_eq!(
+        resolve_shop_code(&db, "test-shop").await.unwrap(),
+        Tenant::id("tnt_issuedbyidentity1").unwrap()
+    );
+    for bad in ["issued", "tnt_", "tnt_has space"] {
+        assert!(
+            create_tenant_with_key(&db, bad.to_string(), "other-shop", "Other").await.is_err(),
+            "{bad:?} must be rejected as a tenant id"
+        );
+    }
+
     let unknown = resolve_shop_code(&db, "nobody-here").await.unwrap_err();
     assert!(format!("{unknown:?}").contains("TENANT_NOT_FOUND"), "{unknown:?}");
 

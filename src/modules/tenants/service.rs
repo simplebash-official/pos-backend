@@ -54,7 +54,24 @@ pub fn normalize_shop_code(raw: &str) -> AppResult<String> {
 
 /// Registers a tenant. 409 `SHOP_CODE_ALREADY_EXISTS` if the code is taken.
 pub async fn create_tenant(db: &Db, shop_code: &str, name: &str) -> AppResult<TenantInfo> {
+    create_tenant_with_key(db, generate_id(prefixes::TENANT), shop_code, name).await
+}
+
+/// Registers a tenant under an existing tenant id - the id the identity service
+/// issued for the account's shop - so a staff login by shop code lands in the
+/// same tenant whose data the devices sync. The id must look like `tnt_...`.
+pub async fn create_tenant_with_key(
+    db: &Db,
+    key: String,
+    shop_code: &str,
+    name: &str,
+) -> AppResult<TenantInfo> {
     crate::core::logging::domain::tracked("tenants.created", async move {
+        if !key.starts_with("tnt_") || key.len() < 8 || key.chars().any(char::is_whitespace) {
+            return Err(AppError::validation(
+                "Tenant id must look like tnt_... (copy it from the identity service)",
+            ));
+        }
         let shop_code = normalize_shop_code(shop_code)?;
         let name = name.trim();
         if name.is_empty() {
@@ -74,7 +91,7 @@ pub async fn create_tenant(db: &Db, shop_code: &str, name: &str) -> AppResult<Te
         }
         let document = TenantDocument {
             id: None,
-            key: generate_id(prefixes::TENANT),
+            key,
             shop_code: shop_code.clone(),
             name: name.to_string(),
             created_at: BsonDateTime::now(),

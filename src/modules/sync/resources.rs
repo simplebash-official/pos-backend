@@ -16,6 +16,8 @@ pub enum MergeClass {
     Lifecycle,
 }
 
+/// Rollout phase of a resource. Every resource, `users` included, now syncs in
+/// `P3a`; `P3b` is kept for a future resource that must be held back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
     P3a,
@@ -194,9 +196,32 @@ pub const SYNC_RESOURCES: &[ResourceSpec] = &[
         derived: &[],
         local_only: &[],
         order: 140,
-        phase: Phase::P3b,
+        phase: Phase::P3a,
     },
 ];
+
+/// Payload fields that travel between a device and the cloud but must never be
+/// written anywhere else (conflict records, logs): the `users` password hash.
+/// The hash is needed on the wire so a cashier created on one device can log in
+/// on every other device and on the cloud.
+pub fn secret_fields(resource: &str) -> &'static [&'static str] {
+    match resource {
+        "users" => &["passwordHash"],
+        _ => &[],
+    }
+}
+
+/// A copy of `payload` without the resource's secret fields, for anything that
+/// persists a payload outside the resource's own table (conflict details).
+pub fn without_secrets(resource: &str, payload: &serde_json::Value) -> serde_json::Value {
+    let mut copy = payload.clone();
+    if let Some(object) = copy.as_object_mut() {
+        for field in secret_fields(resource) {
+            object.remove(*field);
+        }
+    }
+    copy
+}
 
 /// Looks a resource up by wire name or table name.
 pub fn spec(name: &str) -> Option<&'static ResourceSpec> {
@@ -271,13 +296,18 @@ mod tests {
     }
 
     #[test]
-    fn users_are_the_only_p3b_resource() {
-        let p3b: Vec<_> = SYNC_RESOURCES
-            .iter()
-            .filter(|s| s.phase == Phase::P3b)
-            .map(|s| s.name)
-            .collect();
-        assert_eq!(p3b, ["users"]);
+    fn every_resource_including_users_syncs_in_p3a() {
+        assert!(SYNC_RESOURCES.iter().all(|s| s.phase == Phase::P3a));
+        assert!(spec("users").is_some());
+    }
+
+    #[test]
+    fn the_password_hash_is_stripped_from_stored_payload_copies() {
+        let payload = serde_json::json!({ "key": "usr_1", "passwordHash": "$argon2id$secret", "name": "A" });
+        let clean = without_secrets("users", &payload);
+        assert!(clean.get("passwordHash").is_none());
+        assert_eq!(clean["name"], "A");
+        assert_eq!(without_secrets("products", &payload), payload);
     }
 
     #[test]

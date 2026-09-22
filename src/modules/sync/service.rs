@@ -149,6 +149,12 @@ pub(crate) async fn hydrate(
         "productSerials" => {
             to_values(inventory_product_serial::hydrate_sync_documents(documents)?)?
         }
+        // Sync transport only: the record carries the password hash (see
+        // `users::sync_payload`). `users` is not in `SYNCABLE`, so the legacy
+        // `/sync/changes` feed can never reach this arm.
+        "users" => to_values(crate::modules::users::sync_payload::hydrate_sync_documents(
+            documents,
+        )?)?,
         _ => Vec::new(),
     };
     Ok(values)

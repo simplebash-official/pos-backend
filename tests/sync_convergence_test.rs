@@ -376,7 +376,7 @@ async fn create_shop(d: &Device) -> Catalog {
 
 async fn random_op(d: &Device, catalog: &Catalog, rng: &mut Rng, step: usize) {
     let (key, id) = &catalog.products[rng.below(catalog.products.len())];
-    match rng.below(4) {
+    match rng.below(5) {
         0 | 1 => {
             let quantity = 1 + rng.below(3);
             d.api(
@@ -394,6 +394,18 @@ async fn random_op(d: &Device, catalog: &Catalog, rng: &mut Rng, step: usize) {
         2 => {
             let price = 40_000 + 100 * rng.below(200) as i64;
             d.api("PUT", &format!("/api/inventory/products/{id}"), Some(json!({ "sellingPriceCents": price }))).await;
+        }
+        3 => {
+            // A new cashier login: every replica must end up with the same account.
+            d.api(
+                "POST",
+                "/api/users",
+                Some(json!({
+                    "name": format!("Cashier {step}"), "email": format!("staff-{}-{step}@shop.test", d.id),
+                    "password": format!("cashier-pass-{step}"), "role": "staff"
+                })),
+            )
+            .await;
         }
         _ => {
             if rng.below(2) == 0 {
@@ -420,7 +432,7 @@ async fn random_op(d: &Device, catalog: &Catalog, rng: &mut Rng, step: usize) {
 
 const SYNCED: &[&str] = &[
     "categories", "subcategories", "suppliers", "products", "supplier_products", "customers", "purchases",
-    "stock_movements", "invoices", "payments", "credit_notes",
+    "stock_movements", "invoices", "payments", "credit_notes", "users",
 ];
 
 async fn table_rows(pool: &SqlitePool, table: &str) -> Vec<Value> {
@@ -520,6 +532,12 @@ async fn three_devices_and_the_cloud_converge() {
         }
     }
 
+    let logins: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+        .fetch_one(devices[0].pool())
+        .await
+        .unwrap();
+    assert!(logins > 0, "the scenario must create logins for the users comparison to mean anything");
+
     // 2. Stock is exactly its movement ledger on every replica.
     for d in &devices {
         let rows = sqlx::query(
@@ -538,7 +556,12 @@ async fn three_devices_and_the_cloud_converge() {
 
     // 3. The cloud holds exactly the ledger the devices hold.
     let cloud_log = cloud_changes(&cloud).await;
-    for (resource, table) in [("stockMovements", "stock_movements"), ("invoices", "invoices"), ("payments", "payments")] {
+    for (resource, table) in [
+        ("stockMovements", "stock_movements"),
+        ("invoices", "invoices"),
+        ("payments", "payments"),
+        ("users", "users"),
+    ] {
         let in_cloud: BTreeSet<String> = cloud_log
             .iter()
             .filter(|c| c["resource"] == resource && c["op"] == "upsert")

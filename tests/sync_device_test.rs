@@ -588,3 +588,170 @@ async fn backups_never_carry_sync_bookkeeping() {
     assert!(tables.contains_key("categories"));
     assert!(tables.keys().all(|t| !t.starts_with("sync_")), "sync tables leaked into the backup: {:?}", tables.keys().collect::<Vec<_>>());
 }
+
+// ---------------------------------------------------------------------------
+// Users (P3b): logins travel with the shop
+// ---------------------------------------------------------------------------
+
+/// Creates a staff login on `dev` and returns `(id, key)`.
+async fn create_cashier(dev: &Device, email: &str, password: &str) -> (String, String) {
+    let created = dev
+        .api("POST", "/api/users", Some(json!({ "name": "Cashier One", "email": email, "password": password, "role": "staff" })))
+        .await;
+    (
+        created["data"]["id"].as_str().unwrap().to_string(),
+        created["data"]["key"].as_str().unwrap().to_string(),
+    )
+}
+
+async fn login_status(dev: &Device, email: &str, password: &str) -> StatusCode {
+    dev.call("POST", "/api/auth/login", Some(json!({ "email": email, "password": password })), None).await.0
+}
+
+/// Two enabled devices with empty outboxes.
+async fn linked_pair() -> (Device, Device) {
+    let a = Device::new().await;
+    let b = Device::new().await;
+    for dev in [&a, &b] {
+        dev.sync("POST", "/api/sync/enable", Some(json!({}))).await;
+        dev.sync("POST", "/api/sync/outbox/ack", Some(json!({ "upToSeq": 1_000_000 }))).await;
+    }
+    (a, b)
+}
+
+async fn hand_over(from: &Device, to: &Device) -> Value {
+    let changes = as_pulled(&from.drain_outbox().await);
+    from.sync("POST", "/api/sync/outbox/ack", Some(json!({ "upToSeq": 1_000_000 }))).await;
+    to.sync("POST", "/api/sync/apply", Some(json!({ "mode": "incremental", "changes": changes }))).await
+}
+
+#[tokio::test]
+async fn a_cashier_created_on_one_device_can_log_in_on_another() {
+    let (a, b) = linked_pair().await;
+    let (id, key) = create_cashier(&a, "cash1@shop.test", "cashier-pass-1").await;
+
+    let changes = as_pulled(&a.drain_outbox().await);
+    let record = changes.iter().find(|c| c["resource"] == "users" && c["key"] == key.as_str()).expect("the user is captured");
+    assert!(
+        record["payload"]["passwordHash"].as_str().unwrap().starts_with("$argon2"),
+        "the sync record carries the hash so the login works elsewhere"
+    );
+    b.sync("POST", "/api/sync/apply", Some(json!({ "mode": "incremental", "changes": changes }))).await;
+
+    // Same row on both devices: same legacy id (login tokens carry it) and same hash.
+    let row = |dev: &Device| {
+        let pool = dev.pool().clone();
+        let key = key.clone();
+        async move {
+            sqlx::query_as::<_, (String, String, String)>("SELECT id, password_hash, role FROM users WHERE key = ?")
+                .bind(key)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+    let (row_a, row_b) = (row(&a).await, row(&b).await);
+    assert_eq!(row_a, row_b);
+    assert_eq!(row_b.0, id);
+
+    assert_eq!(login_status(&b, "cash1@shop.test", "cashier-pass-1").await, StatusCode::OK);
+    assert_eq!(login_status(&b, "cash1@shop.test", "wrong-password").await, StatusCode::UNAUTHORIZED);
+    // Applying created no echo: B has nothing to send back.
+    assert_eq!(b.pending_out().await, 0);
+}
+
+#[tokio::test]
+async fn deactivating_and_deleting_a_cashier_propagates() {
+    let (a, b) = linked_pair().await;
+    let (id, key) = create_cashier(&a, "cash2@shop.test", "cashier-pass-2").await;
+    hand_over(&a, &b).await;
+    assert_eq!(login_status(&b, "cash2@shop.test", "cashier-pass-2").await, StatusCode::OK);
+
+    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    a.api("PATCH", &format!("/api/users/{id}"), Some(json!({ "isActive": false }))).await;
+    hand_over(&a, &b).await;
+    let active: bool = sqlx::query_scalar("SELECT is_active FROM users WHERE key = ?").bind(&key).fetch_one(b.pool()).await.unwrap();
+    assert!(!active, "the deactivation reached B");
+    assert_ne!(login_status(&b, "cash2@shop.test", "cashier-pass-2").await, StatusCode::OK, "a deactivated cashier cannot log in");
+
+    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    a.api("DELETE", &format!("/api/users/{id}"), None).await;
+    hand_over(&a, &b).await;
+    let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE key = ?").bind(&key).fetch_one(b.pool()).await.unwrap();
+    assert_eq!(remaining, 0, "the delete removed the login on B");
+    assert_ne!(login_status(&b, "cash2@shop.test", "cashier-pass-2").await, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn the_password_hash_never_lands_in_a_conflict_record() {
+    let (a, b) = linked_pair().await;
+    let (id, key) = create_cashier(&a, "cash3@shop.test", "cashier-pass-3").await;
+    hand_over(&a, &b).await;
+
+    // Both devices rename the cashier; B's edit is later, so A's edit loses on B.
+    a.api("PATCH", &format!("/api/users/{id}"), Some(json!({ "name": "Cashier (A)" }))).await;
+    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    b.api("PATCH", &format!("/api/users/{id}"), Some(json!({ "name": "Cashier (B)" }))).await;
+    let from_a = as_pulled(&a.drain_outbox().await);
+    let applied = b.sync("POST", "/api/sync/apply", Some(json!({ "mode": "incremental", "changes": from_a }))).await;
+    assert_eq!(applied["applied"], 0, "{applied}");
+
+    let conflicts = b.sync("GET", "/api/sync/conflicts", None).await;
+    let conflict = conflicts
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["kind"] == "LWW_LOSER" && c["entityKey"] == key.as_str())
+        .expect("the losing user edit is recorded");
+    assert_eq!(conflict["detail"]["losingPayload"]["name"], "Cashier (A)");
+    assert!(conflict["detail"]["losingPayload"].get("passwordHash").is_none(), "{conflict}");
+    let stored: String = sqlx::query_scalar("SELECT detail FROM sync_conflicts").fetch_one(b.pool()).await.unwrap();
+    assert!(!stored.contains("argon2") && !stored.contains("passwordHash"), "hash leaked into sync_conflicts: {stored}");
+}
+
+#[tokio::test]
+async fn two_admins_from_two_devices_are_both_kept_and_reported() {
+    let (a, b) = linked_pair().await;
+    // Each device made its own shop owner offline.
+    let mk = |dev: &Device, email: &'static str| {
+        let dev_admin = dev.admin.clone();
+        let router = dev.app.router.clone();
+        async move {
+            let request = Request::builder()
+                .method("POST")
+                .uri("/api/users")
+                .header(CONTENT_TYPE, "application/json")
+                .header(AUTHORIZATION, format!("Bearer {dev_admin}"))
+                .body(Body::from(json!({ "name": "Owner", "email": email, "password": "owner-pass-12", "role": "staff" }).to_string()))
+                .unwrap();
+            let response = router.oneshot(request).await.unwrap();
+            assert!(response.status().is_success());
+        }
+    };
+    mk(&a, "owner-a@shop.test").await;
+    mk(&b, "owner-b@shop.test").await;
+    // Promote both to admin directly (the service's one-admin rule guards the API path only).
+    for dev in [&a, &b] {
+        sqlx::query("UPDATE users SET role = 'admin'").execute(dev.pool()).await.unwrap();
+    }
+    hand_over(&a, &b).await;
+
+    let admins: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE role = 'admin' AND deleted_at IS NULL")
+        .fetch_one(b.pool())
+        .await
+        .unwrap();
+    assert_eq!(admins, 2, "neither owner was dropped");
+    let conflicts = b.sync("GET", "/api/sync/conflicts", None).await;
+    let raised = conflicts.as_array().unwrap().iter().filter(|c| c["detail"]["reason"] == "MULTIPLE_ADMINS").count();
+    assert_eq!(raised, 1, "the shop owner is told once: {conflicts}");
+}
+
+#[test]
+fn logging_redaction_masks_the_password_hash_under_both_spellings() {
+    use simplebash_pos_backend::core::logging::redact::redact_value;
+    let mut value = json!({ "changes": [{ "payload": { "passwordHash": "$argon2id$v=19$secret", "name": "A" } }], "password_hash": "$argon2id$other" });
+    redact_value(&mut value);
+    let text = value.to_string();
+    assert!(!text.contains("argon2"), "{text}");
+    assert!(text.contains("\"name\":\"A\""));
+}

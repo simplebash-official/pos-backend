@@ -9,3 +9,4 @@ mod model;
 mod repository;
 pub mod routes;
 pub mod service;
+pub(crate) mod sync_payload;

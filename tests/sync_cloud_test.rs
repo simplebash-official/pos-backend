@@ -24,6 +24,7 @@ use simplebash_pos_backend::{
         tenancy::{Tenant, with_tenant},
     },
     domain::users::Role,
+    modules::tenants::service::create_tenant,
     modules::sync::{
         apply_mongo::test_support::{encode_for_test, hydrate_for_test},
         cloud_capture::run_consumer,
@@ -822,4 +823,86 @@ async fn snapshot_pagination_is_consistent() {
     assert!(pages >= 3, "expected several pages, got {pages}");
     assert_eq!(seen.len() as u64, expected);
     drop_db(&app).await;
+}
+
+// ---------------------------------------------------------------------------
+// Users: a cashier pushed by a device can log in on the cloud web app
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_pushed_cashier_logs_in_by_shop_code_and_a_web_delete_reaches_devices() {
+    use argon2::{
+        Argon2,
+        password_hash::{PasswordHasher, SaltString, rand_core::OsRng},
+    };
+    let _guard = SERIAL.lock().await;
+    let app = common::spawn_app_multi_tenant().await;
+    start(&app).await;
+
+    let shop = create_tenant(&app.db_handle, "shop-cashier", "Cashier Shop").await.unwrap();
+    let other = create_tenant(&app.db_handle, "shop-other", "Other Shop").await.unwrap();
+    let tid = shop.key.clone();
+
+    let hash = Argon2::default()
+        .hash_password(b"cashier-pass-9", &SaltString::generate(&mut OsRng))
+        .unwrap()
+        .to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+    let id = ObjectId::new().to_hex();
+    let payload = json!({
+        "id": id, "key": "usr_cashier_cloud", "name": "Cloud Cashier", "email": "cashier@shop.test",
+        "passwordHash": hash, "role": "staff", "isActive": true, "employeeKey": null,
+        "createdAt": now, "updatedAt": now, "version": 1, "deletedAt": null,
+    });
+
+    // A device of the shop pushes the cashier.
+    let (status, pushed) = push(&app, &tid, "dev_u1", "batch-u1", vec![record("users", &payload, "dev_u1")]).await;
+    assert_eq!(status, StatusCode::OK, "push: {pushed}");
+    assert_eq!(statuses(&pushed), ["applied"], "{pushed}");
+
+    // The cashier logs in on the cloud by shop code and gets a token for THAT shop.
+    let login = |shop_code: &str, password: &str| {
+        json!({ "email": "cashier@shop.test", "password": password, "shopCode": shop_code })
+    };
+    let (status, body) = call(&app.router, "POST", "/api/auth/login", None, Some(login("shop-cashier", "cashier-pass-9"))).await;
+    assert_eq!(status, StatusCode::OK, "cashier login: {body}");
+    assert_eq!(body["data"]["user"]["role"], "staff");
+    assert!(body["data"]["user"].get("passwordHash").is_none(), "no REST response carries the hash");
+    let (status, _) = call(&app.router, "POST", "/api/auth/login", None, Some(login("shop-cashier", "wrong-password"))).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    // The same credentials do not work in another shop.
+    assert_eq!(other.shop_code, "shop-other");
+    let (status, _) = call(&app.router, "POST", "/api/auth/login", None, Some(login("shop-other", "cashier-pass-9"))).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // Another device of the shop pulls the cashier, hash included (that is what
+    // lets the login work there), through the authenticated sync transport only.
+    let observer = device_token(&app, &tid, "dev_u2");
+    let feed = wait_for(&app, &observer, 0, |changes| {
+        changes.iter().any(|c| c["resource"] == "users" && c["key"] == "usr_cashier_cloud")
+    })
+    .await;
+    let pulled = feed["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["resource"] == "users" && c["key"] == "usr_cashier_cloud" && c["op"] == "upsert")
+        .expect("the cashier is in the change feed");
+    assert_eq!(pulled["payload"]["passwordHash"], hash);
+    assert_eq!(pulled["payload"]["id"], id);
+    let cursor = feed["nextSeq"].as_i64().unwrap();
+
+    // The owner deletes the cashier on the web: it is a tombstone the change
+    // stream carries to devices as a delete, and the login stops working.
+    let admin = admin_token(&app, &tid);
+    let (status, body) = call(&app.router, "DELETE", &format!("/api/users/{id}"), Some(&admin), None).await;
+    assert!(status.is_success(), "web delete: {status} {body}");
+    wait_for(&app, &observer, cursor, |changes| {
+        changes.iter().any(|c| c["resource"] == "users" && c["key"] == "usr_cashier_cloud" && c["op"] == "delete")
+    })
+    .await;
+    let (status, _) = call(&app.router, "POST", "/api/auth/login", None, Some(login("shop-cashier", "cashier-pass-9"))).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "a deleted cashier cannot log in");
+
+    app.db.drop().await.ok();
 }

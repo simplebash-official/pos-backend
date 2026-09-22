@@ -28,7 +28,7 @@ use crate::{
         },
         cloud_store,
         derived_mongo::recompute_derived,
-        resources::{Phase, ResourceSpec, spec as resource_spec},
+        resources::{ResourceSpec, spec as resource_spec, without_secrets},
         service::hydrate,
     },
 };
@@ -89,7 +89,8 @@ async fn lww_loser_conflict(
         resource: spec.name.to_string(),
         entity_key: record.key.clone(),
         detail: serde_json::json!({
-            "losingPayload": record.payload,
+            // Never persist a secret (the users password hash) outside its own table.
+            "losingPayload": record.payload.as_ref().map(|p| without_secrets(spec.name, p)),
             "winningDeviceId": existing.meta.device_id,
             "winningUpdatedAt": existing.meta.updated_at_ms,
         }),
@@ -109,11 +110,6 @@ async fn process_change(
     let Some(spec) = resource_spec(&record.resource) else {
         return Ok(ack(record, AckStatus::Rejected, Some("UNKNOWN_RESOURCE"), false));
     };
-    // Users sync in a later phase; until then they are not accepted.
-    if spec.phase == Phase::P3b {
-        return Ok(ack(record, AckStatus::Rejected, Some("UNKNOWN_RESOURCE"), false));
-    }
-
     let (effective_ms, clamped) = clamp_updated_at(record.updated_at.timestamp_millis(), now_ms);
     let existing = load_existing(db, spec, &record.key).await?;
     let incoming = IncomingChange {

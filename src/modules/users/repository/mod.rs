@@ -6,7 +6,7 @@
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use futures_util::TryStreamExt;
 use mongodb::{
-    bson::{Document, doc, oid::ObjectId},
+    bson::{Bson, DateTime as BsonDateTime, Document, doc, oid::ObjectId},
     options::ReturnDocument,
 };
 use sqlx::Row;
@@ -47,7 +47,11 @@ fn user_from_sqlite_row(r: &sqlx::sqlite::SqliteRow) -> UserDocument {
 
 pub(crate) async fn find_user_by_id(db: &Db, id: ObjectId) -> AppResult<Option<UserDocument>> {
     match db {
-        Db::Mongo(db) => Ok(users(db).find_one(doc! { "_id": id }).await?),
+        // `deleted_at: null` matches live users: a user deleted through sync (or
+        // the REST delete) is a tombstone on Mongo and must not be found again.
+        Db::Mongo(db) => Ok(users(db)
+            .find_one(doc! { "_id": id, "deleted_at": Bson::Null })
+            .await?),
         Db::Sqlite(pool) => {
             let id_hex = id.to_hex();
             let row = sqlx::query("SELECT * FROM users WHERE id = $1")
@@ -64,7 +68,9 @@ pub(crate) async fn find_user_by_id(db: &Db, id: ObjectId) -> AppResult<Option<U
 /// use.
 pub(crate) async fn find_user_by_email(db: &Db, email: &str) -> AppResult<Option<UserDocument>> {
     match db {
-        Db::Mongo(db) => Ok(users(db).find_one(doc! { "email": email }).await?),
+        Db::Mongo(db) => Ok(users(db)
+            .find_one(doc! { "email": email, "deleted_at": Bson::Null })
+            .await?),
         Db::Sqlite(pool) => {
             let row = sqlx::query("SELECT * FROM users WHERE LOWER(email) = LOWER($1)")
                 .bind(email)
@@ -85,7 +91,7 @@ pub(crate) async fn find_user_by_employee_key(
 ) -> AppResult<Option<UserDocument>> {
     match db {
         Db::Mongo(db) => Ok(users(db)
-            .find_one(doc! { "employee_key": employee_key })
+            .find_one(doc! { "employee_key": employee_key, "deleted_at": Bson::Null })
             .await?),
         Db::Sqlite(pool) => {
             let row = sqlx::query("SELECT * FROM users WHERE employee_key = $1")
@@ -112,7 +118,7 @@ pub(crate) async fn find_users_by_employee_keys(
     match db {
         Db::Mongo(db) => {
             let mut cursor = users(db)
-                .find(doc! { "employee_key": { "$in": employee_keys } })
+                .find(doc! { "employee_key": { "$in": employee_keys }, "deleted_at": Bson::Null })
                 .await?;
 
             let mut items = Vec::new();
@@ -192,7 +198,10 @@ pub(crate) async fn update_user(
 ) -> AppResult<Option<UserDocument>> {
     match db {
         Db::Mongo(db) => Ok(users(db)
-            .find_one_and_update(doc! { "_id": id }, doc! { "$set": set_doc })
+            .find_one_and_update(
+                doc! { "_id": id, "deleted_at": Bson::Null },
+                doc! { "$set": set_doc },
+            )
             .return_document(ReturnDocument::After)
             .await?),
         Db::Sqlite(pool) => {
@@ -254,7 +263,19 @@ pub(crate) async fn update_user(
 
 pub(crate) async fn delete_user(db: &Db, id: ObjectId) -> AppResult<Option<UserDocument>> {
     match db {
-        Db::Mongo(db) => Ok(users(db).find_one_and_delete(doc! { "_id": id }).await?),
+        // A tombstone, not a removal: the cloud change stream only sees updates,
+        // so this is what carries the delete to every device. Returns the user as
+        // it was before deletion, like the SQLite arm.
+        Db::Mongo(db) => {
+            let now = BsonDateTime::now();
+            Ok(users(db)
+                .find_one_and_update(
+                    doc! { "_id": id, "deleted_at": Bson::Null },
+                    doc! { "$set": { "deleted_at": now, "updated_at": now } },
+                )
+                .return_document(ReturnDocument::Before)
+                .await?)
+        }
         Db::Sqlite(pool) => {
             let user = find_user_by_id(db, id).await?;
             if user.is_some() {
@@ -274,6 +295,8 @@ pub(crate) async fn delete_user(db: &Db, id: ObjectId) -> AppResult<Option<UserD
 pub(crate) async fn list_users(db: &Db, filter: Document) -> AppResult<Vec<UserDocument>> {
     match db {
         Db::Mongo(db) => {
+            let mut filter = filter;
+            filter.insert("deleted_at", Bson::Null);
             let mut cursor = users(db).find(filter).sort(doc! { "name": 1 }).await?;
 
             let mut items = Vec::new();
@@ -324,7 +347,7 @@ pub(crate) async fn list_users(db: &Db, filter: Document) -> AppResult<Vec<UserD
 pub(crate) async fn count_users_by_role(db: &Db, role: Role) -> AppResult<u64> {
     match db {
         Db::Mongo(db) => Ok(users(db)
-            .count_documents(doc! { "role": role.as_str() })
+            .count_documents(doc! { "role": role.as_str(), "deleted_at": Bson::Null })
             .await?),
         Db::Sqlite(pool) => {
             let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users WHERE role = $1")

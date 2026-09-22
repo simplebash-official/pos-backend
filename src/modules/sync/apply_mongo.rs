@@ -93,6 +93,7 @@ fn unique_columns(resource: &str) -> &'static [&'static str] {
         "creditNotes" => &["credit_note_number"],
         "repairs" | "printJobs" => &["ticket_number"],
         "productSerials" => &["serial_number"],
+        "users" => &["email"],
         _ => &[],
     }
 }
@@ -290,8 +291,59 @@ pub(crate) async fn apply_upsert(
     if spec.name == "categories" {
         fold_subcategories(db, record, payload, effective_ms, device_id).await?;
     }
+    if spec.name == "users"
+        && payload.get("role").and_then(Value::as_str) == Some("admin")
+        && let Some(conflict) = extra_admin_conflict(db, &record.key, conflicts).await?
+    {
+        conflicts.push(conflict);
+    }
     note_scope(spec, Some(payload), &record.key, &document, scope);
     Ok(WriteOutcome::Written)
+}
+
+/// The one-admin-per-shop rule is enforced only by the users service create
+/// path, which sync bypasses. When two DIFFERENT admins arrive for one shop
+/// (created on two devices), both are kept - dropping either would lock a real
+/// owner out - and the shop owner is told through a conflict. There is no
+/// dedicated conflict kind, so this reuses `UniqueViolation` with
+/// `reason = MULTIPLE_ADMINS` (the value that is "unique" is the admin role).
+async fn extra_admin_conflict(
+    db: &Db,
+    key: &str,
+    raised: &[NewConflict],
+) -> AppResult<Option<NewConflict>> {
+    let mut cursor = coll(db, "users")?
+        .find(doc! { "role": "admin", "deleted_at": Bson::Null })
+        .await?;
+    let mut admin_keys = Vec::new();
+    while cursor.advance().await? {
+        if let Ok(k) = cursor.deserialize_current()?.get_str("key") {
+            admin_keys.push(k.to_string());
+        }
+    }
+    admin_keys.sort();
+    if admin_keys.len() < 2 || !admin_keys.iter().any(|k| k == key) {
+        return Ok(None);
+    }
+    let same_batch = raised.iter().any(|c| c.resource == "users" && c.entity_key == key);
+    let stored = coll(db, crate::modules::sync::cloud_store::CONFLICTS)?
+        .count_documents(doc! {
+            "kind": ConflictKind::UniqueViolation.as_str(),
+            "resource": "users", "entity_key": key, "detail.reason": "MULTIPLE_ADMINS",
+        })
+        .await?;
+    if same_batch || stored > 0 {
+        return Ok(None);
+    }
+    Ok(Some(NewConflict {
+        kind: ConflictKind::UniqueViolation,
+        resource: "users".to_string(),
+        entity_key: key.to_string(),
+        detail: serde_json::json!({
+            "column": "role", "originalValue": "admin", "storedValue": "admin",
+            "reason": "MULTIPLE_ADMINS", "adminKeys": admin_keys,
+        }),
+    }))
 }
 
 /// Serial double-sale rule: an existing SOLD serial receiving a different

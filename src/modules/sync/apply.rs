@@ -38,7 +38,9 @@ use crate::{
     modules::sync::{
         derived_sqlite,
         outbox::ms_to_datetime,
-        resources::{self, MergeClass, Phase, ResourceSpec, SYNC_RESOURCES, snake_to_camel},
+        resources::{
+            self, MergeClass, Phase, ResourceSpec, SYNC_RESOURCES, snake_to_camel, without_secrets,
+        },
         service::hydrate,
         state::pool_of,
     },
@@ -48,7 +50,7 @@ use crate::{
 /// receiver must do the same, or the row would linger and keep showing up in
 /// reads that do not filter `deleted_at`. The row's merge metadata survives, so
 /// an older edit arriving later still loses to the delete.
-const HARD_DELETE_TABLES: &[&str] = &["categories", "supplier_products"];
+const HARD_DELETE_TABLES: &[&str] = &["categories", "supplier_products", "users"];
 
 /// One column of a synced table.
 #[derive(Debug, Clone)]
@@ -405,10 +407,6 @@ async fn apply_records_in_tx(
             counts.conflicts += 1;
             continue;
         };
-        if spec.phase == Phase::P3b {
-            counts.conflicts += 1;
-            continue;
-        }
         let (ms, clamped) = clamp_updated_at(rec.updated_at.timestamp_millis(), now_ms);
         let incoming = IncomingChange {
             record: rec,
@@ -453,7 +451,7 @@ async fn apply_records_in_tx(
                         resource: spec.name.to_string(),
                         entity_key: rec.key.clone(),
                         detail: serde_json::json!({
-                            "losingPayload": losing,
+                            "losingPayload": without_secrets(spec.name, losing),
                             "winningDeviceId": meta.as_ref().map(|m| m.device_id.clone()),
                             "winningUpdatedAt": meta.as_ref().map(|m| ms_to_datetime(m.updated_at_ms)),
                         }),
@@ -568,6 +566,12 @@ async fn apply_records_in_tx(
                                 continue;
                             }
                         }
+                        if spec.name == "users"
+                            && payload.get("role").and_then(Value::as_str) == Some("admin")
+                            && let Some(conflict) = extra_admin_conflict(&mut *conn, &rec.key, conflicts).await?
+                        {
+                            conflicts.push(conflict);
+                        }
                         if spec.name == "categories" {
                             reconcile_subcategories(&mut *conn, &rec.key, payload, ms, device).await?;
                         }
@@ -581,6 +585,47 @@ async fn apply_records_in_tx(
         }
     }
     Ok(counts)
+}
+
+/// The one-admin-per-shop rule is enforced only by the users service create
+/// path, which sync bypasses. When two DIFFERENT admins arrive for one shop
+/// (created on two devices), both are kept - dropping either would lock a real
+/// owner out - and the shop owner is told through a conflict. There is no
+/// dedicated conflict kind, so this reuses `UniqueViolation` with
+/// `reason = MULTIPLE_ADMINS` (the value that is "unique" is the admin role).
+async fn extra_admin_conflict(
+    conn: &mut SqliteConnection,
+    key: &str,
+    raised: &[NewConflict],
+) -> AppResult<Option<NewConflict>> {
+    let admin_keys: Vec<String> =
+        sqlx::query_scalar("SELECT key FROM users WHERE role = 'admin' AND deleted_at IS NULL ORDER BY key")
+            .fetch_all(&mut *conn)
+            .await?;
+    if admin_keys.len() < 2 || !admin_keys.iter().any(|k| k == key) {
+        return Ok(None);
+    }
+    let same_batch = raised.iter().any(|c| c.resource == "users" && c.entity_key == key);
+    let stored: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sync_conflicts WHERE kind = ? AND resource = 'users' AND entity_key = ? \
+         AND resolved_at IS NULL AND detail LIKE '%MULTIPLE_ADMINS%'",
+    )
+    .bind(ConflictKind::UniqueViolation.as_str())
+    .bind(key)
+    .fetch_one(&mut *conn)
+    .await?;
+    if same_batch || stored > 0 {
+        return Ok(None);
+    }
+    Ok(Some(NewConflict {
+        kind: ConflictKind::UniqueViolation,
+        resource: "users".to_string(),
+        entity_key: key.to_string(),
+        detail: serde_json::json!({
+            "column": "role", "originalValue": "admin", "storedValue": "admin",
+            "reason": "MULTIPLE_ADMINS", "adminKeys": admin_keys,
+        }),
+    }))
 }
 
 /// A serial claimed by two different invoices is kept as recorded on both
