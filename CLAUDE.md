@@ -52,6 +52,7 @@ make check
 
 Config is loaded from `.env` (via `dotenvy`) in every binary and integration test. Two dedicated configuration templates are provided:
 - `.env.desktop.example`: Configures embedded SQLite (`DATABASE_TYPE=sqlite`), loopback listener (`BIND_ADDR=127.0.0.1`), and local document-server for desktop/Tauri operations.
+- `PROVISION_SECRET` (multi-tenant web only, 16+ chars, shared with identity-server) enables `POST /api/internal/provision`; leave it unset everywhere else (the route then 404s). Details in `src/CLAUDE.md` → *Shop provisioning*.
 - `.env.web.example`: Configures MongoDB cluster persistence (`DATABASE_TYPE=mongodb`, `MONGODB_URI`), multi-interface listener (`BIND_ADDR=0.0.0.0`), and containerized document-server for web/server deployments.
 Default `DATABASE_TYPE=sqlite` requires no external services (creates `pos.db` automatically). If `DATABASE_TYPE=mongodb`, copy `.env.web.example` to `.env` and point `MONGODB_URI` at a running MongoDB instance before running or testing — `Config::from_env()` fails fast (process exits) on missing/invalid vars.
 
