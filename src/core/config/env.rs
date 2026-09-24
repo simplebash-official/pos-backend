@@ -62,6 +62,10 @@ pub struct Config {
     pub identity_jwks_url: Option<String>,
     /// Required `iss` of platform tokens; unset skips the issuer check.
     pub identity_issuer: Option<String>,
+    /// Shared secret the identity service presents (`X-Provision-Secret`) when it
+    /// hands a newly registered shop to `POST /api/internal/provision`. Unset
+    /// switches that endpoint off. Multi-tenant deployments only.
+    pub provision_secret: Option<String>,
 }
 
 /// Why startup configuration failed to load. `main.rs` logs this and exits
@@ -185,6 +189,15 @@ impl Config {
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty());
 
+        let provision_secret = env::var("PROVISION_SECRET")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+        // Anything short is guessable over the network; refuse to boot with it.
+        if provision_secret.as_deref().is_some_and(|v| v.len() < 16) {
+            return Err(ConfigError::Invalid("PROVISION_SECRET"));
+        }
+
         Ok(Self {
             database_type,
             database_url,
@@ -203,6 +216,7 @@ impl Config {
             cors_allowed_origins,
             identity_jwks_url,
             identity_issuer,
+            provision_secret,
         })
     }
 }

@@ -70,6 +70,7 @@ async fn setup_sqlite_app() -> SqliteTestContext {
         cors_allowed_origins: Vec::new(),
         identity_jwks_url: None,
         identity_issuer: None,
+        provision_secret: None,
     };
 
     let config = Arc::new(config);

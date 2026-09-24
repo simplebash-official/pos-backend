@@ -27,6 +27,11 @@ pub(crate) async fn find_tenant_by_shop_code(
         .await?)
 }
 
+/// Finds a tenant by its immutable id (`tnt_...`).
+pub(crate) async fn find_tenant_by_key(db: &Db, key: &str) -> AppResult<Option<TenantDocument>> {
+    Ok(directory(db)?.find_one(doc! { "key": key }).await?)
+}
+
 /// Inserts a new tenant. The unique `shop_code` index turns a racing duplicate
 /// into a driver error, which the caller reports as a conflict.
 pub(crate) async fn insert_tenant(db: &Db, document: &TenantDocument) -> AppResult<()> {

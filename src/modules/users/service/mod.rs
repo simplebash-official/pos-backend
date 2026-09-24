@@ -262,6 +262,66 @@ pub async fn create_user(db: &Db, body: CreateUserRequest) -> AppResult<User> {
     Ok(inserted.into_user())
 }
 
+/// Checks an owner login handed over by the identity service without writing
+/// anything, so a provisioning request can be rejected before any tenant row is
+/// created. The hash must be an Argon2 PHC string: anything else could never be
+/// verified by `verify_password` and would create an Admin nobody can log in as.
+pub fn validate_owner_login(name: &str, email: &str, password_hash: &str) -> AppResult<()> {
+    if name.trim().is_empty() {
+        return Err(AppError::validation("Name is required"));
+    }
+    validate_email(email)?;
+    let not_argon2 = || AppError::validation("Owner password hash must be an Argon2 PHC string");
+    let parsed = PasswordHash::new(password_hash).map_err(|_| not_argon2())?;
+    if !parsed.algorithm.as_str().starts_with("argon2") {
+        return Err(not_argon2());
+    }
+    Ok(())
+}
+
+/// Creates the owner's Admin login for a freshly provisioned shop from a password
+/// hash the identity service already made, so the same email + password works in
+/// both places without the plaintext ever reaching this service. Returns `false`
+/// (and changes nothing) when the shop already has an Admin, which makes replaying
+/// a provisioning request harmless. `pub` for the same reason as `create_user`:
+/// the tenants module reaches it across the private `repository` boundary.
+pub async fn create_owner_admin_if_absent(
+    db: &Db,
+    name: &str,
+    email: &str,
+    password_hash: &str,
+) -> AppResult<bool> {
+    validate_owner_login(name, email, password_hash)?;
+
+    if repository::count_users_by_role(db, Role::Admin).await? > 0 {
+        return Ok(false);
+    }
+
+    let email = normalize_email(email);
+    if repository::find_user_by_email(db, &email).await?.is_some() {
+        return Err(AppError::conflict(
+            codes::EMAIL_ALREADY_EXISTS,
+            format!("A user with email '{email}' already exists"),
+        ));
+    }
+
+    let now = BsonDateTime::now();
+    let document = UserDocument {
+        id: None,
+        key: generate_id(prefixes::USER),
+        name: name.trim().to_string(),
+        email,
+        password_hash: password_hash.to_string(),
+        role: Role::Admin,
+        is_active: true,
+        employee_key: None,
+        created_at: now,
+        updated_at: now,
+    };
+    repository::insert_user(db, document).await?;
+    Ok(true)
+}
+
 /// Rotates the single Admin account's email/password in place. `pub`, not
 /// `pub(crate)`, so `src/bin/reset_admin.rs` can reach it directly — there is
 /// no HTTP path that can do this, since `ensure_manageable` always 404s an

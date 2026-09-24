@@ -9,9 +9,12 @@ use crate::{
         constants::{codes, prefixes},
         error::{AppError, AppResult},
         id::generate_id,
-        tenancy::Tenant,
+        tenancy::{Tenant, with_tenant},
     },
-    modules::tenants::{model::TenantDocument, repository},
+    modules::{
+        tenants::{model::TenantDocument, repository},
+        users,
+    },
 };
 
 /// A directory entry as returned to callers (the binary, tests).
@@ -52,6 +55,16 @@ pub fn normalize_shop_code(raw: &str) -> AppResult<String> {
     Ok(code)
 }
 
+/// A tenant id must be one the identity service issued: `tnt_...`.
+fn validate_tenant_key(key: &str) -> AppResult<()> {
+    if !key.starts_with("tnt_") || key.len() < 8 || key.chars().any(char::is_whitespace) {
+        return Err(AppError::validation(
+            "Tenant id must look like tnt_... (copy it from the identity service)",
+        ));
+    }
+    Ok(())
+}
+
 /// Registers a tenant. 409 `SHOP_CODE_ALREADY_EXISTS` if the code is taken.
 pub async fn create_tenant(db: &Db, shop_code: &str, name: &str) -> AppResult<TenantInfo> {
     create_tenant_with_key(db, generate_id(prefixes::TENANT), shop_code, name).await
@@ -67,11 +80,7 @@ pub async fn create_tenant_with_key(
     name: &str,
 ) -> AppResult<TenantInfo> {
     crate::core::logging::domain::tracked("tenants.created", async move {
-        if !key.starts_with("tnt_") || key.len() < 8 || key.chars().any(char::is_whitespace) {
-            return Err(AppError::validation(
-                "Tenant id must look like tnt_... (copy it from the identity service)",
-            ));
-        }
+        validate_tenant_key(&key)?;
         let shop_code = normalize_shop_code(shop_code)?;
         let name = name.trim();
         if name.is_empty() {
@@ -111,6 +120,92 @@ pub async fn create_tenant_with_key(
     .await
 }
 
+/// The owner login handed over with a shop: identity's email, name and its
+/// existing Argon2id hash (see `users::service::create_owner_admin_if_absent`).
+#[derive(Debug, Clone)]
+pub struct ProvisionOwner {
+    pub email: String,
+    pub name: String,
+    pub password_hash: String,
+}
+
+/// What a provisioning call actually changed; both `false` on a pure replay.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct ProvisionOutcome {
+    pub tenant_created: bool,
+    pub admin_created: bool,
+}
+
+/// Registers a shop the identity service just created and, when `owner` is given,
+/// its first Admin login. Idempotent so identity (or an operator) can safely
+/// replay it: the same tenant id + shop code is a no-op, a shop code already
+/// owned by a *different* tenant is a 409, and an existing Admin is left alone.
+pub async fn provision_shop(
+    db: &Db,
+    tenant_id: &str,
+    shop_code: &str,
+    name: &str,
+    owner: Option<ProvisionOwner>,
+) -> AppResult<ProvisionOutcome> {
+    // Validate everything before writing anything, so a bad request leaves no
+    // half-registered shop behind.
+    validate_tenant_key(tenant_id)?;
+    let shop_code = normalize_shop_code(shop_code)?;
+    if name.trim().is_empty() {
+        return Err(AppError::validation("Tenant name is required"));
+    }
+    if let Some(owner) = &owner {
+        users::service::validate_owner_login(&owner.name, &owner.email, &owner.password_hash)?;
+    }
+
+    let tenant_created = match repository::find_tenant_by_shop_code(db, &shop_code).await? {
+        Some(existing) if existing.key == tenant_id => false,
+        Some(_) => {
+            return Err(AppError::conflict(
+                codes::SHOP_CODE_ALREADY_EXISTS,
+                format!("Shop code '{shop_code}' is already in use"),
+            ));
+        }
+        None => {
+            if repository::find_tenant_by_key(db, tenant_id)
+                .await?
+                .is_some()
+            {
+                return Err(AppError::conflict(
+                    codes::TENANT_ALREADY_EXISTS,
+                    "This tenant is already registered under a different shop code",
+                ));
+            }
+            create_tenant_with_key(db, tenant_id.to_string(), &shop_code, name).await?;
+            true
+        }
+    };
+
+    let admin_created = match owner {
+        None => false,
+        Some(owner) => {
+            // Users are tenant-owned data: the Admin must be written inside the
+            // new shop's scope, not the platform scope this call runs in.
+            let scope = Tenant::id(tenant_id)?;
+            with_tenant(scope, async {
+                users::service::create_owner_admin_if_absent(
+                    db,
+                    &owner.name,
+                    &owner.email,
+                    &owner.password_hash,
+                )
+                .await
+            })
+            .await?
+        }
+    };
+
+    Ok(ProvisionOutcome {
+        tenant_created,
+        admin_created,
+    })
+}
+
 /// The tenant behind a shop code, or `None` if there is none (or the code is
 /// malformed - a malformed code cannot exist in the directory).
 pub(crate) async fn lookup_shop_code(db: &Db, code: &str) -> AppResult<Option<Tenant>> {
@@ -139,8 +234,19 @@ mod tests {
 
     #[test]
     fn shop_codes_are_lowercased_and_validated() {
-        assert_eq!(normalize_shop_code("  Acme-Repairs ").unwrap(), "acme-repairs");
-        for bad in ["ab", "-abc", "abc-", "has space", "under_score", "", &"x".repeat(33)] {
+        assert_eq!(
+            normalize_shop_code("  Acme-Repairs ").unwrap(),
+            "acme-repairs"
+        );
+        for bad in [
+            "ab",
+            "-abc",
+            "abc-",
+            "has space",
+            "under_score",
+            "",
+            &"x".repeat(33),
+        ] {
             assert!(normalize_shop_code(bad).is_err(), "{bad:?}");
         }
     }

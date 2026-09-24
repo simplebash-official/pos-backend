@@ -457,6 +457,7 @@ mod tests {
             cors_allowed_origins: Vec::new(),
             identity_jwks_url: jwks_url,
             identity_issuer: Some(ISSUER.to_string()),
+            provision_secret: None,
         }
     }
 

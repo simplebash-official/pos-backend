@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
 use axum::Router;
+use jsonwebtoken::{EncodingKey, Header, encode};
+use mongodb::Database;
+use serde_json::json;
 use simplebash_pos_backend::{
     app, app::AppState, clients, core::config::Config, core::middleware::auth::Claims,
     domain::users::Role,
 };
-use jsonwebtoken::{EncodingKey, Header, encode};
-use mongodb::Database;
-use serde_json::json;
 
 pub struct TestApp {
     #[allow(dead_code)]
@@ -378,13 +378,25 @@ pub fn mint_device_token(config: &Config, tid: &str, device_id: &str) -> String 
 /// every collection and drop the database when done.
 #[allow(dead_code)]
 pub async fn spawn_app_multi_tenant() -> TestApp {
+    spawn_app_multi_tenant_with_secret(None).await
+}
+
+/// Same as `spawn_app_multi_tenant`, with `PROVISION_SECRET` set (or explicitly
+/// unset), so the shop-provisioning endpoint can be exercised deterministically
+/// whatever the environment holds.
+#[allow(dead_code)]
+pub async fn spawn_app_multi_tenant_with_secret(provision_secret: Option<&str>) -> TestApp {
     dotenvy::dotenv().ok();
     let mock_doc_server_url = start_mock_document_server().await;
 
     let mut config = Config::from_env().expect("invalid configuration for test run");
     config.database_type = simplebash_pos_backend::core::config::DatabaseType::Mongo;
     config.tenant_mode = simplebash_pos_backend::core::config::TenantMode::Multi;
-    config.mongodb_db_name = format!("jtroute_{}", &uuid::Uuid::new_v4().simple().to_string()[..24]);
+    config.provision_secret = provision_secret.map(str::to_string);
+    config.mongodb_db_name = format!(
+        "jtroute_{}",
+        &uuid::Uuid::new_v4().simple().to_string()[..24]
+    );
     config.document_server_url = mock_doc_server_url;
 
     let db = clients::mongo::connect(&config.mongodb_uri, &config.mongodb_db_name)

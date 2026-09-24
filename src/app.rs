@@ -99,6 +99,8 @@ pub fn build_router(state: AppState) -> Router {
     //   POST /api/auth/login          issues the token
     //   GET  /api/system/setup-status query initial installation and setup status
     //   POST /api/system/setup        bootstrap administrator and initialize database
+    //   POST /api/internal/provision  identity -> POS shop hand-off; authenticated by the
+    //                                 shared X-Provision-Secret header, blocked at nginx
     //   GET  /docs, /api-docs/openapi.json   Swagger UI
     //   GET  /api/{inventory,billing,reports}
     //                                 static module-status stubs
@@ -192,7 +194,8 @@ pub fn build_router(state: AppState) -> Router {
         .nest(
             &format!("/{}", mod_names::SYSTEM),
             modules::system::routes::router(),
-        );
+        )
+        .nest("/internal", modules::tenants::routes::router());
 
     let (router, openapi) = OpenApiRouter::<AppState>::with_openapi(ApiDoc::openapi())
         .nest("/api", api_router)

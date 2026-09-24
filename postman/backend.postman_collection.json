@@ -4375,6 +4375,54 @@
         }
       ],
       "description": "System installation, onboarding status check, and initial database setup bootstrap."
+    },
+    {
+      "name": "Internal",
+      "description": "Server-to-server endpoints. Not for browsers: authenticated by a shared secret, and nginx refuses to forward /api/internal/ from the internet.",
+      "item": [
+        {
+          "name": "Provision Shop (identity → POS)",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Provision-Secret",
+                "value": "{{provisionSecret}}",
+                "description": "Must equal the backend's PROVISION_SECRET. The endpoint only exists when TENANT_MODE=multi and that secret is set (otherwise 404)."
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenantId\": \"tnt_xxxxxxxxxxxxxxxx\",\n  \"shopCode\": \"ann-s-phones\",\n  \"name\": \"Ann's Phones\",\n  \"owner\": {\n    \"email\": \"owner@shop.com\",\n    \"name\": \"Ann\",\n    \"passwordHash\": \"$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/internal/provision",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "internal",
+                "provision"
+              ]
+            },
+            "description": "Registers a shop created by the identity service and, when `owner` is present, its first Admin login (using the account's existing Argon2id hash, so the same password works in the POS). Idempotent: replaying the same tenant is a no-op; a shop code owned by a different tenant is 409 SHOP_CODE_ALREADY_EXISTS; an existing Admin is left alone. `owner` is omitted for desktop sign-ups."
+          },
+          "response": []
+        }
+      ]
     }
   ],
   "auth": {
@@ -4470,6 +4518,11 @@
       "key": "importBatchKey",
       "value": "imp_xxxxxxxxxxxxxxxx",
       "description": "An import batch system-generated key (from Process Import / List Imports)."
+    },
+    {
+      "key": "provisionSecret",
+      "value": "replace-with-PROVISION_SECRET",
+      "description": "Shared secret for the internal provisioning endpoint (backend PROVISION_SECRET)."
     }
   ]
 }
