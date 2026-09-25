@@ -66,6 +66,8 @@ pub struct Config {
     /// hands a newly registered shop to `POST /api/internal/provision`. Unset
     /// switches that endpoint off. Multi-tenant deployments only.
     pub provision_secret: Option<String>,
+    /// Environment (e.g. "development" or "production"), parsed from APP_ENV or ENVIRONMENT.
+    pub app_env: String,
 }
 
 /// Why startup configuration failed to load. `main.rs` logs this and exits
@@ -198,6 +200,12 @@ impl Config {
             return Err(ConfigError::Invalid("PROVISION_SECRET"));
         }
 
+        let app_env = env::var("APP_ENV")
+            .or_else(|_| env::var("ENVIRONMENT"))
+            .unwrap_or_else(|_| "development".to_string())
+            .trim()
+            .to_lowercase();
+
         Ok(Self {
             database_type,
             database_url,
@@ -217,6 +225,7 @@ impl Config {
             identity_jwks_url,
             identity_issuer,
             provision_secret,
+            app_env,
         })
     }
 }
