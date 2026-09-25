@@ -71,6 +71,7 @@ async fn setup_sqlite_app() -> SqliteTestContext {
         identity_jwks_url: None,
         identity_issuer: None,
         provision_secret: None,
+        app_env: "test".to_string(),
     };
 
     let config = Arc::new(config);

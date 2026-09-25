@@ -6,6 +6,6 @@
 // a shop registers (`routes`); tenants can also be created by hand with
 // `cargo run --bin create_tenant`. Login only resolves codes through `service`.
 mod model;
-mod repository;
+pub(crate) mod repository;
 pub mod routes;
 pub mod service;

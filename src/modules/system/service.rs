@@ -16,7 +16,11 @@ use crate::{
     domain::system::{
         SetupStatusResponse, SetupSystemRequest, SetupSystemResponse, SystemInstallation,
     },
-    modules::{system::repository, users::service as users_service},
+    modules::{
+        system::repository,
+        tenants::repository as tenants_repository,
+        users::service as users_service,
+    },
     seeds,
 };
 
@@ -69,6 +73,88 @@ pub(crate) async fn get_setup_status(db: &Db) -> AppResult<SetupStatusResponse> 
         app_version: installation.app_version,
         platform: installation.platform,
     })
+}
+
+/// Evaluates setup status for a specific tenant in multi-tenant mode.
+pub(crate) async fn get_tenant_setup_status(
+    db: &Db,
+    shop_code_or_key: &str,
+) -> AppResult<Option<SetupStatusResponse>> {
+    let tenant_opt = if shop_code_or_key.starts_with("tnt_") {
+        tenants_repository::find_tenant_by_key(db, shop_code_or_key).await?
+    } else {
+        tenants_repository::find_tenant_by_shop_code(db, shop_code_or_key).await?
+    };
+
+    if let Some(tenant) = tenant_opt {
+        let app_version = env::var("APP_VERSION").unwrap_or_else(|_| "0.7.0".to_string());
+        Ok(Some(SetupStatusResponse {
+            setup_completed: tenant.setup_completed,
+            is_first_run: !tenant.setup_completed,
+            installation_id: Some(tenant.key),
+            installed_at: Some(tenant.created_at.to_chrono().to_rfc3339()),
+            setup_completed_at: tenant.setup_completed_at.map(|d| d.to_chrono().to_rfc3339()),
+            sample_data_loaded: Some(tenant.sample_data_loaded),
+            app_version,
+            platform: "Cloud (Multi-Tenant)".to_string(),
+        }))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Executes tenant-scoped setup in multi-tenant mode, optionally populating demo data into the tenant namespace.
+pub(crate) async fn perform_tenant_setup(
+    db: &Db,
+    tenant_key: &str,
+    load_sample_data: bool,
+    admin_user: Option<crate::domain::users::User>,
+) -> AppResult<SetupSystemResponse> {
+    crate::core::logging::domain::tracked("system.tenant_setup_performed", async move {
+        let tenant = tenants_repository::find_tenant_by_key(db, tenant_key)
+            .await?
+            .ok_or_else(|| AppError::not_found("Tenant not found"))?;
+
+        if tenant.setup_completed {
+            return Err(AppError::conflict(
+                codes::SETUP_ALREADY_COMPLETED,
+                "Tenant setup has already been completed",
+            ));
+        }
+
+        let scope = crate::core::tenancy::Tenant::id(tenant_key)?;
+        crate::core::tenancy::with_tenant(scope, async {
+            if load_sample_data {
+                seeds::providers::seed_providers(db).await?;
+                seeds::suppliers::seed_suppliers(db).await?;
+                seeds::customers::seed_customers(db).await?;
+                seeds::inventory::seed_inventory(db).await?;
+            }
+            Ok::<(), AppError>(())
+        })
+        .await?;
+
+        tenants_repository::complete_tenant_setup(db, tenant_key, load_sample_data).await?;
+
+        let admin_email = admin_user
+            .as_ref()
+            .map(|u| u.email.clone())
+            .unwrap_or_default();
+
+        Ok(SetupSystemResponse {
+            setup_completed: true,
+            sample_data_loaded: load_sample_data,
+            admin_email,
+            token: None,
+            user: admin_user,
+            message: if load_sample_data {
+                "Shop setup completed successfully with sample demo data".to_string()
+            } else {
+                "Shop setup completed successfully with clean database".to_string()
+            },
+        })
+    })
+    .await
 }
 
 /// Executes initial system setup, bootstrapping the administrator and optionally loading demo data.

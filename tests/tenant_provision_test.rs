@@ -68,6 +68,60 @@ async fn post(
     )
 }
 
+async fn get_with_token(
+    router: &Router,
+    uri: &str,
+    token: Option<&str>,
+) -> (StatusCode, Value) {
+    let mut request = Request::builder()
+        .method("GET")
+        .uri(uri);
+    if let Some(t) = token {
+        request = request.header("authorization", format!("Bearer {t}"));
+    }
+    let response = router
+        .clone()
+        .oneshot(request.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
+}
+
+async fn post_with_token(
+    router: &Router,
+    uri: &str,
+    token: Option<&str>,
+    body: Value,
+) -> (StatusCode, Value) {
+    let mut request = Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header(CONTENT_TYPE, "application/json");
+    if let Some(t) = token {
+        request = request.header("authorization", format!("Bearer {t}"));
+    }
+    let response = router
+        .clone()
+        .oneshot(request.body(Body::from(body.to_string())).unwrap())
+        .await
+        .unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
+}
+
 fn shop(tenant_id: &str, shop_code: &str, owner_hash: Option<&str>) -> Value {
     let mut body = json!({ "tenantId": tenant_id, "shopCode": shop_code, "name": "Ann's Phones" });
     if let Some(hash) = owner_hash {
@@ -331,4 +385,71 @@ async fn the_shared_secret_is_required_and_the_endpoint_is_off_without_one() {
     let (status, _) = post(&off.router, "/api/internal/provision", Some(SECRET), body).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     let _ = off.db.drop().await;
+}
+
+#[tokio::test]
+async fn multi_tenant_onboarding_and_sample_data_seeding() {
+    if !has_mongo() {
+        return;
+    }
+    let app = common::spawn_app_multi_tenant_with_secret(Some(SECRET)).await;
+    ensure_indexes(&app.db, true).await;
+
+    // 1. Provision shop with owner
+    let (status, _) = post(
+        &app.router,
+        "/api/internal/provision",
+        Some(SECRET),
+        shop(TENANT_A, "ann-s-phones", Some(&argon2_hash(PASSWORD))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // 2. Query setup-status by shop code before login
+    let (status, body) = get_with_token(&app.router, "/api/system/setup-status?shop=ann-s-phones", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["setupCompleted"], false);
+    assert_eq!(body["data"]["isFirstRun"], true);
+
+    // 3. Log in with owner credentials
+    let (status, body) = post(
+        &app.router,
+        "/api/auth/login",
+        None,
+        json!({ "email": "ann@example.com", "password": PASSWORD, "shopCode": "ann-s-phones" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let token = body["data"]["token"].as_str().unwrap();
+
+    // 4. Query setup-status with bearer token
+    let (status, body) = get_with_token(&app.router, "/api/system/setup-status", Some(token)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["setupCompleted"], false);
+
+    // 5. Complete setup with sample data
+    let (status, body) = post_with_token(
+        &app.router,
+        "/api/system/setup",
+        Some(token),
+        json!({ "loadSampleData": true }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["setupCompleted"], true);
+    assert_eq!(body["data"]["sampleDataLoaded"], true);
+
+    // 6. Query setup-status again: should now be completed
+    let (status, body) = get_with_token(&app.router, "/api/system/setup-status", Some(token)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["setupCompleted"], true);
+    assert_eq!(body["data"]["sampleDataLoaded"], true);
+
+    // 7. Verify products exist inside tenant
+    let (status, body) = get_with_token(&app.router, "/api/inventory/products", Some(token)).await;
+    assert_eq!(status, StatusCode::OK);
+    let count = body["data"]["products"].as_array().map(|a| a.len()).unwrap_or(0);
+    assert!(count > 0, "sample products should be loaded in tenant scope");
+
+    let _ = app.db.drop().await;
 }

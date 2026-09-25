@@ -19,4 +19,13 @@ pub struct TenantDocument {
     pub created_at: BsonDateTime,
     #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
+    /// Whether initial onboarding setup has been completed for this tenant.
+    #[serde(default)]
+    pub setup_completed: bool,
+    /// Whether demo sample data was loaded during onboarding setup.
+    #[serde(default)]
+    pub sample_data_loaded: bool,
+    /// Timestamp when onboarding setup was completed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup_completed_at: Option<BsonDateTime>,
 }

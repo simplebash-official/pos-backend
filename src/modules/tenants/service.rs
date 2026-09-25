@@ -105,6 +105,9 @@ pub async fn create_tenant_with_key(
             name: name.to_string(),
             created_at: BsonDateTime::now(),
             updated_at: BsonDateTime::now(),
+            setup_completed: false,
+            sample_data_loaded: false,
+            setup_completed_at: None,
         };
         // A concurrent creator can pass the check above; the unique index then
         // rejects the second insert.

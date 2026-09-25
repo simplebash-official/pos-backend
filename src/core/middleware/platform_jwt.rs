@@ -458,6 +458,7 @@ mod tests {
             identity_jwks_url: jwks_url,
             identity_issuer: Some(ISSUER.to_string()),
             provision_secret: None,
+            app_env: "test".to_string(),
         }
     }
 
