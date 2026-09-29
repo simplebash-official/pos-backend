@@ -141,7 +141,7 @@ pub struct ProvisionOutcome {
 
 /// Registers a shop the identity service just created and, when `owner` is given,
 /// its first Admin login. Idempotent so identity (or an operator) can safely
-/// replay it: the same tenant id + shop code is a no-op, a shop code already
+/// replay it: the same tenant id + shop code only refreshes the shop name, a shop code already
 /// owned by a *different* tenant is a 409, and an existing Admin is left alone.
 pub async fn provision_shop(
     db: &Db,
@@ -162,7 +162,13 @@ pub async fn provision_shop(
     }
 
     let tenant_created = match repository::find_tenant_by_shop_code(db, &shop_code).await? {
-        Some(existing) if existing.key == tenant_id => false,
+        Some(existing) if existing.key == tenant_id => {
+            // A replay is also how identity pushes a renamed shop.
+            if existing.name != name.trim() {
+                repository::update_tenant_name(db, tenant_id, name.trim()).await?;
+            }
+            false
+        }
         Some(_) => {
             return Err(AppError::conflict(
                 codes::SHOP_CODE_ALREADY_EXISTS,

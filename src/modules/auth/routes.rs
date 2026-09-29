@@ -108,7 +108,13 @@ async fn me(
     user: CurrentUser,
     State(state): State<AppState>,
 ) -> AppResult<Json<ApiResponse<User>>> {
-    let current = service::me(&state.db, &user.user_id).await?;
+    let current = service::me(
+        &state.db,
+        &user.user_id,
+        user.email.as_deref(),
+        user.name.as_deref(),
+    )
+    .await?;
 
     Ok(Json(ApiResponse::success(
         current,

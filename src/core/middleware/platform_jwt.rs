@@ -48,6 +48,11 @@ struct PlatformClaims {
     /// Registered device the token was issued to (device tokens only).
     #[serde(default)]
     did: Option<String>,
+    /// The account's email and display name (interactive identity tokens only).
+    #[serde(default)]
+    email: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
 }
 
 /// What a verified platform token grants inside this backend.
@@ -61,12 +66,18 @@ pub struct PlatformIdentity {
     pub scope: String,
     /// Device id (`did`) for device tokens.
     pub device_id: Option<String>,
+    /// Profile of the signed-in account, when the token carries it.
+    pub email: Option<String>,
+    pub name: Option<String>,
 }
 
 /// Maps token scopes onto the local role model. Platform tokens carry no
 /// `role`/`permissions` claims, so this is the single place that decides what
 /// a scope may do:
 ///   - `owner`  (the business owner's account token, e.g. on the web)  -> Admin
+///   - `account` (an interactive identity login; identity only puts a `tid`
+///     on it for a shop the account owns, so `verify_platform_token`
+///     insists on one)                                                  -> Admin
 ///   - `device` (a linked desktop installation acting for its shop)     -> Admin
 ///   - `staff`                                                          -> Manager
 ///
@@ -76,7 +87,7 @@ pub fn role_for_scope(scope: &str) -> Option<Role> {
     let mut best = None;
     for s in scope.split_whitespace() {
         match s {
-            "owner" | "device" => return Some(Role::Admin),
+            "owner" | "device" | "account" => return Some(Role::Admin),
             "staff" => best = Some(Role::Manager),
             _ => {}
         }
@@ -225,11 +236,18 @@ pub async fn verify_platform_token(
 
     let role = role_for_scope(&claims.scope)
         .ok_or_else(|| AppError::unauthorized("token scope is not permitted"))?;
+    // An account session without a shop names no tenant to be Admin of.
+    let only_account = claims.scope.split_whitespace().all(|s| s == "account");
+    if only_account && claims.tid.as_deref().is_none_or(str::is_empty) {
+        return Err(AppError::unauthorized("account token has no shop"));
+    }
     Ok(PlatformIdentity {
         sub: claims.sub,
         tid: claims.tid,
         scope: claims.scope.clone(),
         device_id: claims.did,
+        email: claims.email,
+        name: claims.name,
         role,
         permissions: roles::default_permissions(role)
             .iter()
@@ -339,6 +357,7 @@ mod tests {
         assert_eq!(role_for_scope("device"), Some(Role::Admin));
         assert_eq!(role_for_scope("staff"), Some(Role::Manager));
         assert_eq!(role_for_scope("staff owner"), Some(Role::Admin));
+        assert_eq!(role_for_scope("account"), Some(Role::Admin));
         assert_eq!(role_for_scope("read"), None);
         assert_eq!(role_for_scope(""), None);
 

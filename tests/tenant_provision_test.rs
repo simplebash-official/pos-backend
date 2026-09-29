@@ -448,8 +448,68 @@ async fn multi_tenant_onboarding_and_sample_data_seeding() {
     // 7. Verify products exist inside tenant
     let (status, body) = get_with_token(&app.router, "/api/inventory/products", Some(token)).await;
     assert_eq!(status, StatusCode::OK);
-    let count = body["data"]["products"].as_array().map(|a| a.len()).unwrap_or(0);
-    assert!(count > 0, "sample products should be loaded in tenant scope");
+    let count = body["data"]["items"].as_array().map(|a| a.len()).unwrap_or(0);
+    assert!(count > 0, "sample products should be loaded in tenant scope: {body}");
+
+    let _ = app.db.drop().await;
+}
+
+#[tokio::test]
+async fn replaying_with_a_new_name_refreshes_names_but_keeps_the_password() {
+    if !has_mongo() {
+        return;
+    }
+    let app = common::spawn_app_multi_tenant_with_secret(Some(SECRET)).await;
+    ensure_indexes(&app.db, true).await;
+    let hash = argon2_hash(PASSWORD);
+
+    let (first, _) = post(
+        &app.router,
+        "/api/internal/provision",
+        Some(SECRET),
+        shop(TENANT_A, "ann-s-phones", Some(&hash)),
+    )
+    .await;
+    assert_eq!(first, StatusCode::OK);
+
+    // Identity renamed the owner and the shop, and (say) rotated its own hash.
+    let renamed = json!({
+        "tenantId": TENANT_A,
+        "shopCode": "ann-s-phones",
+        "name": "Ann Mobile",
+        "owner": { "email": "ann@example.com", "name": "Ann Perera", "passwordHash": argon2_hash("another-pass-9") },
+    });
+    let (status, body) = post(&app.router, "/api/internal/provision", Some(SECRET), renamed).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["adminCreated"], false);
+
+    let user = app
+        .db
+        .collection::<mongodb::bson::Document>("users")
+        .find_one(doc! { "email": "ann@example.com" })
+        .await
+        .unwrap()
+        .expect("owner user stored");
+    assert_eq!(user.get_str("name").unwrap(), "Ann Perera");
+
+    let tenant = app
+        .db
+        .collection::<mongodb::bson::Document>("tenants")
+        .find_one(doc! { "key": TENANT_A })
+        .await
+        .unwrap()
+        .expect("tenant stored");
+    assert_eq!(tenant.get_str("name").unwrap(), "Ann Mobile");
+
+    // The local password is untouched by a replay.
+    let (status, body) = post(
+        &app.router,
+        "/api/auth/login",
+        None,
+        json!({ "email": "ann@example.com", "password": PASSWORD, "shopCode": "ann-s-phones" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
 
     let _ = app.db.drop().await;
 }

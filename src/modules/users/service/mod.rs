@@ -172,6 +172,29 @@ pub(crate) async fn get_user(db: &Db, id: ObjectId) -> AppResult<User> {
     Ok(document.into_user())
 }
 
+/// Resolves the local user behind an identity-server account (matched by its
+/// email, which both sides normalise the same way). Identity owns the display
+/// name, so a changed `name` claim is written through. `None` when the shop has
+/// no such user.
+pub(crate) async fn find_user_for_identity(
+    db: &Db,
+    email: &str,
+    name: Option<&str>,
+) -> AppResult<Option<User>> {
+    let Some(mut document) = repository::find_user_by_email(db, &normalize_email(email)).await?
+    else {
+        return Ok(None);
+    };
+    if let (Some(name), Some(id)) = (name.map(str::trim).filter(|n| !n.is_empty()), document.id) {
+        if document.name != name {
+            if let Some(updated) = repository::update_user(db, id, doc! { "name": name }).await? {
+                document = updated;
+            }
+        }
+    }
+    Ok(Some(document.into_user()))
+}
+
 /// Scoped lookup for `GET /users/{id}` — 404s if `id` resolves to an
 /// account outside `manageable_roles(caller_role)` (see `ensure_manageable`).
 pub(crate) async fn get_user_for_caller(
@@ -282,8 +305,9 @@ pub fn validate_owner_login(name: &str, email: &str, password_hash: &str) -> App
 /// Creates the owner's Admin login for a freshly provisioned shop from a password
 /// hash the identity service already made, so the same email + password works in
 /// both places without the plaintext ever reaching this service. Returns `false`
-/// (and changes nothing) when the shop already has an Admin, which makes replaying
-/// a provisioning request harmless. `pub` for the same reason as `create_user`:
+/// when the shop already has an Admin: the owner's own Admin row is refreshed with
+/// identity's display name, any other existing Admin is left alone, so replaying a
+/// provisioning request is harmless. `pub` for the same reason as `create_user`:
 /// the tenants module reaches it across the private `repository` boundary.
 pub async fn create_owner_admin_if_absent(
     db: &Db,
@@ -293,11 +317,27 @@ pub async fn create_owner_admin_if_absent(
 ) -> AppResult<bool> {
     validate_owner_login(name, email, password_hash)?;
 
+    let email = normalize_email(email);
+
+    // Replays are how identity re-syncs a profile: when the owner's Admin already
+    // exists, identity is the source of truth for its display name. The password
+    // hash is deliberately left alone - the shop may have changed it locally.
+    if let Some(existing) = repository::find_user_by_email(db, &email).await? {
+        if existing.role == Role::Admin {
+            let name = name.trim();
+            if existing.name != name {
+                if let Some(id) = existing.id {
+                    repository::update_user(db, id, doc! { "name": name }).await?;
+                }
+            }
+            return Ok(false);
+        }
+    }
+
     if repository::count_users_by_role(db, Role::Admin).await? > 0 {
         return Ok(false);
     }
 
-    let email = normalize_email(email);
     if repository::find_user_by_email(db, &email).await?.is_some() {
         return Err(AppError::conflict(
             codes::EMAIL_ALREADY_EXISTS,

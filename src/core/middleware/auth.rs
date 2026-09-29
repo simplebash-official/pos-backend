@@ -56,6 +56,9 @@ pub struct CurrentUser {
     pub scope: Option<String>,
     /// Registered device id (`did`) of a device token.
     pub device_id: Option<String>,
+    /// Profile claims of an identity token (`None` for local tokens).
+    pub email: Option<String>,
+    pub name: Option<String>,
 }
 
 impl CurrentUser {
@@ -138,6 +141,8 @@ impl FromRequestParts<AppState> for CurrentUser {
             permissions: verified.permissions,
             scope: verified.scope,
             device_id: verified.device_id,
+            email: verified.email,
+            name: verified.name,
         })
     }
 }
@@ -156,6 +161,9 @@ pub struct VerifiedToken {
     pub tenant: Option<Tenant>,
     pub scope: Option<String>,
     pub device_id: Option<String>,
+    /// Profile claims of an identity token (`None` for local tokens).
+    pub email: Option<String>,
+    pub name: Option<String>,
 }
 
 impl VerifiedToken {
@@ -172,6 +180,8 @@ impl VerifiedToken {
             tenant: tid.and_then(|t| Tenant::id(t).ok()),
             scope: None,
             device_id: None,
+            email: None,
+            name: None,
         }
     }
 
@@ -213,6 +223,8 @@ pub async fn verify_bearer(headers: &HeaderMap, config: &Config) -> AppResult<Ve
             identity.tid,
         );
         verified.scope = Some(identity.scope);
+        verified.email = identity.email;
+        verified.name = identity.name;
         verified.device_id = identity.device_id;
         return Ok(verified);
     }

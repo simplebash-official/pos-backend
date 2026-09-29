@@ -39,6 +39,17 @@ pub(crate) async fn insert_tenant(db: &Db, document: &TenantDocument) -> AppResu
     Ok(())
 }
 
+/// Renames a tenant (identity is the source of truth for the shop name).
+pub(crate) async fn update_tenant_name(db: &Db, key: &str, name: &str) -> AppResult<()> {
+    directory(db)?
+        .update_one(
+            doc! { "key": key },
+            doc! { "$set": { "name": name, "updated_at": mongodb::bson::DateTime::now() } },
+        )
+        .await?;
+    Ok(())
+}
+
 /// Marks setup as completed for a tenant.
 pub(crate) async fn complete_tenant_setup(
     db: &Db,

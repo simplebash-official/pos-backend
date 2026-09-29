@@ -137,18 +137,29 @@ async fn record_login_session(
 /// one place a caller can discover mid-session that their account was
 /// deactivated (or deleted) *since* their token was issued, since there is
 /// no revocation/blacklist infra to push that information any other way.
-pub(crate) async fn me(db: &Db, user_id: &str) -> AppResult<User> {
-    let object_id = ObjectId::parse_str(user_id)
-        .map_err(|_| AppError::unauthorized("Invalid token subject"))?;
-
-    let user = users_service::get_user(db, object_id)
-        .await
-        .map_err(|err| match err {
-            AppError::NotFound { .. } => {
-                AppError::unauthorized_with_code("Account no longer exists", codes::USER_NOT_FOUND)
-            }
-            other => other,
-        })?;
+pub(crate) async fn me(
+    db: &Db,
+    user_id: &str,
+    identity_email: Option<&str>,
+    identity_name: Option<&str>,
+) -> AppResult<User> {
+    let gone = || AppError::unauthorized_with_code("Account no longer exists", codes::USER_NOT_FOUND);
+    let user = match ObjectId::parse_str(user_id) {
+        Ok(object_id) => users_service::get_user(db, object_id)
+            .await
+            .map_err(|err| match err {
+                AppError::NotFound { .. } => gone(),
+                other => other,
+            })?,
+        // An identity-server token's subject is an `acc_...` id, not a local
+        // ObjectId: find the shop's user for that account by its email claim.
+        Err(_) => match identity_email {
+            Some(email) => users_service::find_user_for_identity(db, email, identity_name)
+                .await?
+                .ok_or_else(gone)?,
+            None => return Err(AppError::unauthorized("Invalid token subject")),
+        },
+    };
 
     if !user.is_active {
         return Err(AppError::unauthorized_with_code(

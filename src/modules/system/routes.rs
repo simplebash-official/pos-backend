@@ -143,7 +143,18 @@ async fn perform_setup(
 
             let user = match mongodb::bson::oid::ObjectId::parse_str(&verified.user_id) {
                 Ok(oid) => users_service::get_user(&state.db, oid).await.ok(),
-                Err(_) => None,
+                // Identity-server token: the caller is the shop's user with that email.
+                Err(_) => match verified.email.as_deref() {
+                    Some(email) => users_service::find_user_for_identity(
+                        &state.db,
+                        email,
+                        verified.name.as_deref(),
+                    )
+                    .await
+                    .ok()
+                    .flatten(),
+                    None => None,
+                },
             };
 
             let result = service::perform_tenant_setup(
