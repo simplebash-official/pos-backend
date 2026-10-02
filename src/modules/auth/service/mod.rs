@@ -19,7 +19,10 @@ use crate::{
         utils::calculate_pagination,
     },
     domain::{
-        auth::{LoginRequest, LoginResponse, LoginSessionListQuery, LoginSessionsResponse},
+        auth::{
+            LoginRequest, LoginResponse, LoginSessionListQuery, LoginSessionsResponse,
+            ShopLookupResponse,
+        },
         users::User,
     },
     modules::{
@@ -44,7 +47,7 @@ pub(crate) async fn login(
     user_agent: Option<String>,
 ) -> AppResult<LoginResponse> {
     if config.tenant_mode != crate::core::config::TenantMode::Multi {
-        return login_in_scope(db, config, body, ip_address, user_agent).await;
+        return login_in_scope(db, config, body, ip_address, user_agent, None).await;
     }
 
     // Multi-tenant: the shop code picks the tenant, and everything below - the
@@ -55,11 +58,14 @@ pub(crate) async fn login(
     if code.is_empty() {
         return Err(AppError::validation("Shop code is required"));
     }
-    let tenant = tenants_service::lookup_shop_code(db, code)
+    let (tenant, shop_name) = tenants_service::lookup_shop_details(db, code)
         .await?
         .ok_or_else(|| AppError::unauthorized("Invalid shop code, email or password"))?;
-    crate::core::tenancy::with_tenant(tenant, login_in_scope(db, config, body, ip_address, user_agent))
-        .await
+    crate::core::tenancy::with_tenant(
+        tenant,
+        login_in_scope(db, config, body, ip_address, user_agent, Some(shop_name)),
+    )
+    .await
 }
 
 async fn login_in_scope(
@@ -68,6 +74,7 @@ async fn login_in_scope(
     body: LoginRequest,
     ip_address: Option<String>,
     user_agent: Option<String>,
+    shop_name: Option<String>,
 ) -> AppResult<LoginResponse> {
     crate::core::logging::domain::tracked("auth.login", async move {
         if body.email.trim().is_empty() || body.password.is_empty() {
@@ -102,6 +109,7 @@ async fn login_in_scope(
             token,
             expires_in: config.jwt_expiry_hours * 3600,
             user,
+            shop_name,
         })
     })
     .await
@@ -202,5 +210,16 @@ pub(crate) async fn list_sessions(
         total,
         page,
         limit,
+    })
+}
+
+/// Looks up a shop by its code and returns its display name (for branding the login screen).
+pub(crate) async fn lookup_shop(db: &Db, code: &str) -> AppResult<ShopLookupResponse> {
+    let (_, name) = tenants_service::lookup_shop_details(db, code)
+        .await?
+        .ok_or_else(|| AppError::not_found(format!("No shop found with code '{}'", code.trim())))?;
+    Ok(ShopLookupResponse {
+        shop_code: code.trim().to_ascii_lowercase(),
+        name,
     })
 }

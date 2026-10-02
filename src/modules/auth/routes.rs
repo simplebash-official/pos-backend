@@ -10,7 +10,7 @@
 
 use axum::{
     Json,
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::HeaderMap,
 };
 use utoipa_axum::{router::OpenApiRouter, routes};
@@ -24,7 +24,10 @@ use crate::{
         response::{ApiResponse, ErrorResponse},
     },
     domain::{
-        auth::{LoginRequest, LoginResponse, LoginSessionListQuery, LoginSessionsResponse},
+        auth::{
+            LoginRequest, LoginResponse, LoginSessionListQuery, LoginSessionsResponse,
+            ShopLookupResponse,
+        },
         users::User,
     },
     modules::auth::service,
@@ -37,6 +40,7 @@ use crate::{
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(login))
+        .routes(routes!(lookup_shop))
         .routes(routes!(me))
         .routes(routes!(list_sessions))
 }
@@ -95,6 +99,26 @@ async fn login(
     let response = service::login(&state.db, &state.config, body, ip_address, user_agent).await?;
 
     Ok(Json(ApiResponse::success(response, "Login successful")))
+}
+
+#[utoipa::path(get, path = "/shop/{code}", tag = modules::AUTH,
+    params(
+        ("code" = String, Path, description = "Shop code to look up")
+    ),
+    responses(
+        (status = 200, description = "Shop details retrieved successfully", body = ApiResponse<ShopLookupResponse>),
+        (status = 404, description = "Shop not found", body = ErrorResponse),
+    )
+)]
+async fn lookup_shop(
+    State(state): State<AppState>,
+    Path(code): Path<String>,
+) -> AppResult<Json<ApiResponse<ShopLookupResponse>>> {
+    let response = service::lookup_shop(&state.db, &code).await?;
+    Ok(Json(ApiResponse::success(
+        response,
+        "Shop details retrieved successfully",
+    )))
 }
 
 #[utoipa::path(get, path = "/me", tag = modules::AUTH,

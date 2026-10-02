@@ -227,6 +227,17 @@ pub(crate) async fn lookup_shop_code(db: &Db, code: &str) -> AppResult<Option<Te
     }
 }
 
+/// The tenant and display name behind a shop code, or `None` if there is none.
+pub(crate) async fn lookup_shop_details(db: &Db, code: &str) -> AppResult<Option<(Tenant, String)>> {
+    let Ok(code) = normalize_shop_code(code) else {
+        return Ok(None);
+    };
+    match repository::find_tenant_by_shop_code(db, &code).await? {
+        Some(t) => Ok(Some((Tenant::id(&t.key)?, t.name))),
+        None => Ok(None),
+    }
+}
+
 /// Resolves a shop code to its tenant scope; 404 `TENANT_NOT_FOUND` if unknown.
 pub async fn resolve_shop_code(db: &Db, code: &str) -> AppResult<Tenant> {
     lookup_shop_code(db, code).await?.ok_or_else(|| {

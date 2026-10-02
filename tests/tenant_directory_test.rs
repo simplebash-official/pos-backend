@@ -205,6 +205,35 @@ async fn tenant_directory_and_multi_tenant_login_roundtrip() {
     let me: Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(me["data"]["name"], "Alpha Admin");
 
+    // Public shop lookup endpoint resolves branding name without authentication.
+    let lookup_ok = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/auth/shop/shop-alpha")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(lookup_ok.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(lookup_ok.into_body(), usize::MAX).await.unwrap();
+    let shop: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(shop["data"]["shopCode"], "shop-alpha");
+    assert_eq!(shop["data"]["name"], "Alpha Repairs");
+
+    let lookup_missing = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/auth/shop/ghost-shop")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(lookup_missing.status(), StatusCode::NOT_FOUND);
+
     raw.drop().await.ok();
 }
 

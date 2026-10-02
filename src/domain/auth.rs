@@ -35,6 +35,19 @@ pub struct LoginResponse {
     pub expires_in: i64,
     /// Profile details of the logged-in user.
     pub user: User,
+    /// Display name of the shop (in multi-tenant deployments).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shop_name: Option<String>,
+}
+
+/// Response for `GET /auth/shop/{code}`.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ShopLookupResponse {
+    /// Unique shop code.
+    pub shop_code: String,
+    /// Display name of the shop.
+    pub name: String,
 }
 
 /// A single login event, as returned by `GET /auth/sessions`. `name`/
