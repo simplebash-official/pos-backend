@@ -876,14 +876,15 @@ async fn analytics_summary_and_timeseries_use_cost_snapshot_and_shop_local_bucke
         roles::default_permissions(Role::Staff),
     );
 
-    // A quiet future window no other test seeds into. Two shop-local days:
+    // A quiet past window no other test seeds into (the timeseries never
+    // returns buckets after today, so it must not be in the future). Two shop-local days:
     // 15 Jun (15:30 Colombo) and 16 Jun (09:30 Colombo).
-    let day1 = NaiveDate::from_ymd_opt(2027, 6, 15)
+    let day1 = NaiveDate::from_ymd_opt(2021, 6, 15)
         .unwrap()
         .and_hms_opt(10, 0, 0)
         .unwrap()
         .and_utc();
-    let day2 = NaiveDate::from_ymd_opt(2027, 6, 16)
+    let day2 = NaiveDate::from_ymd_opt(2021, 6, 16)
         .unwrap()
         .and_hms_opt(4, 0, 0)
         .unwrap()
@@ -956,7 +957,7 @@ async fn analytics_summary_and_timeseries_use_cost_snapshot_and_shop_local_bucke
     let (status, _) = send_authed(
         &app.router,
         "GET",
-        "/api/reports/analytics/summary?preset=custom&from=2027-06-15&to=2027-06-16",
+        "/api/reports/analytics/summary?preset=custom&from=2021-06-15&to=2021-06-16",
         None,
         &staff_token,
     )
@@ -967,7 +968,7 @@ async fn analytics_summary_and_timeseries_use_cost_snapshot_and_shop_local_bucke
     let (status, body) = send_authed(
         &app.router,
         "GET",
-        "/api/reports/analytics/summary?preset=custom&from=2027-06-15&to=2027-06-16&comparePrevious=true",
+        "/api/reports/analytics/summary?preset=custom&from=2021-06-15&to=2021-06-16&comparePrevious=true",
         None,
         &admin_token,
     )
@@ -987,7 +988,7 @@ async fn analytics_summary_and_timeseries_use_cost_snapshot_and_shop_local_bucke
     let (status, body) = send_authed(
         &app.router,
         "GET",
-        "/api/reports/analytics/timeseries?preset=custom&from=2027-06-15&to=2027-06-16&granularity=day",
+        "/api/reports/analytics/timeseries?preset=custom&from=2021-06-15&to=2021-06-16&granularity=day",
         None,
         &admin_token,
     )
@@ -1005,7 +1006,7 @@ async fn analytics_summary_and_timeseries_use_cost_snapshot_and_shop_local_bucke
     let (status, body) = send_authed(
         &app.router,
         "GET",
-        "/api/reports/analytics/payment-methods?preset=custom&from=2027-06-15&to=2027-06-16",
+        "/api/reports/analytics/payment-methods?preset=custom&from=2021-06-15&to=2021-06-16",
         None,
         &admin_token,
     )
@@ -1018,7 +1019,7 @@ async fn analytics_summary_and_timeseries_use_cost_snapshot_and_shop_local_bucke
     let (status, body) = send_authed(
         &app.router,
         "GET",
-        "/api/reports/analytics/top-customers?preset=custom&from=2027-06-15&to=2027-06-16",
+        "/api/reports/analytics/top-customers?preset=custom&from=2021-06-15&to=2021-06-16",
         None,
         &admin_token,
     )
@@ -1035,7 +1036,7 @@ async fn analytics_summary_and_timeseries_use_cost_snapshot_and_shop_local_bucke
     let (status, body) = send_authed(
         &app.router,
         "GET",
-        "/api/reports/analytics/cashier-performance?preset=custom&from=2027-06-15&to=2027-06-16",
+        "/api/reports/analytics/cashier-performance?preset=custom&from=2021-06-15&to=2021-06-16",
         None,
         &admin_token,
     )
@@ -1053,7 +1054,7 @@ async fn analytics_summary_and_timeseries_use_cost_snapshot_and_shop_local_bucke
     let (status, body) = send_authed(
         &app.router,
         "GET",
-        "/api/reports/analytics/sales-by-category?preset=custom&from=2027-06-15&to=2027-06-16",
+        "/api/reports/analytics/sales-by-category?preset=custom&from=2021-06-15&to=2021-06-16",
         None,
         &admin_token,
     )
@@ -1070,7 +1071,7 @@ async fn analytics_summary_and_timeseries_use_cost_snapshot_and_shop_local_bucke
     let (status, body) = send_authed(
         &app.router,
         "GET",
-        "/api/reports/analytics/sales-patterns?preset=custom&from=2027-06-15&to=2027-06-16",
+        "/api/reports/analytics/sales-patterns?preset=custom&from=2021-06-15&to=2021-06-16",
         None,
         &admin_token,
     )
@@ -1089,7 +1090,7 @@ async fn analytics_summary_and_timeseries_use_cost_snapshot_and_shop_local_bucke
     let (status, body) = send_authed(
         &app.router,
         "GET",
-        "/api/reports/analytics/discounts?preset=custom&from=2027-06-15&to=2027-06-16",
+        "/api/reports/analytics/discounts?preset=custom&from=2021-06-15&to=2021-06-16",
         None,
         &admin_token,
     )

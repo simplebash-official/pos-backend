@@ -266,9 +266,13 @@ async fn product_lifecycle_create_get_update_stock_and_delete() {
     .await;
     assert_eq!(status, StatusCode::OK);
     let list = movements["data"]["movements"].as_array().unwrap();
-    assert_eq!(list.len(), 1);
-    assert_eq!(list[0]["quantityDelta"], -4);
-    assert_eq!(list[0]["type"], "manual_adjustment");
+    // Oldest first: the opening balance that creating the product with
+    // `stockQuantity: 10` recorded, then the manual adjustment.
+    assert_eq!(list.len(), 2, "{list:?}");
+    assert_eq!(list[0]["quantityDelta"], 10);
+    assert_eq!(list[0]["type"], "opening_balance");
+    assert_eq!(list[1]["quantityDelta"], -4);
+    assert_eq!(list[1]["type"], "manual_adjustment");
 
     let (status, deleted) = send(
         &app,
