@@ -217,7 +217,12 @@ pub fn index_specs(multi_tenant: bool) -> Vec<IndexSpec> {
     if multi_tenant {
         // Per-tenant monotonic `seq`: the pull cursor. Unique so a replayed
         // change-stream event can never be assigned two sequence numbers.
-        specs.add("sync_changes", "sync_changes_seq_unique", doc! { "seq": 1 }, true);
+        specs.add(
+            "sync_changes",
+            "sync_changes_seq_unique",
+            doc! { "seq": 1 },
+            true,
+        );
         // De-duplicates a change-stream event replayed after a consumer restart.
         specs.add(
             "sync_changes",
@@ -232,7 +237,12 @@ pub fn index_specs(multi_tenant: bool) -> Vec<IndexSpec> {
             doc! { "resource": 1, "key": 1, "seq": 1 },
             false,
         );
-        specs.add("sync_meta", "sync_meta_kind_unique", doc! { "kind": 1 }, true);
+        specs.add(
+            "sync_meta",
+            "sync_meta_kind_unique",
+            doc! { "kind": 1 },
+            true,
+        );
         specs.add(
             "sync_device_state",
             "sync_device_state_device_unique",
@@ -253,7 +263,12 @@ pub fn index_specs(multi_tenant: bool) -> Vec<IndexSpec> {
             unique: false,
             ttl: Some(SYNC_BATCH_RETENTION),
         });
-        specs.add("sync_conflicts", "sync_conflicts_key_unique", doc! { "key": 1 }, true);
+        specs.add(
+            "sync_conflicts",
+            "sync_conflicts_key_unique",
+            doc! { "key": 1 },
+            true,
+        );
         specs.add(
             "sync_conflicts",
             "sync_conflicts_detected_at",
@@ -305,7 +320,10 @@ mod tests {
     use super::*;
 
     fn names(specs: &[IndexSpec]) -> Vec<String> {
-        specs.iter().map(|s| format!("{}.{}", s.collection, s.name)).collect()
+        specs
+            .iter()
+            .map(|s| format!("{}.{}", s.collection, s.name))
+            .collect()
     }
 
     #[test]
@@ -318,12 +336,22 @@ mod tests {
         assert!(names(&specs).contains(&"products.sync_updated_at_key".to_string()));
         assert!(names(&specs).contains(&"idempotency_keys.idempotency_ttl".to_string()));
 
-        let unique: Vec<_> = specs.iter().filter(|s| s.unique).map(|s| s.name.as_str()).collect();
+        let unique: Vec<_> = specs
+            .iter()
+            .filter(|s| s.unique)
+            .map(|s| s.name.as_str())
+            .collect();
         assert_eq!(
             unique,
-            ["idempotency_key_user_unique", "product_serials_serial_number_unique"]
+            [
+                "idempotency_key_user_unique",
+                "product_serials_serial_number_unique"
+            ]
         );
-        let sync = specs.iter().find(|s| s.name == "sync_updated_at_key").unwrap();
+        let sync = specs
+            .iter()
+            .find(|s| s.name == "sync_updated_at_key")
+            .unwrap();
         assert_eq!(sync.keys, doc! { "updated_at": 1, "key": 1 });
     }
 
@@ -375,7 +403,11 @@ mod tests {
         for multi in [false, true] {
             let mut seen = std::collections::HashSet::new();
             for s in index_specs(multi) {
-                assert!(seen.insert((s.collection, s.name.clone())), "duplicate {}", s.name);
+                assert!(
+                    seen.insert((s.collection, s.name.clone())),
+                    "duplicate {}",
+                    s.name
+                );
             }
         }
     }

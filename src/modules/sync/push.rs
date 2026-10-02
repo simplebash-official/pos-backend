@@ -36,12 +36,7 @@ use crate::{
 /// Most changes one push may carry.
 pub(crate) const MAX_PUSH_CHANGES: usize = 500;
 
-fn ack(
-    record: &ChangeRecord,
-    status: AckStatus,
-    reason: Option<&str>,
-    clamped: bool,
-) -> ChangeAck {
+fn ack(record: &ChangeRecord, status: AckStatus, reason: Option<&str>, clamped: bool) -> ChangeAck {
     ChangeAck {
         key: record.key.clone(),
         resource: record.resource.clone(),
@@ -108,7 +103,12 @@ async fn process_change(
     scope: &mut DerivedScope,
 ) -> AppResult<ChangeAck> {
     let Some(spec) = resource_spec(&record.resource) else {
-        return Ok(ack(record, AckStatus::Rejected, Some("UNKNOWN_RESOURCE"), false));
+        return Ok(ack(
+            record,
+            AckStatus::Rejected,
+            Some("UNKNOWN_RESOURCE"),
+            false,
+        ));
     };
     let (effective_ms, clamped) = clamp_updated_at(record.updated_at.timestamp_millis(), now_ms);
     let existing = load_existing(db, spec, &record.key).await?;
@@ -125,7 +125,9 @@ async fn process_change(
     let result: AppResult<ChangeAck> = async {
         match decision {
             Decision::Duplicate => Ok(ack(record, AckStatus::Duplicate, None, clamped)),
-            Decision::Reject { reason } => Ok(ack(record, AckStatus::Rejected, Some(reason), false)),
+            Decision::Reject { reason } => {
+                Ok(ack(record, AckStatus::Rejected, Some(reason), false))
+            }
             Decision::KeepLocal { .. } => {
                 if let Some(existing) = existing.as_ref()
                     && let Some(conflict) = lww_loser_conflict(db, spec, record, existing).await?
@@ -138,7 +140,12 @@ async fn process_change(
             }
             Decision::MergeLifecycle => {
                 let Some(existing) = existing.as_ref() else {
-                    return Ok(ack(record, AckStatus::Rejected, Some("INVALID_PAYLOAD"), false));
+                    return Ok(ack(
+                        record,
+                        AckStatus::Rejected,
+                        Some("INVALID_PAYLOAD"),
+                        false,
+                    ));
                 };
                 match apply_lifecycle(db, spec, record, effective_ms, device_id, existing, scope)
                     .await?
@@ -166,8 +173,16 @@ async fn process_change(
                         .await?
                     }
                     ChangeOp::Delete => {
-                        apply_delete(db, spec, record, effective_ms, device_id, existing.as_ref(), scope)
-                            .await?
+                        apply_delete(
+                            db,
+                            spec,
+                            record,
+                            effective_ms,
+                            device_id,
+                            existing.as_ref(),
+                            scope,
+                        )
+                        .await?
                     }
                 };
                 if let WriteOutcome::Rejected(reason) = outcome {
@@ -187,9 +202,12 @@ async fn process_change(
     .await;
 
     match result {
-        Err(AppError::Validation { .. }) => {
-            Ok(ack(record, AckStatus::Rejected, Some("INVALID_PAYLOAD"), false))
-        }
+        Err(AppError::Validation { .. }) => Ok(ack(
+            record,
+            AckStatus::Rejected,
+            Some("INVALID_PAYLOAD"),
+            false,
+        )),
         other => other,
     }
 }
@@ -237,8 +255,15 @@ pub async fn push(db: &Db, device_id: &str, req: PushRequest) -> AppResult<PushR
     let mut acks: Vec<Option<ChangeAck>> = vec![None; req.changes.len()];
     for i in order {
         acks[i] = Some(
-            process_change(db, device_id, &req.changes[i], now_ms, &mut conflicts, &mut scope)
-                .await?,
+            process_change(
+                db,
+                device_id,
+                &req.changes[i],
+                now_ms,
+                &mut conflicts,
+                &mut scope,
+            )
+            .await?,
         );
     }
     let acks: Vec<ChangeAck> = acks.into_iter().flatten().collect();

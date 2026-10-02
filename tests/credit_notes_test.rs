@@ -7,6 +7,8 @@ use axum::{
         header::{AUTHORIZATION, CONTENT_TYPE},
     },
 };
+use mongodb::bson::{DateTime as BsonDateTime, doc};
+use serde_json::{Value, json};
 use simplebash_pos_backend::{
     core::{config::Config, constants::roles, id::generate_id},
     domain::users::Role,
@@ -15,8 +17,6 @@ use simplebash_pos_backend::{
         inventory::model::{CategoryDocument, SubcategoryDocument},
     },
 };
-use mongodb::bson::{DateTime as BsonDateTime, doc};
-use serde_json::{Value, json};
 use tower::ServiceExt;
 use uuid::Uuid;
 

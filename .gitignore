@@ -21,6 +21,9 @@ Thumbs.db
 *.db-shm
 *.db-wal
 
-# Graphify AST cache
-graphify-out/cache/ast/
-graphify-out/cache/semantic/
+# Local AI-tooling / knowledge-graph output (kept on disk, never committed)
+graphify-out/
+.claude/
+.agents/
+.obsidian/
+skills-lock.json

@@ -9,9 +9,7 @@ use sqlx::{Row, SqlitePool};
 
 use crate::{
     clients::{db::Db, sqlite::generate_id_hex},
-    core::{
-        error::{AppError, AppResult},
-    },
+    core::error::{AppError, AppResult},
     domain::sync_local::{
         ConflictItem, EnableRequest, EnableResponse, NumberBlockInfo, SeedResponse,
         SyncStateResponse, UpdateSyncStateRequest,
@@ -164,7 +162,11 @@ pub async fn seed_outbox(db: &Db) -> AppResult<SeedResponse> {
         } else {
             "'upsert'"
         };
-        let version_expr = if spec.table == "product_serials" { "1" } else { "version" };
+        let version_expr = if spec.table == "product_serials" {
+            "1"
+        } else {
+            "version"
+        };
         let inserted = sqlx::query(&format!(
             "INSERT OR REPLACE INTO sync_outbox (resource, key, op, enqueued_at) \
              SELECT '{name}', key, {op_expr}, strftime('%Y-%m-%dT%H:%M:%fZ', 'now') FROM {table}",

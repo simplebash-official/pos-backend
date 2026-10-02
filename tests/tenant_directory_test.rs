@@ -45,7 +45,10 @@ async fn post_login(router: &axum::Router, body: Value) -> (StatusCode, Value) {
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
-    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
 }
 
 #[tokio::test]
@@ -67,23 +70,40 @@ async fn tenant_directory_and_multi_tenant_login_roundtrip() {
     let db = Db::Mongo(TenantDatabase::multi_tenant(raw.clone()));
 
     // --- directory ---------------------------------------------------------
-    let a = create_tenant(&db, "  Shop-Alpha ", "Alpha Repairs").await.unwrap();
-    let b = create_tenant(&db, "shop-beta", "Beta Retail").await.unwrap();
-    assert_eq!(a.shop_code, "shop-alpha", "codes are lowercased and trimmed");
+    let a = create_tenant(&db, "  Shop-Alpha ", "Alpha Repairs")
+        .await
+        .unwrap();
+    let b = create_tenant(&db, "shop-beta", "Beta Retail")
+        .await
+        .unwrap();
+    assert_eq!(
+        a.shop_code, "shop-alpha",
+        "codes are lowercased and trimmed"
+    );
     assert!(a.key.starts_with("tnt_"));
     assert_ne!(a.key, b.key);
 
-    let dup = create_tenant(&db, "SHOP-ALPHA", "Another").await.unwrap_err();
-    assert!(format!("{dup:?}").contains("SHOP_CODE_ALREADY_EXISTS"), "{dup:?}");
+    let dup = create_tenant(&db, "SHOP-ALPHA", "Another")
+        .await
+        .unwrap_err();
+    assert!(
+        format!("{dup:?}").contains("SHOP_CODE_ALREADY_EXISTS"),
+        "{dup:?}"
+    );
     assert!(create_tenant(&db, "no", "Too short").await.is_err());
 
     let resolved = resolve_shop_code(&db, "Shop-Alpha").await.unwrap();
     assert_eq!(resolved, Tenant::id(&a.key).unwrap());
     // A tenant registered under the id the identity service issued keeps that id,
     // so a staff login by shop code reaches the data the devices sync.
-    let issued = create_tenant_with_key(&db, "tnt_issuedbyidentity1".to_string(), "test-shop", "Test Shop")
-        .await
-        .unwrap();
+    let issued = create_tenant_with_key(
+        &db,
+        "tnt_issuedbyidentity1".to_string(),
+        "test-shop",
+        "Test Shop",
+    )
+    .await
+    .unwrap();
     assert_eq!(issued.key, "tnt_issuedbyidentity1");
     assert_eq!(
         resolve_shop_code(&db, "test-shop").await.unwrap(),
@@ -91,13 +111,18 @@ async fn tenant_directory_and_multi_tenant_login_roundtrip() {
     );
     for bad in ["issued", "tnt_", "tnt_has space"] {
         assert!(
-            create_tenant_with_key(&db, bad.to_string(), "other-shop", "Other").await.is_err(),
+            create_tenant_with_key(&db, bad.to_string(), "other-shop", "Other")
+                .await
+                .is_err(),
             "{bad:?} must be rejected as a tenant id"
         );
     }
 
     let unknown = resolve_shop_code(&db, "nobody-here").await.unwrap_err();
-    assert!(format!("{unknown:?}").contains("TENANT_NOT_FOUND"), "{unknown:?}");
+    assert!(
+        format!("{unknown:?}").contains("TENANT_NOT_FOUND"),
+        "{unknown:?}"
+    );
 
     // --- same admin email in both tenants ------------------------------------
     for (info, name, password) in [
@@ -162,7 +187,9 @@ async fn tenant_directory_and_multi_tenant_login_roundtrip() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["data"]["user"]["name"], "Beta Admin");
     assert_eq!(
-        claims_of(body["data"]["token"].as_str().unwrap()).tid.as_deref(),
+        claims_of(body["data"]["token"].as_str().unwrap())
+            .tid
+            .as_deref(),
         Some(b.key.as_str())
     );
 
@@ -201,7 +228,9 @@ async fn tenant_directory_and_multi_tenant_login_roundtrip() {
         .await
         .unwrap();
     assert_eq!(me.status(), StatusCode::OK);
-    let bytes = axum::body::to_bytes(me.into_body(), usize::MAX).await.unwrap();
+    let bytes = axum::body::to_bytes(me.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let me: Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(me["data"]["name"], "Alpha Admin");
 
@@ -217,7 +246,9 @@ async fn tenant_directory_and_multi_tenant_login_roundtrip() {
         .await
         .unwrap();
     assert_eq!(lookup_ok.status(), StatusCode::OK);
-    let bytes = axum::body::to_bytes(lookup_ok.into_body(), usize::MAX).await.unwrap();
+    let bytes = axum::body::to_bytes(lookup_ok.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let shop: Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(shop["data"]["shopCode"], "shop-alpha");
     assert_eq!(shop["data"]["name"], "Alpha Repairs");

@@ -10,7 +10,10 @@ use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
 
 use crate::{
     clients::db::Db,
-    core::{error::AppResult, tenancy::{Tenant, with_tenant}},
+    core::{
+        error::AppResult,
+        tenancy::{Tenant, with_tenant},
+    },
     modules::sync::cloud_store::{self, CHANGES, coll},
 };
 
@@ -19,9 +22,8 @@ pub(crate) const RETENTION_DAYS: i64 = 90;
 /// Compacts one tenant's change log (runs inside that tenant's scope).
 /// Returns how many changes were dropped.
 pub async fn compact_tenant(db: &Db, retention_days: i64) -> AppResult<u64> {
-    let cutoff = BsonDateTime::from_millis(
-        (Utc::now() - Duration::days(retention_days)).timestamp_millis(),
-    );
+    let cutoff =
+        BsonDateTime::from_millis((Utc::now() - Duration::days(retention_days)).timestamp_millis());
     let changes = coll(db, CHANGES)?;
 
     let mut newest = changes

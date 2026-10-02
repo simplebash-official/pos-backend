@@ -14,12 +14,12 @@ pub(crate) mod derived_mongo;
 pub(crate) mod mongo_codec;
 pub mod pull;
 pub mod push;
-pub mod routes_v2;
-pub mod snapshot;
 pub mod resources;
 pub mod routes;
 pub mod routes_local;
+pub mod routes_v2;
 pub mod service;
+pub mod snapshot;
 pub mod state;
 
 use crate::{

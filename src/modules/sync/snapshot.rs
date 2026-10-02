@@ -102,7 +102,10 @@ pub async fn snapshot(
                     .get_datetime("updated_at")
                     .map(|d| d.to_chrono())
                     .unwrap_or_default(),
-                device_id: row.get_str("updated_by_device").unwrap_or("cloud").to_string(),
+                device_id: row
+                    .get_str("updated_by_device")
+                    .unwrap_or("cloud")
+                    .to_string(),
                 payload: Some(payload),
             });
         }

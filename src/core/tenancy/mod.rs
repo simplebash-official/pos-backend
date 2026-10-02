@@ -116,10 +116,12 @@ pub fn scope_pipeline(tenant: &Tenant, pipeline: Vec<Document>) -> AppResult<Vec
 
 fn scope_stage(tenant: &Bson, stage: Document) -> AppResult<Document> {
     let mut stage = stage;
-    if let Some(name) = stage
-        .keys()
-        .find(|k| matches!(k.as_str(), "$unionWith" | "$graphLookup" | "$merge" | "$out"))
-    {
+    if let Some(name) = stage.keys().find(|k| {
+        matches!(
+            k.as_str(),
+            "$unionWith" | "$graphLookup" | "$merge" | "$out"
+        )
+    }) {
         return Err(AppError::internal(format!(
             "aggregation stage {name} is not allowed on a tenant-scoped collection"
         )));
@@ -156,7 +158,9 @@ fn scope_stage(tenant: &Bson, stage: Document) -> AppResult<Document> {
 fn scope_lookup(tenant: &Bson, lookup: Document) -> AppResult<Document> {
     let mut lookup = lookup;
     if let Ok(pipeline) = lookup.get_array("pipeline") {
-        let mut inner = vec![Bson::Document(doc! { "$match": { TENANT_FIELD: tenant.clone() } })];
+        let mut inner = vec![Bson::Document(
+            doc! { "$match": { TENANT_FIELD: tenant.clone() } },
+        )];
         for s in pipeline {
             let Bson::Document(s) = s else {
                 return Err(AppError::internal("pipeline stage must be a document"));
@@ -220,7 +224,9 @@ mod tests {
         let p = scope_pipeline(&Tenant::Deny, vec![doc! { "$count": "n" }]).unwrap();
         assert_eq!(p[0], doc! { "$match": { "tenant_id": "__deny__" } });
         assert_eq!(
-            stamp_document(&Tenant::Deny, doc! { "k": 1 }).get_str("tenant_id").unwrap(),
+            stamp_document(&Tenant::Deny, doc! { "k": 1 })
+                .get_str("tenant_id")
+                .unwrap(),
             "__deny__"
         );
     }
@@ -288,8 +294,8 @@ mod tests {
         let p = scope_pipeline(
             &t("t1"),
             vec![doc! { "$lookup": {
-                "from": "payments", "localField": "key",
-                "foreignField": "invoice_key", "as": "pays" } }],
+            "from": "payments", "localField": "key",
+            "foreignField": "invoice_key", "as": "pays" } }],
         )
         .unwrap();
         let lookup = p[1].get_document("$lookup").unwrap();
@@ -304,8 +310,8 @@ mod tests {
         assert_eq!(
             lookup.get_array("pipeline").unwrap()[0],
             Bson::Document(doc! { "$match": {
-                "tenant_id": "t1",
-                "$expr": { "$eq": [ "$invoice_key", "$$tenant_lf" ] } } })
+            "tenant_id": "t1",
+            "$expr": { "$eq": [ "$invoice_key", "$$tenant_lf" ] } } })
         );
     }
 
@@ -314,9 +320,9 @@ mod tests {
         let p = scope_pipeline(
             &t("t1"),
             vec![doc! { "$lookup": {
-                "from": "a", "as": "x",
-                "pipeline": [ { "$lookup": {
-                    "from": "b", "localField": "k", "foreignField": "j", "as": "y" } } ] } }],
+            "from": "a", "as": "x",
+            "pipeline": [ { "$lookup": {
+                "from": "b", "localField": "k", "foreignField": "j", "as": "y" } } ] } }],
         )
         .unwrap();
         let inner = p[1]
@@ -328,7 +334,11 @@ mod tests {
             inner[0],
             Bson::Document(doc! { "$match": { "tenant_id": "t1" } })
         );
-        let nested = inner[1].as_document().unwrap().get_document("$lookup").unwrap();
+        let nested = inner[1]
+            .as_document()
+            .unwrap()
+            .get_document("$lookup")
+            .unwrap();
         assert!(nested.get("localField").is_none());
         assert!(nested.get_array("pipeline").is_ok());
     }
@@ -338,9 +348,9 @@ mod tests {
         let p = scope_pipeline(
             &t("t1"),
             vec![doc! { "$facet": {
-                "a": [ { "$lookup": {
-                    "from": "b", "localField": "k", "foreignField": "j", "as": "y" } } ],
-                "b": [ { "$count": "n" } ] } }],
+            "a": [ { "$lookup": {
+                "from": "b", "localField": "k", "foreignField": "j", "as": "y" } } ],
+            "b": [ { "$count": "n" } ] } }],
         )
         .unwrap();
         let facet = p[1].get_document("$facet").unwrap();
@@ -367,7 +377,10 @@ mod tests {
 
     #[test]
     fn lookup_without_join_spec_is_rejected() {
-        let r = scope_pipeline(&t("t1"), vec![doc! { "$lookup": { "from": "x", "as": "y" } }]);
+        let r = scope_pipeline(
+            &t("t1"),
+            vec![doc! { "$lookup": { "from": "x", "as": "y" } }],
+        );
         assert!(r.is_err());
     }
 }

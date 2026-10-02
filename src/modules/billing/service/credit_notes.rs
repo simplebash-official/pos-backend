@@ -1329,7 +1329,8 @@ pub(crate) fn line_match(
         {
             return true;
         }
-        if let (Some(req_stk), Some(item_stk)) = (source_ticket_key, item.source_ticket_key.as_deref())
+        if let (Some(req_stk), Some(item_stk)) =
+            (source_ticket_key, item.source_ticket_key.as_deref())
             && req_stk == item_stk
         {
             return true;

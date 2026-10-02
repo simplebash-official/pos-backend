@@ -8,6 +8,8 @@ use axum::{
     },
 };
 use chrono::Utc;
+use mongodb::bson::DateTime as BsonDateTime;
+use serde_json::{Value, json};
 use simplebash_pos_backend::{
     core::{config::Config, constants::roles, id::generate_id},
     domain::{billing::InvoiceStatus, users::Role},
@@ -17,8 +19,6 @@ use simplebash_pos_backend::{
         sync::cursor::encode_cursor,
     },
 };
-use mongodb::bson::DateTime as BsonDateTime;
-use serde_json::{Value, json};
 use tower::ServiceExt;
 use uuid::Uuid;
 

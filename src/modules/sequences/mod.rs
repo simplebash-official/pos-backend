@@ -17,4 +17,3 @@ pub(crate) fn counter_id(db: &TenantDatabase, id: &str) -> String {
         Tenant::Deny => format!("{}:{id}", crate::core::tenancy::DENY_TENANT),
     }
 }
-

@@ -151,7 +151,8 @@ pub(crate) async fn me(
     identity_email: Option<&str>,
     identity_name: Option<&str>,
 ) -> AppResult<User> {
-    let gone = || AppError::unauthorized_with_code("Account no longer exists", codes::USER_NOT_FOUND);
+    let gone =
+        || AppError::unauthorized_with_code("Account no longer exists", codes::USER_NOT_FOUND);
     let user = match ObjectId::parse_str(user_id) {
         Ok(object_id) => users_service::get_user(db, object_id)
             .await

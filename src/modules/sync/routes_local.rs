@@ -253,8 +253,5 @@ async fn resolve_conflict(
     Json(body): Json<ResolveConflictRequest>,
 ) -> AppResult<Json<ApiResponse<String>>> {
     state::resolve_conflict(&app.db, &key, &body.resolution).await?;
-    Ok(Json(ApiResponse::success(
-        key,
-        "Conflict resolved",
-    )))
+    Ok(Json(ApiResponse::success(key, "Conflict resolved")))
 }

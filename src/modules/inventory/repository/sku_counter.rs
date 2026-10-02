@@ -122,7 +122,10 @@ mod tests {
         // Interleave the tenants: each must count 1, 2, 3 on its own.
         for round in 1..=3i64 {
             for t in ["shop_a", "shop_b"] {
-                let n = with_tenant(Tenant::id(t).unwrap(), async { next_sequence(&db, "PHO-SCR").await }).await;
+                let n = with_tenant(Tenant::id(t).unwrap(), async {
+                    next_sequence(&db, "PHO-SCR").await
+                })
+                .await;
                 assert_eq!(n.unwrap(), round, "{t} round {round}");
             }
         }

@@ -155,7 +155,13 @@ async fn seed_tenant_a(app: &common::TestApp, token: &str) -> Seed {
     let v = json_of(&body);
     let (product_id, product_key) = (text(&v, "/data/id"), text(&v, "/data/key"));
     let (barcode, sku) = (text(&v, "/data/barcode"), text(&v, "/data/sku"));
-    needles.extend([product_name, product_id.clone(), product_key.clone(), barcode.clone(), sku]);
+    needles.extend([
+        product_name,
+        product_id.clone(),
+        product_key.clone(),
+        barcode.clone(),
+        sku,
+    ]);
 
     let customer_name = format!("CustA-{uniq}");
     let (status, body) = call(
@@ -262,7 +268,10 @@ async fn get_routes(router: &axum::Router) -> Vec<String> {
         .filter(|p| p != "/api/health")
         .collect();
     routes.sort();
-    assert!(routes.len() > 20, "expected the full GET surface, got {routes:?}");
+    assert!(
+        routes.len() > 20,
+        "expected the full GET surface, got {routes:?}"
+    );
     routes
 }
 
@@ -290,7 +299,10 @@ fn resolve(template: &str, s: &Seed) -> String {
 }
 
 fn leaks<'a>(body: &str, needles: &'a [String]) -> Vec<&'a String> {
-    needles.iter().filter(|n| body.contains(n.as_str())).collect()
+    needles
+        .iter()
+        .filter(|n| body.contains(n.as_str()))
+        .collect()
 }
 
 fn known_issue(template: &str) -> bool {
@@ -405,15 +417,47 @@ async fn cross_tenant_mutations_fail_with_404_and_leave_data_intact() {
     let product = format!("/api/inventory/products/{}", seed.product_id);
     let attempts: Vec<(&str, String, Option<Value>)> = vec![
         ("PUT", product.clone(), Some(json!({ "name": "HACKED" }))),
-        ("PATCH", format!("{product}/stock"), Some(json!({ "delta": -5, "reason": "hack" }))),
+        (
+            "PATCH",
+            format!("{product}/stock"),
+            Some(json!({ "delta": -5, "reason": "hack" })),
+        ),
         ("DELETE", product.clone(), None),
-        ("PATCH", format!("/api/customers/{}", seed.customer_id), Some(json!({ "name": "HACKED" }))),
-        ("DELETE", format!("/api/customers/{}", seed.customer_id), None),
-        ("DELETE", format!("/api/suppliers/{}", seed.supplier_id), None),
-        ("PATCH", format!("/api/employees/{}", seed.employee_id), Some(json!({ "name": "HACKED" }))),
-        ("DELETE", format!("/api/employees/{}", seed.employee_id), None),
-        ("DELETE", format!("/api/inventory/categories/{}", seed.category_key), None),
-        ("POST", format!("/api/billing/invoices/{}/cancel", seed.invoice_id), Some(json!({}))),
+        (
+            "PATCH",
+            format!("/api/customers/{}", seed.customer_id),
+            Some(json!({ "name": "HACKED" })),
+        ),
+        (
+            "DELETE",
+            format!("/api/customers/{}", seed.customer_id),
+            None,
+        ),
+        (
+            "DELETE",
+            format!("/api/suppliers/{}", seed.supplier_id),
+            None,
+        ),
+        (
+            "PATCH",
+            format!("/api/employees/{}", seed.employee_id),
+            Some(json!({ "name": "HACKED" })),
+        ),
+        (
+            "DELETE",
+            format!("/api/employees/{}", seed.employee_id),
+            None,
+        ),
+        (
+            "DELETE",
+            format!("/api/inventory/categories/{}", seed.category_key),
+            None,
+        ),
+        (
+            "POST",
+            format!("/api/billing/invoices/{}/cancel", seed.invoice_id),
+            Some(json!({})),
+        ),
     ];
     let mut failures = Vec::new();
     for (method, uri, body) in attempts {
@@ -422,7 +466,11 @@ async fn cross_tenant_mutations_fail_with_404_and_leave_data_intact() {
             failures.push(format!("{method} {uri} as tenant B -> {status}: {resp}"));
         }
     }
-    assert!(failures.is_empty(), "cross-tenant mutations not rejected:\n{}", failures.join("\n"));
+    assert!(
+        failures.is_empty(),
+        "cross-tenant mutations not rejected:\n{}",
+        failures.join("\n")
+    );
 
     // Tenant A's data is untouched.
     let (status, body) = call(&app.router, "GET", &product, Some(&token_a), None).await;
@@ -440,7 +488,14 @@ async fn cross_tenant_mutations_fail_with_404_and_leave_data_intact() {
         assert_eq!(status, StatusCode::OK, "{uri}: {body}");
         assert!(!body.contains("HACKED"), "{uri} was modified: {body}");
     }
-    let (_, body) = call(&app.router, "GET", &format!("/api/billing/invoices/{}", seed.invoice_id), Some(&token_a), None).await;
+    let (_, body) = call(
+        &app.router,
+        "GET",
+        &format!("/api/billing/invoices/{}", seed.invoice_id),
+        Some(&token_a),
+        None,
+    )
+    .await;
     assert_ne!(json_of(&body)["data"]["status"], "cancelled");
 
     app.db.drop().await.ok();
@@ -459,7 +514,14 @@ async fn token_without_tenant_is_rejected_and_no_document_is_unstamped() {
     let no_tenant = admin_token(&app, None);
     seed_tenant_a(&app, &token_a).await;
 
-    let (status, body) = call(&app.router, "GET", "/api/inventory/products", Some(&no_tenant), None).await;
+    let (status, body) = call(
+        &app.router,
+        "GET",
+        "/api/inventory/products",
+        Some(&no_tenant),
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
     let (status, _) = call(&app.router, "GET", "/api/inventory/products", None, None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
@@ -478,10 +540,16 @@ async fn token_without_tenant_is_rejected_and_no_document_is_unstamped() {
             .await
             .unwrap();
         if unstamped > 0 || denied > 0 {
-            problems.push(format!("{name}: {unstamped} unstamped, {denied} quarantined"));
+            problems.push(format!(
+                "{name}: {unstamped} unstamped, {denied} quarantined"
+            ));
         }
     }
-    assert!(problems.is_empty(), "documents without a real tenant:\n{}", problems.join("\n"));
+    assert!(
+        problems.is_empty(),
+        "documents without a real tenant:\n{}",
+        problems.join("\n")
+    );
 
     app.db.drop().await.ok();
 }
@@ -505,11 +573,19 @@ async fn aggregates_and_cached_reports_are_tenant_scoped() {
     // (route, JSON pointer to a counter, tenant A's expected value)
     let checks = [
         ("/api/inventory/stats", "/data/totalItems", 1),
-        ("/api/inventory/overview?page=1&limit=10", "/data/metrics/totalItems", 1),
+        (
+            "/api/inventory/overview?page=1&limit=10",
+            "/data/metrics/totalItems",
+            1,
+        ),
         ("/api/billing/invoices/stats", "/data/todayInvoiceCount", 1),
         ("/api/billing/invoices/stats", "/data/todaySalesCents", 2000),
         ("/api/customers/stats", "/data/totalCustomers", 1),
-        ("/api/reports/dashboard?preset=all_time", "/data/totalRevenueCents", 2000),
+        (
+            "/api/reports/dashboard?preset=all_time",
+            "/data/totalRevenueCents",
+            2000,
+        ),
         (
             "/api/reports/engine/feed?section=overview&preset=all_time",
             "/data/overview/summary/current/totalRevenueCents",
@@ -521,17 +597,25 @@ async fn aggregates_and_cached_reports_are_tenant_scoped() {
         let (status, body) = call(&app.router, "GET", uri, Some(&token_a), None).await;
         let got_a = json_of(&body).pointer(pointer).and_then(Value::as_i64);
         if status != StatusCode::OK || got_a != Some(expected_a) {
-            failures.push(format!("A {uri} {pointer}: expected {expected_a}, got {got_a:?} ({status})"));
+            failures.push(format!(
+                "A {uri} {pointer}: expected {expected_a}, got {got_a:?} ({status})"
+            ));
         }
     }
     for (uri, pointer, _) in checks {
         let (status, body) = call(&app.router, "GET", uri, Some(&token_b), None).await;
         let got_b = json_of(&body).pointer(pointer).and_then(Value::as_i64);
         if status != StatusCode::OK || got_b != Some(0) {
-            failures.push(format!("B {uri} {pointer}: expected 0, got {got_b:?} ({status})"));
+            failures.push(format!(
+                "B {uri} {pointer}: expected 0, got {got_b:?} ({status})"
+            ));
         }
     }
-    assert!(failures.is_empty(), "aggregate isolation failures:\n{}", failures.join("\n"));
+    assert!(
+        failures.is_empty(),
+        "aggregate isolation failures:\n{}",
+        failures.join("\n")
+    );
 
     app.db.drop().await.ok();
 }

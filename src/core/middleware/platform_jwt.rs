@@ -135,9 +135,7 @@ impl JwksCache {
 
     async fn cached(&self, kid: &str) -> (Option<DecodingKey>, bool) {
         let state = self.state.read().await;
-        let fresh = state
-            .fetched_at
-            .is_some_and(|at| at.elapsed() < self.ttl);
+        let fresh = state.fetched_at.is_some_and(|at| at.elapsed() < self.ttl);
         (state.keys.get(kid).cloned(), fresh)
     }
 
@@ -285,13 +283,18 @@ mod tests {
 
     async fn mock_jwks(initial: serde_json::Value) -> MockJwks {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://{}/.well-known/jwks.json", listener.local_addr().unwrap());
+        let url = format!(
+            "http://{}/.well-known/jwks.json",
+            listener.local_addr().unwrap()
+        );
         let body = Arc::new(Mutex::new(initial.to_string()));
         let hits = Arc::new(AtomicUsize::new(0));
         let (b, h) = (body.clone(), hits.clone());
         tokio::spawn(async move {
             loop {
-                let Ok((mut sock, _)) = listener.accept().await else { break };
+                let Ok((mut sock, _)) = listener.accept().await else {
+                    break;
+                };
                 let (b, h) = (b.clone(), h.clone());
                 tokio::spawn(async move {
                     let mut buf = [0u8; 2048];
@@ -320,7 +323,12 @@ mod tests {
     fn token(pem: &str, kid: &str, claims: serde_json::Value) -> String {
         let mut header = Header::new(Algorithm::EdDSA);
         header.kid = Some(kid.to_string());
-        encode(&header, &claims, &EncodingKey::from_ed_pem(pem.as_bytes()).unwrap()).unwrap()
+        encode(
+            &header,
+            &claims,
+            &EncodingKey::from_ed_pem(pem.as_bytes()).unwrap(),
+        )
+        .unwrap()
     }
 
     fn claims(scope: &str, exp_offset: i64, iss: &str) -> serde_json::Value {
@@ -365,11 +373,18 @@ mod tests {
         let c = cache(&mock, Duration::ZERO);
         let t = token(KEY1_PEM, "k1", claims("staff", 300, ISSUER));
         assert_eq!(
-            verify_platform_token(&c, &t, Some(ISSUER)).await.unwrap().role,
+            verify_platform_token(&c, &t, Some(ISSUER))
+                .await
+                .unwrap()
+                .role,
             Role::Manager
         );
         let none = token(KEY1_PEM, "k1", claims("read", 300, ISSUER));
-        assert!(verify_platform_token(&c, &none, Some(ISSUER)).await.is_err());
+        assert!(
+            verify_platform_token(&c, &none, Some(ISSUER))
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
@@ -393,9 +408,17 @@ mod tests {
         let c = cache(&mock, Duration::from_secs(60));
         let bogus = token(KEY2_PEM, "nope", claims("owner", 300, ISSUER));
         for _ in 0..5 {
-            assert!(verify_platform_token(&c, &bogus, Some(ISSUER)).await.is_err());
+            assert!(
+                verify_platform_token(&c, &bogus, Some(ISSUER))
+                    .await
+                    .is_err()
+            );
         }
-        assert_eq!(mock.hits.load(Ordering::SeqCst), 1, "one fetch, not one per token");
+        assert_eq!(
+            mock.hits.load(Ordering::SeqCst),
+            1,
+            "one fetch, not one per token"
+        );
     }
 
     #[tokio::test]
@@ -421,19 +444,31 @@ mod tests {
 
         // Signed by a different key but claiming kid k1.
         let forged = token(KEY3_PEM, "k1", claims("owner", 300, ISSUER));
-        assert!(verify_platform_token(&c, &forged, Some(ISSUER)).await.is_err());
+        assert!(
+            verify_platform_token(&c, &forged, Some(ISSUER))
+                .await
+                .is_err()
+        );
 
         // Payload swapped after signing (owner -> different tenant).
         let good = token(KEY1_PEM, "k1", claims("staff", 300, ISSUER));
-        let other = token(KEY1_PEM, "k1", json!({
-            "sub": "acct_1", "tid": "tnt_OTHER", "scope": "owner", "iss": ISSUER,
-            "exp": chrono::Utc::now().timestamp() + 300,
-        }));
+        let other = token(
+            KEY1_PEM,
+            "k1",
+            json!({
+                "sub": "acct_1", "tid": "tnt_OTHER", "scope": "owner", "iss": ISSUER,
+                "exp": chrono::Utc::now().timestamp() + 300,
+            }),
+        );
         let mut parts: Vec<&str> = good.split('.').collect();
         let other_parts: Vec<&str> = other.split('.').collect();
         parts[1] = other_parts[1];
         let tampered = parts.join(".");
-        assert!(verify_platform_token(&c, &tampered, Some(ISSUER)).await.is_err());
+        assert!(
+            verify_platform_token(&c, &tampered, Some(ISSUER))
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
@@ -454,10 +489,17 @@ mod tests {
             &EncodingKey::from_ed_pem(KEY1_PEM.as_bytes()).unwrap(),
         )
         .unwrap();
-        assert!(verify_platform_token(&c, &no_kid, Some(ISSUER)).await.is_err());
+        assert!(
+            verify_platform_token(&c, &no_kid, Some(ISSUER))
+                .await
+                .is_err()
+        );
     }
 
-    fn test_config(jwks_url: Option<String>, tenant_mode: crate::core::config::TenantMode) -> crate::core::config::Config {
+    fn test_config(
+        jwks_url: Option<String>,
+        tenant_mode: crate::core::config::TenantMode,
+    ) -> crate::core::config::Config {
         crate::core::config::Config {
             database_type: crate::core::config::DatabaseType::Sqlite,
             database_url: String::new(),
@@ -476,6 +518,7 @@ mod tests {
             cors_allowed_origins: Vec::new(),
             identity_jwks_url: jwks_url,
             identity_issuer: Some(ISSUER.to_string()),
+            identity_tenant_id: None,
             provision_secret: None,
             app_env: "test".to_string(),
         }
@@ -507,14 +550,20 @@ mod tests {
         let exp = chrono::Utc::now().timestamp() + 300;
 
         // Local HS256 token carrying a tenant.
-        let local = hs256(&config.jwt_secret, json!({ "sub": "u1", "exp": exp, "tid": "tnt_local" }));
+        let local = hs256(
+            &config.jwt_secret,
+            json!({ "sub": "u1", "exp": exp, "tid": "tnt_local" }),
+        );
         let v = verify_bearer(&bearer(&local), &config).await.unwrap();
         assert_eq!(v.tenant, Some(Tenant::id("tnt_local").unwrap()));
         assert_eq!(v.tenant_id().as_deref(), Some("tnt_local"));
 
         // Local token without a tenant (or an empty one): no tenant, which is
         // what makes CurrentUser reject it in multi mode.
-        for claims in [json!({ "sub": "u1", "exp": exp }), json!({ "sub": "u1", "exp": exp, "tid": "  " })] {
+        for claims in [
+            json!({ "sub": "u1", "exp": exp }),
+            json!({ "sub": "u1", "exp": exp, "tid": "  " }),
+        ] {
             let t = hs256(&config.jwt_secret, claims);
             let v = verify_bearer(&bearer(&t), &config).await.unwrap();
             assert!(v.tenant.is_none() && v.tenant_id().is_none());
@@ -529,7 +578,10 @@ mod tests {
         assert!(!v.permissions.is_empty());
 
         // Wrong HS256 secret still fails.
-        let bad = hs256("some-other-secret-some-other-secret-0000", json!({ "sub": "u1", "exp": exp, "tid": "t" }));
+        let bad = hs256(
+            "some-other-secret-some-other-secret-0000",
+            json!({ "sub": "u1", "exp": exp, "tid": "t" }),
+        );
         assert!(verify_bearer(&bearer(&bad), &config).await.is_err());
     }
 
@@ -539,7 +591,33 @@ mod tests {
         let config = test_config(None, TenantMode::Multi);
         let platform = token(KEY1_PEM, "k1", claims("owner", 300, ISSUER));
         assert!(verify_bearer(&bearer(&platform), &config).await.is_err());
-        assert!(verify_bearer(&axum::http::HeaderMap::new(), &config).await.is_err());
+        assert!(
+            verify_bearer(&axum::http::HeaderMap::new(), &config)
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn single_shop_mode_only_accepts_platform_tokens_for_its_own_shop() {
+        use crate::core::{config::TenantMode, middleware::auth::verify_bearer};
+        let mock = mock_jwks(jwks(&[("k1", KEY1_X)])).await;
+        // `claims` mints tokens for tenant `tnt_1`.
+        let platform = token(KEY1_PEM, "k1", claims("owner", 300, ISSUER));
+
+        // No shop configured: platform tokens are refused outright.
+        let config = test_config(Some(mock.url.clone()), TenantMode::Single);
+        assert!(verify_bearer(&bearer(&platform), &config).await.is_err());
+
+        // A different shop: refused.
+        let mut config = test_config(Some(mock.url.clone()), TenantMode::Single);
+        config.identity_tenant_id = Some("tnt_OTHER".to_string());
+        assert!(verify_bearer(&bearer(&platform), &config).await.is_err());
+
+        // This shop: accepted.
+        config.identity_tenant_id = Some("tnt_1".to_string());
+        let v = verify_bearer(&bearer(&platform), &config).await.unwrap();
+        assert_eq!(v.role, Some(Role::Admin));
     }
 
     #[tokio::test]

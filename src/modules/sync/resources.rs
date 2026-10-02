@@ -303,7 +303,8 @@ mod tests {
 
     #[test]
     fn the_password_hash_is_stripped_from_stored_payload_copies() {
-        let payload = serde_json::json!({ "key": "usr_1", "passwordHash": "$argon2id$secret", "name": "A" });
+        let payload =
+            serde_json::json!({ "key": "usr_1", "passwordHash": "$argon2id$secret", "name": "A" });
         let clean = without_secrets("users", &payload);
         assert!(clean.get("passwordHash").is_none());
         assert_eq!(clean["name"], "A");

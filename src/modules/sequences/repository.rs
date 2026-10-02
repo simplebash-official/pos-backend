@@ -15,7 +15,8 @@ pub(crate) async fn reserve_block(
 ) -> AppResult<(i64, i64)> {
     match db {
         Db::Mongo(db) => {
-            let counters: ScopedCollection<SequenceCounterDocument> = db.collection("sequence_counters");
+            let counters: ScopedCollection<SequenceCounterDocument> =
+                db.collection("sequence_counters");
             let now = mongodb::bson::DateTime::now();
 
             let updated = counters

@@ -8,6 +8,8 @@ use axum::{
     },
 };
 use chrono::{Duration, NaiveDate, Utc};
+use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
+use serde_json::{Value, json};
 use simplebash_pos_backend::{
     core::{constants::roles, id::generate_id},
     domain::{billing::InvoiceStatus, users::Role},
@@ -18,8 +20,6 @@ use simplebash_pos_backend::{
         repairs::model::RepairDocument,
     },
 };
-use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
-use serde_json::{Value, json};
 use tower::ServiceExt;
 
 async fn execute(router: &axum::Router, request: Request<Body>) -> (StatusCode, Value) {

@@ -7,8 +7,8 @@ use axum::{
         header::{AUTHORIZATION, CONTENT_TYPE},
     },
 };
-use simplebash_pos_backend::{core::constants::roles, domain::users::Role};
 use serde_json::{Value, json};
+use simplebash_pos_backend::{core::constants::roles, domain::users::Role};
 use tower::ServiceExt;
 use uuid::Uuid;
 

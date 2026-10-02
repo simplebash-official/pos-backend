@@ -105,7 +105,10 @@ async fn table_columns(conn: &mut SqliteConnection, table: &str) -> AppResult<Ve
                 ColKind::Json
             } else if declared.contains("INT") {
                 ColKind::Integer
-            } else if declared.contains("REAL") || declared.contains("FLOA") || declared.contains("DOUB") {
+            } else if declared.contains("REAL")
+                || declared.contains("FLOA")
+                || declared.contains("DOUB")
+            {
                 ColKind::Real
             } else {
                 ColKind::Text
@@ -224,7 +227,9 @@ async fn upsert_row(
     let updates: Vec<String> = names
         .iter()
         // Derived columns only seed a new row; recompute owns them afterwards.
-        .filter(|n| !matches!(**n, "key" | "id" | "created_at" | "version") && !w.derived.contains(n))
+        .filter(|n| {
+            !matches!(**n, "key" | "id" | "created_at" | "version") && !w.derived.contains(n)
+        })
         .map(|n| format!("{n} = excluded.{n}"))
         .chain(
             names
@@ -238,7 +243,9 @@ async fn upsert_row(
         cols = names.join(", "),
         updates = updates.join(", "),
     );
-    bind_all(sqlx::query(&sql), &values).execute(&mut *conn).await?;
+    bind_all(sqlx::query(&sql), &values)
+        .execute(&mut *conn)
+        .await?;
     Ok(())
 }
 
@@ -288,7 +295,12 @@ async fn upsert_with_unique_retry(
                 return Err(err.into());
             };
             let camel = wire_field(w.table, &column);
-            let Some(value) = w.payload.get(&camel).and_then(Value::as_str).map(str::to_owned) else {
+            let Some(value) = w
+                .payload
+                .get(&camel)
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+            else {
                 return Err(err.into());
             };
 
@@ -385,16 +397,21 @@ async fn rename_stored_row(
 /// clock (adjusted the same way the capture triggers compute it) or one past
 /// the row's current meta, whichever is later - so the correction always wins
 /// a future Lww comparison against the state it is replacing.
-async fn local_correction_ms(conn: &mut SqliteConnection, resource: &str, key: &str) -> AppResult<i64> {
+async fn local_correction_ms(
+    conn: &mut SqliteConnection,
+    resource: &str,
+    key: &str,
+) -> AppResult<i64> {
     let offset: i64 = sqlx::query_scalar("SELECT clock_offset_ms FROM sync_state WHERE id = 1")
         .fetch_one(&mut *conn)
         .await?;
-    let prior: Option<i64> =
-        sqlx::query_scalar("SELECT updated_at_ms FROM sync_row_meta WHERE resource = ? AND key = ?")
-            .bind(resource)
-            .bind(key)
-            .fetch_optional(&mut *conn)
-            .await?;
+    let prior: Option<i64> = sqlx::query_scalar(
+        "SELECT updated_at_ms FROM sync_row_meta WHERE resource = ? AND key = ?",
+    )
+    .bind(resource)
+    .bind(key)
+    .fetch_optional(&mut *conn)
+    .await?;
     let now = Utc::now().timestamp_millis() + offset;
     Ok(now.max(prior.unwrap_or(0) + 1))
 }
@@ -408,7 +425,11 @@ fn device_tag(device_id: &str) -> String {
         .collect()
 }
 
-async fn load_meta(conn: &mut SqliteConnection, resource: &str, key: &str) -> AppResult<Option<RowMeta>> {
+async fn load_meta(
+    conn: &mut SqliteConnection,
+    resource: &str,
+    key: &str,
+) -> AppResult<Option<RowMeta>> {
     let row = sqlx::query(
         "SELECT updated_at_ms, device_id, version FROM sync_row_meta WHERE resource = ? AND key = ?",
     )
@@ -509,8 +530,12 @@ async fn apply_records_in_tx(
     // Parents before children; within an order, upserts before deletes.
     let mut ordered: Vec<&ChangeRecord> = records.to_vec();
     ordered.sort_by(|a, b| {
-        let oa = resources::spec(&a.resource).map(|s| s.order).unwrap_or(u8::MAX);
-        let ob = resources::spec(&b.resource).map(|s| s.order).unwrap_or(u8::MAX);
+        let oa = resources::spec(&a.resource)
+            .map(|s| s.order)
+            .unwrap_or(u8::MAX);
+        let ob = resources::spec(&b.resource)
+            .map(|s| s.order)
+            .unwrap_or(u8::MAX);
         (oa, a.op == ChangeOp::Delete, &a.key).cmp(&(ob, b.op == ChangeOp::Delete, &b.key))
     });
 
@@ -555,7 +580,8 @@ async fn apply_records_in_tx(
             }
             Decision::KeepLocal { loser } => {
                 counts.conflicts += 1;
-                if let (Some(local), Some(losing)) = (local_payload(db, spec, &rec.key).await?, &rec.payload)
+                if let (Some(local), Some(losing)) =
+                    (local_payload(db, spec, &rec.key).await?, &rec.payload)
                     && is_meaningful_conflict(spec, &local, losing)
                 {
                     conflicts.push(NewConflict {
@@ -607,7 +633,9 @@ async fn apply_records_in_tx(
                     _ => ms,
                 };
                 let meta_device = match (&decision, &meta) {
-                    (Decision::MergeLifecycle, Some(m)) if m.updated_at_ms > ms => m.device_id.as_str(),
+                    (Decision::MergeLifecycle, Some(m)) if m.updated_at_ms > ms => {
+                        m.device_id.as_str()
+                    }
                     _ => rec.device_id.as_str(),
                 };
 
@@ -643,7 +671,8 @@ async fn apply_records_in_tx(
                             continue;
                         };
                         if spec.name == "productSerials"
-                            && let Some(conflict) = serial_conflict(&mut *conn, &rec.key, payload).await?
+                            && let Some(conflict) =
+                                serial_conflict(&mut *conn, &rec.key, payload).await?
                         {
                             conflicts.push(conflict);
                         }
@@ -687,17 +716,27 @@ async fn apply_records_in_tx(
                         }
                         if spec.name == "users"
                             && payload.get("role").and_then(Value::as_str) == Some("admin")
-                            && let Some(conflict) = extra_admin_conflict(&mut *conn, &rec.key, conflicts).await?
+                            && let Some(conflict) =
+                                extra_admin_conflict(&mut *conn, &rec.key, conflicts).await?
                         {
                             conflicts.push(conflict);
                         }
                         if spec.name == "categories" {
-                            reconcile_subcategories(&mut *conn, &rec.key, payload, ms, device).await?;
+                            reconcile_subcategories(&mut *conn, &rec.key, payload, ms, device)
+                                .await?;
                         }
                     }
                 }
 
-                save_meta(&mut *conn, spec.name, &rec.key, meta_ms, meta_device, rec.version).await?;
+                save_meta(
+                    &mut *conn,
+                    spec.name,
+                    &rec.key,
+                    meta_ms,
+                    meta_device,
+                    rec.version,
+                )
+                .await?;
                 add_scope(spec, rec, scope);
                 counts.applied += 1;
             }
@@ -717,14 +756,17 @@ async fn extra_admin_conflict(
     key: &str,
     raised: &[NewConflict],
 ) -> AppResult<Option<NewConflict>> {
-    let admin_keys: Vec<String> =
-        sqlx::query_scalar("SELECT key FROM users WHERE role = 'admin' AND deleted_at IS NULL ORDER BY key")
-            .fetch_all(&mut *conn)
-            .await?;
+    let admin_keys: Vec<String> = sqlx::query_scalar(
+        "SELECT key FROM users WHERE role = 'admin' AND deleted_at IS NULL ORDER BY key",
+    )
+    .fetch_all(&mut *conn)
+    .await?;
     if admin_keys.len() < 2 || !admin_keys.iter().any(|k| k == key) {
         return Ok(None);
     }
-    let same_batch = raised.iter().any(|c| c.resource == "users" && c.entity_key == key);
+    let same_batch = raised
+        .iter()
+        .any(|c| c.resource == "users" && c.entity_key == key);
     let stored: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM sync_conflicts WHERE kind = ? AND resource = 'users' AND entity_key = ? \
          AND resolved_at IS NULL AND detail LIKE '%MULTIPLE_ADMINS%'",
@@ -754,10 +796,11 @@ async fn serial_conflict(
     key: &str,
     incoming: &Map<String, Value>,
 ) -> AppResult<Option<NewConflict>> {
-    let Some(local) = sqlx::query("SELECT serial_number, invoice_key, status FROM product_serials WHERE key = ?")
-        .bind(key)
-        .fetch_optional(&mut *conn)
-        .await?
+    let Some(local) =
+        sqlx::query("SELECT serial_number, invoice_key, status FROM product_serials WHERE key = ?")
+            .bind(key)
+            .fetch_optional(&mut *conn)
+            .await?
     else {
         return Ok(None);
     };
@@ -798,7 +841,10 @@ async fn reconcile_subcategories(
             };
             listed.insert(key.to_string());
             let mut fields = sub.clone();
-            fields.insert("categoryKey".to_string(), Value::String(category_key.to_string()));
+            fields.insert(
+                "categoryKey".to_string(),
+                Value::String(category_key.to_string()),
+            );
             let version = sub.get("version").and_then(Value::as_i64).unwrap_or(1);
             let write = RowWrite {
                 table: "subcategories",
@@ -830,14 +876,24 @@ async fn reconcile_subcategories(
 
 /// Empties every synced table (first page of a bootstrap).
 async fn wipe_synced_tables(conn: &mut SqliteConnection) -> AppResult<()> {
-    for spec in SYNC_RESOURCES.iter().filter(|s| s.phase == Phase::P3a).rev() {
+    for spec in SYNC_RESOURCES
+        .iter()
+        .filter(|s| s.phase == Phase::P3a)
+        .rev()
+    {
         sqlx::query(&format!("DELETE FROM {}", spec.table))
             .execute(&mut *conn)
             .await?;
     }
-    sqlx::query("DELETE FROM subcategories").execute(&mut *conn).await?;
-    sqlx::query("DELETE FROM sync_outbox").execute(&mut *conn).await?;
-    sqlx::query("DELETE FROM sync_row_meta").execute(&mut *conn).await?;
+    sqlx::query("DELETE FROM subcategories")
+        .execute(&mut *conn)
+        .await?;
+    sqlx::query("DELETE FROM sync_outbox")
+        .execute(&mut *conn)
+        .await?;
+    sqlx::query("DELETE FROM sync_row_meta")
+        .execute(&mut *conn)
+        .await?;
     Ok(())
 }
 
@@ -851,9 +907,10 @@ pub async fn apply_batch(db: &Db, req: ApplyRequest) -> AppResult<ApplyResponse>
             .await?;
 
         if req.mode == ApplyMode::Bootstrap {
-            let active: i64 = sqlx::query_scalar("SELECT bootstrap_active FROM sync_state WHERE id = 1")
-                .fetch_one(&mut *tx)
-                .await?;
+            let active: i64 =
+                sqlx::query_scalar("SELECT bootstrap_active FROM sync_state WHERE id = 1")
+                    .fetch_one(&mut *tx)
+                    .await?;
             if active == 0 {
                 wipe_synced_tables(&mut tx).await?;
                 sqlx::query("UPDATE sync_state SET bootstrap_active = 1 WHERE id = 1")
@@ -879,10 +936,12 @@ pub async fn apply_batch(db: &Db, req: ApplyRequest) -> AppResult<ApplyResponse>
         derived_sqlite::store_conflicts(&mut tx, &conflicts).await?;
 
         if let Some(cursor) = req.advance_cursor_to {
-            sqlx::query("UPDATE sync_state SET cloud_cursor = ?, bootstrap_active = 0 WHERE id = 1")
-                .bind(cursor)
-                .execute(&mut *tx)
-                .await?;
+            sqlx::query(
+                "UPDATE sync_state SET cloud_cursor = ?, bootstrap_active = 0 WHERE id = 1",
+            )
+            .bind(cursor)
+            .execute(&mut *tx)
+            .await?;
         }
         // Cleared inside the same transaction: a rollback reverts it too.
         sqlx::query("UPDATE sync_state SET applying = 0 WHERE id = 1")
@@ -917,7 +976,8 @@ pub async fn apply_records(
         .await?;
     let mut scope = DerivedScope::default();
     let mut conflicts = Vec::new();
-    let counts = apply_records_in_tx(db, &mut tx, changes, &origin, &mut scope, &mut conflicts).await?;
+    let counts =
+        apply_records_in_tx(db, &mut tx, changes, &origin, &mut scope, &mut conflicts).await?;
     conflicts.extend(derived_sqlite::recompute(&mut tx, &scope).await?);
     derived_sqlite::store_conflicts(&mut tx, &conflicts).await?;
     sqlx::query("UPDATE sync_state SET applying = 0 WHERE id = 1")

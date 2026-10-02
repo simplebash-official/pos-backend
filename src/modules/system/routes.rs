@@ -67,25 +67,24 @@ async fn get_setup_status(
 ) -> AppResult<Json<ApiResponse<SetupStatusResponse>>> {
     if state.config.tenant_mode == TenantMode::Multi {
         // 1. Check if an authenticated user with a tenant is calling
-        if let Ok(verified) = verify_bearer(&headers, &state.config).await {
-            if let Some(tid) = verified.tenant_id() {
-                if let Some(status) = service::get_tenant_setup_status(&state.db, &tid).await? {
-                    return Ok(Json(ApiResponse::success(
-                        status,
-                        "Tenant setup status retrieved successfully",
-                    )));
-                }
-            }
+        if let Ok(verified) = verify_bearer(&headers, &state.config).await
+            && let Some(tid) = verified.tenant_id()
+            && let Some(status) = service::get_tenant_setup_status(&state.db, &tid).await?
+        {
+            return Ok(Json(ApiResponse::success(
+                status,
+                "Tenant setup status retrieved successfully",
+            )));
         }
 
         // 2. Check if shop query parameter is supplied
-        if let Some(shop_code) = query.shop {
-            if let Some(status) = service::get_tenant_setup_status(&state.db, &shop_code).await? {
-                return Ok(Json(ApiResponse::success(
-                    status,
-                    "Tenant setup status retrieved successfully",
-                )));
-            }
+        if let Some(shop_code) = query.shop
+            && let Some(status) = service::get_tenant_setup_status(&state.db, &shop_code).await?
+        {
+            return Ok(Json(ApiResponse::success(
+                status,
+                "Tenant setup status retrieved successfully",
+            )));
         }
 
         // 3. Fallback for unauthenticated multi-tenant check before shop code is known
@@ -137,9 +136,9 @@ async fn perform_setup(
                     "Only administrators can complete store setup",
                 ));
             }
-            let tid = verified.tenant_id().ok_or_else(|| {
-                AppError::unauthorized("Authenticated token has no tenant scope")
-            })?;
+            let tid = verified
+                .tenant_id()
+                .ok_or_else(|| AppError::unauthorized("Authenticated token has no tenant scope"))?;
 
             let user = match mongodb::bson::oid::ObjectId::parse_str(&verified.user_id) {
                 Ok(oid) => users_service::get_user(&state.db, oid).await.ok(),
@@ -157,13 +156,8 @@ async fn perform_setup(
                 },
             };
 
-            let result = service::perform_tenant_setup(
-                &state.db,
-                &tid,
-                body.load_sample_data,
-                user,
-            )
-            .await?;
+            let result =
+                service::perform_tenant_setup(&state.db, &tid, body.load_sample_data, user).await?;
 
             return Ok(Json(ApiResponse::success(
                 result,

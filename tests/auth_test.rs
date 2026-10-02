@@ -7,12 +7,12 @@ use axum::{
         header::{AUTHORIZATION, CONTENT_TYPE},
     },
 };
+use jsonwebtoken::{DecodingKey, Validation, decode};
+use serde_json::{Value, json};
 use simplebash_pos_backend::{
     core::{constants::roles, middleware::auth::Claims},
     domain::users::Role,
 };
-use jsonwebtoken::{DecodingKey, Validation, decode};
-use serde_json::{Value, json};
 use tower::ServiceExt;
 use uuid::Uuid;
 

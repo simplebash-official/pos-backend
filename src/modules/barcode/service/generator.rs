@@ -38,7 +38,11 @@ pub(crate) async fn generate(db: &Db, namespace: &str) -> AppResult<String> {
         // namespace today, `namespaces::PRODUCT`), so that's the exact name
         // to look a stored block up under too — NOT a `"barcode:{namespace}"`
         // composite, which would never match what was actually stored.
-        debug_assert_eq!(namespace, namespaces::PRODUCT, "add per-namespace block naming if a second barcode namespace is ever introduced");
+        debug_assert_eq!(
+            namespace,
+            namespaces::PRODUCT,
+            "add per-namespace block naming if a second barcode namespace is ever introduced"
+        );
         if let Some(seq) = crate::modules::sync::blocks::next_raw_number(pool, "barcode").await? {
             return ean13::encode(namespace, seq);
         }
@@ -59,6 +63,10 @@ pub(crate) async fn generate(db: &Db, namespace: &str) -> AppResult<String> {
 
 /// Reserves a contiguous block of `block_size` barcode sequence numbers under
 /// `namespace` for a linked device to draw individual barcodes from offline.
-pub(crate) async fn reserve_block(db: &Db, namespace: &str, block_size: i64) -> AppResult<(i64, i64)> {
+pub(crate) async fn reserve_block(
+    db: &Db,
+    namespace: &str,
+    block_size: i64,
+) -> AppResult<(i64, i64)> {
     repository::reserve_block(db, namespace, block_size).await
 }

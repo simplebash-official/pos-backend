@@ -180,7 +180,8 @@ impl SimReplica {
                             for column in sp.derived {
                                 let field = snake_to_camel(column);
                                 map.remove(&field);
-                                if let Some(old) = old_payload.as_ref().and_then(|o| o.get(&field)) {
+                                if let Some(old) = old_payload.as_ref().and_then(|o| o.get(&field))
+                                {
                                     map.insert(field, old.clone());
                                 }
                             }
@@ -203,7 +204,8 @@ impl SimReplica {
                 }
                 let mut changed = merged.changed;
                 row.payload = merged.merged;
-                if (ms, rec.device_id.as_str()) > (row.meta.updated_at_ms, row.meta.device_id.as_str())
+                if (ms, rec.device_id.as_str())
+                    > (row.meta.updated_at_ms, row.meta.device_id.as_str())
                 {
                     row.meta.updated_at_ms = ms;
                     row.meta.device_id = rec.device_id.clone();
@@ -224,11 +226,18 @@ impl SimReplica {
 
     /// Applies a batch in resource order (parents first), then recomputes the
     /// derived fields, exactly like the real applier does per batch.
-    pub fn apply_batch(&mut self, changes: &[ChangeRecord], server_now_ms: Option<i64>) -> Vec<ApplyResult> {
+    pub fn apply_batch(
+        &mut self,
+        changes: &[ChangeRecord],
+        server_now_ms: Option<i64>,
+    ) -> Vec<ApplyResult> {
         let mut order: Vec<usize> = (0..changes.len()).collect();
         order.sort_by_key(|&i| {
             let c = &changes[i];
-            (spec(&c.resource).map(|s| s.order).unwrap_or(u8::MAX), c.key.clone())
+            (
+                spec(&c.resource).map(|s| s.order).unwrap_or(u8::MAX),
+                c.key.clone(),
+            )
         });
         let mut results = vec![ApplyResult::Duplicate; changes.len()];
         for i in order {
@@ -308,7 +317,8 @@ impl SimReplica {
             let p = &row.payload;
             match res.as_str() {
                 "stockMovements" => {
-                    *movement.entry(get_str(p, "productId")).or_default() += get_i64(p, "quantityDelta");
+                    *movement.entry(get_str(p, "productId")).or_default() +=
+                        get_i64(p, "quantityDelta");
                 }
                 "payments" => {
                     *paid.entry(get_str(p, "invoiceKey")).or_default() += get_i64(p, "amountCents");
@@ -317,8 +327,9 @@ impl SimReplica {
                     let entry = refunded.entry(get_str(p, "invoiceKey")).or_default();
                     entry.0 += get_i64(p, "refundCashCents") + get_i64(p, "balanceReductionCents");
                     entry.1 += 1;
-                    *customer_refund.entry(get_str(p, "customerKey")).or_default() +=
-                        get_i64(p, "refundCashCents");
+                    *customer_refund
+                        .entry(get_str(p, "customerKey"))
+                        .or_default() += get_i64(p, "refundCashCents");
                 }
                 _ => {}
             }
@@ -334,21 +345,26 @@ impl SimReplica {
             }
             let (refund_sum, refund_count) = refunded.get(key).copied().unwrap_or((0, 0));
             let total = get_i64(&row.payload, "totalCents");
-            let is_credit = row.payload.get("isCredit").and_then(Value::as_bool).unwrap_or(false);
+            let is_credit = row
+                .payload
+                .get("isCredit")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
             let status = get_str(&row.payload, "status");
             let paid_sum = paid.get(key).copied().unwrap_or(0);
-            let new_status = if is_credit && matches!(status.as_str(), "pending" | "partially_paid" | "paid") {
-                if paid_sum >= total {
-                    "paid"
-                } else if paid_sum > 0 {
-                    "partially_paid"
+            let new_status =
+                if is_credit && matches!(status.as_str(), "pending" | "partially_paid" | "paid") {
+                    if paid_sum >= total {
+                        "paid"
+                    } else if paid_sum > 0 {
+                        "partially_paid"
+                    } else {
+                        "pending"
+                    }
+                    .to_string()
                 } else {
-                    "pending"
-                }
-                .to_string()
-            } else {
-                status
-            };
+                    status
+                };
             if let Value::Object(map) = &mut row.payload {
                 map.insert("refundedCents".into(), json!(refund_sum));
                 map.insert("creditNoteCount".into(), json!(refund_count));
@@ -377,7 +393,12 @@ impl SimReplica {
             }
             match res.as_str() {
                 "products" => {
-                    let id = row.payload.get("id").and_then(Value::as_str).unwrap_or(key).to_string();
+                    let id = row
+                        .payload
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .unwrap_or(key)
+                        .to_string();
                     let stock = movement.get(&id).copied().unwrap_or(0);
                     if let Value::Object(map) = &mut row.payload {
                         map.insert("stockQuantity".into(), json!(stock));
@@ -447,20 +468,68 @@ impl SimReplica {
 /// acting device at run time.
 #[derive(Debug, Clone)]
 pub enum Op {
-    NewProduct { dev: usize, price: i64 },
-    NewCustomer { dev: usize },
-    PriceEdit { dev: usize, sel: u64, price: i64 },
-    DeleteProduct { dev: usize, sel: u64 },
-    StockAdjust { dev: usize, sel: u64, delta: i64 },
-    Sale { dev: usize, sel_product: u64, sel_customer: u64, qty: i64, credit: bool, deposit_percent: i64 },
-    Payment { dev: usize, sel_invoice: u64, amount: i64 },
-    Return { dev: usize, sel_invoice: u64, qty: i64 },
-    VoidInvoice { dev: usize, sel_invoice: u64 },
-    NoteInvoice { dev: usize, sel_invoice: u64, note: u64 },
-    Offline { dev: usize },
-    Online { dev: usize },
-    Skew { dev: usize, ms: i64, known: bool },
-    Sync { dev: usize },
+    NewProduct {
+        dev: usize,
+        price: i64,
+    },
+    NewCustomer {
+        dev: usize,
+    },
+    PriceEdit {
+        dev: usize,
+        sel: u64,
+        price: i64,
+    },
+    DeleteProduct {
+        dev: usize,
+        sel: u64,
+    },
+    StockAdjust {
+        dev: usize,
+        sel: u64,
+        delta: i64,
+    },
+    Sale {
+        dev: usize,
+        sel_product: u64,
+        sel_customer: u64,
+        qty: i64,
+        credit: bool,
+        deposit_percent: i64,
+    },
+    Payment {
+        dev: usize,
+        sel_invoice: u64,
+        amount: i64,
+    },
+    Return {
+        dev: usize,
+        sel_invoice: u64,
+        qty: i64,
+    },
+    VoidInvoice {
+        dev: usize,
+        sel_invoice: u64,
+    },
+    NoteInvoice {
+        dev: usize,
+        sel_invoice: u64,
+        note: u64,
+    },
+    Offline {
+        dev: usize,
+    },
+    Online {
+        dev: usize,
+    },
+    Skew {
+        dev: usize,
+        ms: i64,
+        known: bool,
+    },
+    Sync {
+        dev: usize,
+    },
 }
 
 /// Seeded scenario generator.
@@ -472,18 +541,32 @@ impl Scenario {
         let mut out = Vec::with_capacity(ops + devices * 2);
         // Every device starts with a product and a customer so later ops have targets.
         for dev in 0..devices {
-            out.push(Op::NewProduct { dev, price: 100 + rng.below(900) as i64 });
+            out.push(Op::NewProduct {
+                dev,
+                price: 100 + rng.below(900) as i64,
+            });
             out.push(Op::NewCustomer { dev });
         }
         for _ in 0..ops {
             let dev = rng.below(devices as u64) as usize;
             let sel = rng.next_u64();
             let op = match rng.below(100) {
-                0..=7 => Op::NewProduct { dev, price: 50 + rng.below(950) as i64 },
+                0..=7 => Op::NewProduct {
+                    dev,
+                    price: 50 + rng.below(950) as i64,
+                },
                 8..=11 => Op::NewCustomer { dev },
-                12..=21 => Op::PriceEdit { dev, sel, price: 50 + rng.below(950) as i64 },
+                12..=21 => Op::PriceEdit {
+                    dev,
+                    sel,
+                    price: 50 + rng.below(950) as i64,
+                },
                 22..=24 => Op::DeleteProduct { dev, sel },
-                25..=32 => Op::StockAdjust { dev, sel, delta: rng.below(41) as i64 - 10 },
+                25..=32 => Op::StockAdjust {
+                    dev,
+                    sel,
+                    delta: rng.below(41) as i64 - 10,
+                },
                 33..=52 => Op::Sale {
                     dev,
                     sel_product: sel,
@@ -492,10 +575,25 @@ impl Scenario {
                     credit: rng.chance(35),
                     deposit_percent: rng.below(101) as i64,
                 },
-                53..=59 => Op::Payment { dev, sel_invoice: sel, amount: 10 + rng.below(400) as i64 },
-                60..=65 => Op::Return { dev, sel_invoice: sel, qty: 1 + rng.below(2) as i64 },
-                66..=68 => Op::VoidInvoice { dev, sel_invoice: sel },
-                69..=72 => Op::NoteInvoice { dev, sel_invoice: sel, note: rng.below(1000) },
+                53..=59 => Op::Payment {
+                    dev,
+                    sel_invoice: sel,
+                    amount: 10 + rng.below(400) as i64,
+                },
+                60..=65 => Op::Return {
+                    dev,
+                    sel_invoice: sel,
+                    qty: 1 + rng.below(2) as i64,
+                },
+                66..=68 => Op::VoidInvoice {
+                    dev,
+                    sel_invoice: sel,
+                },
+                69..=72 => Op::NoteInvoice {
+                    dev,
+                    sel_invoice: sel,
+                    note: rng.below(1000),
+                },
                 73..=79 => Op::Offline { dev },
                 80..=86 => Op::Online { dev },
                 87..=89 => Op::Skew {
@@ -567,7 +665,13 @@ impl Harness {
                     "id": key, "name": format!("Product {key}"), "priceCents": price,
                     "stockQuantity": 0
                 });
-                self.devices[dev].replica.local_write("products", &key, ChangeOp::Upsert, Some(payload), now);
+                self.devices[dev].replica.local_write(
+                    "products",
+                    &key,
+                    ChangeOp::Upsert,
+                    Some(payload),
+                    now,
+                );
             }
             Op::NewCustomer { dev } => {
                 let key = self.fresh_key(dev, "cus");
@@ -575,7 +679,13 @@ impl Harness {
                     "id": key, "name": format!("Customer {key}"),
                     "totalPurchasesCents": 0, "outstandingBalanceCents": 0
                 });
-                self.devices[dev].replica.local_write("customers", &key, ChangeOp::Upsert, Some(payload), now);
+                self.devices[dev].replica.local_write(
+                    "customers",
+                    &key,
+                    ChangeOp::Upsert,
+                    Some(payload),
+                    now,
+                );
             }
             Op::PriceEdit { dev, sel, price } => {
                 let products = self.devices[dev].replica.visible("products");
@@ -584,7 +694,13 @@ impl Harness {
                 }
                 let (key, mut payload) = products[(sel % products.len() as u64) as usize].clone();
                 payload["priceCents"] = json!(price);
-                self.devices[dev].replica.local_write("products", &key, ChangeOp::Upsert, Some(payload), now);
+                self.devices[dev].replica.local_write(
+                    "products",
+                    &key,
+                    ChangeOp::Upsert,
+                    Some(payload),
+                    now,
+                );
             }
             Op::DeleteProduct { dev, sel } => {
                 let products = self.devices[dev].replica.visible("products");
@@ -592,7 +708,13 @@ impl Harness {
                     return;
                 }
                 let (key, _) = products[(sel % products.len() as u64) as usize].clone();
-                self.devices[dev].replica.local_write("products", &key, ChangeOp::Delete, None, now);
+                self.devices[dev].replica.local_write(
+                    "products",
+                    &key,
+                    ChangeOp::Delete,
+                    None,
+                    now,
+                );
             }
             Op::StockAdjust { dev, sel, delta } => {
                 let products = self.devices[dev].replica.visible("products");
@@ -602,19 +724,37 @@ impl Harness {
                 let (pkey, _) = products[(sel % products.len() as u64) as usize].clone();
                 let key = self.fresh_key(dev, "sm");
                 let payload = json!({ "id": key, "productId": pkey, "quantityDelta": delta });
-                self.devices[dev].replica.local_write("stockMovements", &key, ChangeOp::Upsert, Some(payload), now);
+                self.devices[dev].replica.local_write(
+                    "stockMovements",
+                    &key,
+                    ChangeOp::Upsert,
+                    Some(payload),
+                    now,
+                );
             }
-            Op::Sale { dev, sel_product, sel_customer, qty, credit, deposit_percent } => {
+            Op::Sale {
+                dev,
+                sel_product,
+                sel_customer,
+                qty,
+                credit,
+                deposit_percent,
+            } => {
                 let products = self.devices[dev].replica.visible("products");
                 let customers = self.devices[dev].replica.visible("customers");
                 if products.is_empty() || customers.is_empty() {
                     return;
                 }
-                let (pkey, product) = products[(sel_product % products.len() as u64) as usize].clone();
+                let (pkey, product) =
+                    products[(sel_product % products.len() as u64) as usize].clone();
                 let (ckey, _) = customers[(sel_customer % customers.len() as u64) as usize].clone();
                 let unit = get_i64(&product, "priceCents");
                 let total = unit * qty;
-                let deposit = if credit { total * deposit_percent / 100 } else { total };
+                let deposit = if credit {
+                    total * deposit_percent / 100
+                } else {
+                    total
+                };
                 let status = if deposit >= total {
                     "paid"
                 } else if deposit > 0 {
@@ -634,13 +774,29 @@ impl Harness {
                 if deposit > 0 {
                     let pay = self.fresh_key(dev, "pay");
                     let payload = json!({ "id": pay, "invoiceKey": ikey, "amountCents": deposit });
-                    self.devices[dev].replica.local_write("payments", &pay, ChangeOp::Upsert, Some(payload), now);
+                    self.devices[dev].replica.local_write(
+                        "payments",
+                        &pay,
+                        ChangeOp::Upsert,
+                        Some(payload),
+                        now,
+                    );
                 }
                 let sm = self.fresh_key(dev, "sm");
                 let payload = json!({ "id": sm, "productId": pkey, "quantityDelta": -qty });
-                self.devices[dev].replica.local_write("stockMovements", &sm, ChangeOp::Upsert, Some(payload), now);
+                self.devices[dev].replica.local_write(
+                    "stockMovements",
+                    &sm,
+                    ChangeOp::Upsert,
+                    Some(payload),
+                    now,
+                );
             }
-            Op::Payment { dev, sel_invoice, amount } => {
+            Op::Payment {
+                dev,
+                sel_invoice,
+                amount,
+            } => {
                 let invoices: Vec<_> = self.devices[dev]
                     .replica
                     .visible("invoices")
@@ -656,9 +812,19 @@ impl Harness {
                 let (ikey, _) = invoices[(sel_invoice % invoices.len() as u64) as usize].clone();
                 let pay = self.fresh_key(dev, "pay");
                 let payload = json!({ "id": pay, "invoiceKey": ikey, "amountCents": amount });
-                self.devices[dev].replica.local_write("payments", &pay, ChangeOp::Upsert, Some(payload), now);
+                self.devices[dev].replica.local_write(
+                    "payments",
+                    &pay,
+                    ChangeOp::Upsert,
+                    Some(payload),
+                    now,
+                );
             }
-            Op::Return { dev, sel_invoice, qty } => {
+            Op::Return {
+                dev,
+                sel_invoice,
+                qty,
+            } => {
                 let invoices: Vec<_> = self.devices[dev]
                     .replica
                     .visible("invoices")
@@ -668,7 +834,8 @@ impl Harness {
                 if invoices.is_empty() {
                     return;
                 }
-                let (ikey, invoice) = invoices[(sel_invoice % invoices.len() as u64) as usize].clone();
+                let (ikey, invoice) =
+                    invoices[(sel_invoice % invoices.len() as u64) as usize].clone();
                 let item = invoice["items"][0].clone();
                 let unit = get_i64(&item, "unitPriceCents");
                 let pkey = get_str(&item, "productKey");
@@ -679,10 +846,22 @@ impl Harness {
                     "status": "resolved",
                     "returnedItems": [ { "productKey": pkey, "quantity": qty } ]
                 });
-                self.devices[dev].replica.local_write("creditNotes", &cn, ChangeOp::Upsert, Some(payload), now);
+                self.devices[dev].replica.local_write(
+                    "creditNotes",
+                    &cn,
+                    ChangeOp::Upsert,
+                    Some(payload),
+                    now,
+                );
                 let sm = self.fresh_key(dev, "sm");
                 let payload = json!({ "id": sm, "productId": pkey, "quantityDelta": qty });
-                self.devices[dev].replica.local_write("stockMovements", &sm, ChangeOp::Upsert, Some(payload), now);
+                self.devices[dev].replica.local_write(
+                    "stockMovements",
+                    &sm,
+                    ChangeOp::Upsert,
+                    Some(payload),
+                    now,
+                );
             }
             Op::VoidInvoice { dev, sel_invoice } => {
                 let invoices: Vec<_> = self.devices[dev]
@@ -694,21 +873,39 @@ impl Harness {
                 if invoices.is_empty() {
                     return;
                 }
-                let (ikey, mut payload) = invoices[(sel_invoice % invoices.len() as u64) as usize].clone();
+                let (ikey, mut payload) =
+                    invoices[(sel_invoice % invoices.len() as u64) as usize].clone();
                 payload["status"] = json!("voided");
                 payload["voidedAt"] = json!(iso(now));
                 payload["voidedBy"] = json!(format!("user_{dev}"));
                 payload["voidedReason"] = json!("sim");
-                self.devices[dev].replica.local_write("invoices", &ikey, ChangeOp::Upsert, Some(payload), now);
+                self.devices[dev].replica.local_write(
+                    "invoices",
+                    &ikey,
+                    ChangeOp::Upsert,
+                    Some(payload),
+                    now,
+                );
             }
-            Op::NoteInvoice { dev, sel_invoice, note } => {
+            Op::NoteInvoice {
+                dev,
+                sel_invoice,
+                note,
+            } => {
                 let invoices = self.devices[dev].replica.visible("invoices");
                 if invoices.is_empty() {
                     return;
                 }
-                let (ikey, mut payload) = invoices[(sel_invoice % invoices.len() as u64) as usize].clone();
+                let (ikey, mut payload) =
+                    invoices[(sel_invoice % invoices.len() as u64) as usize].clone();
                 payload["notes"] = json!(format!("note {note}"));
-                self.devices[dev].replica.local_write("invoices", &ikey, ChangeOp::Upsert, Some(payload), now);
+                self.devices[dev].replica.local_write(
+                    "invoices",
+                    &ikey,
+                    ChangeOp::Upsert,
+                    Some(payload),
+                    now,
+                );
             }
             Op::Offline { dev } => self.devices[dev].online = false,
             Op::Online { dev } => self.devices[dev].online = true,
@@ -731,7 +928,9 @@ impl Harness {
             let mut order: Vec<usize> = (0..pending.len()).collect();
             order.sort_by_key(|&i| {
                 (
-                    spec(&pending[i].resource).map(|s| s.order).unwrap_or(u8::MAX),
+                    spec(&pending[i].resource)
+                        .map(|s| s.order)
+                        .unwrap_or(u8::MAX),
                     pending[i].key.clone(),
                 )
             });
@@ -792,10 +991,19 @@ mod tests {
         let mut diffs = Vec::new();
         for key in left.keys().chain(right.keys()).collect::<BTreeSet<_>>() {
             if left.get(key) != right.get(key) {
-                diffs.push(format!("{key}\n   left : {:?}\n   right: {:?}", left.get(key), right.get(key)));
+                diffs.push(format!(
+                    "{key}\n   left : {:?}\n   right: {:?}",
+                    left.get(key),
+                    right.get(key)
+                ));
             }
         }
-        assert!(diffs.is_empty(), "{label}: {} rows differ:\n{}", diffs.len(), diffs.iter().take(3).cloned().collect::<Vec<_>>().join("\n"));
+        assert!(
+            diffs.is_empty(),
+            "{label}: {} rows differ:\n{}",
+            diffs.len(),
+            diffs.iter().take(3).cloned().collect::<Vec<_>>().join("\n")
+        );
     }
 
     fn naive_stock(replica: &SimReplica, product_key: &str) -> i64 {
@@ -841,8 +1049,16 @@ mod tests {
                     purchases -= get_i64(cn, "refundCashCents");
                 }
             }
-            assert_eq!(get_i64(&c, "totalPurchasesCents"), purchases, "{label}: purchases of {key}");
-            assert_eq!(get_i64(&c, "outstandingBalanceCents"), outstanding, "{label}: balance of {key}");
+            assert_eq!(
+                get_i64(&c, "totalPurchasesCents"),
+                purchases,
+                "{label}: purchases of {key}"
+            );
+            assert_eq!(
+                get_i64(&c, "outstandingBalanceCents"),
+                outstanding,
+                "{label}: balance of {key}"
+            );
         }
         for (ikey, inv) in &invoices {
             let (mut sum, mut count) = (0, 0);
@@ -852,8 +1068,16 @@ mod tests {
                     count += 1;
                 }
             }
-            assert_eq!(get_i64(inv, "refundedCents"), sum, "{label}: refunded of {ikey}");
-            assert_eq!(get_i64(inv, "creditNoteCount"), count, "{label}: count of {ikey}");
+            assert_eq!(
+                get_i64(inv, "refundedCents"),
+                sum,
+                "{label}: refunded of {ikey}"
+            );
+            assert_eq!(
+                get_i64(inv, "creditNoteCount"),
+                count,
+                "{label}: count of {ikey}"
+            );
         }
     }
 
@@ -884,9 +1108,24 @@ mod tests {
         h.run(&[
             Op::NewProduct { dev: 0, price: 200 },
             Op::NewCustomer { dev: 0 },
-            Op::StockAdjust { dev: 0, sel: 0, delta: 10 },
-            Op::Sale { dev: 0, sel_product: 0, sel_customer: 0, qty: 3, credit: true, deposit_percent: 50 },
-            Op::Return { dev: 0, sel_invoice: 0, qty: 1 },
+            Op::StockAdjust {
+                dev: 0,
+                sel: 0,
+                delta: 10,
+            },
+            Op::Sale {
+                dev: 0,
+                sel_product: 0,
+                sel_customer: 0,
+                qty: 3,
+                credit: true,
+                deposit_percent: 50,
+            },
+            Op::Return {
+                dev: 0,
+                sel_invoice: 0,
+                qty: 1,
+            },
         ]);
         let r = &h.devices[0].replica;
         assert_invariants(r, "single device");
@@ -906,8 +1145,16 @@ mod tests {
         h.settle();
         h.devices[0].online = false;
         h.devices[1].online = false;
-        h.step(&Op::PriceEdit { dev: 0, sel: 0, price: 111 });
-        h.step(&Op::PriceEdit { dev: 1, sel: 0, price: 222 });
+        h.step(&Op::PriceEdit {
+            dev: 0,
+            sel: 0,
+            price: 111,
+        });
+        h.step(&Op::PriceEdit {
+            dev: 1,
+            sel: 0,
+            price: 222,
+        });
         h.settle();
         let a = h.devices[0].replica.canonical();
         assert_eq!(a, h.devices[1].replica.canonical());
@@ -915,8 +1162,15 @@ mod tests {
         let price = get_i64(&h.hub.visible("products")[0].1, "priceCents");
         assert_eq!(price, 222, "device 1 edited last");
         assert!(
-            h.hub.conflicts.iter().any(|c| c.kind == ConflictKind::LwwLoser)
-                || h.devices.iter().any(|d| d.replica.conflicts.iter().any(|c| c.kind == ConflictKind::LwwLoser))
+            h.hub
+                .conflicts
+                .iter()
+                .any(|c| c.kind == ConflictKind::LwwLoser)
+                || h.devices.iter().any(|d| d
+                    .replica
+                    .conflicts
+                    .iter()
+                    .any(|c| c.kind == ConflictKind::LwwLoser))
         );
     }
 
@@ -925,24 +1179,42 @@ mod tests {
         let mut h = Harness::new(2, 3);
         h.step(&Op::NewProduct { dev: 0, price: 100 });
         h.step(&Op::NewCustomer { dev: 0 });
-        h.step(&Op::StockAdjust { dev: 0, sel: 0, delta: 1 });
+        h.step(&Op::StockAdjust {
+            dev: 0,
+            sel: 0,
+            delta: 1,
+        });
         h.settle();
         h.devices[0].online = false;
         h.devices[1].online = false;
         for dev in 0..2 {
-            h.step(&Op::Sale { dev, sel_product: 0, sel_customer: 0, qty: 1, credit: false, deposit_percent: 100 });
+            h.step(&Op::Sale {
+                dev,
+                sel_product: 0,
+                sel_customer: 0,
+                qty: 1,
+                credit: false,
+                deposit_percent: 100,
+            });
         }
         h.settle();
         for d in &h.devices {
             assert_invariants(&d.replica, &d.replica.device_id);
-            assert_eq!(get_i64(&d.replica.visible("products")[0].1, "stockQuantity"), -1);
+            assert_eq!(
+                get_i64(&d.replica.visible("products")[0].1, "stockQuantity"),
+                -1
+            );
         }
-        assert_eq!(h.devices[0].replica.canonical(), h.devices[1].replica.canonical());
-        assert!(h.devices.iter().any(|d| d
-            .replica
-            .conflicts
-            .iter()
-            .any(|c| c.kind == ConflictKind::NegativeStock)));
+        assert_eq!(
+            h.devices[0].replica.canonical(),
+            h.devices[1].replica.canonical()
+        );
+        assert!(h.devices.iter().any(|d| {
+            d.replica
+                .conflicts
+                .iter()
+                .any(|c| c.kind == ConflictKind::NegativeStock)
+        }));
     }
 
     #[test]
@@ -950,24 +1222,43 @@ mod tests {
         let mut h = Harness::new(2, 4);
         h.step(&Op::NewProduct { dev: 0, price: 100 });
         h.step(&Op::NewCustomer { dev: 0 });
-        h.step(&Op::StockAdjust { dev: 0, sel: 0, delta: 5 });
-        h.step(&Op::Sale { dev: 0, sel_product: 0, sel_customer: 0, qty: 1, credit: false, deposit_percent: 100 });
+        h.step(&Op::StockAdjust {
+            dev: 0,
+            sel: 0,
+            delta: 5,
+        });
+        h.step(&Op::Sale {
+            dev: 0,
+            sel_product: 0,
+            sel_customer: 0,
+            qty: 1,
+            credit: false,
+            deposit_percent: 100,
+        });
         h.settle();
         h.devices[0].online = false;
         h.devices[1].online = false;
         for dev in 0..2 {
-            h.step(&Op::Return { dev, sel_invoice: 0, qty: 1 });
+            h.step(&Op::Return {
+                dev,
+                sel_invoice: 0,
+                qty: 1,
+            });
         }
         h.settle();
-        assert_eq!(h.devices[0].replica.canonical(), h.devices[1].replica.canonical());
+        assert_eq!(
+            h.devices[0].replica.canonical(),
+            h.devices[1].replica.canonical()
+        );
         let inv = &h.devices[0].replica.visible("invoices")[0].1;
         assert_eq!(get_i64(inv, "refundedCents"), 200);
         assert_eq!(get_i64(inv, "creditNoteCount"), 2);
-        assert!(h.devices.iter().any(|d| d
-            .replica
-            .conflicts
-            .iter()
-            .any(|c| c.kind == ConflictKind::OverRefund)));
+        assert!(h.devices.iter().any(|d| {
+            d.replica
+                .conflicts
+                .iter()
+                .any(|c| c.kind == ConflictKind::OverRefund)
+        }));
     }
 
     #[test]
@@ -975,18 +1266,39 @@ mod tests {
         let mut h = Harness::new(2, 5);
         h.step(&Op::NewProduct { dev: 0, price: 100 });
         h.step(&Op::NewCustomer { dev: 0 });
-        h.step(&Op::StockAdjust { dev: 0, sel: 0, delta: 5 });
-        h.step(&Op::Sale { dev: 0, sel_product: 0, sel_customer: 0, qty: 1, credit: false, deposit_percent: 100 });
+        h.step(&Op::StockAdjust {
+            dev: 0,
+            sel: 0,
+            delta: 5,
+        });
+        h.step(&Op::Sale {
+            dev: 0,
+            sel_product: 0,
+            sel_customer: 0,
+            qty: 1,
+            credit: false,
+            deposit_percent: 100,
+        });
         h.settle();
         h.devices[0].online = false;
         h.devices[1].online = false;
-        h.step(&Op::VoidInvoice { dev: 0, sel_invoice: 0 });
-        h.step(&Op::NoteInvoice { dev: 1, sel_invoice: 0, note: 42 });
+        h.step(&Op::VoidInvoice {
+            dev: 0,
+            sel_invoice: 0,
+        });
+        h.step(&Op::NoteInvoice {
+            dev: 1,
+            sel_invoice: 0,
+            note: 42,
+        });
         h.settle();
         let inv = h.hub.visible("invoices")[0].1.clone();
         assert_eq!(get_str(&inv, "status"), "voided");
         assert_eq!(get_str(&inv, "notes"), "note 42");
-        assert_eq!(h.devices[0].replica.canonical(), h.devices[1].replica.canonical());
+        assert_eq!(
+            h.devices[0].replica.canonical(),
+            h.devices[1].replica.canonical()
+        );
         assert_eq!(h.devices[0].replica.canonical(), h.hub.canonical());
     }
 
@@ -1002,7 +1314,10 @@ mod tests {
         for d in &h.devices {
             assert_eq!(d.replica.visible("products").len(), 1);
         }
-        assert_eq!(h.devices[0].replica.canonical(), h.devices[1].replica.canonical());
+        assert_eq!(
+            h.devices[0].replica.canonical(),
+            h.devices[1].replica.canonical()
+        );
     }
 
     #[test]
@@ -1016,7 +1331,11 @@ mod tests {
             assert_invariants(&h.hub, &format!("seed {seed} hub"));
             for d in &h.devices {
                 let label = format!("seed {seed} {}", d.replica.device_id);
-                assert_same(&d.replica.canonical(), &hub, &format!("{label} diverged from the cloud"));
+                assert_same(
+                    &d.replica.canonical(),
+                    &hub,
+                    &format!("{label} diverged from the cloud"),
+                );
                 assert_invariants(&d.replica, &label);
             }
         }
@@ -1038,7 +1357,11 @@ mod tests {
                     replica.apply(rec, None);
                 }
                 replica.derive();
-                assert_same(&replica.canonical(), &expected, &format!("seed {seed} round {round}"));
+                assert_same(
+                    &replica.canonical(),
+                    &expected,
+                    &format!("seed {seed} round {round}"),
+                );
                 assert_invariants(&replica, &format!("seed {seed} round {round}"));
             }
         }
@@ -1056,7 +1379,9 @@ mod tests {
             let second = replica.apply_batch(&records, None);
             assert_eq!(replica.canonical(), once, "seed {seed}");
             assert!(
-                second.iter().all(|r| matches!(r, ApplyResult::Duplicate | ApplyResult::KeepLocal)),
+                second
+                    .iter()
+                    .all(|r| matches!(r, ApplyResult::Duplicate | ApplyResult::KeepLocal)),
                 "seed {seed}: a repeat was applied again"
             );
         }

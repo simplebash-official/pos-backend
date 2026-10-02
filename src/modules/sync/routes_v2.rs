@@ -145,9 +145,20 @@ async fn get_snapshot(
     Query(query): Query<SnapshotQuery>,
 ) -> AppResult<Json<ApiResponse<SnapshotResponse>>> {
     require_cloud(&state)?;
-    user.require_device()?;
+    let device_id = user.require_device()?;
+    // Push, pull and register all refuse a revoked device; the snapshot (which
+    // carries every user row, password hashes included) must too.
+    if !super::cloud_store::ensure_device_active(&state.db, &device_id).await? {
+        return Err(AppError::forbidden_with_code(
+            "This device has been revoked",
+            "DEVICE_REVOKED",
+        ));
+    }
     let response = snapshot::snapshot(&state.db, query.page.as_deref(), query.limit).await?;
-    Ok(Json(ApiResponse::success(response, "Snapshot page retrieved")))
+    Ok(Json(ApiResponse::success(
+        response,
+        "Snapshot page retrieved",
+    )))
 }
 
 // ============================================================================

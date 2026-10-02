@@ -17,8 +17,7 @@ use crate::{
         SetupStatusResponse, SetupSystemRequest, SetupSystemResponse, SystemInstallation,
     },
     modules::{
-        system::repository,
-        tenants::repository as tenants_repository,
+        system::repository, tenants::repository as tenants_repository,
         users::service as users_service,
     },
     seeds,
@@ -93,7 +92,9 @@ pub(crate) async fn get_tenant_setup_status(
             is_first_run: !tenant.setup_completed,
             installation_id: Some(tenant.key),
             installed_at: Some(tenant.created_at.to_chrono().to_rfc3339()),
-            setup_completed_at: tenant.setup_completed_at.map(|d| d.to_chrono().to_rfc3339()),
+            setup_completed_at: tenant
+                .setup_completed_at
+                .map(|d| d.to_chrono().to_rfc3339()),
             sample_data_loaded: Some(tenant.sample_data_loaded),
             app_version,
             platform: "Cloud (Multi-Tenant)".to_string(),
@@ -201,6 +202,15 @@ pub(crate) async fn perform_setup(
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .unwrap_or("System Admin");
+
+        // An account already exists (created by AUTO_SEED or the `seed_admin`
+        // binary) but setup was never marked complete. Only the holder of that
+        // account may finish setup — check the credentials *before* any side
+        // effect (API key, sample data, completion flag), so an anonymous
+        // caller can't re-run setup against a live shop.
+        if users_count > 0 {
+            users_service::verify_credentials(db, admin_email, admin_password).await?;
+        }
 
         // 1. Bootstrap the Admin user account
         seeds::admin::seed_admin(

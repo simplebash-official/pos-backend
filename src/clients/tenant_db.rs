@@ -11,9 +11,7 @@ use std::borrow::Borrow;
 
 use mongodb::{
     Collection, Cursor, Database,
-    action::{
-        Distinct, Find, FindOne, FindOneAndDelete, FindOneAndUpdate, Update as UpdateAction,
-    },
+    action::{Distinct, Find, FindOne, FindOneAndDelete, FindOneAndUpdate, Update as UpdateAction},
     bson::{Bson, Document},
     error::Error as MongoError,
     options::UpdateModifications,
@@ -21,9 +19,7 @@ use mongodb::{
 };
 use serde::{Serialize, de::DeserializeOwned};
 
-use crate::core::tenancy::{
-    Tenant, current_tenant, scope_filter, scope_pipeline, stamp_document,
-};
+use crate::core::tenancy::{Tenant, current_tenant, scope_filter, scope_pipeline, stamp_document};
 
 #[derive(Clone)]
 pub struct TenantDatabase {

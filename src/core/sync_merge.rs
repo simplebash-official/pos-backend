@@ -121,7 +121,8 @@ pub fn decide(spec: &ResourceSpec, local: Option<&RowMeta>, incoming: &IncomingC
         return Decision::Apply;
     };
 
-    let same_write = incoming.updated_at_ms == local.updated_at_ms && rec.device_id == local.device_id;
+    let same_write =
+        incoming.updated_at_ms == local.updated_at_ms && rec.device_id == local.device_id;
 
     match spec.class {
         // (3)
@@ -161,8 +162,8 @@ pub fn decide_append_only(
     let Some(local) = local else {
         return Decision::Apply;
     };
-    let same_write =
-        incoming.updated_at_ms == local.updated_at_ms && incoming.record.device_id == local.device_id;
+    let same_write = incoming.updated_at_ms == local.updated_at_ms
+        && incoming.record.device_id == local.device_id;
     if !same_write && immutable_differs {
         Decision::Reject {
             reason: "IMMUTABLE_MISMATCH",
@@ -313,8 +314,10 @@ pub fn merge_lifecycle(resource: &str, local: &Value, incoming: &Value) -> Lifec
         return reject("IMMUTABLE_MISMATCH");
     }
 
-    let status_of = |m: &Map<String, Value>| m.get("status").and_then(Value::as_str).map(str::to_owned);
-    let (Some(incoming_status), local_status) = (status_of(incoming_map), status_of(local_map)) else {
+    let status_of =
+        |m: &Map<String, Value>| m.get("status").and_then(Value::as_str).map(str::to_owned);
+    let (Some(incoming_status), local_status) = (status_of(incoming_map), status_of(local_map))
+    else {
         return reject("INVALID_PAYLOAD");
     };
     let Some(incoming_rank) = lifecycle_rank(resource, &incoming_status) else {
@@ -352,7 +355,8 @@ pub fn merge_lifecycle(resource: &str, local: &Value, incoming: &Value) -> Lifec
                 .unwrap_or_default()
                 .to_owned()
         };
-        let notes = |m: &Map<String, Value>| m.get("notes").map(|v| v.to_string()).unwrap_or_default();
+        let notes =
+            |m: &Map<String, Value>| m.get("notes").map(|v| v.to_string()).unwrap_or_default();
         let incoming_newer =
             (stamp(incoming_map), notes(incoming_map)) > (stamp(local_map), notes(local_map));
         if incoming_newer {
@@ -389,7 +393,13 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use serde_json::json;
 
-    fn record(resource: &str, op: ChangeOp, device: &str, ms: i64, payload: Option<Value>) -> ChangeRecord {
+    fn record(
+        resource: &str,
+        op: ChangeOp,
+        device: &str,
+        ms: i64,
+        payload: Option<Value>,
+    ) -> ChangeRecord {
         ChangeRecord {
             resource: resource.to_string(),
             key: "k1".to_string(),
@@ -422,7 +432,13 @@ mod tests {
     fn new_row_is_applied_for_every_class() {
         for name in ["products", "stockMovements", "invoices", "categories"] {
             let s = spec(name).unwrap();
-            let r = record(name, ChangeOp::Upsert, "dev_a", 10, Some(json!({"key": "k1"})));
+            let r = record(
+                name,
+                ChangeOp::Upsert,
+                "dev_a",
+                10,
+                Some(json!({"key": "k1"})),
+            );
             assert_eq!(decide(s, None, &inc(&r)), Decision::Apply, "{name}");
         }
     }
@@ -434,7 +450,9 @@ mod tests {
             let r = record("products", ChangeOp::Upsert, "dev_a", 10, payload);
             assert_eq!(
                 decide(s, None, &inc(&r)),
-                Decision::Reject { reason: "INVALID_PAYLOAD" }
+                Decision::Reject {
+                    reason: "INVALID_PAYLOAD"
+                }
             );
         }
     }
@@ -445,23 +463,35 @@ mod tests {
         let r = record("nope", ChangeOp::Upsert, "dev_a", 10, Some(json!({})));
         assert_eq!(
             decide(s, None, &inc(&r)),
-            Decision::Reject { reason: "UNKNOWN_RESOURCE" }
+            Decision::Reject {
+                reason: "UNKNOWN_RESOURCE"
+            }
         );
         let r = record("customers", ChangeOp::Upsert, "dev_a", 10, Some(json!({})));
         assert_eq!(
             decide(s, None, &inc(&r)),
-            Decision::Reject { reason: "UNKNOWN_RESOURCE" }
+            Decision::Reject {
+                reason: "UNKNOWN_RESOURCE"
+            }
         );
     }
 
     #[test]
     fn delete_of_an_append_only_or_lifecycle_resource_is_rejected() {
-        for name in ["stockMovements", "payments", "invoices", "creditNotes", "productSerials"] {
+        for name in [
+            "stockMovements",
+            "payments",
+            "invoices",
+            "creditNotes",
+            "productSerials",
+        ] {
             let s = spec(name).unwrap();
             let r = record(name, ChangeOp::Delete, "dev_a", 10, None);
             assert_eq!(
                 decide(s, None, &inc(&r)),
-                Decision::Reject { reason: "INVALID_PAYLOAD" },
+                Decision::Reject {
+                    reason: "INVALID_PAYLOAD"
+                },
                 "{name}"
             );
         }
@@ -484,7 +514,9 @@ mod tests {
         assert_eq!(decide(s, Some(&local), &inc(&newer)), Decision::Apply);
         assert_eq!(
             decide(s, Some(&local), &inc(&older)),
-            Decision::KeepLocal { loser: ConflictKind::LwwLoser }
+            Decision::KeepLocal {
+                loser: ConflictKind::LwwLoser
+            }
         );
         assert_eq!(decide(s, Some(&local), &inc(&same)), Decision::Duplicate);
     }
@@ -498,7 +530,9 @@ mod tests {
         assert_eq!(decide(s, Some(&local), &inc(&higher)), Decision::Apply);
         assert_eq!(
             decide(s, Some(&local), &inc(&lower)),
-            Decision::KeepLocal { loser: ConflictKind::LwwLoser }
+            Decision::KeepLocal {
+                loser: ConflictKind::LwwLoser
+            }
         );
     }
 
@@ -511,24 +545,46 @@ mod tests {
         assert_eq!(decide(s, Some(&live), &inc(&newer_delete)), Decision::Apply);
         assert_eq!(
             decide(s, Some(&live), &inc(&older_delete)),
-            Decision::KeepLocal { loser: ConflictKind::LwwLoser }
+            Decision::KeepLocal {
+                loser: ConflictKind::LwwLoser
+            }
         );
-        let tombstone = RowMeta { deleted: true, ..meta(200, "dev_b") };
+        let tombstone = RowMeta {
+            deleted: true,
+            ..meta(200, "dev_b")
+        };
         let later_edit = record("products", ChangeOp::Upsert, "dev_a", 300, Some(json!({})));
-        assert_eq!(decide(s, Some(&tombstone), &inc(&later_edit)), Decision::Apply);
+        assert_eq!(
+            decide(s, Some(&tombstone), &inc(&later_edit)),
+            Decision::Apply
+        );
     }
 
     #[test]
     fn append_only_never_rewrites_an_existing_row() {
         let s = spec("stockMovements").unwrap();
         let local = meta(100, "dev_a");
-        let r = record("stockMovements", ChangeOp::Upsert, "dev_z", 999, Some(json!({})));
+        let r = record(
+            "stockMovements",
+            ChangeOp::Upsert,
+            "dev_z",
+            999,
+            Some(json!({})),
+        );
         assert_eq!(decide(s, Some(&local), &inc(&r)), Decision::Duplicate);
         assert_eq!(
             decide_append_only(s, Some(&local), &inc(&r), true),
-            Decision::Reject { reason: "IMMUTABLE_MISMATCH" }
+            Decision::Reject {
+                reason: "IMMUTABLE_MISMATCH"
+            }
         );
-        let same = record("stockMovements", ChangeOp::Upsert, "dev_a", 100, Some(json!({})));
+        let same = record(
+            "stockMovements",
+            ChangeOp::Upsert,
+            "dev_a",
+            100,
+            Some(json!({})),
+        );
         assert_eq!(
             decide_append_only(s, Some(&local), &inc(&same), true),
             Decision::Duplicate
@@ -542,7 +598,10 @@ mod tests {
         let local = meta(100, "dev_a");
         let other = record("invoices", ChangeOp::Upsert, "dev_b", 150, Some(json!({})));
         let same = record("invoices", ChangeOp::Upsert, "dev_a", 100, Some(json!({})));
-        assert_eq!(decide(s, Some(&local), &inc(&other)), Decision::MergeLifecycle);
+        assert_eq!(
+            decide(s, Some(&local), &inc(&other)),
+            Decision::MergeLifecycle
+        );
         assert_eq!(decide(s, Some(&local), &inc(&same)), Decision::Duplicate);
     }
 
@@ -552,17 +611,26 @@ mod tests {
         assert_eq!(clamp_updated_at(now + 299_999, now), (now + 299_999, false));
         assert_eq!(clamp_updated_at(now + 300_000, now), (now + 300_000, false));
         assert_eq!(clamp_updated_at(now + 300_001, now), (now, true));
-        assert_eq!(clamp_updated_at(now - 86_400_000, now), (now - 86_400_000, false));
+        assert_eq!(
+            clamp_updated_at(now - 86_400_000, now),
+            (now - 86_400_000, false)
+        );
         assert_eq!(clamp_updated_at(i64::MAX, i64::MAX), (i64::MAX, false));
     }
 
     #[test]
     fn lifecycle_ranks_are_monotonic() {
         let inv = ["pending", "partially_paid", "paid", "closed", "voided"];
-        let ranks: Vec<_> = inv.iter().map(|s| lifecycle_rank("invoices", s).unwrap()).collect();
+        let ranks: Vec<_> = inv
+            .iter()
+            .map(|s| lifecycle_rank("invoices", s).unwrap())
+            .collect();
         assert_eq!(ranks, [0, 1, 2, 3, 4]);
         let cn = ["awaiting_resolution", "resolved", "voided"];
-        let ranks: Vec<_> = cn.iter().map(|s| lifecycle_rank("creditNotes", s).unwrap()).collect();
+        let ranks: Vec<_> = cn
+            .iter()
+            .map(|s| lifecycle_rank("creditNotes", s).unwrap())
+            .collect();
         assert_eq!(ranks, [0, 1, 2]);
         assert_eq!(lifecycle_rank("invoices", "nonsense"), None);
         assert_eq!(lifecycle_rank("products", "pending"), None);
@@ -645,8 +713,14 @@ mod tests {
 
     #[test]
     fn invoice_notes_is_last_writer_wins_and_symmetric() {
-        let a = invoice("paid", json!({ "notes": "old", "updatedAt": "2026-01-01T00:00:00.000Z" }));
-        let b = invoice("paid", json!({ "notes": "new", "updatedAt": "2026-01-02T00:00:00.000Z" }));
+        let a = invoice(
+            "paid",
+            json!({ "notes": "old", "updatedAt": "2026-01-01T00:00:00.000Z" }),
+        );
+        let b = invoice(
+            "paid",
+            json!({ "notes": "new", "updatedAt": "2026-01-02T00:00:00.000Z" }),
+        );
         assert_eq!(merge_lifecycle("invoices", &a, &b).merged["notes"], "new");
         assert_eq!(merge_lifecycle("invoices", &b, &a).merged["notes"], "new");
     }
@@ -659,7 +733,12 @@ mod tests {
             w("n2", "2026-01-02T00:00:00.000Z"),
             w("n3", "2026-01-03T00:00:00.000Z"),
         );
-        let orders = [[&n1, &n3, &n2], [&n3, &n1, &n2], [&n2, &n1, &n3], [&n3, &n2, &n1]];
+        let orders = [
+            [&n1, &n3, &n2],
+            [&n3, &n1, &n2],
+            [&n2, &n1, &n3],
+            [&n3, &n2, &n1],
+        ];
         for order in orders {
             let mut cur = order[0].clone();
             for next in &order[1..] {
@@ -681,8 +760,14 @@ mod tests {
         let open = cn("awaiting_resolution", json!({}));
         let resolved = cn("resolved", json!({}));
         let voided = cn("voided", json!({ "voidedBy": "u9" }));
-        assert_eq!(merge_lifecycle("creditNotes", &open, &resolved).merged["status"], "resolved");
-        assert_eq!(merge_lifecycle("creditNotes", &voided, &resolved).merged["status"], "voided");
+        assert_eq!(
+            merge_lifecycle("creditNotes", &open, &resolved).merged["status"],
+            "resolved"
+        );
+        assert_eq!(
+            merge_lifecycle("creditNotes", &voided, &resolved).merged["status"],
+            "voided"
+        );
         let changed_body = cn("resolved", json!({ "refundCashCents": 5 }));
         assert_eq!(
             merge_lifecycle("creditNotes", &open, &changed_body).rejected,
@@ -693,10 +778,19 @@ mod tests {
     #[test]
     fn invalid_lifecycle_inputs_are_rejected() {
         let ok = invoice("paid", json!({}));
-        assert_eq!(merge_lifecycle("invoices", &ok, &json!("x")).rejected, Some("INVALID_PAYLOAD"));
+        assert_eq!(
+            merge_lifecycle("invoices", &ok, &json!("x")).rejected,
+            Some("INVALID_PAYLOAD")
+        );
         let bad_status = invoice("weird", json!({}));
-        assert_eq!(merge_lifecycle("invoices", &ok, &bad_status).rejected, Some("INVALID_PAYLOAD"));
-        assert_eq!(merge_lifecycle("products", &ok, &ok).rejected, Some("UNKNOWN_RESOURCE"));
+        assert_eq!(
+            merge_lifecycle("invoices", &ok, &bad_status).rejected,
+            Some("INVALID_PAYLOAD")
+        );
+        assert_eq!(
+            merge_lifecycle("products", &ok, &ok).rejected,
+            Some("UNKNOWN_RESOURCE")
+        );
     }
 
     #[test]

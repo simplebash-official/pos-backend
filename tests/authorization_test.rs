@@ -28,9 +28,9 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
-use simplebash_pos_backend::{app, app::AppState, clients, core::config::Config};
 use mongodb::Client;
 use mongodb::options::{ClientOptions, ResolverConfig};
+use simplebash_pos_backend::{app, app::AppState, clients, core::config::Config};
 use tower::ServiceExt;
 
 /// Every route that is allowed to answer without a token, as
@@ -53,6 +53,7 @@ use tower::ServiceExt;
 const PUBLIC_ROUTES: &[(&str, &str)] = &[
     ("GET", "/api/health"),
     ("POST", "/api/auth/login"),
+    ("GET", "/api/auth/shop/{code}"),
     ("GET", "/api/billing"),
     ("GET", "/api/inventory"),
     ("GET", "/api/reports"),

@@ -7,6 +7,7 @@ use axum::{
         header::{AUTHORIZATION, CONTENT_TYPE},
     },
 };
+use serde_json::{Value, json};
 use simplebash_pos_backend::{
     app::{self, AppState},
     clients::{self, db::Db},
@@ -16,7 +17,6 @@ use simplebash_pos_backend::{
     },
     domain::users::Role,
 };
-use serde_json::{Value, json};
 use std::sync::Arc;
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -70,6 +70,7 @@ async fn setup_sqlite_app() -> SqliteTestContext {
         cors_allowed_origins: Vec::new(),
         identity_jwks_url: None,
         identity_issuer: None,
+        identity_tenant_id: None,
         provision_secret: None,
         app_env: "test".to_string(),
     };
@@ -81,8 +82,9 @@ async fn setup_sqlite_app() -> SqliteTestContext {
     ));
 
     let db = Db::Sqlite(pool.clone());
-    let reports_engine =
-        Arc::new(simplebash_pos_backend::modules::reports::engine::AnalyticsEngine::new(db.clone()));
+    let reports_engine = Arc::new(
+        simplebash_pos_backend::modules::reports::engine::AnalyticsEngine::new(db.clone()),
+    );
 
     let state = AppState {
         config: config.clone(),

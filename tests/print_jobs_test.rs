@@ -7,13 +7,13 @@ use axum::{
         header::{AUTHORIZATION, CONTENT_TYPE},
     },
 };
+use mongodb::bson::DateTime as BsonDateTime;
+use serde_json::{Value, json};
 use simplebash_pos_backend::{
     core::{constants::roles, id::generate_id},
     domain::users::Role,
     modules::print_jobs::model::PrintJobDocument,
 };
-use mongodb::bson::DateTime as BsonDateTime;
-use serde_json::{Value, json};
 use tower::ServiceExt;
 
 async fn execute(router: &axum::Router, request: Request<Body>) -> (StatusCode, Value) {
@@ -589,9 +589,10 @@ async fn print_jobs_stats_endpoint_returns_today_job_count_revenue_pending_count
     seed_print_job_with(&db, "cancelled", 1000, yesterday).await;
 
     let db_handle = simplebash_pos_backend::clients::db::Db::from_mongo(db.clone());
-    let stats = simplebash_pos_backend::modules::print_jobs::service::get_print_job_stats(&db_handle)
-        .await
-        .expect("get_print_job_stats should succeed");
+    let stats =
+        simplebash_pos_backend::modules::print_jobs::service::get_print_job_stats(&db_handle)
+            .await
+            .expect("get_print_job_stats should succeed");
 
     // today_job_count includes all 3 jobs created "now", regardless of status.
     assert_eq!(stats.today_job_count, 3);

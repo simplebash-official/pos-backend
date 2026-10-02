@@ -216,6 +216,7 @@ pub async fn verify_bearer(headers: &HeaderMap, config: &Config) -> AppResult<Ve
         let identity =
             platform_jwt::verify_platform_token(&cache, token, config.identity_issuer.as_deref())
                 .await?;
+        ensure_platform_token_is_for_this_shop(config, identity.tid.as_deref())?;
         let mut verified = VerifiedToken::new(
             identity.sub,
             Some(identity.role),
@@ -243,6 +244,24 @@ pub async fn verify_bearer(headers: &HeaderMap, config: &Config) -> AppResult<Ve
     verified.scope = decoded.claims.scope;
     verified.device_id = decoded.claims.did;
     Ok(verified)
+}
+
+/// A single-shop deployment serves exactly one shop, but the identity service
+/// signs tokens for every shop it knows. Without this check any account
+/// registered there (scopes `owner`/`account`/`device` map to Admin) would be
+/// Admin here. Multi-tenant deployments are covered instead by the tenant
+/// scoping every query gets from the token's `tid`.
+fn ensure_platform_token_is_for_this_shop(config: &Config, tid: Option<&str>) -> AppResult<()> {
+    if config.tenant_mode == TenantMode::Multi {
+        return Ok(());
+    }
+    match (config.identity_tenant_id.as_deref(), tid) {
+        (Some(expected), Some(actual)) if !expected.is_empty() && expected == actual => Ok(()),
+        (None, _) => Err(AppError::unauthorized(
+            "platform tokens are not accepted by this shop (IDENTITY_TENANT_ID is not set)",
+        )),
+        _ => Err(AppError::unauthorized("token is not for this shop")),
+    }
 }
 
 /// Identifies a caller whose JWT carries `role: Role::Admin`. This is the

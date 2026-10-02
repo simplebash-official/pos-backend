@@ -4,9 +4,9 @@ use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
+use mongodb::bson::DateTime as BsonDateTime;
 use simplebash_pos_backend::core::middleware::idempotency::IdempotencyDocument;
 use simplebash_pos_backend::domain::users::Role;
-use mongodb::bson::DateTime as BsonDateTime;
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -276,5 +276,56 @@ async fn a_forged_token_is_rejected_rather_than_bucketed_as_anonymous() {
     assert!(
         stored.is_none(),
         "a rejected request must not reserve an idempotency record: {stored:?}"
+    );
+}
+
+#[tokio::test]
+async fn an_oversized_body_is_refused_without_being_buffered() {
+    let app = common::spawn_app().await;
+    let token = common::mint_token(&app.config, Some(Role::Admin), &[]);
+    let idem_key = format!("idem-big-{}", Uuid::new_v4());
+
+    // Just over the cap: the middleware must stop reading and answer 413
+    // instead of buffering an unbounded body into memory.
+    let big = "x".repeat(
+        simplebash_pos_backend::core::middleware::idempotency::MAX_IDEMPOTENT_BODY_BYTES + 1,
+    );
+    let request = Request::builder()
+        .method("POST")
+        .uri("/api/sequences/repair/reserve")
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .header("idempotency-key", &idem_key)
+        .body(Body::from(big))
+        .unwrap();
+    let response = app.router.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+#[tokio::test]
+async fn an_unauthenticated_request_never_touches_the_idempotency_store() {
+    let app = common::spawn_app().await;
+    let idem_key = format!("idem-anon-{}", Uuid::new_v4());
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("/api/sequences/repair/reserve")
+        .header(header::CONTENT_TYPE, "application/json")
+        .header("idempotency-key", &idem_key)
+        .header("x-device-id", "till-01")
+        .body(Body::from(r#"{"blockSize":10}"#))
+        .unwrap();
+    let response = app.router.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let stored = app
+        .db
+        .collection::<mongodb::bson::Document>("idempotency_keys")
+        .find_one(mongodb::bson::doc! { "key": &idem_key })
+        .await
+        .expect("query idempotency_keys");
+    assert!(
+        stored.is_none(),
+        "anonymous request left a record: {stored:?}"
     );
 }

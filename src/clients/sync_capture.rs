@@ -131,7 +131,12 @@ pub async fn install_triggers(pool: &SqlitePool) -> AppResult<()> {
             "COALESCE(OLD.version, 1) + 1"
         };
         statements.push(delete_trigger_sql(
-            spec.table, spec.table, spec.name, "OLD.key", "delete", version_expr,
+            spec.table,
+            spec.table,
+            spec.name,
+            "OLD.key",
+            "delete",
+            version_expr,
         ));
     }
     // Deleting a subcategory changes its parent category (still present).

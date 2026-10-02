@@ -32,17 +32,14 @@ impl Fixture {
     }
 
     async fn cleanup(self) {
-        self.global
-            .as_mongo()
-            .unwrap()
-            .unscoped()
-            .drop()
-            .await
-            .ok();
+        self.global.as_mongo().unwrap().unscoped().drop().await.ok();
     }
 }
 
-fn coll(db: &Db, name: &str) -> simplebash_pos_backend::clients::tenant_db::ScopedCollection<Document> {
+fn coll(
+    db: &Db,
+    name: &str,
+) -> simplebash_pos_backend::clients::tenant_db::ScopedCollection<Document> {
     db.as_mongo().unwrap().collection::<Document>(name)
 }
 
@@ -65,9 +62,21 @@ async fn reads_writes_and_deletes_stay_inside_the_tenant() {
     }
 
     // Same keys exist in both tenants; each sees only its own.
-    assert_eq!(coll(&f.a, "items").count_documents(doc! {}).await.unwrap(), 2);
-    assert_eq!(coll(&f.b, "items").count_documents(doc! {}).await.unwrap(), 2);
-    assert_eq!(coll(&f.global, "items").count_documents(doc! {}).await.unwrap(), 4);
+    assert_eq!(
+        coll(&f.a, "items").count_documents(doc! {}).await.unwrap(),
+        2
+    );
+    assert_eq!(
+        coll(&f.b, "items").count_documents(doc! {}).await.unwrap(),
+        2
+    );
+    assert_eq!(
+        coll(&f.global, "items")
+            .count_documents(doc! {})
+            .await
+            .unwrap(),
+        4
+    );
 
     let a_item = coll(&f.a, "items")
         .find_one(doc! { "key": "item_1" })
@@ -108,8 +117,14 @@ async fn reads_writes_and_deletes_stay_inside_the_tenant() {
 
     // Deletes are scoped as well.
     coll(&f.a, "items").delete_many(doc! {}).await.unwrap();
-    assert_eq!(coll(&f.a, "items").count_documents(doc! {}).await.unwrap(), 0);
-    assert_eq!(coll(&f.b, "items").count_documents(doc! {}).await.unwrap(), 2);
+    assert_eq!(
+        coll(&f.a, "items").count_documents(doc! {}).await.unwrap(),
+        0
+    );
+    assert_eq!(
+        coll(&f.b, "items").count_documents(doc! {}).await.unwrap(),
+        2
+    );
 
     f.cleanup().await;
 }
@@ -126,8 +141,14 @@ async fn upsert_and_insert_cannot_escape_the_tenant() {
         .insert_one(doc! { "key": "d1", "tenant_id": "tenant_b" })
         .await
         .unwrap();
-    assert_eq!(coll(&f.b, "docs").count_documents(doc! {}).await.unwrap(), 0);
-    assert_eq!(coll(&f.a, "docs").count_documents(doc! {}).await.unwrap(), 1);
+    assert_eq!(
+        coll(&f.b, "docs").count_documents(doc! {}).await.unwrap(),
+        0
+    );
+    assert_eq!(
+        coll(&f.a, "docs").count_documents(doc! {}).await.unwrap(),
+        1
+    );
 
     // An upsert creates the document inside the calling tenant.
     coll(&f.b, "counters")
@@ -141,7 +162,13 @@ async fn upsert_and_insert_cannot_escape_the_tenant() {
         .unwrap()
         .unwrap();
     assert_eq!(created.get_str("tenant_id").unwrap(), "tenant_b");
-    assert_eq!(coll(&f.a, "counters").count_documents(doc! {}).await.unwrap(), 0);
+    assert_eq!(
+        coll(&f.a, "counters")
+            .count_documents(doc! {})
+            .await
+            .unwrap(),
+        0
+    );
 
     f.cleanup().await;
 }
@@ -169,34 +196,50 @@ async fn aggregation_lookups_and_facets_are_tenant_scoped() {
 
     // Classic localField/foreignField lookup: must not see the other tenant's payments.
     let pipeline = vec![doc! { "$lookup": {
-        "from": "payments", "localField": "key",
-        "foreignField": "invoice_key", "as": "pays" } }];
-    let mut cursor = coll(&f.a, "invoices").aggregate(pipeline.clone()).await.unwrap();
+    "from": "payments", "localField": "key",
+    "foreignField": "invoice_key", "as": "pays" } }];
+    let mut cursor = coll(&f.a, "invoices")
+        .aggregate(pipeline.clone())
+        .await
+        .unwrap();
     assert!(cursor.advance().await.unwrap());
     let row = cursor.deserialize_current().unwrap();
     assert_eq!(row.get_array("pays").unwrap().len(), 1);
-    assert!(!cursor.advance().await.unwrap(), "only tenant A's invoice is returned");
+    assert!(
+        !cursor.advance().await.unwrap(),
+        "only tenant A's invoice is returned"
+    );
 
     let mut cursor = coll(&f.b, "invoices").aggregate(pipeline).await.unwrap();
     assert!(cursor.advance().await.unwrap());
     assert_eq!(
-        cursor.deserialize_current().unwrap().get_array("pays").unwrap().len(),
+        cursor
+            .deserialize_current()
+            .unwrap()
+            .get_array("pays")
+            .unwrap()
+            .len(),
         3
     );
 
     // The same lookup inside a $facet branch is scoped too.
     let faceted = vec![doc! { "$facet": {
-        "joined": [ { "$lookup": {
-            "from": "payments", "localField": "key",
-            "foreignField": "invoice_key", "as": "pays" } } ],
-        "n": [ { "$count": "n" } ] } }];
+    "joined": [ { "$lookup": {
+        "from": "payments", "localField": "key",
+        "foreignField": "invoice_key", "as": "pays" } } ],
+    "n": [ { "$count": "n" } ] } }];
     let mut cursor = coll(&f.a, "invoices").aggregate(faceted).await.unwrap();
     assert!(cursor.advance().await.unwrap());
     let row = cursor.deserialize_current().unwrap();
     let joined = row.get_array("joined").unwrap();
     assert_eq!(joined.len(), 1);
     assert_eq!(
-        joined[0].as_document().unwrap().get_array("pays").unwrap().len(),
+        joined[0]
+            .as_document()
+            .unwrap()
+            .get_array("pays")
+            .unwrap()
+            .len(),
         1
     );
 
@@ -256,7 +299,10 @@ async fn ambient_tenant_scopes_a_shared_multi_tenant_handle_and_fails_closed() {
 
     // No tenant in scope (unauthenticated / forgotten scope): nothing is visible...
     assert_eq!(
-        coll(&shared, "items").count_documents(doc! {}).await.unwrap(),
+        coll(&shared, "items")
+            .count_documents(doc! {})
+            .await
+            .unwrap(),
         0
     );
     // ...and a stray write is quarantined, never placed in a real tenant.

@@ -242,12 +242,21 @@ async fn recompute_product(
         return Ok(());
     };
     let old = num_i64(&product, "stock_quantity").unwrap_or(0);
-    let total = sum_field(db, "stock_movements", doc! { "product_id": oid }, "quantity_delta").await?;
+    let total = sum_field(
+        db,
+        "stock_movements",
+        doc! { "product_id": oid },
+        "quantity_delta",
+    )
+    .await?;
     if total == old {
         return Ok(());
     }
     products
-        .update_one(doc! { "_id": oid }, doc! { "$set": { "stock_quantity": total } })
+        .update_one(
+            doc! { "_id": oid },
+            doc! { "$set": { "stock_quantity": total } },
+        )
         .await?;
     if total < 0 && old >= 0 {
         conflicts.push(NewConflict {

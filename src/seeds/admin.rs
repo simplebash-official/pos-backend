@@ -27,10 +27,26 @@ pub async fn seed_admin(
         .or_else(|| env::var("SEED_ADMIN_EMAIL").ok())
         .unwrap_or_else(|| "admin@pos.com".to_string());
 
-    let password = password_override
+    let is_prod = env::var("APP_ENV")
+        .or_else(|_| env::var("ENVIRONMENT"))
+        .map(|v| {
+            let v = v.trim();
+            v.eq_ignore_ascii_case("production") || v.eq_ignore_ascii_case("prod")
+        })
+        .unwrap_or(false);
+
+    let password = match password_override
         .map(String::from)
         .or_else(|| env::var("SEED_ADMIN_PASSWORD").ok())
-        .unwrap_or_else(|| "admin@1234".to_string());
+    {
+        Some(p) if !p.trim().is_empty() => p,
+        _ if is_prod => {
+            return Err(AppError::validation(
+                "SEED_ADMIN_PASSWORD is required in production mode; refusing to seed insecure default admin credentials",
+            ));
+        }
+        _ => "admin@1234".to_string(),
+    };
 
     let name = name_override
         .map(String::from)

@@ -39,9 +39,12 @@ async fn sequence_blocks_are_independent_per_tenant() {
     let mut seen = Vec::new();
     for _ in 0..2 {
         for t in ["shop_a", "shop_b"] {
-            let r = with_tenant(tenant(t), reserve_sequence(&db, "invoice".into(), request(5)))
-                .await
-                .unwrap();
+            let r = with_tenant(
+                tenant(t),
+                reserve_sequence(&db, "invoice".into(), request(5)),
+            )
+            .await
+            .unwrap();
             seen.push((t, r.start, r.end));
         }
     }
@@ -88,16 +91,28 @@ async fn single_shop_handle_keeps_bare_counter_ids() {
     };
     let db = Db::from_mongo(raw.clone());
 
-    let r = reserve_sequence(&db, "invoice".into(), request(3)).await.unwrap();
+    let r = reserve_sequence(&db, "invoice".into(), request(3))
+        .await
+        .unwrap();
     assert_eq!((r.start, r.end), (1, 3));
     let counters = raw.collection::<Document>("sequence_counters");
     assert_eq!(
-        counters.count_documents(doc! { "_id": "invoice" }).await.unwrap(),
+        counters
+            .count_documents(doc! { "_id": "invoice" })
+            .await
+            .unwrap(),
         1,
         "single-shop deployments keep the bare _id"
     );
-    let stored = counters.find_one(doc! { "_id": "invoice" }).await.unwrap().unwrap();
-    assert!(stored.get("tenant_id").is_none(), "no tenant field in single-shop mode");
+    let stored = counters
+        .find_one(doc! { "_id": "invoice" })
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        stored.get("tenant_id").is_none(),
+        "no tenant field in single-shop mode"
+    );
 
     raw.drop().await.ok();
 }

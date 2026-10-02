@@ -207,10 +207,7 @@ pub(crate) fn encode_generic(
         .filter(|v| !v.is_null())
         .map(|v| parse_datetime("deletedAt", v))
         .transpose()?;
-    let version = object
-        .get("version")
-        .and_then(Value::as_i64)
-        .unwrap_or(1);
+    let version = object.get("version").and_then(Value::as_i64).unwrap_or(1);
 
     Ok(Encoded {
         id,
@@ -254,7 +251,14 @@ mod tests {
         assert_eq!(encoded.fields.get_str("name").unwrap(), "Screen");
         assert_eq!(encoded.fields.get_str("category_key").unwrap(), "cat_1");
         // Read-time enrichments and merge-managed columns are not stored fields.
-        for absent in ["category", "subcategory", "updated_at", "version", "id", "updated_by_device"] {
+        for absent in [
+            "category",
+            "subcategory",
+            "updated_at",
+            "version",
+            "id",
+            "updated_by_device",
+        ] {
             assert!(encoded.fields.get(absent).is_none(), "{absent}");
         }
         assert_eq!(encoded.derived.get_i64("stock_quantity").unwrap(), 7);
@@ -272,7 +276,10 @@ mod tests {
                      "productId": "65a1b2c3d4e5f60718293a4c", "quantityDelta": -2 }),
         )
         .unwrap();
-        assert!(matches!(encoded.fields.get("product_id"), Some(Bson::ObjectId(_))));
+        assert!(matches!(
+            encoded.fields.get("product_id"),
+            Some(Bson::ObjectId(_))
+        ));
     }
 
     #[test]

@@ -89,7 +89,10 @@ async fn multi_tenant_scope_sends_the_tenant_header_single_shop_omits_it() {
     // only the second render's POST necessarily re-hits the network) — find
     // the render POSTs specifically by matching on which one carries no vs.
     // some tenant header, rather than assuming a fixed count/order.
-    let without_header = seen.iter().filter(|h| h.get("X-Tenant-Key").is_none()).count();
+    let without_header = seen
+        .iter()
+        .filter(|h| h.get("X-Tenant-Key").is_none())
+        .count();
     let with_correct_header = seen
         .iter()
         .filter(|h| {
@@ -99,7 +102,10 @@ async fn multi_tenant_scope_sends_the_tenant_header_single_shop_omits_it() {
         })
         .count();
 
-    assert!(without_header >= 1, "the single-shop call must omit X-Tenant-Key: {seen:?}");
+    assert!(
+        without_header >= 1,
+        "the single-shop call must omit X-Tenant-Key: {seen:?}"
+    );
     assert!(
         with_correct_header >= 1,
         "the multi-tenant call must send X-Tenant-Key: tnt_test_header_check: {seen:?}"

@@ -14,12 +14,12 @@
 // MUST run before deploying the new backend binary in any environment that
 // has pre-existing data — the new code has no compat shim for the old shape.
 
-use simplebash_pos_backend::{
-    clients, core::config::Config, core::constants::prefixes, core::id::generate_id,
-};
 use mongodb::{
     Database,
     bson::{Document, doc},
+};
+use simplebash_pos_backend::{
+    clients, core::config::Config, core::constants::prefixes, core::id::generate_id,
 };
 use std::collections::HashMap;
 

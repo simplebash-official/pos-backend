@@ -37,6 +37,7 @@ async fn portal_renders_at_root_and_api() {
         cors_allowed_origins: vec![],
         identity_jwks_url: None,
         identity_issuer: None,
+        identity_tenant_id: None,
         provision_secret: None,
         app_env: "development".to_string(),
     };

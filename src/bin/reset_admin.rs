@@ -3,8 +3,9 @@ use simplebash_pos_backend::{
 };
 
 /// Rotates the existing Admin account's email/password to
-/// `RESET_ADMIN_EMAIL`/`RESET_ADMIN_PASSWORD` (defaults: `admin@pos.com` /
-/// `admin@1234`).
+/// `RESET_ADMIN_EMAIL` (default `admin@pos.com`) / `RESET_ADMIN_PASSWORD`
+/// (required — there is deliberately no default, so a reset can never leave
+/// the shop on a publicly documented password).
 ///
 /// Unlike `seed_admin`, this requires an Admin to already exist and
 /// overwrites its credentials in place — there is no undo, and no HTTP
@@ -19,8 +20,15 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     let email = std::env::var("RESET_ADMIN_EMAIL").unwrap_or_else(|_| "admin@pos.com".to_string());
-    let password =
-        std::env::var("RESET_ADMIN_PASSWORD").unwrap_or_else(|_| "admin@1234".to_string());
+    let password = match std::env::var("RESET_ADMIN_PASSWORD") {
+        Ok(p) if p.trim().len() >= 8 => p,
+        _ => {
+            eprintln!(
+                "RESET_ADMIN_PASSWORD must be set to the new admin password (at least 8 characters)"
+            );
+            std::process::exit(2);
+        }
+    };
 
     let config = Config::from_env().expect("invalid configuration");
     let db = clients::db::connect_from_config(&config)

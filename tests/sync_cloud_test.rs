@@ -24,12 +24,12 @@ use simplebash_pos_backend::{
         tenancy::{Tenant, with_tenant},
     },
     domain::users::Role,
-    modules::tenants::service::create_tenant,
     modules::sync::{
         apply_mongo::test_support::{encode_for_test, hydrate_for_test},
         cloud_capture::run_consumer,
         compaction::compact_tenant,
     },
+    modules::tenants::service::create_tenant,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -111,9 +111,18 @@ async fn start(app: &common::TestApp) {
         .await;
         assert_eq!(status, StatusCode::CREATED, "canary: {body}");
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        let (status, body) = call(&app.router, "GET", "/api/sync/pull?since=0", Some(&dev), None).await;
+        let (status, body) = call(
+            &app.router,
+            "GET",
+            "/api/sync/pull?since=0",
+            Some(&dev),
+            None,
+        )
+        .await;
         if status == StatusCode::OK
-            && body["data"]["changes"].as_array().is_some_and(|c| !c.is_empty())
+            && body["data"]["changes"]
+                .as_array()
+                .is_some_and(|c| !c.is_empty())
         {
             return;
         }
@@ -138,7 +147,10 @@ async fn wait_for(
         )
         .await;
         if status == StatusCode::OK {
-            let changes = body["data"]["changes"].as_array().cloned().unwrap_or_default();
+            let changes = body["data"]["changes"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
             if pred(&changes) {
                 return body["data"].clone();
             }
@@ -361,7 +373,13 @@ async fn codec_round_trips_real_documents() {
 
     // Exactly the columns the merge rules manage themselves.
     const MANAGED: &[&str] = &[
-        "_id", "tenant_id", "updated_by_device", "version", "created_at", "updated_at", "deleted_at",
+        "_id",
+        "tenant_id",
+        "updated_by_device",
+        "version",
+        "created_at",
+        "updated_at",
+        "deleted_at",
     ];
     let mut checked = 0;
     for (resource, table) in [
@@ -440,7 +458,11 @@ async fn push_pull_roundtrip_dedup_and_isolation() {
     product["stockQuantity"] = json!(999);
     let product_id = text(&product, "/id");
     let changes = vec![
-        record("stockMovements", &movement("sm_test_open", &product_id, 10), "dev_b1"),
+        record(
+            "stockMovements",
+            &movement("sm_test_open", &product_id, 10),
+            "dev_b1",
+        ),
         record("products", &product, "dev_b1"),
         record("categories", &seed.category, "dev_b1"),
         record("customers", &reid(&seed.customer), "dev_b1"),
@@ -464,7 +486,10 @@ async fn push_pull_roundtrip_dedup_and_isolation() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["data"]["stockQuantity"], 10, "stock must equal the ledger, not the payload");
+    assert_eq!(
+        body["data"]["stockQuantity"], 10,
+        "stock must equal the ledger, not the payload"
+    );
     assert_eq!(body["data"]["name"], product["name"]);
     assert_eq!(body["data"]["sku"], product["sku"]);
 
@@ -494,7 +519,8 @@ async fn push_pull_roundtrip_dedup_and_isolation() {
     let key = text(&product, "/key");
     let other = device_token(&app, "tnt_b", "dev_b2");
     let feed = wait_for(&app, &other, 0, |c| {
-        c.iter().any(|x| x["resource"] == "products" && x["key"] == key)
+        c.iter()
+            .any(|x| x["resource"] == "products" && x["key"] == key)
     })
     .await;
     let changes = feed["changes"].as_array().unwrap();
@@ -546,7 +572,8 @@ async fn web_write_appears_in_pull_without_an_origin_device() {
 
     let dev = device_token(&app, "tnt_w", "dev_w1");
     let feed = wait_for(&app, &dev, 0, |c| {
-        c.iter().any(|x| x["resource"] == "products" && x["key"] == key)
+        c.iter()
+            .any(|x| x["resource"] == "products" && x["key"] == key)
     })
     .await;
     let change = feed["changes"]
@@ -555,13 +582,17 @@ async fn web_write_appears_in_pull_without_an_origin_device() {
         .iter()
         .find(|c| c["resource"] == "products" && c["key"] == key)
         .unwrap();
-    assert!(change["originDeviceId"].is_null(), "web write has no device: {change}");
+    assert!(
+        change["originDeviceId"].is_null(),
+        "web write has no device: {change}"
+    );
     assert_eq!(change["op"], "upsert");
     assert_eq!(change["payload"]["name"], seed.product["name"]);
     // Invoices from the sale travel too, in wire (camelCase) form.
     let invoice_key = text(&seed.invoice, "/key");
     let feed = wait_for(&app, &dev, 0, |c| {
-        c.iter().any(|x| x["resource"] == "invoices" && x["key"] == invoice_key)
+        c.iter()
+            .any(|x| x["resource"] == "invoices" && x["key"] == invoice_key)
     })
     .await;
     assert!(feed["nextSeq"].as_i64().unwrap() > 0);
@@ -590,13 +621,27 @@ async fn revoked_and_non_device_callers_are_refused() {
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
     assert_eq!(body["code"], "DEVICE_REVOKED");
     let token = device_token(&app, "tnt_r", "dev_r1");
-    let (status, body) = call(&app.router, "GET", "/api/sync/pull?since=0", Some(&token), None).await;
+    let (status, body) = call(
+        &app.router,
+        "GET",
+        "/api/sync/pull?since=0",
+        Some(&token),
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert_eq!(body["code"], "DEVICE_REVOKED");
 
     // A web owner session is not a device.
     let owner = admin_token(&app, "tnt_r");
-    let (status, body) = call(&app.router, "GET", "/api/sync/pull?since=0", Some(&owner), None).await;
+    let (status, body) = call(
+        &app.router,
+        "GET",
+        "/api/sync/pull?since=0",
+        Some(&owner),
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert_eq!(body["code"], "DEVICE_TOKEN_REQUIRED");
 
@@ -606,7 +651,9 @@ async fn revoked_and_non_device_callers_are_refused() {
         "POST",
         "/api/sync/push",
         Some(&device_token(&app, "tnt_r", "dev_r2")),
-        Some(json!({ "deviceId": "dev_someone_else", "batchId": "b", "baseSeq": 0, "changes": [] })),
+        Some(
+            json!({ "deviceId": "dev_someone_else", "batchId": "b", "baseSeq": 0, "changes": [] }),
+        ),
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
@@ -634,11 +681,25 @@ async fn lww_loser_is_recorded_and_newer_wins() {
         record("customers", &payload, device)
     };
 
-    let (_, body) = push(&app, "tnt_l", "dev_l1", "b1", vec![variant("V2", 10, "dev_l1")]).await;
+    let (_, body) = push(
+        &app,
+        "tnt_l",
+        "dev_l1",
+        "b1",
+        vec![variant("V2", 10, "dev_l1")],
+    )
+    .await;
     assert_eq!(statuses(&body), ["applied"], "{body}");
 
     // An older edit from another device loses and is kept for review.
-    let (_, body) = push(&app, "tnt_l", "dev_l2", "b2", vec![variant("OLD", 0, "dev_l2")]).await;
+    let (_, body) = push(
+        &app,
+        "tnt_l",
+        "dev_l2",
+        "b2",
+        vec![variant("OLD", 0, "dev_l2")],
+    )
+    .await;
     assert_eq!(statuses(&body), ["conflict"], "{body}");
     assert_eq!(acks(&body)[0]["reason"], "LWW_LOSER");
     let key = text(&seed.customer, "/key");
@@ -659,7 +720,14 @@ async fn lww_loser_is_recorded_and_newer_wins() {
     assert_eq!(conflicts, 1);
 
     // A newer edit wins.
-    let (_, body) = push(&app, "tnt_l", "dev_l2", "b3", vec![variant("V3", 20, "dev_l2")]).await;
+    let (_, body) = push(
+        &app,
+        "tnt_l",
+        "dev_l2",
+        "b3",
+        vec![variant("V3", 20, "dev_l2")],
+    )
+    .await;
     assert_eq!(statuses(&body), ["applied"], "{body}");
     let stored = app
         .db
@@ -744,12 +812,26 @@ async fn compaction_expires_the_cursor_and_a_snapshot_recovers() {
     .unwrap();
     assert!(dropped >= 5, "dropped {dropped}");
 
-    let (status, body) = call(&app.router, "GET", "/api/sync/pull?since=0", Some(&dev), None).await;
+    let (status, body) = call(
+        &app.router,
+        "GET",
+        "/api/sync/pull?since=0",
+        Some(&dev),
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::GONE, "{body}");
     assert_eq!(body["code"], "CURSOR_EXPIRED");
 
     // Bootstrap: the snapshot has the live rows and the seq to resume from.
-    let (status, snap) = call(&app.router, "GET", "/api/sync/snapshot?limit=1000", Some(&dev), None).await;
+    let (status, snap) = call(
+        &app.router,
+        "GET",
+        "/api/sync/snapshot?limit=1000",
+        Some(&dev),
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{snap}");
     let keys: Vec<String> = snap["data"]["changes"]
         .as_array()
@@ -782,9 +864,20 @@ async fn snapshot_pagination_is_consistent() {
 
     let mut expected = 0u64;
     for table in [
-        "categories", "suppliers", "products", "supplier_products", "employees", "customers",
-        "purchases", "stock_movements", "product_serials", "repairs", "print_jobs", "invoices",
-        "payments", "credit_notes",
+        "categories",
+        "suppliers",
+        "products",
+        "supplier_products",
+        "employees",
+        "customers",
+        "purchases",
+        "stock_movements",
+        "product_serials",
+        "repairs",
+        "print_jobs",
+        "invoices",
+        "payments",
+        "credit_notes",
     ] {
         expected += app
             .db
@@ -808,10 +901,17 @@ async fn snapshot_pagination_is_consistent() {
         assert_eq!(status, StatusCode::OK, "{body}");
         let data = &body["data"];
         let seq = data["asOfSeq"].as_i64().unwrap();
-        assert_eq!(*as_of.get_or_insert(seq), seq, "asOfSeq must not move between pages");
+        assert_eq!(
+            *as_of.get_or_insert(seq),
+            seq,
+            "asOfSeq must not move between pages"
+        );
         for c in data["changes"].as_array().unwrap() {
             let id = format!("{}:{}", c["resource"], c["key"]);
-            assert!(seen.insert(id.clone()), "duplicate record across pages: {id}");
+            assert!(
+                seen.insert(id.clone()),
+                "duplicate record across pages: {id}"
+            );
         }
         pages += 1;
         match data["nextPage"].as_str() {
@@ -839,8 +939,12 @@ async fn a_pushed_cashier_logs_in_by_shop_code_and_a_web_delete_reaches_devices(
     let app = common::spawn_app_multi_tenant().await;
     start(&app).await;
 
-    let shop = create_tenant(&app.db_handle, "shop-cashier", "Cashier Shop").await.unwrap();
-    let other = create_tenant(&app.db_handle, "shop-other", "Other Shop").await.unwrap();
+    let shop = create_tenant(&app.db_handle, "shop-cashier", "Cashier Shop")
+        .await
+        .unwrap();
+    let other = create_tenant(&app.db_handle, "shop-other", "Other Shop")
+        .await
+        .unwrap();
     let tid = shop.key.clone();
 
     let hash = Argon2::default()
@@ -856,37 +960,70 @@ async fn a_pushed_cashier_logs_in_by_shop_code_and_a_web_delete_reaches_devices(
     });
 
     // A device of the shop pushes the cashier.
-    let (status, pushed) = push(&app, &tid, "dev_u1", "batch-u1", vec![record("users", &payload, "dev_u1")]).await;
+    let (status, pushed) = push(
+        &app,
+        &tid,
+        "dev_u1",
+        "batch-u1",
+        vec![record("users", &payload, "dev_u1")],
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "push: {pushed}");
     assert_eq!(statuses(&pushed), ["applied"], "{pushed}");
 
     // The cashier logs in on the cloud by shop code and gets a token for THAT shop.
-    let login = |shop_code: &str, password: &str| {
-        json!({ "email": "cashier@shop.test", "password": password, "shopCode": shop_code })
-    };
-    let (status, body) = call(&app.router, "POST", "/api/auth/login", None, Some(login("shop-cashier", "cashier-pass-9"))).await;
+    let login = |shop_code: &str, password: &str| json!({ "email": "cashier@shop.test", "password": password, "shopCode": shop_code });
+    let (status, body) = call(
+        &app.router,
+        "POST",
+        "/api/auth/login",
+        None,
+        Some(login("shop-cashier", "cashier-pass-9")),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "cashier login: {body}");
     assert_eq!(body["data"]["user"]["role"], "staff");
-    assert!(body["data"]["user"].get("passwordHash").is_none(), "no REST response carries the hash");
-    let (status, _) = call(&app.router, "POST", "/api/auth/login", None, Some(login("shop-cashier", "wrong-password"))).await;
+    assert!(
+        body["data"]["user"].get("passwordHash").is_none(),
+        "no REST response carries the hash"
+    );
+    let (status, _) = call(
+        &app.router,
+        "POST",
+        "/api/auth/login",
+        None,
+        Some(login("shop-cashier", "wrong-password")),
+    )
+    .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     // The same credentials do not work in another shop.
     assert_eq!(other.shop_code, "shop-other");
-    let (status, _) = call(&app.router, "POST", "/api/auth/login", None, Some(login("shop-other", "cashier-pass-9"))).await;
+    let (status, _) = call(
+        &app.router,
+        "POST",
+        "/api/auth/login",
+        None,
+        Some(login("shop-other", "cashier-pass-9")),
+    )
+    .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
     // Another device of the shop pulls the cashier, hash included (that is what
     // lets the login work there), through the authenticated sync transport only.
     let observer = device_token(&app, &tid, "dev_u2");
     let feed = wait_for(&app, &observer, 0, |changes| {
-        changes.iter().any(|c| c["resource"] == "users" && c["key"] == "usr_cashier_cloud")
+        changes
+            .iter()
+            .any(|c| c["resource"] == "users" && c["key"] == "usr_cashier_cloud")
     })
     .await;
     let pulled = feed["changes"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|c| c["resource"] == "users" && c["key"] == "usr_cashier_cloud" && c["op"] == "upsert")
+        .find(|c| {
+            c["resource"] == "users" && c["key"] == "usr_cashier_cloud" && c["op"] == "upsert"
+        })
         .expect("the cashier is in the change feed");
     assert_eq!(pulled["payload"]["passwordHash"], hash);
     assert_eq!(pulled["payload"]["id"], id);
@@ -895,14 +1032,34 @@ async fn a_pushed_cashier_logs_in_by_shop_code_and_a_web_delete_reaches_devices(
     // The owner deletes the cashier on the web: it is a tombstone the change
     // stream carries to devices as a delete, and the login stops working.
     let admin = admin_token(&app, &tid);
-    let (status, body) = call(&app.router, "DELETE", &format!("/api/users/{id}"), Some(&admin), None).await;
+    let (status, body) = call(
+        &app.router,
+        "DELETE",
+        &format!("/api/users/{id}"),
+        Some(&admin),
+        None,
+    )
+    .await;
     assert!(status.is_success(), "web delete: {status} {body}");
     wait_for(&app, &observer, cursor, |changes| {
-        changes.iter().any(|c| c["resource"] == "users" && c["key"] == "usr_cashier_cloud" && c["op"] == "delete")
+        changes.iter().any(|c| {
+            c["resource"] == "users" && c["key"] == "usr_cashier_cloud" && c["op"] == "delete"
+        })
     })
     .await;
-    let (status, _) = call(&app.router, "POST", "/api/auth/login", None, Some(login("shop-cashier", "cashier-pass-9"))).await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED, "a deleted cashier cannot log in");
+    let (status, _) = call(
+        &app.router,
+        "POST",
+        "/api/auth/login",
+        None,
+        Some(login("shop-cashier", "cashier-pass-9")),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "a deleted cashier cannot log in"
+    );
 
     app.db.drop().await.ok();
 }

@@ -32,6 +32,18 @@ pub(crate) async fn render_uncached(
     .await
 }
 
+/// True for a non-empty, at most 128-character string made only of ASCII
+/// letters, digits, `_` and `-` — the alphabet of generated keys
+/// (`<prefix>_<nanoid>`) and of the fixed cache keys. Anything else (a `/`,
+/// `..`, a drive letter, a NUL) is refused before it can become a path.
+fn is_safe_path_segment(segment: &str) -> bool {
+    !segment.is_empty()
+        && segment.len() <= 128
+        && segment
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
 /// Returns the PDF bytes for `(entity_key, cache_key)`, rendering and
 /// persisting a fresh copy only if one doesn't already exist. `cache_key`
 /// and `template_name` are deliberately separate: `cache_key` is whatever
@@ -62,6 +74,16 @@ pub(crate) async fn get_or_render(
     template_name: &str,
     data: serde_json::Value,
 ) -> AppResult<Vec<u8>> {
+    // Both keys become path segments under `generated_documents_dir`. Entity
+    // keys normally look like `inv_<nanoid>`, but a sync push can create an
+    // invoice/credit note with any key string, so a `../` or absolute key
+    // must never reach `Path::join`.
+    if !is_safe_path_segment(entity_key) || !is_safe_path_segment(cache_key) {
+        return Err(crate::core::error::AppError::validation(
+            "document key contains characters that are not allowed",
+        ));
+    }
+
     if let Some(existing) =
         repository::find_latest_by_entity_and_type(db, entity_key, cache_key).await?
     {
@@ -129,4 +151,33 @@ pub(crate) async fn get_or_render(
     .await?;
 
     Ok(pdf_bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_safe_path_segment;
+
+    #[test]
+    fn only_generated_key_shapes_are_safe_path_segments() {
+        for ok in [
+            "inv_V1StGXR8_Z5jdHi6B-myT",
+            "thermal-receipt-80mm",
+            "a4-invoice",
+        ] {
+            assert!(is_safe_path_segment(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            "..",
+            "../../etc",
+            "/tmp/x",
+            "inv_1/..",
+            "C:\\x",
+            "a b",
+            "inv\u{0}",
+        ] {
+            assert!(!is_safe_path_segment(bad), "{bad:?}");
+        }
+        assert!(!is_safe_path_segment(&"a".repeat(129)));
+    }
 }

@@ -33,11 +33,12 @@ pub fn router() -> OpenApiRouter<AppState> {
     )
 )]
 async fn get_changes(
-    _current_user: CurrentUser,
+    current_user: CurrentUser,
     State(state): State<AppState>,
     Query(query): Query<SyncChangesQuery>,
 ) -> AppResult<Json<ApiResponse<SyncChangesResponse>>> {
-    let response = service::get_changes(&state.db, query).await?;
+    let is_admin = current_user.role == Some(crate::domain::users::Role::Admin);
+    let response = service::get_changes(&state.db, query, is_admin).await?;
     Ok(Json(ApiResponse::success(
         response,
         "Sync changes retrieved successfully",

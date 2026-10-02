@@ -32,10 +32,7 @@ const PLATFORM_ALLOWED: &[&str] = &[
 ];
 
 /// The driver's own `Database` / `Collection` types bypass the wrapper.
-const RAW_TYPES_ALLOWED: &[&str] = &[
-    "src/clients/",
-    "src/modules/reports/engine/indexes.rs",
-];
+const RAW_TYPES_ALLOWED: &[&str] = &["src/clients/", "src/modules/reports/engine/indexes.rs"];
 
 fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(dir).unwrap() {
@@ -122,5 +119,8 @@ fn the_lint_really_detects_a_violation() {
     // Guard against the scan silently matching nothing: a needle that is known
     // to exist in the allowlisted client layer must be found when nothing is allowed.
     let found = violations(&|l| l.contains(".unscoped()"), &[]);
-    assert!(!found.is_empty(), "the source scan found no `.unscoped()` at all");
+    assert!(
+        !found.is_empty(),
+        "the source scan found no `.unscoped()` at all"
+    );
 }

@@ -76,8 +76,13 @@ async fn call(
         .unwrap();
     let response = router.clone().oneshot(request).await.unwrap();
     let status = response.status();
-    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -96,7 +101,11 @@ struct Device {
 impl Device {
     async fn new(n: usize, cloud: &common::TestApp) -> Device {
         let app = common::spawn_app_sqlite().await;
-        let admin = common::mint_token(&app.config, Some(Role::Admin), roles::default_permissions(Role::Admin));
+        let admin = common::mint_token(
+            &app.config,
+            Some(Role::Admin),
+            roles::default_permissions(Role::Admin),
+        );
         let agent = encode(
             &Header::default(),
             &json!({ "sub": "sync-agent", "scope": "sync", "exp": 9_999_999_999u64 }),
@@ -105,7 +114,14 @@ impl Device {
         .unwrap();
         let id = format!("dev_conv{n}aaaa{n}bbbb");
         let cloud_token = common::mint_device_token(&cloud.config, TENANT, &id);
-        Device { app, admin, agent, id, cloud_token, cursor: 0 }
+        Device {
+            app,
+            admin,
+            agent,
+            id,
+            cloud_token,
+            cursor: 0,
+        }
     }
 
     fn pool(&self) -> &SqlitePool {
@@ -114,13 +130,21 @@ impl Device {
 
     async fn api(&self, method: &str, uri: &str, body: Option<Value>) -> Value {
         let (status, value) = call(&self.app.router, method, uri, &self.admin, body).await;
-        assert!(status.is_success(), "[{}] {method} {uri} -> {status}: {value}", self.id);
+        assert!(
+            status.is_success(),
+            "[{}] {method} {uri} -> {status}: {value}",
+            self.id
+        );
         value
     }
 
     async fn sync(&self, method: &str, uri: &str, body: Option<Value>) -> Value {
         let (status, value) = call(&self.app.router, method, uri, &self.agent, body).await;
-        assert!(status.is_success(), "[{}] {method} {uri} -> {status}: {value}", self.id);
+        assert!(
+            status.is_success(),
+            "[{}] {method} {uri} -> {status}: {value}",
+            self.id
+        );
         value["data"].clone()
     }
 }
@@ -132,7 +156,9 @@ impl Device {
 /// Push everything in the local outbox to the cloud, acking only after a 2xx.
 async fn push_all(cloud: &common::TestApp, d: &Device) {
     loop {
-        let page = d.sync("GET", "/api/sync/outbox?after=0&limit=200", None).await;
+        let page = d
+            .sync("GET", "/api/sync/outbox?after=0&limit=200", None)
+            .await;
         let items = page["items"].as_array().unwrap().clone();
         if items.is_empty() {
             return;
@@ -152,9 +178,18 @@ async fn push_all(cloud: &common::TestApp, d: &Device) {
         .await;
         assert_eq!(status, StatusCode::OK, "[{}] push: {body}", d.id);
         for ack in body["data"]["acks"].as_array().unwrap() {
-            assert_ne!(ack["status"], "rejected", "[{}] a change was rejected: {ack}", d.id);
+            assert_ne!(
+                ack["status"], "rejected",
+                "[{}] a change was rejected: {ack}",
+                d.id
+            );
         }
-        d.sync("POST", "/api/sync/outbox/ack", Some(json!({ "upToSeq": page["lastSeq"] }))).await;
+        d.sync(
+            "POST",
+            "/api/sync/outbox/ack",
+            Some(json!({ "upToSeq": page["lastSeq"] })),
+        )
+        .await;
     }
 }
 
@@ -344,8 +379,19 @@ async fn start_consumer(cloud: &common::TestApp) {
         .await;
         assert_eq!(status, StatusCode::CREATED, "canary: {body}");
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        let (status, body) = call(&cloud.router, "GET", "/api/sync/pull?since=0", &observer, None).await;
-        if status == StatusCode::OK && body["data"]["changes"].as_array().is_some_and(|c| !c.is_empty()) {
+        let (status, body) = call(
+            &cloud.router,
+            "GET",
+            "/api/sync/pull?since=0",
+            &observer,
+            None,
+        )
+        .await;
+        if status == StatusCode::OK
+            && body["data"]["changes"]
+                .as_array()
+                .is_some_and(|c| !c.is_empty())
+        {
             return;
         }
     }
@@ -362,13 +408,24 @@ struct Catalog {
 
 async fn create_shop(d: &Device) -> Catalog {
     let cat = d
-        .api("POST", "/api/inventory/categories", Some(json!({ "name": "Electronics", "icon": "devices", "color": "blue" })))
+        .api(
+            "POST",
+            "/api/inventory/categories",
+            Some(json!({ "name": "Electronics", "icon": "devices", "color": "blue" })),
+        )
         .await;
     let category_key = cat["data"]["key"].as_str().unwrap().to_string();
     let sub = d
-        .api("POST", &format!("/api/inventory/categories/{category_key}/subcategories"), Some(json!({ "name": "Phones" })))
+        .api(
+            "POST",
+            &format!("/api/inventory/categories/{category_key}/subcategories"),
+            Some(json!({ "name": "Phones" })),
+        )
         .await;
-    let subcategory_key = sub["data"]["subcategories"][0]["key"].as_str().unwrap().to_string();
+    let subcategory_key = sub["data"]["subcategories"][0]["key"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let mut products = Vec::new();
     for name in ["Phone", "Charger"] {
         let p = d
@@ -386,7 +443,12 @@ async fn create_shop(d: &Device) -> Catalog {
             p["data"]["id"].as_str().unwrap().to_string(),
         ));
     }
-    d.api("POST", "/api/customers", Some(json!({ "name": "Walk-in Regular", "primaryPhone": "0770000000" }))).await;
+    d.api(
+        "POST",
+        "/api/customers",
+        Some(json!({ "name": "Walk-in Regular", "primaryPhone": "0770000000" })),
+    )
+    .await;
     Catalog { products }
 }
 
@@ -409,7 +471,12 @@ async fn random_op(d: &Device, catalog: &Catalog, rng: &mut Rng, step: usize) {
         }
         2 => {
             let price = 40_000 + 100 * rng.below(200) as i64;
-            d.api("PUT", &format!("/api/inventory/products/{id}"), Some(json!({ "sellingPriceCents": price }))).await;
+            d.api(
+                "PUT",
+                &format!("/api/inventory/products/{id}"),
+                Some(json!({ "sellingPriceCents": price })),
+            )
+            .await;
         }
         3 => {
             // A new cashier login: every replica must end up with the same account.
@@ -425,11 +492,18 @@ async fn random_op(d: &Device, catalog: &Catalog, rng: &mut Rng, step: usize) {
         }
         _ => {
             if rng.below(2) == 0 {
-                let current = d.api("GET", &format!("/api/inventory/products/{id}"), None).await["data"]["stockQuantity"]
+                let current = d
+                    .api("GET", &format!("/api/inventory/products/{id}"), None)
+                    .await["data"]["stockQuantity"]
                     .as_i64()
                     .unwrap();
                 let delta = rng.below(7) as i64 - 3;
-                d.api("PUT", &format!("/api/inventory/products/{id}"), Some(json!({ "stockQuantity": current + delta }))).await;
+                d.api(
+                    "PUT",
+                    &format!("/api/inventory/products/{id}"),
+                    Some(json!({ "stockQuantity": current + delta })),
+                )
+                .await;
             } else {
                 d.api(
                     "POST",
@@ -447,13 +521,26 @@ async fn random_op(d: &Device, catalog: &Catalog, rng: &mut Rng, step: usize) {
 // ---------------------------------------------------------------------------
 
 const SYNCED: &[&str] = &[
-    "categories", "subcategories", "suppliers", "products", "supplier_products", "customers", "purchases",
-    "stock_movements", "invoices", "payments", "credit_notes", "users",
+    "categories",
+    "subcategories",
+    "suppliers",
+    "products",
+    "supplier_products",
+    "customers",
+    "purchases",
+    "stock_movements",
+    "invoices",
+    "payments",
+    "credit_notes",
+    "users",
 ];
 
 async fn table_rows(pool: &SqlitePool, table: &str) -> Vec<Value> {
     use simplebash_pos_backend::clients::sqlite::map_sqlite_row_to_document;
-    let rows = sqlx::query(&format!("SELECT * FROM {table} ORDER BY key")).fetch_all(pool).await.unwrap();
+    let rows = sqlx::query(&format!("SELECT * FROM {table} ORDER BY key"))
+        .fetch_all(pool)
+        .await
+        .unwrap();
     rows.iter()
         .map(|row| {
             let mut value = serde_json::to_value(map_sqlite_row_to_document(row)).unwrap();
@@ -497,7 +584,12 @@ async fn three_devices_and_the_cloud_converge() {
         Device::new(3, &cloud).await,
     ];
     for d in &devices {
-        d.sync("POST", "/api/sync/enable", Some(json!({ "tenantId": TENANT, "deviceId": d.id }))).await;
+        d.sync(
+            "POST",
+            "/api/sync/enable",
+            Some(json!({ "tenantId": TENANT, "deviceId": d.id })),
+        )
+        .await;
         reserve_blocks(&cloud, d).await;
     }
 
@@ -544,7 +636,12 @@ async fn three_devices_and_the_cloud_converge() {
     for table in SYNCED {
         let base = table_rows(devices[0].pool(), table).await;
         for d in &devices[1..] {
-            assert_eq!(base, table_rows(d.pool(), table).await, "table {table} differs on {}", d.id);
+            assert_eq!(
+                base,
+                table_rows(d.pool(), table).await,
+                "table {table} differs on {}",
+                d.id
+            );
         }
     }
 
@@ -552,7 +649,10 @@ async fn three_devices_and_the_cloud_converge() {
         .fetch_one(devices[0].pool())
         .await
         .unwrap();
-    assert!(logins > 0, "the scenario must create logins for the users comparison to mean anything");
+    assert!(
+        logins > 0,
+        "the scenario must create logins for the users comparison to mean anything"
+    );
 
     // 2. Stock is exactly its movement ledger on every replica.
     for d in &devices {
@@ -565,8 +665,13 @@ async fn three_devices_and_the_cloud_converge() {
         .unwrap();
         for row in rows {
             use sqlx::Row;
-            let (key, stock, ledger): (String, i64, i64) = (row.get("key"), row.get("stock"), row.get("ledger"));
-            assert_eq!(stock, ledger, "stock of {key} is not its ledger on {}", d.id);
+            let (key, stock, ledger): (String, i64, i64) =
+                (row.get("key"), row.get("stock"), row.get("ledger"));
+            assert_eq!(
+                stock, ledger,
+                "stock of {key} is not its ledger on {}",
+                d.id
+            );
         }
     }
 
@@ -583,7 +688,11 @@ async fn three_devices_and_the_cloud_converge() {
             .filter(|c| c["resource"] == resource && c["op"] == "upsert")
             .map(|c| c["key"].as_str().unwrap().to_string())
             .collect();
-        assert_eq!(in_cloud, keys(devices[0].pool(), table).await, "{resource} in the cloud differ from the devices");
+        assert_eq!(
+            in_cloud,
+            keys(devices[0].pool(), table).await,
+            "{resource} in the cloud differ from the devices"
+        );
     }
 
     // 4. No two invoices share a number, and nothing was renamed to dodge a collision.
@@ -592,14 +701,23 @@ async fn three_devices_and_the_cloud_converge() {
         .await
         .unwrap();
     let distinct: BTreeSet<&String> = numbers.iter().collect();
-    assert_eq!(numbers.len(), distinct.len(), "duplicate invoice numbers: {numbers:?}");
+    assert_eq!(
+        numbers.len(),
+        distinct.len(),
+        "duplicate invoice numbers: {numbers:?}"
+    );
     for d in &devices {
-        let unique_violations: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM sync_conflicts WHERE kind = 'UNIQUE_VIOLATION'")
-                .fetch_one(d.pool())
-                .await
-                .unwrap();
-        assert_eq!(unique_violations, 0, "{} had to rename a colliding value", d.id);
+        let unique_violations: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sync_conflicts WHERE kind = 'UNIQUE_VIOLATION'",
+        )
+        .fetch_one(d.pool())
+        .await
+        .unwrap();
+        assert_eq!(
+            unique_violations, 0,
+            "{} had to rename a colliding value",
+            d.id
+        );
     }
 
     cloud.db.drop().await.ok();
@@ -629,12 +747,29 @@ async fn devices_with_persistent_clock_skew_still_converge() {
         Device::new(14, &cloud).await,
     ];
     for d in &devices {
-        d.sync("POST", "/api/sync/enable", Some(json!({ "tenantId": TENANT, "deviceId": d.id }))).await;
+        d.sync(
+            "POST",
+            "/api/sync/enable",
+            Some(json!({ "tenantId": TENANT, "deviceId": d.id })),
+        )
+        .await;
         reserve_blocks(&cloud, d).await;
     }
     // Device 12 runs 90s fast, device 13 runs 60s slow, the rest are on time.
-    devices[1].sync("POST", "/api/sync/state", Some(json!({ "clockOffsetMs": 90_000 }))).await;
-    devices[2].sync("POST", "/api/sync/state", Some(json!({ "clockOffsetMs": -60_000 }))).await;
+    devices[1]
+        .sync(
+            "POST",
+            "/api/sync/state",
+            Some(json!({ "clockOffsetMs": 90_000 })),
+        )
+        .await;
+    devices[2]
+        .sync(
+            "POST",
+            "/api/sync/state",
+            Some(json!({ "clockOffsetMs": -60_000 })),
+        )
+        .await;
 
     let catalog = create_shop(&devices[0]).await;
     push_all(&cloud, &devices[0]).await;
@@ -673,7 +808,12 @@ async fn devices_with_persistent_clock_skew_still_converge() {
     for table in SYNCED {
         let base = table_rows(devices[0].pool(), table).await;
         for d in &devices[1..] {
-            assert_eq!(base, table_rows(d.pool(), table).await, "table {table} differs on {} under clock skew", d.id);
+            assert_eq!(
+                base,
+                table_rows(d.pool(), table).await,
+                "table {table} differs on {} under clock skew",
+                d.id
+            );
         }
     }
     for d in &devices {
@@ -686,8 +826,13 @@ async fn devices_with_persistent_clock_skew_still_converge() {
         .unwrap();
         for row in rows {
             use sqlx::Row;
-            let (key, stock, ledger): (String, i64, i64) = (row.get("key"), row.get("stock"), row.get("ledger"));
-            assert_eq!(stock, ledger, "stock of {key} is not its ledger on {} under clock skew", d.id);
+            let (key, stock, ledger): (String, i64, i64) =
+                (row.get("key"), row.get("stock"), row.get("ledger"));
+            assert_eq!(
+                stock, ledger,
+                "stock of {key} is not its ledger on {} under clock skew",
+                d.id
+            );
         }
     }
     let numbers: Vec<String> = sqlx::query_scalar("SELECT invoice_number FROM invoices")
@@ -695,7 +840,11 @@ async fn devices_with_persistent_clock_skew_still_converge() {
         .await
         .unwrap();
     let distinct: BTreeSet<&String> = numbers.iter().collect();
-    assert_eq!(numbers.len(), distinct.len(), "duplicate invoice numbers under clock skew: {numbers:?}");
+    assert_eq!(
+        numbers.len(),
+        distinct.len(),
+        "duplicate invoice numbers under clock skew: {numbers:?}"
+    );
 
     cloud.db.drop().await.ok();
 }
@@ -711,19 +860,35 @@ async fn concurrent_serial_sale_is_flagged_and_both_invoices_survive() {
 
     let mut devices = vec![Device::new(21, &cloud).await, Device::new(22, &cloud).await];
     for d in &devices {
-        d.sync("POST", "/api/sync/enable", Some(json!({ "tenantId": TENANT, "deviceId": d.id }))).await;
+        d.sync(
+            "POST",
+            "/api/sync/enable",
+            Some(json!({ "tenantId": TENANT, "deviceId": d.id })),
+        )
+        .await;
         reserve_blocks(&cloud, d).await;
     }
 
     // Device 1 mints the serialized product, its serial, and pushes them out.
     let cat = devices[0]
-        .api("POST", "/api/inventory/categories", Some(json!({ "name": "Serial Goods", "icon": "phone", "color": "teal" })))
+        .api(
+            "POST",
+            "/api/inventory/categories",
+            Some(json!({ "name": "Serial Goods", "icon": "phone", "color": "teal" })),
+        )
         .await;
     let category_key = cat["data"]["key"].as_str().unwrap().to_string();
     let sub = devices[0]
-        .api("POST", &format!("/api/inventory/categories/{category_key}/subcategories"), Some(json!({ "name": "Flagship" })))
+        .api(
+            "POST",
+            &format!("/api/inventory/categories/{category_key}/subcategories"),
+            Some(json!({ "name": "Flagship" })),
+        )
         .await;
-    let subcategory_key = sub["data"]["subcategories"][0]["key"].as_str().unwrap().to_string();
+    let subcategory_key = sub["data"]["subcategories"][0]["key"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let product = devices[0]
         .api(
             "POST",
@@ -799,7 +964,11 @@ async fn concurrent_serial_sale_is_flagged_and_both_invoices_survive() {
             .fetch_one(d.pool())
             .await
             .unwrap();
-        assert_eq!(count, 2, "both sales of the double-sold serial must survive on {}", d.id);
+        assert_eq!(
+            count, 2,
+            "both sales of the double-sold serial must survive on {}",
+            d.id
+        );
     }
 
     // The conflict is on record somewhere: on the cloud (it sees the second
@@ -808,12 +977,17 @@ async fn concurrent_serial_sale_is_flagged_and_both_invoices_survive() {
     let cloud_hits = cloud_conflicts(&cloud, "SERIAL_DOUBLE_SOLD").await.len();
     let mut device_hits = 0i64;
     for d in &devices {
-        device_hits += sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM sync_conflicts WHERE kind = 'SERIAL_DOUBLE_SOLD'")
-            .fetch_one(d.pool())
-            .await
-            .unwrap();
+        device_hits += sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM sync_conflicts WHERE kind = 'SERIAL_DOUBLE_SOLD'",
+        )
+        .fetch_one(d.pool())
+        .await
+        .unwrap();
     }
-    assert!(cloud_hits + device_hits as usize >= 1, "no SERIAL_DOUBLE_SOLD conflict was recorded anywhere");
+    assert!(
+        cloud_hits + device_hits as usize >= 1,
+        "no SERIAL_DOUBLE_SOLD conflict was recorded anywhere"
+    );
 
     // Fixed bug: `apply_mongo::serial_double_sale` used to keep whichever row was
     // *already stored*, unconditionally, discarding the incoming write even when
@@ -840,12 +1014,18 @@ async fn concurrent_serial_sale_is_flagged_and_both_invoices_survive() {
     assert!(invoice_keys.contains(&cloud_state.1));
 
     for d in &devices {
-        let row: (String, String) = sqlx::query_as("SELECT status, invoice_key FROM product_serials WHERE serial_number = ?")
-            .bind(&serial)
-            .fetch_one(d.pool())
-            .await
-            .unwrap();
-        assert_eq!(row, cloud_state, "{} disagrees with the cloud about who owns the serial", d.id);
+        let row: (String, String) = sqlx::query_as(
+            "SELECT status, invoice_key FROM product_serials WHERE serial_number = ?",
+        )
+        .bind(&serial)
+        .fetch_one(d.pool())
+        .await
+        .unwrap();
+        assert_eq!(
+            row, cloud_state,
+            "{} disagrees with the cloud about who owns the serial",
+            d.id
+        );
     }
 
     cloud.db.drop().await.ok();
@@ -862,7 +1042,12 @@ async fn concurrent_full_refunds_raise_over_refund_not_silent_corruption() {
 
     let mut devices = vec![Device::new(31, &cloud).await, Device::new(32, &cloud).await];
     for d in &devices {
-        d.sync("POST", "/api/sync/enable", Some(json!({ "tenantId": TENANT, "deviceId": d.id }))).await;
+        d.sync(
+            "POST",
+            "/api/sync/enable",
+            Some(json!({ "tenantId": TENANT, "deviceId": d.id })),
+        )
+        .await;
         reserve_blocks(&cloud, d).await;
     }
 
@@ -917,12 +1102,13 @@ async fn concurrent_full_refunds_raise_over_refund_not_silent_corruption() {
 
     // Both credit notes survive, everywhere.
     for d in &devices {
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM credit_notes WHERE key IN (?, ?)")
-            .bind(&credit_note_keys[0])
-            .bind(&credit_note_keys[1])
-            .fetch_one(d.pool())
-            .await
-            .unwrap();
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM credit_notes WHERE key IN (?, ?)")
+                .bind(&credit_note_keys[0])
+                .bind(&credit_note_keys[1])
+                .fetch_one(d.pool())
+                .await
+                .unwrap();
         assert_eq!(count, 2, "both credit notes must survive on {}", d.id);
     }
 
@@ -934,19 +1120,32 @@ async fn concurrent_full_refunds_raise_over_refund_not_silent_corruption() {
             .fetch_one(d.pool())
             .await
             .unwrap();
-        assert!(refunded > total_cents, "{} should show the honest over-refunded total, got {refunded} for a {total_cents}-cent invoice", d.id);
-        assert!(refunded >= 0 && refunded <= total_cents * 3, "{} shows a nonsensical refunded_cents: {refunded}", d.id);
+        assert!(
+            refunded > total_cents,
+            "{} should show the honest over-refunded total, got {refunded} for a {total_cents}-cent invoice",
+            d.id
+        );
+        assert!(
+            refunded >= 0 && refunded <= total_cents * 3,
+            "{} shows a nonsensical refunded_cents: {refunded}",
+            d.id
+        );
     }
 
     let cloud_hits = cloud_conflicts(&cloud, "OVER_REFUND").await.len();
     let mut device_hits = 0i64;
     for d in &devices {
-        device_hits += sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM sync_conflicts WHERE kind = 'OVER_REFUND'")
-            .fetch_one(d.pool())
-            .await
-            .unwrap();
+        device_hits += sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM sync_conflicts WHERE kind = 'OVER_REFUND'",
+        )
+        .fetch_one(d.pool())
+        .await
+        .unwrap();
     }
-    assert!(cloud_hits + device_hits as usize >= 1, "no OVER_REFUND conflict was recorded anywhere");
+    assert!(
+        cloud_hits + device_hits as usize >= 1,
+        "no OVER_REFUND conflict was recorded anywhere"
+    );
 
     cloud.db.drop().await.ok();
 }
@@ -963,11 +1162,20 @@ async fn concurrent_duplicate_category_names_are_renamed_and_both_survive() {
 
     let mut devices = vec![Device::new(41, &cloud).await, Device::new(42, &cloud).await];
     for d in &devices {
-        d.sync("POST", "/api/sync/enable", Some(json!({ "tenantId": TENANT, "deviceId": d.id }))).await;
+        d.sync(
+            "POST",
+            "/api/sync/enable",
+            Some(json!({ "tenantId": TENANT, "deviceId": d.id })),
+        )
+        .await;
     }
     // A shared baseline so both devices have something to bootstrap/converge on.
     devices[0]
-        .api("POST", "/api/inventory/categories", Some(json!({ "name": "Baseline", "icon": "box", "color": "gray" })))
+        .api(
+            "POST",
+            "/api/inventory/categories",
+            Some(json!({ "name": "Baseline", "icon": "box", "color": "gray" })),
+        )
         .await;
     push_all(&cloud, &devices[0]).await;
     wait_for_cloud_quiet(&cloud).await;
@@ -977,7 +1185,11 @@ async fn concurrent_duplicate_category_names_are_renamed_and_both_survive() {
     let mut category_keys = Vec::new();
     for d in &devices {
         let cat = d
-            .api("POST", "/api/inventory/categories", Some(json!({ "name": "Accessories", "icon": "tag", "color": "purple" })))
+            .api(
+                "POST",
+                "/api/inventory/categories",
+                Some(json!({ "name": "Accessories", "icon": "tag", "color": "purple" })),
+            )
             .await;
         category_keys.push(cat["data"]["key"].as_str().unwrap().to_string());
     }
@@ -995,14 +1207,19 @@ async fn concurrent_duplicate_category_names_are_renamed_and_both_survive() {
 
     // Both categories survive on every replica, and their names are now distinct.
     for d in &devices {
-        let names: Vec<String> = sqlx::query_scalar("SELECT name FROM categories WHERE key IN (?, ?) ORDER BY key")
-            .bind(&category_keys[0])
-            .bind(&category_keys[1])
-            .fetch_all(d.pool())
-            .await
-            .unwrap();
+        let names: Vec<String> =
+            sqlx::query_scalar("SELECT name FROM categories WHERE key IN (?, ?) ORDER BY key")
+                .bind(&category_keys[0])
+                .bind(&category_keys[1])
+                .fetch_all(d.pool())
+                .await
+                .unwrap();
         assert_eq!(names.len(), 2, "both categories must survive on {}", d.id);
-        assert_ne!(names[0], names[1], "the colliding name must have been renamed apart on {}", d.id);
+        assert_ne!(
+            names[0], names[1],
+            "the colliding name must have been renamed apart on {}",
+            d.id
+        );
     }
     // Fixed bug: which of the two keys kept the original name and which got the
     // device-tag suffix used to be decided independently by whichever replica
@@ -1042,8 +1259,14 @@ async fn concurrent_duplicate_category_names_are_renamed_and_both_survive() {
     }
     let cloud_lower = cloud_name_of(&cloud, lower_key).await;
     let cloud_higher = cloud_name_of(&cloud, higher_key).await;
-    assert_eq!(cloud_lower, "Accessories", "the lower key must keep the original name");
-    assert_ne!(cloud_higher, "Accessories", "the higher key must have been renamed apart");
+    assert_eq!(
+        cloud_lower, "Accessories",
+        "the lower key must keep the original name"
+    );
+    assert_ne!(
+        cloud_higher, "Accessories",
+        "the higher key must have been renamed apart"
+    );
 
     for d in &devices {
         assert_eq!(
@@ -1063,13 +1286,17 @@ async fn concurrent_duplicate_category_names_are_renamed_and_both_survive() {
     let cloud_hits = cloud_conflicts(&cloud, "UNIQUE_VIOLATION").await.len();
     let mut device_hits = 0i64;
     for d in &devices {
-        device_hits += sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM sync_conflicts WHERE kind = 'UNIQUE_VIOLATION'")
-            .fetch_one(d.pool())
-            .await
-            .unwrap();
+        device_hits += sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM sync_conflicts WHERE kind = 'UNIQUE_VIOLATION'",
+        )
+        .fetch_one(d.pool())
+        .await
+        .unwrap();
     }
-    assert!(cloud_hits + device_hits as usize >= 1, "no UNIQUE_VIOLATION conflict was recorded anywhere");
+    assert!(
+        cloud_hits + device_hits as usize >= 1,
+        "no UNIQUE_VIOLATION conflict was recorded anywhere"
+    );
 
     cloud.db.drop().await.ok();
 }
-

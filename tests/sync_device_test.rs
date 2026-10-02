@@ -32,7 +32,11 @@ struct Device {
 impl Device {
     async fn new() -> Device {
         let app = common::spawn_app_sqlite().await;
-        let admin = common::mint_token(&app.config, Some(Role::Admin), roles::default_permissions(Role::Admin));
+        let admin = common::mint_token(
+            &app.config,
+            Some(Role::Admin),
+            roles::default_permissions(Role::Admin),
+        );
         let agent = encode(
             &Header::default(),
             &json!({ "sub": "sync-agent", "scope": "sync", "exp": 9_999_999_999u64 }),
@@ -46,28 +50,54 @@ impl Device {
         self.app.db_handle.as_sqlite().expect("sqlite device")
     }
 
-    async fn call(&self, method: &str, uri: &str, body: Option<Value>, token: Option<&str>) -> (StatusCode, Value) {
-        let mut builder = Request::builder().method(method).uri(uri).header(CONTENT_TYPE, "application/json");
+    async fn call(
+        &self,
+        method: &str,
+        uri: &str,
+        body: Option<Value>,
+        token: Option<&str>,
+    ) -> (StatusCode, Value) {
+        let mut builder = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header(CONTENT_TYPE, "application/json");
         if let Some(t) = token {
             builder = builder.header(AUTHORIZATION, format!("Bearer {t}"));
         }
-        let body = body.map(|b| Body::from(serde_json::to_vec(&b).unwrap())).unwrap_or_else(Body::empty);
-        let response = self.app.router.clone().oneshot(builder.body(body).unwrap()).await.unwrap();
+        let body = body
+            .map(|b| Body::from(serde_json::to_vec(&b).unwrap()))
+            .unwrap_or_else(Body::empty);
+        let response = self
+            .app
+            .router
+            .clone()
+            .oneshot(builder.body(body).unwrap())
+            .await
+            .unwrap();
         let status = response.status();
-        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
     }
 
     /// A normal authenticated API call (as the POS UI would make).
     async fn api(&self, method: &str, uri: &str, body: Option<Value>) -> Value {
-        let (status, value) = self.call(method, uri, body, Some(&self.admin.clone())).await;
+        let (status, value) = self
+            .call(method, uri, body, Some(&self.admin.clone()))
+            .await;
         assert!(status.is_success(), "{method} {uri} -> {status}: {value}");
         value
     }
 
     /// A call to the local sync API with the shell's service token.
     async fn sync(&self, method: &str, uri: &str, body: Option<Value>) -> Value {
-        let (status, value) = self.call(method, uri, body, Some(&self.agent.clone())).await;
+        let (status, value) = self
+            .call(method, uri, body, Some(&self.agent.clone()))
+            .await;
         assert!(status.is_success(), "{method} {uri} -> {status}: {value}");
         value["data"].clone()
     }
@@ -85,7 +115,13 @@ impl Device {
         let mut after = 0i64;
         let mut items = Vec::new();
         loop {
-            let page = self.sync("GET", &format!("/api/sync/outbox?after={after}&limit=500"), None).await;
+            let page = self
+                .sync(
+                    "GET",
+                    &format!("/api/sync/outbox?after={after}&limit=500"),
+                    None,
+                )
+                .await;
             let batch = page["items"].as_array().unwrap().clone();
             if batch.is_empty() {
                 break;
@@ -112,13 +148,24 @@ fn as_pulled(items: &[Value]) -> Vec<Value> {
 
 async fn shop(dev: &Device) -> Value {
     let cat = dev
-        .api("POST", "/api/inventory/categories", Some(json!({ "name": "Electronics", "icon": "devices", "color": "blue" })))
+        .api(
+            "POST",
+            "/api/inventory/categories",
+            Some(json!({ "name": "Electronics", "icon": "devices", "color": "blue" })),
+        )
         .await;
     let category_key = cat["data"]["key"].as_str().unwrap().to_string();
     let sub = dev
-        .api("POST", &format!("/api/inventory/categories/{category_key}/subcategories"), Some(json!({ "name": "Phones" })))
+        .api(
+            "POST",
+            &format!("/api/inventory/categories/{category_key}/subcategories"),
+            Some(json!({ "name": "Phones" })),
+        )
         .await;
-    let subcategory_key = sub["data"]["subcategories"][0]["key"].as_str().unwrap().to_string();
+    let subcategory_key = sub["data"]["subcategories"][0]["key"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let product = dev
         .api(
@@ -194,7 +241,10 @@ async fn shop(dev: &Device) -> Value {
 /// Table contents with write-metadata removed, JSON columns parsed, for
 /// comparing two devices row by row.
 async fn table_rows(pool: &SqlitePool, table: &str) -> Vec<Value> {
-    let rows = sqlx::query(&format!("SELECT * FROM {table} ORDER BY key")).fetch_all(pool).await.unwrap();
+    let rows = sqlx::query(&format!("SELECT * FROM {table} ORDER BY key"))
+        .fetch_all(pool)
+        .await
+        .unwrap();
     rows.iter()
         .map(|row| {
             let mut value = serde_json::to_value(map_sqlite_row_to_document(row)).unwrap();
@@ -214,13 +264,26 @@ async fn table_rows(pool: &SqlitePool, table: &str) -> Vec<Value> {
 }
 
 const SYNCED: &[&str] = &[
-    "categories", "subcategories", "suppliers", "products", "supplier_products", "customers", "purchases",
-    "stock_movements", "invoices", "payments", "credit_notes",
+    "categories",
+    "subcategories",
+    "suppliers",
+    "products",
+    "supplier_products",
+    "customers",
+    "purchases",
+    "stock_movements",
+    "invoices",
+    "payments",
+    "credit_notes",
 ];
 
 async fn assert_same_data(a: &Device, b: &Device) {
     for table in SYNCED {
-        assert_eq!(table_rows(a.pool(), table).await, table_rows(b.pool(), table).await, "table {table} differs");
+        assert_eq!(
+            table_rows(a.pool(), table).await,
+            table_rows(b.pool(), table).await,
+            "table {table} differs"
+        );
     }
 }
 
@@ -236,10 +299,25 @@ async fn local_sync_routes_need_the_service_token() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
     // A normal admin token is not a sync service token.
-    let (status, _) = dev.call("GET", "/api/sync/state", None, Some(&dev.admin.clone())).await;
-    assert!(status == StatusCode::FORBIDDEN || status == StatusCode::UNAUTHORIZED, "{status}");
-    let (status, _) = dev.call("POST", "/api/sync/apply", Some(json!({ "mode": "incremental", "changes": [] })), Some(&dev.admin.clone())).await;
-    assert!(status == StatusCode::FORBIDDEN || status == StatusCode::UNAUTHORIZED, "{status}");
+    let (status, _) = dev
+        .call("GET", "/api/sync/state", None, Some(&dev.admin.clone()))
+        .await;
+    assert!(
+        status == StatusCode::FORBIDDEN || status == StatusCode::UNAUTHORIZED,
+        "{status}"
+    );
+    let (status, _) = dev
+        .call(
+            "POST",
+            "/api/sync/apply",
+            Some(json!({ "mode": "incremental", "changes": [] })),
+            Some(&dev.admin.clone()),
+        )
+        .await;
+    assert!(
+        status == StatusCode::FORBIDDEN || status == StatusCode::UNAUTHORIZED,
+        "{status}"
+    );
 
     let state = dev.state().await;
     assert!(state["deviceId"].as_str().unwrap().starts_with("dev_"));
@@ -256,23 +334,48 @@ async fn local_sync_routes_need_the_service_token() {
 #[tokio::test]
 async fn triggers_are_inert_until_enabled_then_enqueue_and_coalesce() {
     let dev = Device::new().await;
-    dev.api("POST", "/api/inventory/categories", Some(json!({ "name": "Before", "icon": "x", "color": "red" }))).await;
-    assert_eq!(dev.pending_out().await, 0, "capture is off: nothing is queued");
+    dev.api(
+        "POST",
+        "/api/inventory/categories",
+        Some(json!({ "name": "Before", "icon": "x", "color": "red" })),
+    )
+    .await;
+    assert_eq!(
+        dev.pending_out().await,
+        0,
+        "capture is off: nothing is queued"
+    );
 
     // Enabling seeds the outbox with what already exists.
     let enabled = dev.sync("POST", "/api/sync/enable", Some(json!({}))).await;
     assert!(enabled["enqueued"].as_i64().unwrap() >= 1);
     assert_eq!(dev.state().await["captureEnabled"], true);
-    dev.sync("POST", "/api/sync/outbox/ack", Some(json!({ "upToSeq": 1_000_000 }))).await;
+    dev.sync(
+        "POST",
+        "/api/sync/outbox/ack",
+        Some(json!({ "upToSeq": 1_000_000 })),
+    )
+    .await;
     assert_eq!(dev.pending_out().await, 0);
 
-    let cat = dev.api("POST", "/api/inventory/categories", Some(json!({ "name": "After", "icon": "x", "color": "red" }))).await;
+    let cat = dev
+        .api(
+            "POST",
+            "/api/inventory/categories",
+            Some(json!({ "name": "After", "icon": "x", "color": "red" })),
+        )
+        .await;
     let key = cat["data"]["key"].as_str().unwrap().to_string();
     assert_eq!(dev.pending_out().await, 1);
 
     // Two more edits of the same row stay ONE outbox entry.
     for name in ["After 2", "After 3"] {
-        dev.api("PUT", &format!("/api/inventory/categories/{key}"), Some(json!({ "name": name }))).await;
+        dev.api(
+            "PUT",
+            &format!("/api/inventory/categories/{key}"),
+            Some(json!({ "name": name })),
+        )
+        .await;
     }
     let items = dev.drain_outbox().await;
     assert_eq!(items.len(), 1, "coalesced per (resource, key)");
@@ -280,16 +383,28 @@ async fn triggers_are_inert_until_enabled_then_enqueue_and_coalesce() {
     assert_eq!(items[0]["record"]["resource"], "categories");
     assert_eq!(items[0]["record"]["op"], "upsert");
     assert_eq!(items[0]["record"]["payload"]["name"], "After 3");
-    assert!(items[0]["record"]["payload"]["id"].as_str().is_some(), "legacy id travels with the payload");
+    assert!(
+        items[0]["record"]["payload"]["id"].as_str().is_some(),
+        "legacy id travels with the payload"
+    );
 
     // Acknowledged rows are removed; new edits queue again with a higher seq.
     let last = items[0]["seq"].as_i64().unwrap();
-    dev.sync("POST", "/api/sync/outbox/ack", Some(json!({ "upToSeq": last }))).await;
+    dev.sync(
+        "POST",
+        "/api/sync/outbox/ack",
+        Some(json!({ "upToSeq": last })),
+    )
+    .await;
     assert_eq!(dev.pending_out().await, 0);
-    dev.api("DELETE", &format!("/api/inventory/categories/{key}"), None).await;
+    dev.api("DELETE", &format!("/api/inventory/categories/{key}"), None)
+        .await;
     let items = dev.drain_outbox().await;
     assert_eq!(items.len(), 1);
-    assert_eq!(items[0]["record"]["op"], "delete", "soft delete is captured as a tombstone");
+    assert_eq!(
+        items[0]["record"]["op"], "delete",
+        "soft delete is captured as a tombstone"
+    );
     assert!(items[0]["seq"].as_i64().unwrap() > last);
 }
 
@@ -298,9 +413,20 @@ async fn nothing_is_captured_while_a_batch_is_being_applied() {
     let dev = Device::new().await;
     dev.sync("POST", "/api/sync/enable", Some(json!({}))).await;
 
-    sqlx::query("UPDATE sync_state SET applying = 1 WHERE id = 1").execute(dev.pool()).await.unwrap();
-    dev.api("POST", "/api/inventory/categories", Some(json!({ "name": "During apply", "icon": "x", "color": "red" }))).await;
-    sqlx::query("UPDATE sync_state SET applying = 0 WHERE id = 1").execute(dev.pool()).await.unwrap();
+    sqlx::query("UPDATE sync_state SET applying = 1 WHERE id = 1")
+        .execute(dev.pool())
+        .await
+        .unwrap();
+    dev.api(
+        "POST",
+        "/api/inventory/categories",
+        Some(json!({ "name": "During apply", "icon": "x", "color": "red" })),
+    )
+    .await;
+    sqlx::query("UPDATE sync_state SET applying = 0 WHERE id = 1")
+        .execute(dev.pool())
+        .await
+        .unwrap();
     assert_eq!(dev.pending_out().await, 0);
 }
 
@@ -317,20 +443,26 @@ async fn opening_balance_migration_turns_stock_into_a_ledger_and_is_idempotent()
     .await
     .unwrap();
 
-    let first = simplebash_pos_backend::modules::sync::state::migrate_opening_balances(dev.pool()).await.unwrap();
+    let first = simplebash_pos_backend::modules::sync::state::migrate_opening_balances(dev.pool())
+        .await
+        .unwrap();
     assert_eq!(first, 1);
     let ledger: i64 = sqlx::query_scalar("SELECT SUM(quantity_delta) FROM stock_movements WHERE product_id = '64b000000000000000000001'")
         .fetch_one(dev.pool())
         .await
         .unwrap();
     assert_eq!(ledger, 7);
-    let kind: String = sqlx::query_scalar("SELECT movement_type FROM stock_movements WHERE key = 'sm_open_prod_legacy'")
-        .fetch_one(dev.pool())
-        .await
-        .unwrap();
+    let kind: String = sqlx::query_scalar(
+        "SELECT movement_type FROM stock_movements WHERE key = 'sm_open_prod_legacy'",
+    )
+    .fetch_one(dev.pool())
+    .await
+    .unwrap();
     assert_eq!(kind, "opening_balance");
 
-    let second = simplebash_pos_backend::modules::sync::state::migrate_opening_balances(dev.pool()).await.unwrap();
+    let second = simplebash_pos_backend::modules::sync::state::migrate_opening_balances(dev.pool())
+        .await
+        .unwrap();
     assert_eq!(second, 0, "a second run creates nothing");
 }
 
@@ -341,15 +473,33 @@ async fn creating_and_editing_stock_always_leaves_a_movement_behind() {
     let id = keys["productId"].as_str().unwrap();
 
     let ledger = |pool: SqlitePool, id: String| async move {
-        let stock: i64 = sqlx::query_scalar("SELECT stock_quantity FROM products WHERE id = ?").bind(&id).fetch_one(&pool).await.unwrap();
-        let sum: i64 = sqlx::query_scalar("SELECT COALESCE(SUM(quantity_delta), 0) FROM stock_movements WHERE product_id = ?").bind(&id).fetch_one(&pool).await.unwrap();
+        let stock: i64 = sqlx::query_scalar("SELECT stock_quantity FROM products WHERE id = ?")
+            .bind(&id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let sum: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(SUM(quantity_delta), 0) FROM stock_movements WHERE product_id = ?",
+        )
+        .bind(&id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         (stock, sum)
     };
     let (stock, sum) = ledger(dev.pool().clone(), id.to_string()).await;
-    assert_eq!(stock, sum, "created + purchased + sold + returned all explained by movements");
+    assert_eq!(
+        stock, sum,
+        "created + purchased + sold + returned all explained by movements"
+    );
 
     // Editing the quantity on the product records a movement instead of overwriting.
-    dev.api("PUT", &format!("/api/inventory/products/{id}"), Some(json!({ "stockQuantity": stock + 5 }))).await;
+    dev.api(
+        "PUT",
+        &format!("/api/inventory/products/{id}"),
+        Some(json!({ "stockQuantity": stock + 5 })),
+    )
+    .await;
     let (stock_after, sum_after) = ledger(dev.pool().clone(), id.to_string()).await;
     assert_eq!(stock_after, stock + 5);
     assert_eq!(stock_after, sum_after);
@@ -365,27 +515,58 @@ async fn a_device_reproduces_another_devices_data_without_echoing_it_back() {
     let b = Device::new().await;
     a.sync("POST", "/api/sync/enable", Some(json!({}))).await;
     b.sync("POST", "/api/sync/enable", Some(json!({}))).await;
-    b.sync("POST", "/api/sync/outbox/ack", Some(json!({ "upToSeq": 1_000_000 }))).await;
+    b.sync(
+        "POST",
+        "/api/sync/outbox/ack",
+        Some(json!({ "upToSeq": 1_000_000 })),
+    )
+    .await;
 
     shop(&a).await;
     let changes = as_pulled(&a.drain_outbox().await);
-    assert!(changes.len() >= 10, "a whole shop was captured: {}", changes.len());
+    assert!(
+        changes.len() >= 10,
+        "a whole shop was captured: {}",
+        changes.len()
+    );
 
-    let applied = b.sync("POST", "/api/sync/apply", Some(json!({ "mode": "incremental", "changes": changes, "advanceCursorTo": 42 }))).await;
+    let applied = b
+        .sync(
+            "POST",
+            "/api/sync/apply",
+            Some(json!({ "mode": "incremental", "changes": changes, "advanceCursorTo": 42 })),
+        )
+        .await;
     assert_eq!(applied["conflicts"], 0, "{applied}");
     assert_eq!(applied["cursor"], 42);
     assert!(applied["applied"].as_u64().unwrap() >= 10);
 
     assert_same_data(&a, &b).await;
-    assert_eq!(b.pending_out().await, 0, "applied changes never echo into the outbox");
+    assert_eq!(
+        b.pending_out().await,
+        0,
+        "applied changes never echo into the outbox"
+    );
     assert_eq!(b.state().await["cloudCursor"], 42);
 
     // Stock, balances and refund totals are ledger truth on the receiver.
-    let stock: i64 = sqlx::query_scalar("SELECT stock_quantity FROM products").fetch_one(b.pool()).await.unwrap();
-    let ledger: i64 = sqlx::query_scalar("SELECT SUM(quantity_delta) FROM stock_movements").fetch_one(b.pool()).await.unwrap();
+    let stock: i64 = sqlx::query_scalar("SELECT stock_quantity FROM products")
+        .fetch_one(b.pool())
+        .await
+        .unwrap();
+    let ledger: i64 = sqlx::query_scalar("SELECT SUM(quantity_delta) FROM stock_movements")
+        .fetch_one(b.pool())
+        .await
+        .unwrap();
     assert_eq!(stock, ledger);
-    let refunded: i64 = sqlx::query_scalar("SELECT refunded_cents FROM invoices").fetch_one(b.pool()).await.unwrap();
-    assert!(refunded > 0, "the credit note's refund was recomputed onto the invoice");
+    let refunded: i64 = sqlx::query_scalar("SELECT refunded_cents FROM invoices")
+        .fetch_one(b.pool())
+        .await
+        .unwrap();
+    assert!(
+        refunded > 0,
+        "the credit note's refund was recomputed onto the invoice"
+    );
 }
 
 #[tokio::test]
@@ -407,9 +588,16 @@ async fn applying_the_same_batch_twice_changes_nothing() {
     };
     let second = b.sync("POST", "/api/sync/apply", Some(body)).await;
     assert_eq!(second["applied"], 0, "nothing new: {second}");
-    assert_eq!(second["duplicates"], first["applied"], "every change is recognised as already applied");
+    assert_eq!(
+        second["duplicates"], first["applied"],
+        "every change is recognised as already applied"
+    );
     for (i, t) in SYNCED.iter().enumerate() {
-        assert_eq!(before[i], table_rows(b.pool(), t).await, "table {t} changed on re-apply");
+        assert_eq!(
+            before[i],
+            table_rows(b.pool(), t).await,
+            "table {t} changed on re-apply"
+        );
     }
 }
 
@@ -435,7 +623,12 @@ async fn derived_columns_are_never_taken_from_a_payload() {
             _ => {}
         }
     }
-    b.sync("POST", "/api/sync/apply", Some(json!({ "mode": "incremental", "changes": changes }))).await;
+    b.sync(
+        "POST",
+        "/api/sync/apply",
+        Some(json!({ "mode": "incremental", "changes": changes })),
+    )
+    .await;
     assert_same_data(&a, &b).await;
 }
 
@@ -444,30 +637,75 @@ async fn recompute_restores_customer_balances_and_invoice_totals_from_the_ledger
     let dev = Device::new().await;
     let keys = shop(&dev).await;
 
-    let purchases: i64 = sqlx::query_scalar("SELECT total_purchases_cents FROM customers").fetch_one(dev.pool()).await.unwrap();
-    let refunded: i64 = sqlx::query_scalar("SELECT refunded_cents FROM invoices").fetch_one(dev.pool()).await.unwrap();
+    let purchases: i64 = sqlx::query_scalar("SELECT total_purchases_cents FROM customers")
+        .fetch_one(dev.pool())
+        .await
+        .unwrap();
+    let refunded: i64 = sqlx::query_scalar("SELECT refunded_cents FROM invoices")
+        .fetch_one(dev.pool())
+        .await
+        .unwrap();
 
-    sqlx::query("UPDATE customers SET total_purchases_cents = 1, outstanding_balance_cents = 2").execute(dev.pool()).await.unwrap();
-    sqlx::query("UPDATE invoices SET refunded_cents = 0, credit_note_count = 0").execute(dev.pool()).await.unwrap();
-    sqlx::query("UPDATE products SET stock_quantity = 0").execute(dev.pool()).await.unwrap();
+    sqlx::query("UPDATE customers SET total_purchases_cents = 1, outstanding_balance_cents = 2")
+        .execute(dev.pool())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE invoices SET refunded_cents = 0, credit_note_count = 0")
+        .execute(dev.pool())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE products SET stock_quantity = 0")
+        .execute(dev.pool())
+        .await
+        .unwrap();
 
     let mut scope = DerivedScope::default();
-    scope.customer_keys.insert(keys["customerKey"].as_str().unwrap().to_string());
-    scope.invoice_keys.insert(keys["invoiceKey"].as_str().unwrap().to_string());
-    scope.product_ids.insert(keys["productId"].as_str().unwrap().to_string());
+    scope
+        .customer_keys
+        .insert(keys["customerKey"].as_str().unwrap().to_string());
+    scope
+        .invoice_keys
+        .insert(keys["invoiceKey"].as_str().unwrap().to_string());
+    scope
+        .product_ids
+        .insert(keys["productId"].as_str().unwrap().to_string());
     let mut conn = dev.pool().acquire().await.unwrap();
     let conflicts = derived_sqlite::recompute(&mut conn, &scope).await.unwrap();
     assert!(conflicts.is_empty(), "{conflicts:?}");
     drop(conn);
 
-    let again: i64 = sqlx::query_scalar("SELECT total_purchases_cents FROM customers").fetch_one(dev.pool()).await.unwrap();
+    let again: i64 = sqlx::query_scalar("SELECT total_purchases_cents FROM customers")
+        .fetch_one(dev.pool())
+        .await
+        .unwrap();
     assert_eq!(again, purchases);
-    let outstanding: i64 = sqlx::query_scalar("SELECT outstanding_balance_cents FROM customers").fetch_one(dev.pool()).await.unwrap();
+    let outstanding: i64 = sqlx::query_scalar("SELECT outstanding_balance_cents FROM customers")
+        .fetch_one(dev.pool())
+        .await
+        .unwrap();
     assert_eq!(outstanding, 0, "a fully paid cash sale leaves no balance");
-    assert_eq!(sqlx::query_scalar::<_, i64>("SELECT refunded_cents FROM invoices").fetch_one(dev.pool()).await.unwrap(), refunded);
-    assert_eq!(sqlx::query_scalar::<_, i64>("SELECT credit_note_count FROM invoices").fetch_one(dev.pool()).await.unwrap(), 1);
-    let stock: i64 = sqlx::query_scalar("SELECT stock_quantity FROM products").fetch_one(dev.pool()).await.unwrap();
-    let ledger: i64 = sqlx::query_scalar("SELECT SUM(quantity_delta) FROM stock_movements").fetch_one(dev.pool()).await.unwrap();
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT refunded_cents FROM invoices")
+            .fetch_one(dev.pool())
+            .await
+            .unwrap(),
+        refunded
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT credit_note_count FROM invoices")
+            .fetch_one(dev.pool())
+            .await
+            .unwrap(),
+        1
+    );
+    let stock: i64 = sqlx::query_scalar("SELECT stock_quantity FROM products")
+        .fetch_one(dev.pool())
+        .await
+        .unwrap();
+    let ledger: i64 = sqlx::query_scalar("SELECT SUM(quantity_delta) FROM stock_movements")
+        .fetch_one(dev.pool())
+        .await
+        .unwrap();
     assert_eq!(stock, ledger);
 }
 
@@ -478,35 +716,84 @@ async fn a_newer_edit_wins_and_the_losing_edit_is_kept_for_review() {
     a.sync("POST", "/api/sync/enable", Some(json!({}))).await;
     b.sync("POST", "/api/sync/enable", Some(json!({}))).await;
     let keys = shop(&a).await;
-    b.sync("POST", "/api/sync/apply", Some(json!({ "mode": "incremental", "changes": as_pulled(&a.drain_outbox().await) }))).await;
-    a.sync("POST", "/api/sync/outbox/ack", Some(json!({ "upToSeq": 1_000_000 }))).await;
-    b.sync("POST", "/api/sync/outbox/ack", Some(json!({ "upToSeq": 1_000_000 }))).await;
+    b.sync(
+        "POST",
+        "/api/sync/apply",
+        Some(json!({ "mode": "incremental", "changes": as_pulled(&a.drain_outbox().await) })),
+    )
+    .await;
+    a.sync(
+        "POST",
+        "/api/sync/outbox/ack",
+        Some(json!({ "upToSeq": 1_000_000 })),
+    )
+    .await;
+    b.sync(
+        "POST",
+        "/api/sync/outbox/ack",
+        Some(json!({ "upToSeq": 1_000_000 })),
+    )
+    .await;
 
     // Both devices rename the same product; B's edit is later.
     let id = keys["productId"].as_str().unwrap();
-    a.api("PUT", &format!("/api/inventory/products/{id}"), Some(json!({ "name": "Phone (A)" }))).await;
+    a.api(
+        "PUT",
+        &format!("/api/inventory/products/{id}"),
+        Some(json!({ "name": "Phone (A)" })),
+    )
+    .await;
     tokio::time::sleep(std::time::Duration::from_millis(30)).await;
-    b.api("PUT", &format!("/api/inventory/products/{id}"), Some(json!({ "name": "Phone (B)" }))).await;
+    b.api(
+        "PUT",
+        &format!("/api/inventory/products/{id}"),
+        Some(json!({ "name": "Phone (B)" })),
+    )
+    .await;
 
     let from_a = as_pulled(&a.drain_outbox().await);
     let from_b = as_pulled(&b.drain_outbox().await);
 
     // A receives B's newer edit: B wins on both replicas regardless of order.
-    a.sync("POST", "/api/sync/apply", Some(json!({ "mode": "incremental", "changes": from_b }))).await;
-    let applied = b.sync("POST", "/api/sync/apply", Some(json!({ "mode": "incremental", "changes": from_a }))).await;
+    a.sync(
+        "POST",
+        "/api/sync/apply",
+        Some(json!({ "mode": "incremental", "changes": from_b })),
+    )
+    .await;
+    let applied = b
+        .sync(
+            "POST",
+            "/api/sync/apply",
+            Some(json!({ "mode": "incremental", "changes": from_a })),
+        )
+        .await;
     assert_eq!(applied["applied"], 0, "A's older edit lost on B: {applied}");
     for dev in [&a, &b] {
-        let name: String = sqlx::query_scalar("SELECT name FROM products").fetch_one(dev.pool()).await.unwrap();
+        let name: String = sqlx::query_scalar("SELECT name FROM products")
+            .fetch_one(dev.pool())
+            .await
+            .unwrap();
         assert_eq!(name, "Phone (B)");
     }
 
     // The loser is recorded, listed, and can be resolved.
     let conflicts = b.sync("GET", "/api/sync/conflicts", None).await;
-    let conflict = conflicts.as_array().unwrap().iter().find(|c| c["kind"] == "LWW_LOSER").expect("LWW loser recorded");
+    let conflict = conflicts
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["kind"] == "LWW_LOSER")
+        .expect("LWW loser recorded");
     assert_eq!(conflict["detail"]["losingPayload"]["name"], "Phone (A)");
     assert_eq!(b.state().await["conflictsOpen"].as_i64().unwrap(), 1);
     let key = conflict["key"].as_str().unwrap();
-    b.sync("POST", &format!("/api/sync/conflicts/{key}/resolve"), Some(json!({ "resolution": "kept newer edit" }))).await;
+    b.sync(
+        "POST",
+        &format!("/api/sync/conflicts/{key}/resolve"),
+        Some(json!({ "resolution": "kept newer edit" })),
+    )
+    .await;
     assert_eq!(b.state().await["conflictsOpen"].as_i64().unwrap(), 0);
 }
 
@@ -519,14 +806,33 @@ async fn bootstrap_replaces_local_data_and_only_the_first_page_wipes() {
     let (first_page, second_page) = changes.split_at(changes.len() / 2);
 
     let b = Device::new().await;
-    b.api("POST", "/api/inventory/categories", Some(json!({ "name": "Local demo data", "icon": "x", "color": "red" }))).await;
+    b.api(
+        "POST",
+        "/api/inventory/categories",
+        Some(json!({ "name": "Local demo data", "icon": "x", "color": "red" })),
+    )
+    .await;
 
-    b.sync("POST", "/api/sync/apply", Some(json!({ "mode": "bootstrap", "changes": first_page }))).await;
+    b.sync(
+        "POST",
+        "/api/sync/apply",
+        Some(json!({ "mode": "bootstrap", "changes": first_page })),
+    )
+    .await;
     assert_eq!(b.state().await["bootstrapActive"], true);
-    let demo: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM categories WHERE name = 'Local demo data'").fetch_one(b.pool()).await.unwrap();
+    let demo: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM categories WHERE name = 'Local demo data'")
+            .fetch_one(b.pool())
+            .await
+            .unwrap();
     assert_eq!(demo, 0, "the first bootstrap page wiped the previous data");
 
-    b.sync("POST", "/api/sync/apply", Some(json!({ "mode": "bootstrap", "changes": second_page, "advanceCursorTo": 7 }))).await;
+    b.sync(
+        "POST",
+        "/api/sync/apply",
+        Some(json!({ "mode": "bootstrap", "changes": second_page, "advanceCursorTo": 7 })),
+    )
+    .await;
     let state = b.state().await;
     assert_eq!(state["bootstrapActive"], false);
     assert_eq!(state["cloudCursor"], 7);
@@ -541,13 +847,23 @@ async fn bootstrap_replaces_local_data_and_only_the_first_page_wipes() {
 async fn linked_devices_draw_numbers_from_blocks_then_a_unique_fallback() {
     use simplebash_pos_backend::modules::sequences::service::reserve_sequence;
     let dev = Device::new().await;
-    let single = || ReserveSequenceRequest { block_size: Some(1), device_id: None };
+    let single = || ReserveSequenceRequest {
+        block_size: Some(1),
+        device_id: None,
+    };
 
     // Unlinked: the ordinary local counter.
-    let plain = reserve_sequence(&dev.app.db_handle, "invoice".to_string(), single()).await.unwrap();
+    let plain = reserve_sequence(&dev.app.db_handle, "invoice".to_string(), single())
+        .await
+        .unwrap();
     assert_eq!((plain.prefix.as_str(), plain.start), ("INV-", 1));
 
-    dev.sync("POST", "/api/sync/enable", Some(json!({ "deviceId": "dev_zzzz0000aaaa1111" }))).await;
+    dev.sync(
+        "POST",
+        "/api/sync/enable",
+        Some(json!({ "deviceId": "dev_zzzz0000aaaa1111" })),
+    )
+    .await;
     assert_eq!(dev.state().await["deviceId"], "dev_zzzz0000aaaa1111");
     dev.sync(
         "POST",
@@ -560,18 +876,28 @@ async fn linked_devices_draw_numbers_from_blocks_then_a_unique_fallback() {
     assert_eq!(blocks[0]["remaining"], 2);
     assert_eq!(blocks[0]["blockSize"], 2);
 
-    let n1 = reserve_sequence(&dev.app.db_handle, "invoice".to_string(), single()).await.unwrap();
-    let n2 = reserve_sequence(&dev.app.db_handle, "invoices".to_string(), single()).await.unwrap();
+    let n1 = reserve_sequence(&dev.app.db_handle, "invoice".to_string(), single())
+        .await
+        .unwrap();
+    let n2 = reserve_sequence(&dev.app.db_handle, "invoices".to_string(), single())
+        .await
+        .unwrap();
     assert_eq!((n1.prefix.as_str(), n1.start), ("INV-", 500));
     assert_eq!((n2.prefix.as_str(), n2.start), ("INV-", 501));
     assert_eq!(dev.state().await["numberBlocks"][0]["remaining"], 0);
 
     // Block exhausted: per-device fallback series, never colliding with cloud numbers.
-    let f1 = reserve_sequence(&dev.app.db_handle, "invoice".to_string(), single()).await.unwrap();
-    let f2 = reserve_sequence(&dev.app.db_handle, "invoice".to_string(), single()).await.unwrap();
+    let f1 = reserve_sequence(&dev.app.db_handle, "invoice".to_string(), single())
+        .await
+        .unwrap();
+    let f2 = reserve_sequence(&dev.app.db_handle, "invoice".to_string(), single())
+        .await
+        .unwrap();
     assert_eq!(f1.prefix, "INV-Dzzzz-");
     assert_eq!((f1.start, f2.start), (1, 2));
-    let rendered = |r: &simplebash_pos_backend::domain::sequences::SequenceReservationResponse| format!("{}{:0w$}", r.prefix, r.start, w = r.padding);
+    let rendered = |r: &simplebash_pos_backend::domain::sequences::SequenceReservationResponse| {
+        format!("{}{:0w$}", r.prefix, r.start, w = r.padding)
+    };
     let all = [rendered(&n1), rendered(&n2), rendered(&f1), rendered(&f2)];
     let unique: std::collections::HashSet<_> = all.iter().collect();
     assert_eq!(unique.len(), all.len(), "{all:?}");
@@ -589,16 +915,32 @@ async fn linked_devices_draw_skus_and_barcodes_from_blocks_then_a_unique_fallbac
     use simplebash_pos_backend::modules::sequences::service::reserve_sequence;
 
     let dev = Device::new().await;
-    dev.sync("POST", "/api/sync/enable", Some(json!({ "deviceId": "dev_zzzz0000aaaa1111" }))).await;
+    dev.sync(
+        "POST",
+        "/api/sync/enable",
+        Some(json!({ "deviceId": "dev_zzzz0000aaaa1111" })),
+    )
+    .await;
 
     let cat = dev
-        .api("POST", "/api/inventory/categories", Some(json!({ "name": "Phone Repairs", "icon": "x", "color": "red" })))
+        .api(
+            "POST",
+            "/api/inventory/categories",
+            Some(json!({ "name": "Phone Repairs", "icon": "x", "color": "red" })),
+        )
         .await;
     let category_key = cat["data"]["key"].as_str().unwrap().to_string();
     let sub = dev
-        .api("POST", &format!("/api/inventory/categories/{category_key}/subcategories"), Some(json!({ "name": "Screens" })))
+        .api(
+            "POST",
+            &format!("/api/inventory/categories/{category_key}/subcategories"),
+            Some(json!({ "name": "Screens" })),
+        )
         .await;
-    let subcategory_key = sub["data"]["subcategories"][0]["key"].as_str().unwrap().to_string();
+    let subcategory_key = sub["data"]["subcategories"][0]["key"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let new_product = |name: &str| {
         json!({
@@ -612,11 +954,22 @@ async fn linked_devices_draw_skus_and_barcodes_from_blocks_then_a_unique_fallbac
     let sku_block = reserve_sequence(
         &dev.app.db_handle,
         "sku:PHO-SCR".to_string(),
-        ReserveSequenceRequest { block_size: Some(2), device_id: None },
+        ReserveSequenceRequest {
+            block_size: Some(2),
+            device_id: None,
+        },
     )
     .await
     .unwrap();
-    assert_eq!((sku_block.prefix.as_str(), sku_block.padding, sku_block.start, sku_block.end), ("PHO-SCR-", 4, 1, 2));
+    assert_eq!(
+        (
+            sku_block.prefix.as_str(),
+            sku_block.padding,
+            sku_block.start,
+            sku_block.end
+        ),
+        ("PHO-SCR-", 4, 1, 2)
+    );
     dev.sync(
         "POST",
         "/api/sync/blocks",
@@ -628,7 +981,10 @@ async fn linked_devices_draw_skus_and_barcodes_from_blocks_then_a_unique_fallbac
     let barcode_block = reserve_sequence(
         &dev.app.db_handle,
         "barcode".to_string(),
-        ReserveSequenceRequest { block_size: Some(2), device_id: None },
+        ReserveSequenceRequest {
+            block_size: Some(2),
+            device_id: None,
+        },
     )
     .await
     .unwrap();
@@ -643,17 +999,41 @@ async fn linked_devices_draw_skus_and_barcodes_from_blocks_then_a_unique_fallbac
     let extract_barcode_seq = |barcode: &str| -> i64 { barcode[2..12].parse().unwrap() };
 
     // Products 1 and 2 draw the block, in order, exactly once each.
-    let p1 = dev.api("POST", "/api/inventory/products", Some(new_product("Screen A"))).await;
+    let p1 = dev
+        .api(
+            "POST",
+            "/api/inventory/products",
+            Some(new_product("Screen A")),
+        )
+        .await;
     assert_eq!(p1["data"]["sku"], "PHO-SCR-0001");
-    assert_eq!(extract_barcode_seq(p1["data"]["barcode"].as_str().unwrap()), 1);
+    assert_eq!(
+        extract_barcode_seq(p1["data"]["barcode"].as_str().unwrap()),
+        1
+    );
 
-    let p2 = dev.api("POST", "/api/inventory/products", Some(new_product("Screen B"))).await;
+    let p2 = dev
+        .api(
+            "POST",
+            "/api/inventory/products",
+            Some(new_product("Screen B")),
+        )
+        .await;
     assert_eq!(p2["data"]["sku"], "PHO-SCR-0002");
-    assert_eq!(extract_barcode_seq(p2["data"]["barcode"].as_str().unwrap()), 2);
+    assert_eq!(
+        extract_barcode_seq(p2["data"]["barcode"].as_str().unwrap()),
+        2
+    );
 
     // Both blocks are exhausted now - a third product must still get fresh,
     // never-seen-before numbers instead of erroring or repeating 1/2.
-    let p3 = dev.api("POST", "/api/inventory/products", Some(new_product("Screen C"))).await;
+    let p3 = dev
+        .api(
+            "POST",
+            "/api/inventory/products",
+            Some(new_product("Screen C")),
+        )
+        .await;
     let sku3 = p3["data"]["sku"].as_str().unwrap().to_string();
     let barcode3_seq = extract_barcode_seq(p3["data"]["barcode"].as_str().unwrap());
 
@@ -666,10 +1046,17 @@ async fn linked_devices_draw_skus_and_barcodes_from_blocks_then_a_unique_fallbac
     // digits of the 10-digit sequence field are the device's tag, so a
     // fallback sequence is always >= 10,000,000 - far outside the 1/2 the
     // block itself ever handed out, so it can't collide with them.
-    assert!(barcode3_seq >= 10_000_000, "expected a device-tagged fallback sequence, got {barcode3_seq}");
+    assert!(
+        barcode3_seq >= 10_000_000,
+        "expected a device-tagged fallback sequence, got {barcode3_seq}"
+    );
 
     // Everything actually minted this run is distinct.
-    let skus = [p1["data"]["sku"].as_str().unwrap(), p2["data"]["sku"].as_str().unwrap(), sku3.as_str()];
+    let skus = [
+        p1["data"]["sku"].as_str().unwrap(),
+        p2["data"]["sku"].as_str().unwrap(),
+        sku3.as_str(),
+    ];
     let unique_skus: std::collections::HashSet<_> = skus.iter().collect();
     assert_eq!(unique_skus.len(), skus.len(), "{skus:?}");
     let barcodes = [1i64, 2, barcode3_seq];
@@ -683,28 +1070,47 @@ async fn linked_devices_draw_skus_and_barcodes_from_blocks_then_a_unique_fallbac
 #[tokio::test]
 async fn sku_prefixes_lists_the_distinct_local_catalog_prefixes() {
     let dev = Device::new().await;
-    assert_eq!(dev.sync("GET", "/api/sync/sku-prefixes", None).await["prefixes"], json!([]));
+    assert_eq!(
+        dev.sync("GET", "/api/sync/sku-prefixes", None).await["prefixes"],
+        json!([])
+    );
 
     let mut category_keys = std::collections::HashMap::new();
-    for (category, subcategory) in [("Phone Repairs", "Screens"), ("Phone Repairs", "Batteries"), ("Electronics", "Cables")] {
+    for (category, subcategory) in [
+        ("Phone Repairs", "Screens"),
+        ("Phone Repairs", "Batteries"),
+        ("Electronics", "Cables"),
+    ] {
         let category_key = match category_keys.get(category) {
             Some(key) => key,
             None => {
-                let cat = dev.api("POST", "/api/inventory/categories", Some(json!({ "name": category, "icon": "x", "color": "red" }))).await;
+                let cat = dev
+                    .api(
+                        "POST",
+                        "/api/inventory/categories",
+                        Some(json!({ "name": category, "icon": "x", "color": "red" })),
+                    )
+                    .await;
                 let key = cat["data"]["key"].as_str().unwrap().to_string();
                 category_keys.insert(category.to_string(), key);
                 category_keys.get(category).unwrap()
             }
         };
-        dev.api("POST", &format!("/api/inventory/categories/{category_key}/subcategories"), Some(json!({ "name": subcategory }))).await;
+        dev.api(
+            "POST",
+            &format!("/api/inventory/categories/{category_key}/subcategories"),
+            Some(json!({ "name": subcategory })),
+        )
+        .await;
     }
 
-    let mut prefixes: Vec<String> = dev.sync("GET", "/api/sync/sku-prefixes", None).await["prefixes"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|v| v.as_str().unwrap().to_string())
-        .collect();
+    let mut prefixes: Vec<String> =
+        dev.sync("GET", "/api/sync/sku-prefixes", None).await["prefixes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
     prefixes.sort();
     assert_eq!(prefixes, vec!["ELE-CAB", "PHO-BAT", "PHO-SCR"]);
 }
@@ -713,12 +1119,24 @@ async fn sku_prefixes_lists_the_distinct_local_catalog_prefixes() {
 async fn backups_never_carry_sync_bookkeeping() {
     let dev = Device::new().await;
     dev.sync("POST", "/api/sync/enable", Some(json!({}))).await;
-    dev.api("POST", "/api/inventory/categories", Some(json!({ "name": "Backed up", "icon": "x", "color": "red" }))).await;
+    dev.api(
+        "POST",
+        "/api/inventory/categories",
+        Some(json!({ "name": "Backed up", "icon": "x", "color": "red" })),
+    )
+    .await;
 
     let export = dev.api("POST", "/api/backup/export", Some(json!({}))).await;
-    let tables = export["data"]["tables"].as_object().or_else(|| export["data"].as_object()).expect("export lists tables");
+    let tables = export["data"]["tables"]
+        .as_object()
+        .or_else(|| export["data"].as_object())
+        .expect("export lists tables");
     assert!(tables.contains_key("categories"));
-    assert!(tables.keys().all(|t| !t.starts_with("sync_")), "sync tables leaked into the backup: {:?}", tables.keys().collect::<Vec<_>>());
+    assert!(
+        tables.keys().all(|t| !t.starts_with("sync_")),
+        "sync tables leaked into the backup: {:?}",
+        tables.keys().collect::<Vec<_>>()
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -737,7 +1155,14 @@ async fn create_cashier(dev: &Device, email: &str, password: &str) -> (String, S
 }
 
 async fn login_status(dev: &Device, email: &str, password: &str) -> StatusCode {
-    dev.call("POST", "/api/auth/login", Some(json!({ "email": email, "password": password })), None).await.0
+    dev.call(
+        "POST",
+        "/api/auth/login",
+        Some(json!({ "email": email, "password": password })),
+        None,
+    )
+    .await
+    .0
 }
 
 /// Two enabled devices with empty outboxes.
@@ -746,15 +1171,30 @@ async fn linked_pair() -> (Device, Device) {
     let b = Device::new().await;
     for dev in [&a, &b] {
         dev.sync("POST", "/api/sync/enable", Some(json!({}))).await;
-        dev.sync("POST", "/api/sync/outbox/ack", Some(json!({ "upToSeq": 1_000_000 }))).await;
+        dev.sync(
+            "POST",
+            "/api/sync/outbox/ack",
+            Some(json!({ "upToSeq": 1_000_000 })),
+        )
+        .await;
     }
     (a, b)
 }
 
 async fn hand_over(from: &Device, to: &Device) -> Value {
     let changes = as_pulled(&from.drain_outbox().await);
-    from.sync("POST", "/api/sync/outbox/ack", Some(json!({ "upToSeq": 1_000_000 }))).await;
-    to.sync("POST", "/api/sync/apply", Some(json!({ "mode": "incremental", "changes": changes }))).await
+    from.sync(
+        "POST",
+        "/api/sync/outbox/ack",
+        Some(json!({ "upToSeq": 1_000_000 })),
+    )
+    .await;
+    to.sync(
+        "POST",
+        "/api/sync/apply",
+        Some(json!({ "mode": "incremental", "changes": changes })),
+    )
+    .await
 }
 
 #[tokio::test]
@@ -763,31 +1203,50 @@ async fn a_cashier_created_on_one_device_can_log_in_on_another() {
     let (id, key) = create_cashier(&a, "cash1@shop.test", "cashier-pass-1").await;
 
     let changes = as_pulled(&a.drain_outbox().await);
-    let record = changes.iter().find(|c| c["resource"] == "users" && c["key"] == key.as_str()).expect("the user is captured");
+    let record = changes
+        .iter()
+        .find(|c| c["resource"] == "users" && c["key"] == key.as_str())
+        .expect("the user is captured");
     assert!(
-        record["payload"]["passwordHash"].as_str().unwrap().starts_with("$argon2"),
+        record["payload"]["passwordHash"]
+            .as_str()
+            .unwrap()
+            .starts_with("$argon2"),
         "the sync record carries the hash so the login works elsewhere"
     );
-    b.sync("POST", "/api/sync/apply", Some(json!({ "mode": "incremental", "changes": changes }))).await;
+    b.sync(
+        "POST",
+        "/api/sync/apply",
+        Some(json!({ "mode": "incremental", "changes": changes })),
+    )
+    .await;
 
     // Same row on both devices: same legacy id (login tokens carry it) and same hash.
     let row = |dev: &Device| {
         let pool = dev.pool().clone();
         let key = key.clone();
         async move {
-            sqlx::query_as::<_, (String, String, String)>("SELECT id, password_hash, role FROM users WHERE key = ?")
-                .bind(key)
-                .fetch_one(&pool)
-                .await
-                .unwrap()
+            sqlx::query_as::<_, (String, String, String)>(
+                "SELECT id, password_hash, role FROM users WHERE key = ?",
+            )
+            .bind(key)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
         }
     };
     let (row_a, row_b) = (row(&a).await, row(&b).await);
     assert_eq!(row_a, row_b);
     assert_eq!(row_b.0, id);
 
-    assert_eq!(login_status(&b, "cash1@shop.test", "cashier-pass-1").await, StatusCode::OK);
-    assert_eq!(login_status(&b, "cash1@shop.test", "wrong-password").await, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        login_status(&b, "cash1@shop.test", "cashier-pass-1").await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        login_status(&b, "cash1@shop.test", "wrong-password").await,
+        StatusCode::UNAUTHORIZED
+    );
     // Applying created no echo: B has nothing to send back.
     assert_eq!(b.pending_out().await, 0);
 }
@@ -797,21 +1256,44 @@ async fn deactivating_and_deleting_a_cashier_propagates() {
     let (a, b) = linked_pair().await;
     let (id, key) = create_cashier(&a, "cash2@shop.test", "cashier-pass-2").await;
     hand_over(&a, &b).await;
-    assert_eq!(login_status(&b, "cash2@shop.test", "cashier-pass-2").await, StatusCode::OK);
+    assert_eq!(
+        login_status(&b, "cash2@shop.test", "cashier-pass-2").await,
+        StatusCode::OK
+    );
 
     tokio::time::sleep(std::time::Duration::from_millis(30)).await;
-    a.api("PATCH", &format!("/api/users/{id}"), Some(json!({ "isActive": false }))).await;
+    a.api(
+        "PATCH",
+        &format!("/api/users/{id}"),
+        Some(json!({ "isActive": false })),
+    )
+    .await;
     hand_over(&a, &b).await;
-    let active: bool = sqlx::query_scalar("SELECT is_active FROM users WHERE key = ?").bind(&key).fetch_one(b.pool()).await.unwrap();
+    let active: bool = sqlx::query_scalar("SELECT is_active FROM users WHERE key = ?")
+        .bind(&key)
+        .fetch_one(b.pool())
+        .await
+        .unwrap();
     assert!(!active, "the deactivation reached B");
-    assert_ne!(login_status(&b, "cash2@shop.test", "cashier-pass-2").await, StatusCode::OK, "a deactivated cashier cannot log in");
+    assert_ne!(
+        login_status(&b, "cash2@shop.test", "cashier-pass-2").await,
+        StatusCode::OK,
+        "a deactivated cashier cannot log in"
+    );
 
     tokio::time::sleep(std::time::Duration::from_millis(30)).await;
     a.api("DELETE", &format!("/api/users/{id}"), None).await;
     hand_over(&a, &b).await;
-    let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE key = ?").bind(&key).fetch_one(b.pool()).await.unwrap();
+    let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE key = ?")
+        .bind(&key)
+        .fetch_one(b.pool())
+        .await
+        .unwrap();
     assert_eq!(remaining, 0, "the delete removed the login on B");
-    assert_ne!(login_status(&b, "cash2@shop.test", "cashier-pass-2").await, StatusCode::OK);
+    assert_ne!(
+        login_status(&b, "cash2@shop.test", "cashier-pass-2").await,
+        StatusCode::OK
+    );
 }
 
 #[tokio::test]
@@ -821,11 +1303,27 @@ async fn the_password_hash_never_lands_in_a_conflict_record() {
     hand_over(&a, &b).await;
 
     // Both devices rename the cashier; B's edit is later, so A's edit loses on B.
-    a.api("PATCH", &format!("/api/users/{id}"), Some(json!({ "name": "Cashier (A)" }))).await;
+    a.api(
+        "PATCH",
+        &format!("/api/users/{id}"),
+        Some(json!({ "name": "Cashier (A)" })),
+    )
+    .await;
     tokio::time::sleep(std::time::Duration::from_millis(30)).await;
-    b.api("PATCH", &format!("/api/users/{id}"), Some(json!({ "name": "Cashier (B)" }))).await;
+    b.api(
+        "PATCH",
+        &format!("/api/users/{id}"),
+        Some(json!({ "name": "Cashier (B)" })),
+    )
+    .await;
     let from_a = as_pulled(&a.drain_outbox().await);
-    let applied = b.sync("POST", "/api/sync/apply", Some(json!({ "mode": "incremental", "changes": from_a }))).await;
+    let applied = b
+        .sync(
+            "POST",
+            "/api/sync/apply",
+            Some(json!({ "mode": "incremental", "changes": from_a })),
+        )
+        .await;
     assert_eq!(applied["applied"], 0, "{applied}");
 
     let conflicts = b.sync("GET", "/api/sync/conflicts", None).await;
@@ -836,9 +1334,20 @@ async fn the_password_hash_never_lands_in_a_conflict_record() {
         .find(|c| c["kind"] == "LWW_LOSER" && c["entityKey"] == key.as_str())
         .expect("the losing user edit is recorded");
     assert_eq!(conflict["detail"]["losingPayload"]["name"], "Cashier (A)");
-    assert!(conflict["detail"]["losingPayload"].get("passwordHash").is_none(), "{conflict}");
-    let stored: String = sqlx::query_scalar("SELECT detail FROM sync_conflicts").fetch_one(b.pool()).await.unwrap();
-    assert!(!stored.contains("argon2") && !stored.contains("passwordHash"), "hash leaked into sync_conflicts: {stored}");
+    assert!(
+        conflict["detail"]["losingPayload"]
+            .get("passwordHash")
+            .is_none(),
+        "{conflict}"
+    );
+    let stored: String = sqlx::query_scalar("SELECT detail FROM sync_conflicts")
+        .fetch_one(b.pool())
+        .await
+        .unwrap();
+    assert!(
+        !stored.contains("argon2") && !stored.contains("passwordHash"),
+        "hash leaked into sync_conflicts: {stored}"
+    );
 }
 
 #[tokio::test]
@@ -864,17 +1373,27 @@ async fn two_admins_from_two_devices_are_both_kept_and_reported() {
     mk(&b, "owner-b@shop.test").await;
     // Promote both to admin directly (the service's one-admin rule guards the API path only).
     for dev in [&a, &b] {
-        sqlx::query("UPDATE users SET role = 'admin'").execute(dev.pool()).await.unwrap();
+        sqlx::query("UPDATE users SET role = 'admin'")
+            .execute(dev.pool())
+            .await
+            .unwrap();
     }
     hand_over(&a, &b).await;
 
-    let admins: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE role = 'admin' AND deleted_at IS NULL")
-        .fetch_one(b.pool())
-        .await
-        .unwrap();
+    let admins: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM users WHERE role = 'admin' AND deleted_at IS NULL",
+    )
+    .fetch_one(b.pool())
+    .await
+    .unwrap();
     assert_eq!(admins, 2, "neither owner was dropped");
     let conflicts = b.sync("GET", "/api/sync/conflicts", None).await;
-    let raised = conflicts.as_array().unwrap().iter().filter(|c| c["detail"]["reason"] == "MULTIPLE_ADMINS").count();
+    let raised = conflicts
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| c["detail"]["reason"] == "MULTIPLE_ADMINS")
+        .count();
     assert_eq!(raised, 1, "the shop owner is told once: {conflicts}");
 }
 

@@ -68,14 +68,8 @@ async fn post(
     )
 }
 
-async fn get_with_token(
-    router: &Router,
-    uri: &str,
-    token: Option<&str>,
-) -> (StatusCode, Value) {
-    let mut request = Request::builder()
-        .method("GET")
-        .uri(uri);
+async fn get_with_token(router: &Router, uri: &str, token: Option<&str>) -> (StatusCode, Value) {
+    let mut request = Request::builder().method("GET").uri(uri);
     if let Some(t) = token {
         request = request.header("authorization", format!("Bearer {t}"));
     }
@@ -406,7 +400,12 @@ async fn multi_tenant_onboarding_and_sample_data_seeding() {
     assert_eq!(status, StatusCode::OK);
 
     // 2. Query setup-status by shop code before login
-    let (status, body) = get_with_token(&app.router, "/api/system/setup-status?shop=ann-s-phones", None).await;
+    let (status, body) = get_with_token(
+        &app.router,
+        "/api/system/setup-status?shop=ann-s-phones",
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["data"]["setupCompleted"], false);
     assert_eq!(body["data"]["isFirstRun"], true);
@@ -448,8 +447,14 @@ async fn multi_tenant_onboarding_and_sample_data_seeding() {
     // 7. Verify products exist inside tenant
     let (status, body) = get_with_token(&app.router, "/api/inventory/products", Some(token)).await;
     assert_eq!(status, StatusCode::OK);
-    let count = body["data"]["items"].as_array().map(|a| a.len()).unwrap_or(0);
-    assert!(count > 0, "sample products should be loaded in tenant scope: {body}");
+    let count = body["data"]["items"]
+        .as_array()
+        .map(|a| a.len())
+        .unwrap_or(0);
+    assert!(
+        count > 0,
+        "sample products should be loaded in tenant scope: {body}"
+    );
 
     let _ = app.db.drop().await;
 }
@@ -479,7 +484,13 @@ async fn replaying_with_a_new_name_refreshes_names_but_keeps_the_password() {
         "name": "Ann Mobile",
         "owner": { "email": "ann@example.com", "name": "Ann Perera", "passwordHash": argon2_hash("another-pass-9") },
     });
-    let (status, body) = post(&app.router, "/api/internal/provision", Some(SECRET), renamed).await;
+    let (status, body) = post(
+        &app.router,
+        "/api/internal/provision",
+        Some(SECRET),
+        renamed,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["data"]["adminCreated"], false);
 

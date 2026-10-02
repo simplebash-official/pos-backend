@@ -11,8 +11,16 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     app::AppState,
-    core::{constants::codes, error::AppError, middleware::auth::Claims, response::ErrorResponse},
+    core::{
+        constants::codes, error::AppError, middleware::auth::verify_bearer, response::ErrorResponse,
+    },
 };
+
+/// Largest request body this middleware will buffer (to hash it and replay
+/// it to the handler). Matches axum's default `DefaultBodyLimit`; the only
+/// route that legitimately takes more (`/api/backup`) is exempt below. A
+/// bigger body is answered 413 without being read into memory.
+pub const MAX_IDEMPOTENT_BODY_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IdempotencyDocument {
@@ -77,53 +85,47 @@ mod hex {
 /// persisting it would leave bearer tokens sitting in plaintext in Mongo and
 /// let anyone replaying the same `Idempotency-Key` read one back. Replaying a
 /// login is meaningless anyway, so the whole route family opts out rather
-/// than only redacting the body.
+/// than only redacting the body. The same goes for `/api/system/setup` (its
+/// response carries the new admin's JWT) and `/api/backup` (an export is the
+/// whole database, password hashes included, and imports are up to 50 MiB).
 fn is_idempotency_exempt(path: &str) -> bool {
-    // Kept as a literal rather than built from `constants::modules::AUTH` so
-    // this stays allocation-free on the hot path for every mutating request.
+    // Kept as literals rather than built from `constants::modules` so this
+    // stays allocation-free on the hot path for every mutating request.
     path == "/api/auth"
         || path.starts_with("/api/auth/")
         // Sync has its own retry-safe protocol (batch ids, idempotent apply).
         || path == "/api/sync"
         || path.starts_with("/api/sync/")
+        || path == "/api/system/setup"
+        || path == "/api/backup"
+        || path.starts_with("/api/backup/")
 }
 
-/// Identifies the bucket an `Idempotency-Key` is scoped to. A valid token
-/// gives the account's id; an unauthenticated caller falls back to its device
-/// id, then to a shared `"anonymous"` bucket.
+/// Identifies the bucket an `Idempotency-Key` is scoped to: the verified
+/// caller's id (local HS256 or identity-service token, via the same
+/// `verify_bearer` every handler uses).
 ///
-/// A *present but unverifiable* Bearer token is an error rather than a
-/// fallback (`Err` → 401): silently downgrading it to the device or anonymous
-/// bucket would let a caller with an expired or forged token land in — and
-/// read cached responses out of — a bucket it has no claim to. Every route
-/// this middleware can reach requires auth anyway (see the intentional-public
-/// list in `app::build_router`), so the handler would reject such a request a
-/// moment later regardless; rejecting here just avoids writing a record for
-/// it first. A non-`Bearer` `Authorization` header is left to fall through,
-/// since it was never a token claim to begin with.
-fn extract_user_id(request: &Request, jwt_secret: &str) -> Result<String, AppError> {
-    if let Some(auth_header) = request.headers().get(header::AUTHORIZATION)
-        && let Ok(auth_str) = auth_header.to_str()
-        && let Some(token) = auth_str.strip_prefix("Bearer ")
-    {
-        return match jsonwebtoken::decode::<Claims>(
-            token,
-            &jsonwebtoken::DecodingKey::from_secret(jwt_secret.as_bytes()),
-            &jsonwebtoken::Validation::default(),
-        ) {
-            Ok(data) => Ok(data.claims.sub),
-            Err(err) => Err(AppError::from(err)),
-        };
+/// - `Ok(Some(id))` — a valid token.
+/// - `Ok(None)` — no Bearer token: the request bypasses the idempotency store
+///   entirely. Every route this middleware can reach that is not public
+///   rejects it a moment later anyway, and an unauthenticated caller must not
+///   be able to make the server buffer bodies or write records.
+/// - `Err` (→ 401) — a *present but unverifiable* Bearer token, rather than a
+///   silent fallback that could let a forged token reach a bucket it has no
+///   claim to. A non-`Bearer` `Authorization` header counts as "no token".
+async fn extract_user_id(
+    headers: &axum::http::HeaderMap,
+    state: &AppState,
+) -> Result<Option<String>, AppError> {
+    let has_bearer = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("Bearer "));
+    if !has_bearer {
+        return Ok(None);
     }
-
-    if let Some(device_header) = request.headers().get("x-device-id")
-        && let Ok(device_str) = device_header.to_str()
-        && !device_str.trim().is_empty()
-    {
-        return Ok(format!("device:{}", device_str.trim()));
-    }
-
-    Ok("anonymous".to_string())
+    let verified = verify_bearer(headers, &state.config).await?;
+    Ok(Some(verified.user_id))
 }
 
 pub async fn handle_idempotency(
@@ -152,18 +154,26 @@ pub async fn handle_idempotency(
         return next.run(request).await;
     };
 
-    let user_id = match extract_user_id(&request, &state.config.jwt_secret) {
-        Ok(id) => id,
+    // Cloned so no borrow of the (non-`Sync`) request is held across the
+    // await below.
+    let headers = request.headers().clone();
+    let user_id = match extract_user_id(&headers, &state).await {
+        Ok(Some(id)) => id,
+        Ok(None) => return next.run(request).await,
         Err(err) => return err.into_response(),
     };
     let uri = request.uri().to_string();
 
     let (parts, body) = request.into_parts();
-    let body_bytes = match axum::body::to_bytes(body, usize::MAX).await {
+    let body_bytes = match axum::body::to_bytes(body, MAX_IDEMPOTENT_BODY_BYTES).await {
         Ok(bytes) => bytes,
-        Err(err) => {
-            return AppError::validation(format!("Failed to read request body: {err}"))
-                .into_response();
+        Err(_) => {
+            let err_resp = ErrorResponse::new(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                codes::VALIDATION_ERROR,
+                format!("Request body exceeds the {MAX_IDEMPOTENT_BODY_BYTES}-byte limit"),
+            );
+            return (StatusCode::PAYLOAD_TOO_LARGE, axum::Json(err_resp)).into_response();
         }
     };
 

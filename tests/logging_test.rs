@@ -43,8 +43,9 @@ async fn build_test_app() -> axum::Router {
         config.document_server_url.clone(),
         config.document_server_api_key.clone(),
     ));
-    let reports_engine =
-        Arc::new(simplebash_pos_backend::modules::reports::engine::AnalyticsEngine::new(db.clone()));
+    let reports_engine = Arc::new(
+        simplebash_pos_backend::modules::reports::engine::AnalyticsEngine::new(db.clone()),
+    );
     app::build_router(AppState {
         config,
         db,

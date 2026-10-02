@@ -53,15 +53,25 @@ pub struct Config {
     /// Safe and idempotent (never overwrites existing data).
     pub auto_seed: bool,
     pub tenant_mode: TenantMode,
-    /// Browser origins allowed by CORS when `TENANT_MODE=multi`
-    /// (`CORS_ALLOWED_ORIGINS`, comma separated). Single-shop deployments
-    /// keep the permissive default, since they sit behind their own proxy.
+    /// Browser origins allowed by CORS (`CORS_ALLOWED_ORIGINS`, comma
+    /// separated), in every tenant mode. When unset, multi-tenant deployments
+    /// allow no browser origin, and single-shop ones allow only the desktop
+    /// webview and local Vite dev origins (`app::DEFAULT_SINGLE_SHOP_ORIGINS`)
+    /// — never `*`, since a desktop backend on 127.0.0.1 is reachable from any
+    /// web page the shop owner opens.
     pub cors_allowed_origins: Vec<String>,
     /// JWKS endpoint of the identity service. When set, EdDSA platform tokens
     /// are accepted alongside local HS256 tokens (see `middleware::platform_jwt`).
     pub identity_jwks_url: Option<String>,
-    /// Required `iss` of platform tokens; unset skips the issuer check.
+    /// Required `iss` of platform tokens. Mandatory whenever
+    /// `identity_jwks_url` is set (startup fails otherwise).
     pub identity_issuer: Option<String>,
+    /// The identity-service tenant id (`tid`) of THIS shop, for single-shop
+    /// deployments that accept platform tokens. In `TENANT_MODE=single` a
+    /// platform token is only accepted when its `tid` equals this value;
+    /// when unset, platform tokens are refused in single mode (any account on
+    /// the identity service would otherwise become this shop's Admin).
+    pub identity_tenant_id: Option<String>,
     /// Shared secret the identity service presents (`X-Provision-Secret`) when it
     /// hands a newly registered shop to `POST /api/internal/provision`. Unset
     /// switches that endpoint off. Multi-tenant deployments only.
@@ -145,6 +155,14 @@ impl Config {
 
         let document_server_url = required("DOCUMENT_SERVER_URL")?;
         let document_server_api_key = required("DOCUMENT_SERVER_API_KEY")?;
+        // The document server refuses to boot with a copied-from-the-docs key;
+        // fail here too, with the variable name that actually needs changing.
+        {
+            let k = document_server_api_key.trim().to_ascii_lowercase();
+            if k.is_empty() || k.starts_with("replace_with") || k.starts_with("change-me") {
+                return Err(ConfigError::Invalid("DOCUMENT_SERVER_API_KEY"));
+            }
+        }
         let generated_documents_dir = env::var("GENERATED_DOCUMENTS_DIR")
             .unwrap_or_else(|_| "generated_documents".to_string());
         let return_window_days = env::var("RETURN_WINDOW_DAYS")
@@ -190,6 +208,15 @@ impl Config {
             .ok()
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty());
+        // Without an issuer pin, any token signed by a key in that JWKS is
+        // accepted regardless of who minted it for what.
+        if identity_jwks_url.is_some() && identity_issuer.is_none() {
+            return Err(ConfigError::Missing("IDENTITY_ISSUER"));
+        }
+        let identity_tenant_id = env::var("IDENTITY_TENANT_ID")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
 
         let provision_secret = env::var("PROVISION_SECRET")
             .ok()
@@ -224,6 +251,7 @@ impl Config {
             cors_allowed_origins,
             identity_jwks_url,
             identity_issuer,
+            identity_tenant_id,
             provision_secret,
             app_env,
         })

@@ -111,7 +111,13 @@ fn millis(ms: i64) -> BsonDateTime {
 }
 
 /// Adds the derived-scope entries a written change implies.
-fn note_scope(spec: &ResourceSpec, payload: Option<&Value>, key: &str, doc: &Document, scope: &mut DerivedScope) {
+fn note_scope(
+    spec: &ResourceSpec,
+    payload: Option<&Value>,
+    key: &str,
+    doc: &Document,
+    scope: &mut DerivedScope,
+) {
     let text = |name: &str| payload.and_then(|p| p.get(name)).and_then(Value::as_str);
     match spec.name {
         "products" => {
@@ -182,7 +188,10 @@ fn build_document(
     }
 
     let existing_version = existing.map(|e| e.meta.version).unwrap_or(0);
-    document.insert("version", existing_version.max(encoded.version).max(record.version));
+    document.insert(
+        "version",
+        existing_version.max(encoded.version).max(record.version),
+    );
     let created = existing
         .and_then(|e| e.doc.get_datetime("created_at").ok().copied())
         .or(encoded.created_at)
@@ -383,7 +392,9 @@ async fn extra_admin_conflict(
     if admin_keys.len() < 2 || !admin_keys.iter().any(|k| k == key) {
         return Ok(None);
     }
-    let same_batch = raised.iter().any(|c| c.resource == "users" && c.entity_key == key);
+    let same_batch = raised
+        .iter()
+        .any(|c| c.resource == "users" && c.entity_key == key);
     let stored = coll(db, crate::modules::sync::cloud_store::CONFLICTS)?
         .count_documents(doc! {
             "kind": ConflictKind::UniqueViolation.as_str(),
@@ -572,7 +583,14 @@ pub(crate) async fn apply_lifecycle(
     let winning_ms = effective_ms.max(existing.meta.updated_at_ms);
     let mut merged_record = record.clone();
     merged_record.payload = Some(merged.merged.clone());
-    let document = build_document(spec, &merged_record, encoded, Some(existing), winning_ms, device_id);
+    let document = build_document(
+        spec,
+        &merged_record,
+        encoded,
+        Some(existing),
+        winning_ms,
+        device_id,
+    );
     coll(db, spec.table)?
         .replace_one(doc! { "key": &record.key }, document.clone())
         .await?;

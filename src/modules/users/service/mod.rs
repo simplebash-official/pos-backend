@@ -185,12 +185,11 @@ pub(crate) async fn find_user_for_identity(
     else {
         return Ok(None);
     };
-    if let (Some(name), Some(id)) = (name.map(str::trim).filter(|n| !n.is_empty()), document.id) {
-        if document.name != name {
-            if let Some(updated) = repository::update_user(db, id, doc! { "name": name }).await? {
-                document = updated;
-            }
-        }
+    if let (Some(name), Some(id)) = (name.map(str::trim).filter(|n| !n.is_empty()), document.id)
+        && document.name != name
+        && let Some(updated) = repository::update_user(db, id, doc! { "name": name }).await?
+    {
+        document = updated;
     }
     Ok(Some(document.into_user()))
 }
@@ -322,16 +321,16 @@ pub async fn create_owner_admin_if_absent(
     // Replays are how identity re-syncs a profile: when the owner's Admin already
     // exists, identity is the source of truth for its display name. The password
     // hash is deliberately left alone - the shop may have changed it locally.
-    if let Some(existing) = repository::find_user_by_email(db, &email).await? {
-        if existing.role == Role::Admin {
-            let name = name.trim();
-            if existing.name != name {
-                if let Some(id) = existing.id {
-                    repository::update_user(db, id, doc! { "name": name }).await?;
-                }
-            }
-            return Ok(false);
+    if let Some(existing) = repository::find_user_by_email(db, &email).await?
+        && existing.role == Role::Admin
+    {
+        let name = name.trim();
+        if existing.name != name
+            && let Some(id) = existing.id
+        {
+            repository::update_user(db, id, doc! { "name": name }).await?;
         }
+        return Ok(false);
     }
 
     if repository::count_users_by_role(db, Role::Admin).await? > 0 {

@@ -64,7 +64,13 @@ async fn main() {
     // Loopback (desktop / local dev) keeps the convenience default.
     let publicly_reachable = config.bind_addr != "127.0.0.1" && config.bind_addr != "localhost";
     let seed_password_chosen = std::env::var("SEED_ADMIN_PASSWORD")
-        .map(|p| !p.is_empty() && p != "admin@1234")
+        .map(|p| {
+            let p = p.trim();
+            !p.is_empty()
+                && p != "admin@1234"
+                && !p.starts_with("replace_with")
+                && !p.starts_with("change_this")
+        })
         .unwrap_or(false);
     if config.auto_seed && publicly_reachable && !seed_password_chosen {
         tracing::error!(
@@ -114,16 +120,17 @@ async fn main() {
         ),
     }
 
-    let reports_engine =
-        Arc::new(simplebash_pos_backend::modules::reports::engine::AnalyticsEngine::new(db.clone()));
+    let reports_engine = Arc::new(
+        simplebash_pos_backend::modules::reports::engine::AnalyticsEngine::new(db.clone()),
+    );
     reports_engine.init().await;
 
     // Multi-tenant cloud only: the single change-stream consumer that feeds the
     // per-tenant sync change log (it holds a lease, so extra instances stand by).
     if config.tenant_mode == simplebash_pos_backend::core::config::TenantMode::Multi {
-        tokio::spawn(simplebash_pos_backend::modules::sync::cloud_capture::run_consumer(
-            db.clone(),
-        ));
+        tokio::spawn(
+            simplebash_pos_backend::modules::sync::cloud_capture::run_consumer(db.clone()),
+        );
     }
 
     let state = AppState {

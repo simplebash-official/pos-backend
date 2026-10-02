@@ -3,6 +3,8 @@ name = "simplebash_pos_backend"
 version = "0.1.0"
 edition = "2024"
 default-run = "simplebash_pos_backend"
+license = "AGPL-3.0-only"
+publish = false
 
 [dependencies]
 argon2 = "0.5.3"

@@ -8,9 +8,9 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use simplebash_pos_backend::{app, app::AppState, clients, core::config::Config};
 use mongodb::Client;
 use mongodb::options::{ClientOptions, ResolverConfig};
+use simplebash_pos_backend::{app, app::AppState, clients, core::config::Config};
 use tower::ServiceExt;
 
 async fn build_test_app() -> axum::Router {

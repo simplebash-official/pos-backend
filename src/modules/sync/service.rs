@@ -58,6 +58,11 @@ const SYNCABLE: &[(&str, &str)] = &[
     ("productSerials", "product_serials"),
 ];
 
+/// Collections whose REST routes are Admin-only (`AdminUser` on every
+/// suppliers / supplier-products / purchases route — pricing and cost data).
+/// The delta feed must not hand them to anyone the REST API would refuse.
+const ADMIN_ONLY_COLLECTIONS: &[&str] = &["suppliers", "supplier_products", "purchases"];
+
 /// Maps a caller-supplied resource name to its collection, accepting the
 /// snake_case spelling of the two multi-word names as an alias.
 fn collection_for(resource: &str) -> Option<&'static str> {
@@ -167,7 +172,14 @@ fn to_values<T: serde::Serialize>(items: Vec<T>) -> AppResult<Vec<Value>> {
         .collect()
 }
 
-pub async fn get_changes(db: &Db, query: SyncChangesQuery) -> AppResult<SyncChangesResponse> {
+/// `caller_is_admin == false` silently drops the Admin-only resources
+/// (`ADMIN_ONLY_COLLECTIONS`) from the response, the same way an unknown
+/// resource name is skipped.
+pub async fn get_changes(
+    db: &Db,
+    query: SyncChangesQuery,
+    caller_is_admin: bool,
+) -> AppResult<SyncChangesResponse> {
     let server_time = Utc::now();
     let requested_limit = query.limit.unwrap_or(DEFAULT_LIMIT);
     // `limit = 0` means "tell me the cursor, send me nothing".
@@ -194,6 +206,9 @@ pub async fn get_changes(db: &Db, query: SyncChangesQuery) -> AppResult<SyncChan
         let Some(collection_name) = collection_for(&resource) else {
             continue;
         };
+        if !caller_is_admin && ADMIN_ONLY_COLLECTIONS.contains(&collection_name) {
+            continue;
+        }
 
         let cursor_str_opt = cursors_map
             .get(&resource)

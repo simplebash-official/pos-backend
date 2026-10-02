@@ -99,7 +99,8 @@ async fn recompute_invoice(
 
     let mut refunded = 0i64;
     for note in &notes {
-        refunded += note.get::<i64, _>("refund_cash_cents") + note.get::<i64, _>("balance_reduction_cents");
+        refunded +=
+            note.get::<i64, _>("refund_cash_cents") + note.get::<i64, _>("balance_reduction_cents");
         let returned: serde_json::Value =
             serde_json::from_str(&note.get::<String, _>("returned_items")).unwrap_or_default();
         let lines = returned.as_array().cloned().unwrap_or_default();
@@ -224,10 +225,11 @@ async fn recompute_product(
     product_id: &str,
     conflicts: &mut Vec<NewConflict>,
 ) -> AppResult<()> {
-    let Some(row) = sqlx::query("SELECT key, stock_quantity FROM products WHERE id = ? AND deleted_at IS NULL")
-        .bind(product_id)
-        .fetch_optional(&mut *conn)
-        .await?
+    let Some(row) =
+        sqlx::query("SELECT key, stock_quantity FROM products WHERE id = ? AND deleted_at IS NULL")
+            .bind(product_id)
+            .fetch_optional(&mut *conn)
+            .await?
     else {
         return Ok(());
     };

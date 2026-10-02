@@ -37,27 +37,50 @@ pub struct AppState {
     pub reports_engine: Arc<modules::reports::engine::AnalyticsEngine>,
 }
 
+/// Browser origins a single-shop backend answers when `CORS_ALLOWED_ORIGINS`
+/// is unset: the Tauri desktop webview (macOS/Linux `tauri://localhost`,
+/// Windows `http(s)://tauri.localhost`) and the Vite dev server. A web
+/// deployment whose UI is served from another origin must list it in
+/// `CORS_ALLOWED_ORIGINS`.
+pub const DEFAULT_SINGLE_SHOP_ORIGINS: &[&str] = &[
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+];
+
 /// Assembles the full HTTP router: the top-level `/health` check, every
 /// feature module nested under `/api/<module>` (see `mod_names` below),
 /// Swagger UI, CORS, and request tracing — this is the one place all of
 /// that gets wired together, called once from `main.rs`.
 pub fn build_router(state: AppState) -> Router {
-    // Multi-tenant deployments only answer browsers from the configured origins;
-    // an empty list allows no cross-origin browser at all (fail closed).
-    let allow_origin = if state.config.tenant_mode == crate::core::config::TenantMode::Multi {
-        let origins: Vec<axum::http::HeaderValue> = state
-            .config
-            .cors_allowed_origins
-            .iter()
-            .filter_map(|o| o.parse().ok())
-            .collect();
-        if origins.is_empty() {
-            tracing::warn!("TENANT_MODE=multi without CORS_ALLOWED_ORIGINS: no browser origin is allowed");
-        }
-        tower_http::cors::AllowOrigin::list(origins)
+    // Browsers are only answered from an explicit origin list — never `*`:
+    // a desktop backend listens on 127.0.0.1, so a wildcard would let any web
+    // page the shop owner visits drive this API. Multi-tenant deployments with
+    // no `CORS_ALLOWED_ORIGINS` allow no browser origin at all (fail closed);
+    // single-shop ones fall back to the desktop webview + local dev origins.
+    let configured: Vec<&str> = state
+        .config
+        .cors_allowed_origins
+        .iter()
+        .map(String::as_str)
+        .collect();
+    let origin_list: Vec<&str> = if !configured.is_empty() {
+        configured
+    } else if state.config.tenant_mode == crate::core::config::TenantMode::Multi {
+        tracing::warn!(
+            "TENANT_MODE=multi without CORS_ALLOWED_ORIGINS: no browser origin is allowed"
+        );
+        Vec::new()
     } else {
-        tower_http::cors::AllowOrigin::from(tower_http::cors::Any)
+        DEFAULT_SINGLE_SHOP_ORIGINS.to_vec()
     };
+    let allow_origin = tower_http::cors::AllowOrigin::list(
+        origin_list
+            .iter()
+            .filter_map(|o| o.parse::<axum::http::HeaderValue>().ok()),
+    );
     let cors = CorsLayer::new()
         .allow_origin(allow_origin)
         .allow_methods([
@@ -97,6 +120,7 @@ pub fn build_router(state: AppState) -> Router {
     // The complete set of intentionally-public routes is:
     //   GET  /api/health              liveness probe, static payload
     //   POST /api/auth/login          issues the token
+    //   GET  /api/auth/shop/{code}    public shop lookup for multi-tenant branding
     //   GET  /api/system/setup-status query initial installation and setup status
     //   POST /api/system/setup        bootstrap administrator and initialize database
     //   POST /api/internal/provision  identity -> POS shop hand-off; authenticated by the
@@ -248,11 +272,12 @@ async fn portal(
     let uptime = server_uptime_seconds();
     let version = env!("CARGO_PKG_VERSION");
     let env_name = &state.config.app_env;
-    let env_class = if env_name.eq_ignore_ascii_case("production") || env_name.eq_ignore_ascii_case("prod") {
-        "env-prod"
-    } else {
-        "env-dev"
-    };
+    let env_class =
+        if env_name.eq_ignore_ascii_case("production") || env_name.eq_ignore_ascii_case("prod") {
+            "env-prod"
+        } else {
+            "env-dev"
+        };
 
     let display_env = match env_name.to_lowercase().as_str() {
         "production" | "prod" => "Production".to_string(),

@@ -165,8 +165,19 @@ mod tests {
                 vec!["active".into(), tenant_tag(t)],
             );
         }
-        assert_eq!(cache.invalidate_matching(&["active", &tenant_tag("shop_a")]), 1);
-        assert!(cache.get(&build_scoped_cache_key(Some("shop_a"), "feed", "x")).is_none());
-        assert!(cache.get(&build_scoped_cache_key(Some("shop_b"), "feed", "x")).is_some());
+        assert_eq!(
+            cache.invalidate_matching(&["active", &tenant_tag("shop_a")]),
+            1
+        );
+        assert!(
+            cache
+                .get(&build_scoped_cache_key(Some("shop_a"), "feed", "x"))
+                .is_none()
+        );
+        assert!(
+            cache
+                .get(&build_scoped_cache_key(Some("shop_b"), "feed", "x"))
+                .is_some()
+        );
     }
 }

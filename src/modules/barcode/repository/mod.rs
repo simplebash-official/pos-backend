@@ -57,7 +57,11 @@ pub(crate) async fn next_sequence(db: &Db, namespace: &str) -> AppResult<i64> {
 /// increments one at a time — a block a linked device pre-fetches and a
 /// barcode generated directly (unlinked, or online with no block held) can
 /// therefore never land on the same number.
-pub(crate) async fn reserve_block(db: &Db, namespace: &str, block_size: i64) -> AppResult<(i64, i64)> {
+pub(crate) async fn reserve_block(
+    db: &Db,
+    namespace: &str,
+    block_size: i64,
+) -> AppResult<(i64, i64)> {
     match db {
         Db::Mongo(db) => {
             let updated = barcode_counters(db)
@@ -117,7 +121,10 @@ mod tests {
         // Interleave the tenants: each must count 1, 2, 3 on its own.
         for round in 1..=3i64 {
             for t in ["shop_a", "shop_b"] {
-                let n = with_tenant(Tenant::id(t).unwrap(), async { next_sequence(&db, "product").await }).await;
+                let n = with_tenant(Tenant::id(t).unwrap(), async {
+                    next_sequence(&db, "product").await
+                })
+                .await;
                 assert_eq!(n.unwrap(), round, "{t} round {round}");
             }
         }

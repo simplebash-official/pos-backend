@@ -39,7 +39,10 @@ pub(crate) fn coll(db: &Db, name: &str) -> AppResult<ScopedCollection<Document>>
 /// single change-stream consumer calls this, so seq order equals commit order.
 pub(crate) async fn allocate_seq(db: &Db) -> AppResult<i64> {
     let updated = coll(db, META)?
-        .find_one_and_update(doc! { "kind": "meta" }, doc! { "$inc": { "last_seq": 1_i64 } })
+        .find_one_and_update(
+            doc! { "kind": "meta" },
+            doc! { "$inc": { "last_seq": 1_i64 } },
+        )
         .upsert(true)
         .return_document(ReturnDocument::After)
         .await?;

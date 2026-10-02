@@ -83,7 +83,16 @@ pub async fn reserve_sequence(
         let (start, end) =
             repository::reserve_block(db, &name, prefix, padding, block_size).await?;
 
-        finish_reservation(db, name, prefix.to_string(), padding, start, end, req.device_id).await
+        finish_reservation(
+            db,
+            name,
+            prefix.to_string(),
+            padding,
+            start,
+            end,
+            req.device_id,
+        )
+        .await
     })
     .await
 }

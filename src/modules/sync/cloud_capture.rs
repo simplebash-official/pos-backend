@@ -203,9 +203,10 @@ async fn process_event(db: &Db, event: ChangeStreamEvent<Document>) -> AppResult
         return Ok(());
     };
     // The event id is unique per event: the natural de-duplication key.
-    let source_token = bson::serialize_to_bson(&event.id)
-        .ok()
-        .and_then(|b| b.as_document().and_then(|d| d.get_str("_data").ok().map(str::to_string)));
+    let source_token = bson::serialize_to_bson(&event.id).ok().and_then(|b| {
+        b.as_document()
+            .and_then(|d| d.get_str("_data").ok().map(str::to_string))
+    });
     let Some(source_token) = source_token else {
         return Ok(());
     };
@@ -249,7 +250,10 @@ async fn publish(db: &Db, collection: &str, full: Document, source_token: &str) 
         return Ok(());
     };
 
-    let key = doc_for_change.get_str("key").unwrap_or_default().to_string();
+    let key = doc_for_change
+        .get_str("key")
+        .unwrap_or_default()
+        .to_string();
     if key.is_empty() {
         return Ok(());
     }

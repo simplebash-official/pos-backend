@@ -9,8 +9,8 @@ use std::sync::{
 };
 
 use axum::{Json, Router, http::StatusCode, response::IntoResponse, routing::get};
-use simplebash_pos_backend::clients::document_server::DocumentServerClient;
 use serde_json::json;
+use simplebash_pos_backend::clients::document_server::DocumentServerClient;
 
 async fn spawn(app: Router) -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
