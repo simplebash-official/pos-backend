@@ -46,6 +46,48 @@ pub(crate) async fn login(
     ip_address: Option<String>,
     user_agent: Option<String>,
 ) -> AppResult<LoginResponse> {
+    // Brute-force guard, per shop + account (see `core::rate_limit`). Checked
+    // before the password hash is touched, so a blocked account also stops
+    // costing an Argon2 verification per attempt.
+    let limiter = &*crate::core::rate_limit::LOGIN_FAILURES;
+    let limit_key = format!(
+        "{}|{}",
+        body.shop_code
+            .as_deref()
+            .unwrap_or_default()
+            .trim()
+            .to_lowercase(),
+        body.email.trim().to_lowercase()
+    );
+    if let Err(retry_after) = limiter.check(&limit_key) {
+        let minutes = retry_after.as_secs().div_ceil(60).max(1);
+        return Err(AppError::custom(
+            axum::http::StatusCode::TOO_MANY_REQUESTS,
+            crate::core::constants::codes::TOO_MANY_LOGIN_ATTEMPTS,
+            format!("Too many failed sign-in attempts. Please try again in {minutes} minute(s)."),
+        ));
+    }
+
+    let result = login_unthrottled(db, config, body, ip_address, user_agent).await;
+    match &result {
+        Ok(_) => limiter.reset(&limit_key),
+        Err(err)
+            if err.status_code_code_and_message().0 == axum::http::StatusCode::UNAUTHORIZED =>
+        {
+            limiter.record_failure(&limit_key)
+        }
+        Err(_) => {}
+    }
+    result
+}
+
+async fn login_unthrottled(
+    db: &Db,
+    config: &Config,
+    body: LoginRequest,
+    ip_address: Option<String>,
+    user_agent: Option<String>,
+) -> AppResult<LoginResponse> {
     if config.tenant_mode != crate::core::config::TenantMode::Multi {
         return login_in_scope(db, config, body, ip_address, user_agent, None).await;
     }

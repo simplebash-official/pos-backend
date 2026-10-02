@@ -103,6 +103,12 @@ fn hash_password(password: &str) -> AppResult<String> {
         .map_err(|err| AppError::internal(format!("failed to hash password: {err}")))
 }
 
+/// A real Argon2 hash of a throwaway value, computed once, for
+/// `verify_credentials` to verify against when the email is unknown.
+static DUMMY_PASSWORD_HASH: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    hash_password("not-a-real-password").expect("hashing a constant cannot fail")
+});
+
 fn verify_password(password: &str, hash: &str) -> AppResult<bool> {
     let parsed_hash = PasswordHash::new(hash)
         .map_err(|err| AppError::internal(format!("stored password hash is invalid: {err}")))?;
@@ -406,7 +412,10 @@ pub async fn reset_admin_credentials(db: &Db, email: &str, password: &str) -> Ap
         .await?
         .ok_or_else(|| AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND))?;
 
-    Ok(updated.into_user())
+    let user = updated.into_user();
+    // Existing tokens for this account must be re-checked on their next use.
+    crate::core::middleware::auth::invalidate_account_status(&user.id);
+    Ok(user)
 }
 
 /// Scoped creation for `POST /users` — 403s (not 404, since there's no
@@ -542,7 +551,10 @@ pub(crate) async fn update_user(
             }
         }
 
-        Ok(updated.into_user())
+        let user = updated.into_user();
+        // A deactivation or role change must reach the user's live tokens now.
+        crate::core::middleware::auth::invalidate_account_status(&user.id);
+        Ok(user)
     })
     .await
 }
@@ -570,7 +582,9 @@ pub(crate) async fn delete_user(db: &Db, id: ObjectId, caller_role: Role) -> App
             employees::service::touch_by_key(db, employee_key).await?;
         }
 
-        Ok(deleted.into_user())
+        let user = deleted.into_user();
+        crate::core::middleware::auth::invalidate_account_status(&user.id);
+        Ok(user)
     })
     .await
 }
@@ -583,14 +597,15 @@ pub(crate) async fn delete_user(db: &Db, id: ObjectId, caller_role: Role) -> App
 /// proven they know the real password.
 pub(crate) async fn verify_credentials(db: &Db, email: &str, password: &str) -> AppResult<User> {
     let normalized = normalize_email(email);
-    let document = repository::find_user_by_email(db, &normalized)
-        .await?
-        .ok_or_else(|| {
-            AppError::unauthorized_with_code(
-                "Invalid email or password",
-                codes::INVALID_CREDENTIALS,
-            )
-        })?;
+    let Some(document) = repository::find_user_by_email(db, &normalized).await? else {
+        // Spend the same Argon2 work as a real check, so response time
+        // doesn't reveal whether the email exists.
+        let _ = verify_password(password, &DUMMY_PASSWORD_HASH);
+        return Err(AppError::unauthorized_with_code(
+            "Invalid email or password",
+            codes::INVALID_CREDENTIALS,
+        ));
+    };
 
     if !verify_password(password, &document.password_hash)? {
         return Err(AppError::unauthorized_with_code(

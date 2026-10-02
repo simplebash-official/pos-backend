@@ -70,6 +70,11 @@ pub const INVALID_CREDENTIALS: &str = "INVALID_CREDENTIALS";
 pub const USER_NOT_FOUND: &str = "USER_NOT_FOUND";
 pub const EMAIL_ALREADY_EXISTS: &str = "EMAIL_ALREADY_EXISTS";
 pub const USER_INACTIVE: &str = "USER_INACTIVE";
+/// 429 — too many failed logins for this account; retry after the window.
+pub const TOO_MANY_LOGIN_ATTEMPTS: &str = "TOO_MANY_LOGIN_ATTEMPTS";
+/// 401 — the account behind a still-valid token was deactivated, deleted or
+/// had its role changed; the user must sign in again.
+pub const SESSION_REVOKED: &str = "SESSION_REVOKED";
 pub const PERMISSION_DENIED: &str = "PERMISSION_DENIED";
 pub const ADMIN_ALREADY_EXISTS: &str = "ADMIN_ALREADY_EXISTS";
 

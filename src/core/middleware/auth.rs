@@ -133,6 +133,8 @@ impl FromRequestParts<AppState> for CurrentUser {
             return Err(AppError::unauthorized("token has no tenant"));
         }
 
+        ensure_account_still_valid(state, &verified).await?;
+
         let tenant_id = verified.tenant_id();
         Ok(CurrentUser {
             user_id: verified.user_id,
@@ -144,6 +146,90 @@ impl FromRequestParts<AppState> for CurrentUser {
             email: verified.email,
             name: verified.name,
         })
+    }
+}
+
+/// How long a looked-up account status is trusted before the next request
+/// re-reads it. Changes made through this API invalidate it immediately
+/// (`invalidate_account_status`); anything else (a sync push, a restore) is
+/// picked up within this window.
+const ACCOUNT_STATUS_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// `(tenant|user_id) -> (Some((is_active, role)) | None if deleted, read at)`.
+type AccountStatusCache =
+    std::collections::HashMap<String, (Option<(bool, Role)>, std::time::Instant)>;
+
+static ACCOUNT_STATUS: std::sync::LazyLock<std::sync::Mutex<AccountStatusCache>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// Drops the cached status for `user_id` (in every tenant), so the next
+/// request with that user's token re-reads the account. Called by the users
+/// service after it deactivates, deletes or re-roles an account.
+pub fn invalidate_account_status(user_id: &str) {
+    let suffix = format!("|{user_id}");
+    ACCOUNT_STATUS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .retain(|key, _| !key.ends_with(&suffix));
+}
+
+/// A JWT stays valid until it expires, so without this a deactivated,
+/// deleted or demoted user would keep their old access for up to
+/// `JWT_EXPIRY_HOURS`. Applies to ordinary local logins (HS256 tokens whose
+/// subject is a user id). Device and identity-service tokens carry a `scope`
+/// and are governed by the device registry / identity service instead.
+async fn ensure_account_still_valid(state: &AppState, verified: &VerifiedToken) -> AppResult<()> {
+    if verified.scope.is_some() || verified.device_id.is_some() {
+        return Ok(());
+    }
+    let Ok(oid) = mongodb::bson::oid::ObjectId::parse_str(&verified.user_id) else {
+        // Not a user-account subject (e.g. a service identity).
+        return Ok(());
+    };
+    let cache_key = format!(
+        "{}|{}",
+        verified.tenant_id().unwrap_or_default(),
+        verified.user_id
+    );
+
+    let cached = ACCOUNT_STATUS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&cache_key)
+        .filter(|(_, read_at)| read_at.elapsed() < ACCOUNT_STATUS_TTL)
+        .map(|(status, _)| *status);
+    let status = match cached {
+        Some(status) => status,
+        None => {
+            let status = match crate::modules::users::service::get_user(&state.db, oid).await {
+                Ok(user) => Some((user.is_active, user.role)),
+                Err(AppError::NotFound { .. }) => None,
+                Err(err) => return Err(err),
+            };
+            ACCOUNT_STATUS
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(cache_key, (status, std::time::Instant::now()));
+            status
+        }
+    };
+
+    match status {
+        None => Err(AppError::unauthorized_with_code(
+            "This account no longer exists. Please sign in again.",
+            crate::core::constants::codes::SESSION_REVOKED,
+        )),
+        Some((false, _)) => Err(AppError::unauthorized_with_code(
+            "This account has been deactivated",
+            crate::core::constants::codes::USER_INACTIVE,
+        )),
+        Some((true, role)) if verified.role.is_some_and(|r| r != role) => {
+            Err(AppError::unauthorized_with_code(
+                "Your access has changed. Please sign in again.",
+                crate::core::constants::codes::SESSION_REVOKED,
+            ))
+        }
+        Some(_) => Ok(()),
     }
 }
 

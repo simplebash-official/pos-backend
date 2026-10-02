@@ -825,3 +825,77 @@ async fn test_sqlite_generated_documents_schema_migration() {
     // Clean up temp database
     let _ = std::fs::remove_file(&db_path);
 }
+
+#[tokio::test]
+async fn test_sqlite_repeated_failed_logins_are_throttled() {
+    let ctx = setup_sqlite_app().await;
+    // Unique per run: the limiter is process-wide, so a shared email could be
+    // pushed over the limit by other tests' failures.
+    let email = format!("brute-{}@example.test", Uuid::new_v4());
+    let attempt = || {
+        Request::builder()
+            .method("POST")
+            .uri("/api/auth/login")
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({ "email": email, "password": "wrong-password-123" }).to_string(),
+            ))
+            .unwrap()
+    };
+
+    for i in 0..10 {
+        let (status, body) = execute(&ctx.router, attempt()).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "attempt {i}: {body}");
+    }
+    let (status, body) = execute(&ctx.router, attempt()).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{body}");
+    assert_eq!(body["code"], "TOO_MANY_LOGIN_ATTEMPTS");
+}
+
+#[tokio::test]
+async fn test_sqlite_deactivating_a_user_revokes_their_live_token() {
+    let ctx = setup_sqlite_app().await;
+    let admin = admin_token(&ctx.config);
+    let email = format!("staff-{}@example.test", Uuid::new_v4());
+    let password = "Staff-Password-123";
+
+    let (status, body) = send_authed(
+        &ctx.router,
+        "POST",
+        "/api/users",
+        Some(json!({ "name": "Staff Member", "email": email, "password": password, "role": "staff" })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let user_id = body["data"]["id"].as_str().expect("user id").to_string();
+
+    let login = Request::builder()
+        .method("POST")
+        .uri("/api/auth/login")
+        .header(CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "email": email, "password": password }).to_string()))
+        .unwrap();
+    let (status, body) = execute(&ctx.router, login).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let staff_token = body["data"]["token"].as_str().expect("token").to_string();
+
+    let (status, body) = send_authed(&ctx.router, "GET", "/api/customers", None, &staff_token).await;
+    assert_eq!(status, StatusCode::OK, "before deactivation: {body}");
+
+    let (status, body) = send_authed(
+        &ctx.router,
+        "PATCH",
+        &format!("/api/users/{user_id}"),
+        Some(json!({ "isActive": false })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // The token itself is still unexpired, but the account behind it is not
+    // active any more: every authenticated route must refuse it now.
+    let (status, body) = send_authed(&ctx.router, "GET", "/api/customers", None, &staff_token).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "after deactivation: {body}");
+    assert_eq!(body["code"], "USER_INACTIVE");
+}
