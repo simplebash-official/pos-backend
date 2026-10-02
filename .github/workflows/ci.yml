@@ -8,13 +8,11 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    services:
-      mongo:
-        image: mongo:7.0
-        ports: ["27017:27017"]
     env:
       # Tests load config from the environment (dotenvy is a no-op without a .env file).
-      MONGODB_URI: mongodb://localhost:27017
+      # directConnection: talk to the single replica-set member started below
+      # as-is, without discovering the set by its advertised hostname.
+      MONGODB_URI: mongodb://localhost:27017/?directConnection=true
       MONGODB_DB_NAME: simplebash_pos
       JWT_SECRET: ci-only-jwt-secret-0123456789abcdef0123456789abcdef
       JWT_EXPIRY_HOURS: "12"
@@ -22,6 +20,24 @@ jobs:
       DOCUMENT_SERVER_API_KEY: ci-only-document-server-key
     steps:
       - uses: actions/checkout@v4
+      # Cloud sync reads MongoDB change streams, which only exist on a replica
+      # set, so a plain `services: mongo` container can't run those tests.
+      # `services` can't pass `--replSet`, hence a step: a one-node set.
+      - name: Start MongoDB (single-node replica set)
+        run: |
+          docker run -d --name mongo -p 27017:27017 mongo:7.0 --replSet rs0 --bind_ip_all
+          for i in $(seq 1 30); do
+            docker exec mongo mongosh --quiet --eval "db.adminCommand('ping').ok" >/dev/null 2>&1 && break
+            sleep 2
+          done
+          docker exec mongo mongosh --quiet --eval \
+            "rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'localhost:27017'}]})"
+          for i in $(seq 1 30); do
+            [ "$(docker exec mongo mongosh --quiet --eval 'rs.status().myState')" = "1" ] && exit 0
+            sleep 2
+          done
+          echo "MongoDB replica set did not become primary" >&2
+          exit 1
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
