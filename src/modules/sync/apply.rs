@@ -897,6 +897,58 @@ async fn wipe_synced_tables(conn: &mut SqliteConnection) -> AppResult<()> {
     Ok(())
 }
 
+/// A device that joined an existing shop by downloading it has no local "first
+/// run" left to do: the shop's admin arrived with the snapshot. Marks the
+/// installation as set up so the POS shows its sign-in instead of the wizard's
+/// admin form. Runs on the final bootstrap page, in the same transaction as the
+/// cursor, so a half-downloaded shop is never marked as ready. Does nothing
+/// when the snapshot carries no active admin (the owner then sets one up here).
+async fn adopt_cloud_setup(tx: &mut sqlx::SqliteConnection) -> AppResult<()> {
+    let admins: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM users \
+         WHERE role = 'admin' AND is_active = 1 AND deleted_at IS NULL",
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    if admins == 0 {
+        return Ok(());
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    // The snapshot replaced any demo rows, so the sample-data flag no longer holds.
+    let updated = sqlx::query(
+        "UPDATE system_installations \
+         SET setup_completed = 1, sample_data_loaded = 0, \
+             setup_completed_at = COALESCE(setup_completed_at, ?1), updated_at = ?1",
+    )
+    .bind(&now)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    if updated == 0 {
+        // No installation row yet (setup was never opened): create it, already complete.
+        let installation_id = std::env::var("INSTALLATION_ID")
+            .unwrap_or_else(|_| format!("inst_{}", nanoid::nanoid!(16)));
+        let app_version = std::env::var("APP_VERSION").unwrap_or_else(|_| "0.5.0".to_string());
+        let platform =
+            std::env::var("PLATFORM").unwrap_or_else(|_| std::env::consts::OS.to_string());
+        sqlx::query(
+            "INSERT INTO system_installations \
+             (key, id, installation_id, app_version, platform, installed_at, setup_completed, \
+              setup_completed_at, sample_data_loaded, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?6, 0, ?6, ?6)",
+        )
+        .bind(format!("inst_{}", nanoid::nanoid!(16)))
+        .bind(format!("inst_{}", nanoid::nanoid!(16)))
+        .bind(installation_id)
+        .bind(app_version)
+        .bind(platform)
+        .bind(&now)
+        .execute(&mut *tx)
+        .await?;
+    }
+    Ok(())
+}
+
 /// `POST /api/sync/apply`: one page of pulled changes, in one transaction.
 pub async fn apply_batch(db: &Db, req: ApplyRequest) -> AppResult<ApplyResponse> {
     crate::core::logging::domain::tracked("sync.applied", async move {
@@ -942,6 +994,9 @@ pub async fn apply_batch(db: &Db, req: ApplyRequest) -> AppResult<ApplyResponse>
             .bind(cursor)
             .execute(&mut *tx)
             .await?;
+            if req.mode == ApplyMode::Bootstrap {
+                adopt_cloud_setup(&mut tx).await?;
+            }
         }
         // Cleared inside the same transaction: a rollback reverts it too.
         sqlx::query("UPDATE sync_state SET applying = 0 WHERE id = 1")

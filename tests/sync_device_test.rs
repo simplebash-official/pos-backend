@@ -840,6 +840,153 @@ async fn bootstrap_replaces_local_data_and_only_the_first_page_wipes() {
 }
 
 // ---------------------------------------------------------------------------
+// Joining an existing shop: the downloaded admin replaces the first-run setup
+// ---------------------------------------------------------------------------
+
+async fn setup_status(dev: &Device) -> Value {
+    dev.call("GET", "/api/system/setup-status", None, None)
+        .await
+        .1["data"]
+        .clone()
+}
+
+/// The cloud's view of a shop that was already set up: its admin plus a shop's data.
+/// Returns the pulled changes, users last (as the cloud snapshot orders them).
+async fn cloud_shop_with_admin() -> Vec<Value> {
+    let cloud = Device::new().await;
+    // The owner's POS admin exists before the device is linked, like the one
+    // provisioned from web sign-up; enabling captures every existing row.
+    let (status, res) = cloud
+        .call(
+            "POST",
+            "/api/system/setup",
+            Some(json!({
+                "loadSampleData": false,
+                "adminName": "Shop Owner",
+                "adminEmail": "owner@shop.test",
+                "adminPassword": "owner-pos-pass-1"
+            })),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{res}");
+    cloud
+        .sync("POST", "/api/sync/enable", Some(json!({})))
+        .await;
+    shop(&cloud).await;
+    as_pulled(&cloud.drain_outbox().await)
+}
+
+fn split_users_last(changes: &[Value]) -> (Vec<Value>, Vec<Value>) {
+    changes
+        .iter()
+        .cloned()
+        .partition(|c| c["resource"] != "users")
+}
+
+#[tokio::test]
+async fn downloading_a_shop_with_an_admin_completes_setup_and_the_admin_can_log_in() {
+    let changes = cloud_shop_with_admin().await;
+    assert!(changes.iter().any(|c| c["resource"] == "users"));
+
+    let joining = Device::new().await;
+    let before = setup_status(&joining).await;
+    assert_eq!(before["setupCompleted"], false);
+    assert_eq!(before["isFirstRun"], true);
+
+    joining
+        .sync(
+            "POST",
+            "/api/sync/apply",
+            Some(json!({ "mode": "bootstrap", "changes": changes, "advanceCursorTo": 9 })),
+        )
+        .await;
+
+    let after = setup_status(&joining).await;
+    assert_eq!(after["setupCompleted"], true);
+    assert_eq!(after["isFirstRun"], false);
+    assert_eq!(after["sampleDataLoaded"], false);
+    assert_eq!(
+        login_status(&joining, "owner@shop.test", "owner-pos-pass-1").await,
+        StatusCode::OK
+    );
+    // And the one-time setup can no longer create a second admin.
+    let (status, res) = joining
+        .call(
+            "POST",
+            "/api/system/setup",
+            Some(json!({ "loadSampleData": false, "adminEmail": "other@shop.test", "adminPassword": "another-pass-1" })),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{res}");
+}
+
+#[tokio::test]
+async fn a_half_downloaded_shop_is_not_marked_as_set_up() {
+    let changes = cloud_shop_with_admin().await;
+    let (rest, users) = split_users_last(&changes);
+
+    let joining = Device::new().await;
+    joining
+        .sync(
+            "POST",
+            "/api/sync/apply",
+            Some(json!({ "mode": "bootstrap", "changes": rest })),
+        )
+        .await;
+    assert_eq!(setup_status(&joining).await["setupCompleted"], false);
+
+    joining
+        .sync(
+            "POST",
+            "/api/sync/apply",
+            Some(json!({ "mode": "bootstrap", "changes": users, "advanceCursorTo": 9 })),
+        )
+        .await;
+    assert_eq!(setup_status(&joining).await["setupCompleted"], true);
+}
+
+#[tokio::test]
+async fn downloading_a_shop_without_an_admin_leaves_the_setup_to_the_owner() {
+    let cloud = Device::new().await;
+    cloud
+        .sync("POST", "/api/sync/enable", Some(json!({})))
+        .await;
+    create_cashier(&cloud, "cash@shop.test", "cashier-pass-1").await;
+    let changes = as_pulled(&cloud.drain_outbox().await);
+
+    let joining = Device::new().await;
+    joining
+        .sync(
+            "POST",
+            "/api/sync/apply",
+            Some(json!({ "mode": "bootstrap", "changes": changes, "advanceCursorTo": 3 })),
+        )
+        .await;
+
+    let status = setup_status(&joining).await;
+    assert_eq!(status["setupCompleted"], false);
+}
+
+#[tokio::test]
+async fn downloading_the_same_shop_again_keeps_the_original_setup_time() {
+    let changes = cloud_shop_with_admin().await;
+    let joining = Device::new().await;
+    let body = json!({ "mode": "bootstrap", "changes": changes, "advanceCursorTo": 9 });
+    joining
+        .sync("POST", "/api/sync/apply", Some(body.clone()))
+        .await;
+    let first = setup_status(&joining).await["setupCompletedAt"].clone();
+    assert!(first.is_string());
+
+    joining.sync("POST", "/api/sync/apply", Some(body)).await;
+    let again = setup_status(&joining).await;
+    assert_eq!(again["setupCompleted"], true);
+    assert_eq!(again["setupCompletedAt"], first);
+}
+
+// ---------------------------------------------------------------------------
 // Number blocks and backup
 // ---------------------------------------------------------------------------
 
