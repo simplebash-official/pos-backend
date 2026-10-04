@@ -1,12 +1,15 @@
 // Device-local sync API, called only by the desktop shell's sync agent with a
 // service token (`SyncAgent`). It exposes this install's sync state, its
 // outbox (what to push), the applier (what was pulled), cloud-reserved number
-// blocks and the reviewable conflict list. These routes exist only on SQLite
-// (desktop) deployments; on the cloud they answer 404.
+// blocks and the reviewable conflict list, plus `GET /local/events`, which
+// tells the agent the moment a local write may have queued something to
+// upload. These routes exist only on SQLite (desktop) deployments; on the
+// cloud they answer 404.
 
 use axum::{
     Json,
     extract::{Path, Query, State},
+    response::{IntoResponse, sse::Sse},
 };
 use utoipa_axum::{router::OpenApiRouter, routes};
 
@@ -26,7 +29,7 @@ use crate::{
         },
         sync_v2::{ApplyRequest, ApplyResponse},
     },
-    modules::sync::{apply, blocks, outbox, state},
+    modules::sync::{apply, blocks, live, outbox, state},
 };
 
 // ============================================================================
@@ -38,6 +41,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_state, update_state))
         .routes(routes!(enable_sync))
         .routes(routes!(get_outbox))
+        .routes(routes!(local_events))
         .routes(routes!(get_pending))
         .routes(routes!(ack_outbox))
         .routes(routes!(seed_outbox))
@@ -46,6 +50,29 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(sku_prefixes))
         .routes(routes!(list_conflicts))
         .routes(routes!(resolve_conflict))
+}
+
+// ============================================================================
+// Events
+// ============================================================================
+
+#[utoipa::path(get, path = "/local/events", tag = modules::SYNC,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, content_type = "text/event-stream",
+         description = "Server-sent events: `outbox` once on connect and after every successful local write \
+                        (coalesced), so the sync agent uploads at once instead of on its next timer.",
+         body = String),
+        (status = 401, description = "Missing or invalid service token", body = ErrorResponse),
+        (status = 404, description = "Not a desktop (SQLite) install", body = ErrorResponse),
+    )
+)]
+async fn local_events(
+    _agent: SyncAgent,
+    State(app): State<AppState>,
+) -> AppResult<impl IntoResponse> {
+    state::pool_of(&app.db)?;
+    Ok(Sse::new(live::local_events()).keep_alive(live::keep_alive()))
 }
 
 // ============================================================================

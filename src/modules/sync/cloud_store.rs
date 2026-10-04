@@ -26,6 +26,8 @@ pub(crate) const META: &str = "sync_meta";
 pub(crate) const DEVICES: &str = "sync_device_state";
 pub(crate) const BATCHES: &str = "sync_batches";
 pub(crate) const CONFLICTS: &str = "sync_conflicts";
+/// Markers for rows a cloud write removed outright (see `record_hard_deletes`).
+pub(crate) const TOMBSTONES: &str = "sync_tombstones";
 
 /// The tenant-scoped collection `name` (ambient tenant of the running request).
 pub(crate) fn coll(db: &Db, name: &str) -> AppResult<ScopedCollection<Document>> {
@@ -33,6 +35,35 @@ pub(crate) fn coll(db: &Db, name: &str) -> AppResult<ScopedCollection<Document>>
         .as_mongo()
         .ok_or_else(|| AppError::internal("cloud sync requires MongoDB"))?
         .collection::<Document>(name))
+}
+
+/// Records that rows of `table` were removed outright (not soft-deleted), so
+/// the change-stream consumer can publish them as deletes: a removed document
+/// leaves nothing behind for it to read. A no-op outside the multi-tenant
+/// cloud (no change log there) and for an empty `keys`.
+pub(crate) async fn record_hard_deletes(db: &Db, table: &str, keys: &[String]) -> AppResult<()> {
+    let Some(mongo) = db.as_mongo() else {
+        return Ok(());
+    };
+    if keys.is_empty() || !mongo.effective_tenant().is_scoped() {
+        return Ok(());
+    }
+    let origin = crate::core::sync_origin::current_origin()
+        .map(|o| o.to_string())
+        .unwrap_or_else(|| crate::core::sync_origin::CLOUD_ORIGIN.to_string());
+    let tombstones = mongo.collection::<Document>(TOMBSTONES);
+    let now = BsonDateTime::now();
+    for key in keys {
+        tombstones
+            .insert_one(doc! {
+                "table": table,
+                "key": key,
+                "deleted_at": now,
+                "updated_by_device": &origin,
+            })
+            .await?;
+    }
+    Ok(())
 }
 
 /// Allocates the next per-tenant sequence number (the pull cursor). Only the
@@ -85,6 +116,14 @@ pub(crate) async fn set_compacted_through(db: &Db, seq: i64) -> AppResult<()> {
 /// seen for the first time is registered on the spot (token issuance already
 /// authenticated it), so `Ok(true)` also covers "new".
 pub(crate) async fn ensure_device_active(db: &Db, device_id: &str) -> AppResult<bool> {
+    // A plain read on the hot path (every pull); the upsert below only runs
+    // the first time a device shows up.
+    if let Some(known) = coll(db, DEVICES)?
+        .find_one(doc! { "device_id": device_id })
+        .await?
+    {
+        return Ok(!known.get_bool("revoked").unwrap_or(false));
+    }
     let state = coll(db, DEVICES)?
         .find_one_and_update(
             doc! { "device_id": device_id },

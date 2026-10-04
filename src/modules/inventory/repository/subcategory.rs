@@ -5,7 +5,7 @@
 
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use futures_util::TryStreamExt;
-use mongodb::bson::{doc, oid::ObjectId};
+use mongodb::bson::{DateTime as BsonDateTime, Document, doc, oid::ObjectId};
 use sqlx::Row;
 
 use crate::{
@@ -126,11 +126,24 @@ pub(crate) async fn list_subcategories_by_category(
     }
 }
 
+/// Marks the parent category changed. A subcategory travels folded into its
+/// category, so devices only learn about a subcategory change through a newer
+/// version of the category (the device-side capture triggers do the same).
+async fn touch_parent_category(db: &TenantDatabase, category_key: &str) -> AppResult<()> {
+    db.collection::<Document>("categories")
+        .update_one(
+            doc! { "key": category_key },
+            doc! { "$set": { "updated_at": BsonDateTime::now() }, "$inc": { "version": 1 } },
+        )
+        .await?;
+    Ok(())
+}
+
 pub(crate) async fn insert_subcategory(db: &Db, document: &SubcategoryDocument) -> AppResult<()> {
     match db {
-        Db::Mongo(db) => {
-            subcategories(db).insert_one(document).await?;
-            Ok(())
+        Db::Mongo(mongo) => {
+            subcategories(mongo).insert_one(document).await?;
+            touch_parent_category(mongo, &document.category_key).await
         }
         Db::Sqlite(pool) => {
             let id = document
@@ -171,9 +184,15 @@ pub(crate) async fn delete_subcategory_by_key(
     key: &str,
 ) -> AppResult<Option<SubcategoryDocument>> {
     match db {
-        Db::Mongo(db) => Ok(subcategories(db)
-            .find_one_and_delete(doc! { "key": key })
-            .await?),
+        Db::Mongo(mongo) => {
+            let deleted = subcategories(mongo)
+                .find_one_and_delete(doc! { "key": key })
+                .await?;
+            if let Some(sub) = &deleted {
+                touch_parent_category(mongo, &sub.category_key).await?;
+            }
+            Ok(deleted)
+        }
         Db::Sqlite(pool) => {
             let existing = find_subcategory_by_key(db, key).await?;
             if existing.is_some() {

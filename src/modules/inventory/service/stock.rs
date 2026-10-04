@@ -42,7 +42,7 @@ pub(crate) async fn apply_stock_delta(
 ) -> AppResult<(i64, ProductDocument)> {
     let now = BsonDateTime::now();
     let (previous_stock_quantity, updated) =
-        match repository::product::adjust_product_stock_pipeline(db, id, delta, now).await? {
+        match repository::product::adjust_product_stock_pipeline(db, id, delta).await? {
             Some(res) => res,
             None => {
                 let existing = repository::product::find_product_by_id(db, id)

@@ -78,7 +78,7 @@ async fn recompute_invoice(
     key: &str,
     conflicts: &mut Vec<NewConflict>,
 ) -> AppResult<Option<String>> {
-    let invoices = coll(db, "invoices")?;
+    let invoices = coll(db, "invoices")?.preserve_origin();
     let Some(invoice) = invoices.find_one(doc! { "key": key }).await? else {
         return Ok(None);
     };
@@ -172,7 +172,7 @@ async fn recompute_invoice(
 /// `total_purchases_cents` and `outstanding_balance_cents` from the invoice /
 /// payment / credit-note ledger, never from incremental deltas.
 async fn recompute_customer(db: &Db, key: &str) -> AppResult<()> {
-    let customers = coll(db, "customers")?;
+    let customers = coll(db, "customers")?.preserve_origin();
     let Some(customer) = customers
         .find_one(doc! { "key": key, "deleted_at": Bson::Null })
         .await?
@@ -237,7 +237,7 @@ async fn recompute_product(
     let Ok(oid) = ObjectId::parse_str(product_id) else {
         return Ok(());
     };
-    let products = coll(db, "products")?;
+    let products = coll(db, "products")?.preserve_origin();
     let Some(product) = products.find_one(doc! { "_id": oid }).await? else {
         return Ok(());
     };

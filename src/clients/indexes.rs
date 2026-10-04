@@ -56,6 +56,9 @@ const IDEMPOTENCY_RETENTION: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 /// How long a push batch's stored acks stay replayable: a device that lost the
 /// response retries the same `batchId` well within this window.
 const SYNC_BATCH_RETENTION: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+/// How long a hard-delete marker outlives its publication. The consumer reads
+/// it within moments; the slack only covers a consumer outage.
+const SYNC_TOMBSTONE_RETENTION: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 /// One index to ensure: enough to build an `IndexModel` and to assert on in tests.
 #[derive(Debug, Clone, PartialEq)]
@@ -263,6 +266,14 @@ pub fn index_specs(multi_tenant: bool) -> Vec<IndexSpec> {
             unique: false,
             ttl: Some(SYNC_BATCH_RETENTION),
         });
+        // Hard-delete markers only live until the consumer has published them.
+        specs.add_untenanted(IndexSpec {
+            collection: "sync_tombstones",
+            name: "sync_tombstones_ttl".to_string(),
+            keys: doc! { "deleted_at": 1 },
+            unique: false,
+            ttl: Some(SYNC_TOMBSTONE_RETENTION),
+        });
         specs.add(
             "sync_conflicts",
             "sync_conflicts_key_unique",
@@ -365,6 +376,9 @@ mod tests {
                     assert_eq!(spec.keys, doc! { "created_at": 1 })
                 }
                 "sync_batches" if spec.ttl.is_some() => assert_eq!(spec.keys, doc! { "at": 1 }),
+                "sync_tombstones" if spec.ttl.is_some() => {
+                    assert_eq!(spec.keys, doc! { "deleted_at": 1 })
+                }
                 _ => {
                     assert_eq!(
                         spec.keys.keys().next().map(String::as_str),

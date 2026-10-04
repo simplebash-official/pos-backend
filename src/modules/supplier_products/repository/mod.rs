@@ -264,9 +264,17 @@ pub(crate) async fn delete_link(
     product_key: &str,
 ) -> AppResult<Option<SupplierProductLinkDocument>> {
     match db {
-        Db::Mongo(db) => Ok(supplier_products(db)
-            .find_one_and_delete(doc! { "supplier_key": supplier_key, "product_key": product_key })
-            .await?),
+        Db::Mongo(mongo) => {
+            let deleted = supplier_products(mongo)
+                .find_one_and_delete(
+                    doc! { "supplier_key": supplier_key, "product_key": product_key },
+                )
+                .await?;
+            if let Some(link) = &deleted {
+                record_link_deletes(db, vec![link.key.clone()]).await?;
+            }
+            Ok(deleted)
+        }
         Db::Sqlite(pool) => {
             let existing = find_link(db, supplier_key, product_key).await?;
             if existing.is_some() {
@@ -283,12 +291,35 @@ pub(crate) async fn delete_link(
     }
 }
 
+/// Tells cloud sync these links were removed outright (see
+/// `sync::service::record_hard_deletes`).
+async fn record_link_deletes(db: &Db, keys: Vec<String>) -> AppResult<()> {
+    crate::modules::sync::service::record_hard_deletes(db, "supplier_products", &keys).await
+}
+
+/// Removes every link matching `filter`, reporting the removed keys to sync.
+async fn delete_links_where(db: &Db, mongo: &TenantDatabase, filter: Document) -> AppResult<u64> {
+    let keys: Vec<String> = supplier_products(mongo)
+        .find(filter.clone())
+        .await?
+        .try_collect::<Vec<_>>()
+        .await?
+        .into_iter()
+        .map(|link| link.key)
+        .collect();
+    let deleted = supplier_products(mongo)
+        .delete_many(filter)
+        .await?
+        .deleted_count;
+    record_link_deletes(db, keys).await?;
+    Ok(deleted)
+}
+
 pub(crate) async fn delete_links_by_supplier(db: &Db, supplier_key: &str) -> AppResult<u64> {
     match db {
-        Db::Mongo(db) => Ok(supplier_products(db)
-            .delete_many(doc! { "supplier_key": supplier_key })
-            .await?
-            .deleted_count),
+        Db::Mongo(mongo) => {
+            delete_links_where(db, mongo, doc! { "supplier_key": supplier_key }).await
+        }
         Db::Sqlite(pool) => {
             let res = sqlx::query("DELETE FROM supplier_products WHERE supplier_key = ?")
                 .bind(supplier_key)
@@ -301,10 +332,9 @@ pub(crate) async fn delete_links_by_supplier(db: &Db, supplier_key: &str) -> App
 
 pub(crate) async fn delete_links_by_product(db: &Db, product_key: &str) -> AppResult<u64> {
     match db {
-        Db::Mongo(db) => Ok(supplier_products(db)
-            .delete_many(doc! { "product_key": product_key })
-            .await?
-            .deleted_count),
+        Db::Mongo(mongo) => {
+            delete_links_where(db, mongo, doc! { "product_key": product_key }).await
+        }
         Db::Sqlite(pool) => {
             let res = sqlx::query("DELETE FROM supplier_products WHERE product_key = ?")
                 .bind(product_key)

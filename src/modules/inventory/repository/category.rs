@@ -281,9 +281,20 @@ pub(crate) async fn update_category_fields(
 
 pub(crate) async fn delete_category(db: &Db, key: &str) -> AppResult<Option<CategoryDocument>> {
     match db {
-        Db::Mongo(db) => Ok(categories(db)
-            .find_one_and_delete(doc! { "key": key })
-            .await?),
+        Db::Mongo(mongo) => {
+            let deleted = categories(mongo)
+                .find_one_and_delete(doc! { "key": key })
+                .await?;
+            if deleted.is_some() {
+                crate::modules::sync::service::record_hard_deletes(
+                    db,
+                    "categories",
+                    &[key.to_string()],
+                )
+                .await?;
+            }
+            Ok(deleted)
+        }
         Db::Sqlite(pool) => {
             let existing = find_category_by_key(db, key).await?;
             if existing.is_some() {

@@ -98,6 +98,19 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .await;
     }
 
+    // `sync_state.outbox_epoch` (see `sync_capture::ensure_state`) arrived after
+    // the table did.
+    let sync_state_cols: Vec<(i32, String)> =
+        sqlx::query_as("SELECT cid, name FROM pragma_table_info('sync_state')")
+            .fetch_all(pool)
+            .await
+            .unwrap_or_default();
+    if !sync_state_cols.is_empty() && !sync_state_cols.iter().any(|(_, n)| n == "outbox_epoch") {
+        let _ = pool
+            .execute("ALTER TABLE sync_state ADD COLUMN outbox_epoch TEXT")
+            .await;
+    }
+
     // Check if 'generated_documents' table is missing required columns from earlier schema versions
     let gen_doc_cols: Vec<(i32, String)> =
         sqlx::query_as("SELECT cid, name FROM pragma_table_info('generated_documents')")

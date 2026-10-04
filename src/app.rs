@@ -231,6 +231,11 @@ pub fn build_router(state: AppState) -> Router {
         .merge(SwaggerUi::new("/docs").url("/api-docs/openapi.json", openapi))
         .layer(cors)
         .layer(trace)
+        // Desktop: wakes the sync agent after each write so it uploads at
+        // once (a cheap no-op where nobody listens).
+        .layer(middleware::from_fn(
+            crate::modules::sync::live::local_write_tick,
+        ))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             crate::core::middleware::idempotency::handle_idempotency,

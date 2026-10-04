@@ -3908,6 +3908,57 @@
             "description": "Per-resource watermark: the newest `updatedAt` and its cursor for every syncable resource. A client adopts these cursors directly right after taking a full snapshot via the plain REST list endpoints, so its first `GET /sync/changes` call is a true delta — deriving a starting cursor from `/sync/changes` itself isn't possible, since that endpoint pages oldest-first and would hand back the *first* row's cursor instead.\n\n**Requires a valid Bearer token** (any role — `CurrentUser`, no specific permission) or the API returns 401."
           },
           "response": []
+        },
+        {
+          "name": "Change Events (realtime)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "text/event-stream"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/sync/events",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "sync",
+                "events"
+              ]
+            },
+            "description": "Server-sent event stream announcing every change to this shop's data as it is written, so devices and open browser tabs refresh at once instead of polling. Events: `hello` `{latestSeq}` on connect; `change` `{seq, resource, origin}` (id = seq) for every change made by anyone **but the caller** (a device's own pushes, or a browser's own writes identified by its `X-Device-Id`, are left out); `resync` when the caller fell behind and should pull; a `: ping` comment every 15 s. Carries no record data: devices read the change through `GET /sync/pull`, browsers through the REST API.\n\nCloud only (`TENANT_MODE=multi`, else 404 `CLOUD_SYNC_DISABLED`). **Requires a valid Bearer token**: a registered device token or any signed-in user of the shop. Postman shows the stream only once it closes; use `curl -N` to watch it live."
+          },
+          "response": []
+        },
+        {
+          "name": "Local Outbox Events (desktop)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "text/event-stream"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/sync/local/events",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "sync",
+                "local",
+                "events"
+              ]
+            },
+            "description": "Desktop (SQLite) only, for the shell's sync agent: a server-sent event stream that sends `outbox` once on connect and again after every successful local write (coalesced), so the agent uploads at once instead of on its next timer. **Requires the shell's service token** (scope `sync`); 404 on the cloud."
+          },
+          "response": []
         }
       ],
       "description": "Delta sync for the offline-first frontend (`../frontend` mirrors every syncable collection into IndexedDB). See CLAUDE.md's \"Offline sync\" section for cursor format, soft-delete semantics, and the `Idempotency-Key`/`If-Match`/`X-Device-Id` headers other write endpoints use alongside this feed."

@@ -1,7 +1,7 @@
 // HTTP surface of cloud sync v2 (multi-tenant MongoDB deployments only):
 // `POST /push`, `GET /pull`, `GET /snapshot`, `POST /devices/register` and
-// `POST /setup-complete`.
-// All require a registered-device token (`CurrentUser::require_device`); a web
+// `POST /setup-complete`, plus `GET /events` (realtime change notifications).
+// All but `/events` require a registered-device token (`CurrentUser::require_device`); a web
 // owner session cannot call them - it uses the normal REST API - and a revoked
 // device is refused with 403 `DEVICE_REVOKED`. On a single-shop deployment
 // (SQLite desktop) they answer 404: those backends are the *clients* of this
@@ -10,6 +10,8 @@
 use axum::{
     Json,
     extract::{Query, State},
+    http::{HeaderName, HeaderValue},
+    response::{IntoResponse, sse::Sse},
 };
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
@@ -22,12 +24,14 @@ use crate::{
         constants::modules,
         error::{AppError, AppResult},
         logging::domain::tracked,
-        middleware::auth::CurrentUser,
+        middleware::{auth::CurrentUser, sync_headers::DeviceId},
         response::{ApiResponse, ErrorResponse},
+        sync_origin::origin_for,
+        tenancy::current_tenant_id,
     },
     domain::sync_v2::{PullResponse, PushRequest, PushResponse, SnapshotResponse},
     modules::{
-        sync::{cloud_store, pull, push, snapshot},
+        sync::{cloud_store, live, pull, push, snapshot},
         tenants::repository as tenants_repository,
     },
 };
@@ -40,6 +44,7 @@ pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(push_changes))
         .routes(routes!(pull_changes))
+        .routes(routes!(change_events))
         .routes(routes!(get_snapshot))
         .routes(routes!(register_device))
         .routes(routes!(mark_setup_complete))
@@ -86,6 +91,9 @@ async fn push_changes(
         push::push(&state.db, &device_id, body).await
     })
     .await?;
+    // Pushed sales, payments and returns change today's figures just like the
+    // web's own billing writes do.
+    state.reports_engine.invalidate_active();
     Ok(Json(ApiResponse::success(response, "Changes processed")))
 }
 
@@ -120,6 +128,45 @@ async fn pull_changes(
     let device_id = user.require_device()?;
     let response = pull::pull(&state.db, &device_id, query.since.unwrap_or(0), query.limit).await?;
     Ok(Json(ApiResponse::success(response, "Changes retrieved")))
+}
+
+#[utoipa::path(get, path = "/events", tag = modules::SYNC,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, content_type = "text/event-stream",
+         description = "Server-sent events: `hello` {latestSeq} on connect, then `change` {seq, resource, origin} \
+                        for every change written by anyone but the caller, `resync` when the caller fell behind \
+                        (pull to catch up), and a `ping` comment every 15 s. Carries no record data: read the \
+                        change through `GET /pull` (devices) or the REST API (browsers).",
+         body = live::LiveEvent),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 404, description = "Cloud sync is not enabled on this deployment", body = ErrorResponse),
+    )
+)]
+async fn change_events(
+    user: CurrentUser,
+    DeviceId(header_device): DeviceId,
+    State(state): State<AppState>,
+) -> AppResult<impl IntoResponse> {
+    require_cloud(&state)?;
+    let tenant = current_tenant_id()
+        .ok_or_else(|| AppError::unauthorized("This token is not bound to a shop"))?;
+    // Same origin the caller's own writes are stamped with, so its echoes are
+    // left out of its stream.
+    let origin = origin_for(user.device_id.as_deref(), header_device.as_deref());
+    // Subscribe before reading the position: a change written in between is
+    // then announced rather than lost.
+    let receiver = live::subscribe(&tenant);
+    let latest = cloud_store::current_seq(&state.db).await?;
+    let events = live::cloud_events(receiver, latest, origin);
+    Ok((
+        // nginx would otherwise buffer the stream until it closes.
+        [(
+            HeaderName::from_static("x-accel-buffering"),
+            HeaderValue::from_static("no"),
+        )],
+        Sse::new(events).keep_alive(live::keep_alive()),
+    ))
 }
 
 /// Query of `GET /sync/snapshot`.

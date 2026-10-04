@@ -575,7 +575,6 @@ pub(crate) async fn adjust_product_stock_pipeline(
     db: &Db,
     id: ObjectId,
     delta: i64,
-    now: BsonDateTime,
 ) -> AppResult<Option<(i64, ProductDocument)>> {
     match db {
         Db::Mongo(db) => {
@@ -584,15 +583,19 @@ pub(crate) async fn adjust_product_stock_pipeline(
                 filter.insert("stock_quantity", doc! { "$gte": -delta });
             }
 
+            // Only the stock moves: `stock_quantity` is derived from the
+            // stock-movement ledger, so this is not an edit of the product.
+            // Bumping `updated_at`/`version` (or the writer) here would let a
+            // sale win last-writer-wins over a newer price or name edit made
+            // on another device.
             let pipeline_update = vec![doc! {
                 "$set": {
                     "stock_quantity": { "$add": ["$stock_quantity", delta] },
-                    "updated_at": now,
-                    "version": { "$add": [{ "$ifNull": ["$version", 1] }, 1] },
                 }
             }];
 
             let result = products(db)
+                .preserve_origin()
                 .find_one_and_update(filter, pipeline_update)
                 .return_document(ReturnDocument::After)
                 .await?;
@@ -606,16 +609,16 @@ pub(crate) async fn adjust_product_stock_pipeline(
         }
         Db::Sqlite(pool) => {
             let id_str = id.to_hex();
-            let updated_at_iso = bson_to_iso(&now);
 
             // Atomic single-statement update with stock floor guard (stock_quantity + delta >= 0)
             // and RETURNING * to eliminate multi-statement transaction concurrency deadlocks.
+            // Only `stock_quantity` changes (see the Mongo arm): the sync
+            // capture trigger ignores derived-only writes, so a sale does not
+            // re-send the product row.
             let row = sqlx::query(
                 r#"
                 UPDATE products
-                SET stock_quantity = stock_quantity + ?,
-                    updated_at = ?,
-                    version = version + 1
+                SET stock_quantity = stock_quantity + ?
                 WHERE id = ?
                   AND deleted_at IS NULL
                   AND (stock_quantity + ? >= 0)
@@ -623,7 +626,6 @@ pub(crate) async fn adjust_product_stock_pipeline(
                 "#,
             )
             .bind(delta)
-            .bind(&updated_at_iso)
             .bind(&id_str)
             .bind(delta)
             .fetch_optional(pool)

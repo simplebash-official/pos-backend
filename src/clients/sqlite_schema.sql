@@ -510,7 +510,8 @@ CREATE TABLE IF NOT EXISTS sync_state (
     last_pushed_outbox_seq INTEGER NOT NULL DEFAULT 0,
     clock_offset_ms INTEGER NOT NULL DEFAULT 0,
     capture_enabled INTEGER NOT NULL DEFAULT 0,
-    bootstrap_active INTEGER NOT NULL DEFAULT 0
+    bootstrap_active INTEGER NOT NULL DEFAULT 0,
+    outbox_epoch TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sync_outbox (

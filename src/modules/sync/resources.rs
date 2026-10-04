@@ -274,6 +274,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn origin_stamped_collections_are_exactly_the_synced_tables() {
+        let mut expected: Vec<&str> = SYNC_RESOURCES.iter().map(|s| s.table).collect();
+        expected.push("subcategories");
+        expected.sort_unstable();
+        let mut actual = crate::core::sync_origin::SYNCED_COLLECTIONS.to_vec();
+        actual.sort_unstable();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
     fn table_is_sorted_by_order_and_orders_are_unique() {
         let orders: Vec<u8> = SYNC_RESOURCES.iter().map(|s| s.order).collect();
         let mut sorted = orders.clone();

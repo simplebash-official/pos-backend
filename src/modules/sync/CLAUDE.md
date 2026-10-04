@@ -1,18 +1,52 @@
-# src/modules/sync/ — offline sync
+# src/modules/sync/ — sync
 
-Loaded automatically when working under `src/modules/sync/`. Extracted from the root `CLAUDE.md`.
-`../frontend` no longer consumes this module — it exists for a future, separate sync backend — so
-this guidance is only relevant when actually touching sync code.
+Loaded automatically when working under `src/modules/sync/`. Two generations live here:
 
-## Offline sync
+- **Sync v2 (live)**: desktops (SQLite) ⇄ the multi-tenant cloud (MongoDB) ⇄ the website.
+  Desktop side: `outbox`, `apply`, `state`, `routes_local` (driven by the desktop shell's
+  agent, `pos-desktop/src-tauri/src/sync/`). Cloud side: `push`, `pull`, `snapshot`,
+  `cloud_capture`, `cloud_store`, `routes_v2`. Realtime notifications: `live`.
+- **Legacy `/sync/changes` + `/sync/status`** (`routes`, `service`, `cursor`): the old
+  per-resource cursor feed, kept for compatibility; see the rules further down.
 
-`../frontend` no longer consumes any of this — its offline-first sync engine was removed and it now
-reads/writes straight through the plain REST endpoints below, the same as any ordinary web client.
-`modules::sync` (`/sync/changes`, `/sync/status`) is kept fully implemented and untouched: a future,
-separate sync backend is planned to reintroduce cross-terminal syncing, and it (or whatever replaces
-`../frontend`'s removed engine) is the intended consumer. Several rules below exist for that
-consumer's benefit rather than any REST caller's, and remain load-bearing for it even while nothing
-currently calls this endpoint.
+## Sync v2: how a change travels (and must stay fast)
+
+```
+desktop write ─► SQLite triggers ─► sync_outbox ─► (local SSE `outbox`) ─► agent pushes
+cloud write (REST or push) ─► change stream ─► cloud_capture ─► sync_changes (per-tenant seq)
+sync_changes insert ─► live::run_watcher (every instance) ─► GET /api/sync/events (SSE)
+     ├─► other desktops: agent pulls since its cursor ─► apply ─► `sync://applied` ─► UI reloads
+     └─► website tabs: invalidate the matching TanStack queries
+```
+
+Rules that keep it correct:
+
+- **Every write to a synced collection names its writer.** `updated_by_device` is stamped
+  centrally by `clients::tenant_db::ScopedCollection` from the request's origin
+  (`core::sync_origin`: device id of a device token, else `web:<X-Device-Id>`, else `cloud`).
+  A device's pull skips rows whose origin is itself, so a write that kept the previous writer's
+  id would never reach that device. Do not hand-set `updated_by_device` in repositories; use
+  `preserve_origin()` only for derived-ledger recomputes (`derived_mongo`) and stock-only moves.
+  `core::sync_origin::SYNCED_COLLECTIONS` must equal `SYNC_RESOURCES` tables + `subcategories`
+  (guarded by a test in `resources.rs`).
+- **No silent hard deletes.** A deleted document leaves the change stream nothing to read.
+  Prefer a soft delete; where a repository must remove a row of a synced collection outright,
+  call `sync::service::record_hard_deletes` right after (a `sync_tombstones` marker the
+  consumer publishes as a delete). Subcategory writes bump their parent category
+  (`touch_parent_category`) because they travel folded into it.
+- **Derived columns never move last-writer-wins.** A write that only changes `derived`
+  columns (`products.stock_quantity`) must not bump `updated_at`/`version`; the SQLite products
+  trigger only fires on non-derived columns and the consumer skips derived-only updates.
+- **The consumer never skips an event.** `cloud_capture` retries, and on persistent failure
+  restarts from its last saved resume token (an event failing across 3 restarts is logged and
+  dropped so one bad write cannot stop every tenant's feed). Duplicates are absorbed by the
+  unique `source_token`; an unused `seq` is just a gap.
+- **Realtime is notification only.** SSE events carry `{seq, resource, origin}`, never record
+  data; clients read through `GET /sync/pull` or REST, so permissions and DTO shapes stay put.
+  Polling remains the safety net (desktop timer 60 s while both streams are up, 15 s otherwise).
+  nginx must not buffer `/api/sync/events` (see `pos-compose` `nginx/conf.d/default.conf`).
+
+## Legacy `/sync/changes` feed
 
 **The one rule that matters: `/sync/changes` items must be byte-identical to what the REST read
 endpoints return.** The client merges the delta feed and the REST snapshot feed into the *same*

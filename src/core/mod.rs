@@ -14,6 +14,7 @@ pub mod openapi;
 pub mod rate_limit;
 pub mod response;
 pub mod sync_merge;
+pub mod sync_origin;
 #[cfg(any(test, feature = "sync-sim"))]
 pub mod sync_sim;
 pub mod tenancy;

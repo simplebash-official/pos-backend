@@ -11,6 +11,7 @@ pub mod cloud_capture;
 pub(crate) mod cloud_store;
 pub mod compaction;
 pub(crate) mod derived_mongo;
+pub mod live;
 pub(crate) mod mongo_codec;
 pub mod pull;
 pub mod push;

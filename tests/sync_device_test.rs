@@ -409,6 +409,83 @@ async fn triggers_are_inert_until_enabled_then_enqueue_and_coalesce() {
 }
 
 #[tokio::test]
+async fn a_sale_moves_stock_without_resending_the_product_row() {
+    let dev = Device::new().await;
+    let keys = shop(&dev).await;
+    dev.sync("POST", "/api/sync/enable", Some(json!({}))).await;
+    dev.sync(
+        "POST",
+        "/api/sync/outbox/ack",
+        Some(json!({ "upToSeq": 1_000_000 })),
+    )
+    .await;
+
+    dev.api(
+        "POST",
+        "/api/billing/sales",
+        Some(json!({
+            "staff": { "cashierName": "Admin" },
+            "items": [{ "productKey": keys["productKey"], "quantity": 1, "discountCents": 0, "sourceType": "retail" }],
+            "payment": { "paymentMethod": "cash", "isCredit": false, "amountReceivedCents": 100000 },
+            "shopProfileSnapshot": { "name": "Shop", "address": "Colombo" }
+        })),
+    )
+    .await;
+
+    let resources: Vec<String> = dev
+        .drain_outbox()
+        .await
+        .iter()
+        .map(|i| i["record"]["resource"].as_str().unwrap().to_string())
+        .collect();
+    assert!(
+        resources.contains(&"stockMovements".to_string()),
+        "{resources:?}"
+    );
+    assert!(resources.contains(&"invoices".to_string()), "{resources:?}");
+    // The stock change travels as its ledger entry; re-sending the whole
+    // product with a fresh timestamp would overwrite a newer price or name
+    // edit made on another device.
+    assert!(
+        !resources.contains(&"products".to_string()),
+        "{resources:?}"
+    );
+
+    // A real edit of the product is still captured.
+    dev.api(
+        "PUT",
+        &format!(
+            "/api/inventory/products/{}",
+            keys["productId"].as_str().unwrap()
+        ),
+        Some(json!({ "sellingPriceCents": 51000 })),
+    )
+    .await;
+    let resources: Vec<String> = dev
+        .drain_outbox()
+        .await
+        .iter()
+        .map(|i| i["record"]["resource"].as_str().unwrap().to_string())
+        .collect();
+    assert!(resources.contains(&"products".to_string()), "{resources:?}");
+}
+
+#[tokio::test]
+async fn the_outbox_names_its_epoch() {
+    let dev = Device::new().await;
+    let page = dev
+        .sync("GET", "/api/sync/outbox?after=0&limit=1", None)
+        .await;
+    let epoch = page["epoch"].as_str().unwrap();
+    assert!(epoch.starts_with("ep_"), "{epoch}");
+    // Stable for the life of the database.
+    let again = dev
+        .sync("GET", "/api/sync/outbox?after=0&limit=1", None)
+        .await;
+    assert_eq!(again["epoch"], page["epoch"]);
+}
+
+#[tokio::test]
 async fn waiting_changes_are_counted_per_resource_and_named_for_people() {
     let dev = Device::new().await;
     dev.sync("POST", "/api/sync/enable", Some(json!({}))).await;

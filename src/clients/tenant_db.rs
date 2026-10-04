@@ -4,10 +4,14 @@
 // reaches the driver, so a repository cannot forget the tenant filter. With
 // `Tenant::Global` the rewrites are identity, i.e. the raw driver behaviour.
 //
+// Writes to a synced collection (`core::sync_origin::SYNCED_COLLECTIONS`) on a
+// multi-tenant handle are also stamped with the request's origin
+// (`updated_by_device`), so the sync change log always names the real writer.
+//
 // Deliberately NOT here: index creation and other admin operations. Those need
 // the raw handle (`TenantDatabase::unscoped`).
 
-use std::borrow::Borrow;
+use std::{borrow::Borrow, sync::Arc};
 
 use mongodb::{
     Collection, Cursor, Database,
@@ -19,7 +23,10 @@ use mongodb::{
 };
 use serde::{Serialize, de::DeserializeOwned};
 
-use crate::core::tenancy::{Tenant, current_tenant, scope_filter, scope_pipeline, stamp_document};
+use crate::core::{
+    sync_origin::{self, CLOUD_ORIGIN, current_origin, is_synced_collection, stamp_update},
+    tenancy::{Tenant, current_tenant, scope_filter, scope_pipeline, stamp_document},
+};
 
 #[derive(Clone)]
 pub struct TenantDatabase {
@@ -73,9 +80,15 @@ impl TenantDatabase {
     }
 
     pub fn collection<T: Send + Sync>(&self, name: &str) -> ScopedCollection<T> {
+        let tenant = self.effective_tenant();
+        // Only the multi-tenant cloud publishes a change log; single-shop
+        // Mongo deployments have no sync and keep their documents untouched.
+        let origin = (tenant.is_scoped() && is_synced_collection(name))
+            .then(|| current_origin().unwrap_or_else(|| Arc::from(CLOUD_ORIGIN)));
         ScopedCollection {
             inner: self.inner.collection::<T>(name),
-            tenant: self.effective_tenant(),
+            tenant,
+            origin,
         }
     }
 
@@ -86,6 +99,7 @@ impl TenantDatabase {
         ScopedCollection {
             inner: self.inner.collection::<T>(name),
             tenant: Tenant::Global,
+            origin: None,
         }
     }
 
@@ -100,6 +114,36 @@ impl TenantDatabase {
 pub struct ScopedCollection<T: Send + Sync> {
     inner: Collection<T>,
     tenant: Tenant,
+    /// Writer stamped on every write (`updated_by_device`); `None` leaves
+    /// documents untouched (unsynced collection, single-tenant handle, or
+    /// `preserve_origin`).
+    origin: Option<Arc<str>>,
+}
+
+impl<T: Send + Sync> ScopedCollection<T> {
+    /// Same collection, but writes keep whatever `updated_by_device` the
+    /// documents already have. Only for writes that are a consequence of
+    /// another device's change rather than a change of their own (derived
+    /// ledger totals recomputed after a push).
+    pub fn preserve_origin(mut self) -> Self {
+        self.origin = None;
+        self
+    }
+
+    fn stamp(&self, update: impl Into<UpdateModifications>) -> UpdateModifications {
+        match &self.origin {
+            Some(origin) => stamp_update(origin, update.into()),
+            None => update.into(),
+        }
+    }
+
+    fn stamp_doc(&self, document: Document) -> Document {
+        let document = stamp_document(&self.tenant, document);
+        match &self.origin {
+            Some(origin) => sync_origin::stamp_document(origin, document),
+            None => document,
+        }
+    }
 }
 
 impl<T: DeserializeOwned + Send + Sync> ScopedCollection<T> {
@@ -119,7 +163,7 @@ impl<T: DeserializeOwned + Send + Sync> ScopedCollection<T> {
         // An upsert copies the equality conditions of the filter into the new
         // document, so a scoped upsert is created inside the tenant as well.
         self.inner
-            .find_one_and_update(scope_filter(&self.tenant, filter), update)
+            .find_one_and_update(scope_filter(&self.tenant, filter), self.stamp(update))
     }
 
     pub fn find_one_and_delete(&self, filter: Document) -> FindOneAndDelete<'_, T> {
@@ -133,7 +177,7 @@ impl<T: DeserializeOwned + Send + Sync> ScopedCollection<T> {
         update: impl Into<UpdateModifications>,
     ) -> UpdateAction<'_> {
         self.inner
-            .update_one(scope_filter(&self.tenant, filter), update)
+            .update_one(scope_filter(&self.tenant, filter), self.stamp(update))
     }
 
     pub fn update_many(
@@ -142,7 +186,7 @@ impl<T: DeserializeOwned + Send + Sync> ScopedCollection<T> {
         update: impl Into<UpdateModifications>,
     ) -> UpdateAction<'_> {
         self.inner
-            .update_many(scope_filter(&self.tenant, filter), update)
+            .update_many(scope_filter(&self.tenant, filter), self.stamp(update))
     }
 
     pub async fn delete_one(&self, filter: Document) -> Result<DeleteResult, MongoError> {
@@ -182,13 +226,13 @@ impl<T: DeserializeOwned + Send + Sync> ScopedCollection<T> {
 
 impl<T: Serialize + DeserializeOwned + Send + Sync> ScopedCollection<T> {
     /// Inserts the document stamped with the tenant (any caller-supplied
-    /// `tenant_id` is overwritten).
+    /// `tenant_id` is overwritten) and, on a synced collection, the origin.
     pub async fn insert_one(&self, doc: impl Borrow<T>) -> Result<InsertOneResult, MongoError> {
         let mut document = match mongodb::bson::serialize_to_bson(doc.borrow())? {
             Bson::Document(d) => d,
             _ => return Err(MongoError::custom("inserted value is not a document")),
         };
-        document = stamp_document(&self.tenant, document);
+        document = self.stamp_doc(document);
         self.inner
             .clone_with_type::<Document>()
             .insert_one(document)
@@ -205,7 +249,7 @@ impl<T: Serialize + DeserializeOwned + Send + Sync> ScopedCollection<T> {
             Bson::Document(d) => d,
             _ => return Err(MongoError::custom("replacement is not a document")),
         };
-        document = stamp_document(&self.tenant, document);
+        document = self.stamp_doc(document);
         self.inner
             .clone_with_type::<Document>()
             .replace_one(scope_filter(&self.tenant, filter), document)

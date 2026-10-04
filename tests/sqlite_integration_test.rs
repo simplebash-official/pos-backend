@@ -874,13 +874,16 @@ async fn test_sqlite_deactivating_a_user_revokes_their_live_token() {
         .method("POST")
         .uri("/api/auth/login")
         .header(CONTENT_TYPE, "application/json")
-        .body(Body::from(json!({ "email": email, "password": password }).to_string()))
+        .body(Body::from(
+            json!({ "email": email, "password": password }).to_string(),
+        ))
         .unwrap();
     let (status, body) = execute(&ctx.router, login).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let staff_token = body["data"]["token"].as_str().expect("token").to_string();
 
-    let (status, body) = send_authed(&ctx.router, "GET", "/api/customers", None, &staff_token).await;
+    let (status, body) =
+        send_authed(&ctx.router, "GET", "/api/customers", None, &staff_token).await;
     assert_eq!(status, StatusCode::OK, "before deactivation: {body}");
 
     let (status, body) = send_authed(
@@ -895,7 +898,12 @@ async fn test_sqlite_deactivating_a_user_revokes_their_live_token() {
 
     // The token itself is still unexpired, but the account behind it is not
     // active any more: every authenticated route must refuse it now.
-    let (status, body) = send_authed(&ctx.router, "GET", "/api/customers", None, &staff_token).await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED, "after deactivation: {body}");
+    let (status, body) =
+        send_authed(&ctx.router, "GET", "/api/customers", None, &staff_token).await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "after deactivation: {body}"
+    );
     assert_eq!(body["code"], "USER_INACTIVE");
 }

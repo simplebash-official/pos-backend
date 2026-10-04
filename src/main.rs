@@ -126,11 +126,16 @@ async fn main() {
     reports_engine.init().await;
 
     // Multi-tenant cloud only: the single change-stream consumer that feeds the
-    // per-tenant sync change log (it holds a lease, so extra instances stand by).
+    // per-tenant sync change log (it holds a lease, so extra instances stand
+    // by), and this instance's watcher announcing new log rows to the devices
+    // and browsers subscribed to `GET /api/sync/events`.
     if config.tenant_mode == simplebash_pos_backend::core::config::TenantMode::Multi {
         tokio::spawn(
             simplebash_pos_backend::modules::sync::cloud_capture::run_consumer(db.clone()),
         );
+        tokio::spawn(simplebash_pos_backend::modules::sync::live::run_watcher(
+            db.clone(),
+        ));
     }
 
     let state = AppState {

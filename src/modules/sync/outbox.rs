@@ -124,7 +124,16 @@ pub async fn list_outbox(db: &Db, query: OutboxQuery) -> AppResult<OutboxRespons
         items.push(OutboxItem { seq, record });
     }
 
-    Ok(OutboxResponse { items, last_seq })
+    let epoch: Option<String> =
+        sqlx::query_scalar("SELECT outbox_epoch FROM sync_state WHERE id = 1")
+            .fetch_optional(pool)
+            .await?
+            .flatten();
+    Ok(OutboxResponse {
+        items,
+        last_seq,
+        epoch: epoch.unwrap_or_default(),
+    })
 }
 
 const PENDING_DEFAULT_LIMIT: i64 = 50;
