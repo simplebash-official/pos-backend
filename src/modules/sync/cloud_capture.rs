@@ -60,23 +60,27 @@ const POISON_RESTARTS: u32 = 3;
 const RESTART_DELAY: Duration = Duration::from_secs(1);
 const STANDBY_DELAY: Duration = Duration::from_secs(5);
 
-/// Why the consumer stopped consuming.
+/// Why the consumer stopped consuming. The errors are boxed so this stays a
+/// small `Err` type (`AppError` alone is over 100 bytes).
 enum Stop {
     /// Lease lost, stream ended or a database error: retake and resume.
-    Retry(AppError),
+    Retry(Box<AppError>),
     /// This event could not be published even after retries.
-    Event { source_token: String, err: AppError },
+    Event {
+        source_token: String,
+        err: Box<AppError>,
+    },
 }
 
 impl From<AppError> for Stop {
     fn from(err: AppError) -> Self {
-        Stop::Retry(err)
+        Stop::Retry(Box::new(err))
     }
 }
 
 impl From<mongodb::error::Error> for Stop {
     fn from(err: mongodb::error::Error) -> Self {
-        Stop::Retry(err.into())
+        Stop::Retry(Box::new(err.into()))
     }
 }
 
@@ -230,9 +234,7 @@ async fn consume(db: &Db, holder: &str, skip: &[String]) -> Result<(), Stop> {
         // answer at once with nothing, forever: stop and let `run_consumer`
         // reopen it from the saved position.
         if !stream.is_alive() {
-            return Err(Stop::Retry(AppError::internal(
-                "the change stream was closed",
-            )));
+            return Err(AppError::internal("the change stream was closed").into());
         }
         // One awaited round trip: returns as soon as an event exists, or
         // empty after `MAX_AWAIT`, so there is no idle sleep adding latency.
@@ -291,7 +293,7 @@ async fn process_with_retry(
             Err(err) => {
                 return Err(Stop::Event {
                     source_token: token.unwrap_or_default(),
-                    err,
+                    err: Box::new(err),
                 });
             }
         }
