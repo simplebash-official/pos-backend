@@ -230,6 +230,23 @@ pub fn spec(name: &str) -> Option<&'static ResourceSpec> {
         .find(|s| s.name == name || s.table == name)
 }
 
+/// The column that names a row to a person (invoice number, product name…).
+/// `None` for rows that have no readable name of their own (payments, stock
+/// movements…). Fixed strings only: the result is spliced into SQL.
+pub fn label_column(table: &str) -> Option<&'static str> {
+    match table {
+        "invoices" => Some("invoice_number"),
+        "credit_notes" => Some("credit_note_number"),
+        "repairs" | "print_jobs" => Some("ticket_number"),
+        "purchases" => Some("reference_no"),
+        "products" | "customers" | "suppliers" | "employees" | "categories" | "users" => {
+            Some("name")
+        }
+        "product_serials" => Some("serial_number"),
+        _ => None,
+    }
+}
+
 /// Resources in apply order (parents first).
 pub fn ordered() -> impl Iterator<Item = &'static ResourceSpec> {
     SYNC_RESOURCES.iter()

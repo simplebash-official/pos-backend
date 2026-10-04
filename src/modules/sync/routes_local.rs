@@ -21,8 +21,8 @@ use crate::{
     domain::{
         sync_local::{
             ConflictItem, EnableRequest, EnableResponse, OutboxAckRequest, OutboxQuery,
-            OutboxResponse, ResolveConflictRequest, SeedResponse, SkuPrefixesResponse,
-            StoreBlockRequest, SyncStateResponse, UpdateSyncStateRequest,
+            OutboxResponse, PendingQuery, PendingResponse, ResolveConflictRequest, SeedResponse,
+            SkuPrefixesResponse, StoreBlockRequest, SyncStateResponse, UpdateSyncStateRequest,
         },
         sync_v2::{ApplyRequest, ApplyResponse},
     },
@@ -38,6 +38,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_state, update_state))
         .routes(routes!(enable_sync))
         .routes(routes!(get_outbox))
+        .routes(routes!(get_pending))
         .routes(routes!(ack_outbox))
         .routes(routes!(seed_outbox))
         .routes(routes!(apply_changes))
@@ -118,6 +119,25 @@ async fn get_outbox(
 ) -> AppResult<Json<ApiResponse<OutboxResponse>>> {
     let result = outbox::list_outbox(&app.db, query).await?;
     Ok(Json(ApiResponse::success(result, "Outbox retrieved")))
+}
+
+#[utoipa::path(get, path = "/outbox/pending", tag = modules::SYNC, params(PendingQuery),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Changes still waiting to upload, with readable names", body = ApiResponse<PendingResponse>),
+        (status = 401, description = "Missing or invalid service token", body = ErrorResponse),
+    )
+)]
+async fn get_pending(
+    _agent: SyncAgent,
+    State(app): State<AppState>,
+    Query(query): Query<PendingQuery>,
+) -> AppResult<Json<ApiResponse<PendingResponse>>> {
+    let result = outbox::list_pending(&app.db, query).await?;
+    Ok(Json(ApiResponse::success(
+        result,
+        "Pending changes retrieved",
+    )))
 }
 
 #[utoipa::path(post, path = "/outbox/ack", tag = modules::SYNC,

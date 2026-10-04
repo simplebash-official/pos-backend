@@ -409,6 +409,79 @@ async fn triggers_are_inert_until_enabled_then_enqueue_and_coalesce() {
 }
 
 #[tokio::test]
+async fn waiting_changes_are_counted_per_resource_and_named_for_people() {
+    let dev = Device::new().await;
+    dev.sync("POST", "/api/sync/enable", Some(json!({}))).await;
+    dev.sync(
+        "POST",
+        "/api/sync/outbox/ack",
+        Some(json!({ "upToSeq": 1_000_000 })),
+    )
+    .await;
+    let empty = dev.sync("GET", "/api/sync/outbox/pending", None).await;
+    assert_eq!(empty["total"], 0);
+    assert_eq!(dev.state().await["pendingByResource"], json!([]));
+
+    for name in ["Screens", "Cables"] {
+        dev.api(
+            "POST",
+            "/api/inventory/categories",
+            Some(json!({ "name": name, "icon": "x", "color": "red" })),
+        )
+        .await;
+    }
+    let state = dev.state().await;
+    assert_eq!(
+        state["pendingByResource"],
+        json!([{ "resource": "categories", "count": 2 }])
+    );
+    assert_eq!(state["conflictsByResource"], json!([]));
+
+    let all = dev.sync("GET", "/api/sync/outbox/pending", None).await;
+    assert_eq!(all["total"], 2);
+    let labels: Vec<&str> = all["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["label"].as_str().unwrap())
+        .collect();
+    assert_eq!(labels, vec!["Cables", "Screens"], "newest change first");
+    assert_eq!(all["items"][0]["op"], "upsert");
+
+    let capped = dev
+        .sync(
+            "GET",
+            "/api/sync/outbox/pending?resource=categories&limit=1",
+            None,
+        )
+        .await;
+    assert_eq!(capped["total"], 2);
+    assert_eq!(capped["items"].as_array().unwrap().len(), 1);
+    let other = dev
+        .sync("GET", "/api/sync/outbox/pending?resource=invoices", None)
+        .await;
+    assert_eq!(other["total"], 0);
+
+    // A row deleted for good has no name left to show, but is still listed.
+    let key = capped["items"][0]["key"].as_str().unwrap().to_string();
+    sqlx::query("DELETE FROM categories WHERE key = ?")
+        .bind(&key)
+        .execute(dev.pool())
+        .await
+        .unwrap();
+    let after = dev
+        .sync("GET", "/api/sync/outbox/pending?resource=categories", None)
+        .await;
+    let gone = after["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["key"] == key.as_str())
+        .unwrap();
+    assert!(gone["label"].is_null());
+}
+
+#[tokio::test]
 async fn nothing_is_captured_while_a_batch_is_being_applied() {
     let dev = Device::new().await;
     dev.sync("POST", "/api/sync/enable", Some(json!({}))).await;

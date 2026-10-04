@@ -11,10 +11,10 @@ use crate::{
     clients::{db::Db, sqlite::generate_id_hex},
     core::error::{AppError, AppResult},
     domain::sync_local::{
-        ConflictItem, EnableRequest, EnableResponse, NumberBlockInfo, SeedResponse,
+        ConflictItem, EnableRequest, EnableResponse, NumberBlockInfo, ResourceCount, SeedResponse,
         SyncStateResponse, UpdateSyncStateRequest,
     },
-    modules::sync::resources::{Phase, SYNC_RESOURCES},
+    modules::sync::resources::{self, Phase, SYNC_RESOURCES},
 };
 
 /// The SQLite pool, or a clear error when the local sync API is reached on a
@@ -60,6 +60,9 @@ pub async fn get_state(db: &Db) -> AppResult<SyncStateResponse> {
             block_size: r.get("block_size"),
         })
         .collect();
+    let pending_by_resource = grouped_counts(pool, "sync_outbox", None).await?;
+    let conflicts_by_resource =
+        grouped_counts(pool, "sync_conflicts", Some("resolved_at IS NULL")).await?;
     Ok(SyncStateResponse {
         device_id: row.get("device_id"),
         tenant_id: row.get("tenant_id"),
@@ -73,7 +76,39 @@ pub async fn get_state(db: &Db) -> AppResult<SyncStateResponse> {
         conflicts_open,
         local_has_data,
         number_blocks,
+        pending_by_resource,
+        conflicts_by_resource,
     })
+}
+
+/// Row counts per `resource`, normalised to the wire name. `table` and
+/// `filter` are fixed strings from this module, never user input.
+async fn grouped_counts(
+    pool: &SqlitePool,
+    table: &str,
+    filter: Option<&str>,
+) -> AppResult<Vec<ResourceCount>> {
+    let sql = format!(
+        "SELECT resource, COUNT(*) AS n FROM {table}{} GROUP BY resource",
+        filter.map(|f| format!(" WHERE {f}")).unwrap_or_default()
+    );
+    let mut merged: Vec<ResourceCount> = Vec::new();
+    for r in sqlx::query(&sql).fetch_all(pool).await? {
+        let raw: String = r.get("resource");
+        let name = resources::spec(&raw)
+            .map(|s| s.name)
+            .unwrap_or(raw.as_str());
+        let n: i64 = r.get("n");
+        match merged.iter_mut().find(|c| c.resource == name) {
+            Some(c) => c.count += n,
+            None => merged.push(ResourceCount {
+                resource: name.to_string(),
+                count: n,
+            }),
+        }
+    }
+    merged.sort_by(|a, b| a.resource.cmp(&b.resource));
+    Ok(merged)
 }
 
 pub async fn update_state(db: &Db, req: UpdateSyncStateRequest) -> AppResult<SyncStateResponse> {

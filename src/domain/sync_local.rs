@@ -28,6 +28,48 @@ pub struct SyncStateResponse {
     pub local_has_data: bool,
     /// Cloud-reserved number blocks still usable, per sequence name.
     pub number_blocks: Vec<NumberBlockInfo>,
+    /// Outbox rows waiting to be pushed, per resource (wire name).
+    pub pending_by_resource: Vec<ResourceCount>,
+    /// Unresolved conflicts, per resource (wire name).
+    pub conflicts_by_resource: Vec<ResourceCount>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceCount {
+    pub resource: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, Deserialize, IntoParams)]
+#[serde(rename_all = "camelCase")]
+#[into_params(parameter_in = Query)]
+pub struct PendingQuery {
+    /// Only this resource (wire name, e.g. `invoices`).
+    pub resource: Option<String>,
+    /// Page size, 1..200 (default 50).
+    pub limit: Option<i64>,
+}
+
+/// One change that has not reached the cloud yet, described for people.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingItem {
+    pub resource: String,
+    pub key: String,
+    /// `upsert` or `delete`.
+    pub op: String,
+    pub enqueued_at: String,
+    /// Invoice number, product name, etc.; `None` when the row is gone or has no readable name.
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingResponse {
+    pub items: Vec<PendingItem>,
+    /// Total waiting for the requested resource(s), which can exceed `items`.
+    pub total: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
