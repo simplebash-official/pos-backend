@@ -898,7 +898,7 @@ async fn downloading_a_shop_with_an_admin_completes_setup_and_the_admin_can_log_
         .sync(
             "POST",
             "/api/sync/apply",
-            Some(json!({ "mode": "bootstrap", "changes": changes, "advanceCursorTo": 9 })),
+            Some(json!({ "mode": "bootstrap", "changes": changes, "advanceCursorTo": 9, "setupCompleted": true })),
         )
         .await;
 
@@ -941,7 +941,7 @@ async fn a_half_downloaded_shop_is_not_marked_as_set_up() {
         .sync(
             "POST",
             "/api/sync/apply",
-            Some(json!({ "mode": "bootstrap", "changes": users, "advanceCursorTo": 9 })),
+            Some(json!({ "mode": "bootstrap", "changes": users, "advanceCursorTo": 9, "setupCompleted": true })),
         )
         .await;
     assert_eq!(setup_status(&joining).await["setupCompleted"], true);
@@ -961,7 +961,7 @@ async fn downloading_a_shop_without_an_admin_leaves_the_setup_to_the_owner() {
         .sync(
             "POST",
             "/api/sync/apply",
-            Some(json!({ "mode": "bootstrap", "changes": changes, "advanceCursorTo": 3 })),
+            Some(json!({ "mode": "bootstrap", "changes": changes, "advanceCursorTo": 3, "setupCompleted": true })),
         )
         .await;
 
@@ -973,7 +973,7 @@ async fn downloading_a_shop_without_an_admin_leaves_the_setup_to_the_owner() {
 async fn downloading_the_same_shop_again_keeps_the_original_setup_time() {
     let changes = cloud_shop_with_admin().await;
     let joining = Device::new().await;
-    let body = json!({ "mode": "bootstrap", "changes": changes, "advanceCursorTo": 9 });
+    let body = json!({ "mode": "bootstrap", "changes": changes, "advanceCursorTo": 9, "setupCompleted": true });
     joining
         .sync("POST", "/api/sync/apply", Some(body.clone()))
         .await;
@@ -984,6 +984,85 @@ async fn downloading_the_same_shop_again_keeps_the_original_setup_time() {
     let again = setup_status(&joining).await;
     assert_eq!(again["setupCompleted"], true);
     assert_eq!(again["setupCompletedAt"], first);
+}
+
+#[tokio::test]
+async fn a_shop_the_cloud_has_not_set_up_leaves_the_choice_to_the_owner_with_the_cloud_admin() {
+    let changes = cloud_shop_with_admin().await;
+
+    for flag in [json!(null), json!(false)] {
+        let joining = Device::new().await;
+        let mut body = json!({ "mode": "bootstrap", "changes": changes, "advanceCursorTo": 9 });
+        if !flag.is_null() {
+            body["setupCompleted"] = flag;
+        }
+        joining.sync("POST", "/api/sync/apply", Some(body)).await;
+
+        // The admin arrived, but the setup choice (demo vs clean) is still open.
+        let status = setup_status(&joining).await;
+        assert_eq!(status["setupCompleted"], false);
+        assert_eq!(
+            status["isFirstRun"], false,
+            "users exist, so this is not a blank install"
+        );
+
+        // A wrong password changes nothing.
+        let (code, res) = joining
+            .call(
+                "POST",
+                "/api/system/setup",
+                Some(json!({
+                    "loadSampleData": false,
+                    "adminEmail": "owner@shop.test",
+                    "adminPassword": "not-the-password"
+                })),
+                None,
+            )
+            .await;
+        assert_eq!(code, StatusCode::UNAUTHORIZED, "{res}");
+        assert_eq!(setup_status(&joining).await["setupCompleted"], false);
+
+        // The cloud admin's own password completes it, signs in, and adds no second admin.
+        let (code, res) = joining
+            .call(
+                "POST",
+                "/api/system/setup",
+                Some(json!({
+                    "loadSampleData": false,
+                    "adminEmail": "owner@shop.test",
+                    "adminPassword": "owner-pos-pass-1"
+                })),
+                None,
+            )
+            .await;
+        assert_eq!(code, StatusCode::OK, "{res}");
+        assert!(res["data"]["token"].is_string(), "{res}");
+        let admins: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE role = 'admin'")
+            .fetch_one(joining.pool())
+            .await
+            .unwrap();
+        assert_eq!(admins, 1);
+        assert_eq!(setup_status(&joining).await["setupCompleted"], true);
+    }
+}
+
+#[tokio::test]
+async fn a_set_up_cloud_shop_passes_on_whether_it_loaded_demo_data() {
+    let changes = cloud_shop_with_admin().await;
+    let joining = Device::new().await;
+    joining
+        .sync(
+            "POST",
+            "/api/sync/apply",
+            Some(json!({
+                "mode": "bootstrap", "changes": changes, "advanceCursorTo": 9,
+                "setupCompleted": true, "sampleDataLoaded": true
+            })),
+        )
+        .await;
+    let status = setup_status(&joining).await;
+    assert_eq!(status["setupCompleted"], true);
+    assert_eq!(status["sampleDataLoaded"], true);
 }
 
 // ---------------------------------------------------------------------------

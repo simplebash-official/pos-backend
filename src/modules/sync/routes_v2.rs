@@ -1,5 +1,6 @@
 // HTTP surface of cloud sync v2 (multi-tenant MongoDB deployments only):
-// `POST /push`, `GET /pull`, `GET /snapshot` and `POST /devices/register`.
+// `POST /push`, `GET /pull`, `GET /snapshot`, `POST /devices/register` and
+// `POST /setup-complete`.
 // All require a registered-device token (`CurrentUser::require_device`); a web
 // owner session cannot call them - it uses the normal REST API - and a revoked
 // device is refused with 403 `DEVICE_REVOKED`. On a single-shop deployment
@@ -25,7 +26,10 @@ use crate::{
         response::{ApiResponse, ErrorResponse},
     },
     domain::sync_v2::{PullResponse, PushRequest, PushResponse, SnapshotResponse},
-    modules::sync::{cloud_store, pull, push, snapshot},
+    modules::{
+        sync::{cloud_store, pull, push, snapshot},
+        tenants::repository as tenants_repository,
+    },
 };
 
 // ============================================================================
@@ -38,6 +42,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(pull_changes))
         .routes(routes!(get_snapshot))
         .routes(routes!(register_device))
+        .routes(routes!(mark_setup_complete))
 }
 
 // ============================================================================
@@ -202,5 +207,75 @@ async fn register_device(
             server_seq,
         },
         "Device registered",
+    )))
+}
+
+// ============================================================================
+// Shop setup
+// ============================================================================
+
+/// Body of `POST /sync/setup-complete`.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SetupCompleteRequest {
+    /// The device's own setup loaded the demo data.
+    #[serde(default)]
+    pub sample_data_loaded: bool,
+}
+
+/// Answer of `POST /sync/setup-complete`.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SetupCompleteResponse {
+    /// Always true once the call succeeds.
+    pub setup_completed: bool,
+    /// False when the shop was already set up (nothing was changed).
+    pub changed: bool,
+}
+
+/// A device that finished the shop's first-time setup tells the cloud, so the
+/// website's POS does not ask the same demo-vs-clean question again. Idempotent
+/// and one-way: a shop that is already set up is left exactly as it is.
+#[utoipa::path(post, path = "/setup-complete", tag = modules::SYNC,
+    request_body = SetupCompleteRequest,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "The shop is marked as set up (or already was)", body = ApiResponse<SetupCompleteResponse>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Not a device token or revoked device", body = ErrorResponse),
+        (status = 404, description = "Cloud sync is not enabled on this deployment", body = ErrorResponse),
+    )
+)]
+async fn mark_setup_complete(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Json(body): Json<SetupCompleteRequest>,
+) -> AppResult<Json<ApiResponse<SetupCompleteResponse>>> {
+    require_cloud(&state)?;
+    let device_id = user.require_device()?;
+    if !cloud_store::ensure_device_active(&state.db, &device_id).await? {
+        return Err(AppError::forbidden_with_code(
+            "This device has been revoked",
+            "DEVICE_REVOKED",
+        ));
+    }
+    let tenant_id = user
+        .tenant_id
+        .as_deref()
+        .ok_or_else(|| AppError::unauthorized("Authenticated token has no tenant scope"))?;
+    let tenant = tenants_repository::find_tenant_by_key(&state.db, tenant_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("Shop not found"))?;
+    let changed = !tenant.setup_completed;
+    if changed {
+        tenants_repository::complete_tenant_setup(&state.db, tenant_id, body.sample_data_loaded)
+            .await?;
+    }
+    Ok(Json(ApiResponse::success(
+        SetupCompleteResponse {
+            setup_completed: true,
+            changed,
+        },
+        "Shop setup recorded",
     )))
 }

@@ -662,6 +662,75 @@ async fn revoked_and_non_device_callers_are_refused() {
 }
 
 // ---------------------------------------------------------------------------
+// The shop's own first-time setup, as seen by devices
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_device_sees_whether_the_shop_is_set_up_and_can_mark_it_once() {
+    let _guard = SERIAL.lock().await;
+    let app = common::spawn_app_multi_tenant().await;
+    let shop = create_tenant(&app.db_handle, "shop-setup-flag", "Setup Flag Shop")
+        .await
+        .unwrap();
+    let tid = shop.key.clone();
+    // Registers the device (a push by a device is how it joins the shop).
+    let (status, body) = push(&app, &tid, "dev_setup", "b-1", vec![]).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let token = device_token(&app, &tid, "dev_setup");
+
+    // A freshly provisioned shop has not chosen demo vs clean data yet.
+    let (status, body) = call(&app.router, "GET", "/api/sync/status", Some(&token), None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["setupCompleted"], false);
+    assert_eq!(body["data"]["sampleDataLoaded"], false);
+
+    // The device finished the setup: the cloud records it.
+    let (status, body) = call(
+        &app.router,
+        "POST",
+        "/api/sync/setup-complete",
+        Some(&token),
+        Some(json!({ "sampleDataLoaded": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["setupCompleted"], true);
+    assert_eq!(body["data"]["changed"], true);
+
+    let (_, body) = call(&app.router, "GET", "/api/sync/status", Some(&token), None).await;
+    assert_eq!(body["data"]["setupCompleted"], true);
+    assert_eq!(body["data"]["sampleDataLoaded"], true);
+
+    // Repeating it, even with different details, changes nothing.
+    let (status, body) = call(
+        &app.router,
+        "POST",
+        "/api/sync/setup-complete",
+        Some(&token),
+        Some(json!({ "sampleDataLoaded": false })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["changed"], false);
+    let (_, body) = call(&app.router, "GET", "/api/sync/status", Some(&token), None).await;
+    assert_eq!(body["data"]["sampleDataLoaded"], true, "never downgraded");
+
+    // A web owner session is not a device and cannot use it.
+    let owner = admin_token(&app, &tid);
+    let (status, body) = call(
+        &app.router,
+        "POST",
+        "/api/sync/setup-complete",
+        Some(&owner),
+        Some(json!({ "sampleDataLoaded": false })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["code"], "DEVICE_TOKEN_REQUIRED");
+    drop_db(&app).await;
+}
+
+// ---------------------------------------------------------------------------
 // Merge behaviour through the push endpoint
 // ---------------------------------------------------------------------------
 

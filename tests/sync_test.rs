@@ -443,6 +443,9 @@ async fn sync_status_returns_latest_resource_timestamps() {
 
     assert_eq!(status, StatusCode::OK, "sync status response: {json}");
     assert_eq!(json["message"], "Sync status retrieved");
+    // Not a cloud shop: the setup flags are off (they only mean something per tenant).
+    assert_eq!(json["data"]["setupCompleted"], false);
+    assert_eq!(json["data"]["sampleDataLoaded"], false);
 
     let resources = json["data"]["resources"]
         .as_object()

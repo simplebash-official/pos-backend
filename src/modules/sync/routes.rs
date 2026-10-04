@@ -7,13 +7,14 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 use crate::{
     app::AppState,
     core::{
+        config::TenantMode,
         constants::modules,
         error::AppResult,
         middleware::auth::CurrentUser,
         response::{ApiResponse, ErrorResponse},
     },
     domain::sync::{SyncChangesQuery, SyncChangesResponse, SyncStatusResponse},
-    modules::sync::service,
+    modules::{sync::service, tenants::repository as tenants_repository},
 };
 
 pub fn router() -> OpenApiRouter<AppState> {
@@ -53,9 +54,18 @@ async fn get_changes(
     )
 )]
 async fn sync_status(
-    _current_user: CurrentUser,
+    current_user: CurrentUser,
     State(state): State<AppState>,
 ) -> AppResult<Json<ApiResponse<SyncStatusResponse>>> {
-    let result = service::get_sync_status(&state.db).await?;
+    let mut result = service::get_sync_status(&state.db).await?;
+    // A cloud shop reports whether its own first-time setup is done, so a device
+    // joining it knows whether to offer the demo/clean choice.
+    if state.config.tenant_mode == TenantMode::Multi
+        && let Some(tenant_id) = current_user.tenant_id.as_deref()
+        && let Some(tenant) = tenants_repository::find_tenant_by_key(&state.db, tenant_id).await?
+    {
+        result.setup_completed = tenant.setup_completed;
+        result.sample_data_loaded = tenant.sample_data_loaded;
+    }
     Ok(Json(ApiResponse::success(result, "Sync status retrieved")))
 }

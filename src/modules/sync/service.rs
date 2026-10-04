@@ -327,5 +327,7 @@ pub async fn get_sync_status(db: &Db) -> AppResult<SyncStatusResponse> {
     Ok(SyncStatusResponse {
         server_time: Utc::now(),
         resources,
+        setup_completed: false,
+        sample_data_loaded: false,
     })
 }
