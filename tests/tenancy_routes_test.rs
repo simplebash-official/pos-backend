@@ -264,6 +264,14 @@ async fn get_routes(router: &axum::Router) -> Vec<String> {
         .expect("paths")
         .iter()
         .filter(|(_, item)| item.get("get").is_some())
+        // Server-sent event streams (`/sync/events`) never end, so reading one
+        // to completion would hang the walk. Their tenant scoping is covered
+        // by `sync_cloud_test` and the `sync::live` unit tests instead.
+        .filter(|(_, item)| {
+            item["get"]["responses"]["200"]["content"]
+                .get("text/event-stream")
+                .is_none()
+        })
         .map(|(path, _)| path.clone())
         .filter(|p| p != "/api/health")
         .collect();

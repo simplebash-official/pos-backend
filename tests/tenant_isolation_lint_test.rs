@@ -20,6 +20,9 @@ const UNSCOPED_ALLOWED: &[&str] = &[
     // `with_tenant` per event; compaction walks the platform-wide log.
     "src/modules/sync/cloud_capture.rs",
     "src/modules/sync/compaction.rs",
+    // The realtime watcher reads every tenant's change-log inserts (read-only)
+    // and hands each event only to subscribers of that row's own `tenant_id`.
+    "src/modules/sync/live.rs",
 ];
 
 /// A collection that is never tenant-filtered (`platform_collection`).
