@@ -349,3 +349,114 @@ async fn sessions_filter_by_user_id() {
     assert!(!sessions.is_empty());
     assert!(sessions.iter().all(|s| s["email"] == email_a));
 }
+
+// ============================================================================
+// Per-login preferences
+// ============================================================================
+
+async fn login_token(router: &axum::Router, email: &str, password: &str) -> String {
+    let (status, body) = send(
+        router,
+        "POST",
+        "/api/auth/login",
+        Some(json!({ "email": email, "password": password })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    body["data"]["token"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn preferences_default_empty_then_persist_and_come_back_from_me() {
+    let app = common::spawn_app().await;
+    let admin = admin_token(&app.config);
+    let (_, email, password) = create_user(&app.router, &admin, "staff").await;
+    let token = login_token(&app.router, &email, &password).await;
+
+    let (status, body) = send_authed(&app.router, "GET", "/api/auth/me", None, &token).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["data"]["preferences"]["billingCatalogSort"].is_null());
+
+    let (status, body) = send_authed(
+        &app.router,
+        "PATCH",
+        "/api/auth/me/preferences",
+        Some(json!({ "billingCatalogSort": "price_asc" })),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["data"]["preferences"]["billingCatalogSort"],
+        "price_asc"
+    );
+
+    let (status, body) = send_authed(&app.router, "GET", "/api/auth/me", None, &token).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["data"]["preferences"]["billingCatalogSort"],
+        "price_asc"
+    );
+}
+
+#[tokio::test]
+async fn preferences_are_independent_per_login() {
+    let app = common::spawn_app().await;
+    let admin = admin_token(&app.config);
+    let (_, email_a, password_a) = create_user(&app.router, &admin, "staff").await;
+    let (_, email_b, password_b) = create_user(&app.router, &admin, "staff").await;
+    let token_a = login_token(&app.router, &email_a, &password_a).await;
+    let token_b = login_token(&app.router, &email_b, &password_b).await;
+
+    let (status, body) = send_authed(
+        &app.router,
+        "PATCH",
+        "/api/auth/me/preferences",
+        Some(json!({ "billingCatalogSort": "stock_desc" })),
+        &token_a,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (_, body) = send_authed(&app.router, "GET", "/api/auth/me", None, &token_b).await;
+    assert!(
+        body["data"]["preferences"]["billingCatalogSort"].is_null(),
+        "second login must not inherit the first login's choice: {body}"
+    );
+    let (_, body) = send_authed(&app.router, "GET", "/api/auth/me", None, &token_a).await;
+    assert_eq!(
+        body["data"]["preferences"]["billingCatalogSort"],
+        "stock_desc"
+    );
+}
+
+#[tokio::test]
+async fn preferences_reject_unknown_sort_id() {
+    let app = common::spawn_app().await;
+    let admin = admin_token(&app.config);
+    let (_, email, password) = create_user(&app.router, &admin, "staff").await;
+    let token = login_token(&app.router, &email, &password).await;
+
+    let (status, body) = send_authed(
+        &app.router,
+        "PATCH",
+        "/api/auth/me/preferences",
+        Some(json!({ "billingCatalogSort": "bogus" })),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+}
+
+#[tokio::test]
+async fn preferences_require_a_token() {
+    let app = common::spawn_app().await;
+    let (status, _) = send(
+        &app.router,
+        "PATCH",
+        "/api/auth/me/preferences",
+        Some(json!({ "billingCatalogSort": "name_asc" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}

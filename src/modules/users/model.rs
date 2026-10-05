@@ -11,7 +11,7 @@ use crate::{
         constants::{prefixes, roles},
         id::generate_id,
     },
-    domain::users::{Role, User},
+    domain::users::{Role, User, UserPreferences},
 };
 
 fn default_true() -> bool {
@@ -42,6 +42,9 @@ pub struct UserDocument {
     /// if any — see `domain::users::User`'s doc comment.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub employee_key: Option<String>,
+    /// Per-login UI preferences; absent on legacy documents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preferences: Option<UserPreferences>,
     /// Timestamp when user account was created.
     #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
@@ -71,6 +74,7 @@ impl UserDocument {
                 .map(|p| p.to_string())
                 .collect(),
             is_active: self.is_active,
+            preferences: self.preferences.unwrap_or_default(),
             employee_key: self.employee_key,
             created_at: self.created_at.to_chrono(),
             updated_at: self.updated_at.to_chrono(),

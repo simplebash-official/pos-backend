@@ -21,7 +21,10 @@ use crate::{
     },
     domain::{
         employees::EmployeeLoginSummary,
-        users::{CreateUserRequest, Role, UpdateUserRequest, User, UserListQuery, UsersResponse},
+        users::{
+            CATALOG_SORT_IDS, CreateUserRequest, Role, UpdateMyPreferencesRequest,
+            UpdateUserRequest, User, UserListQuery, UsersResponse,
+        },
     },
     modules::{
         employees,
@@ -200,6 +203,43 @@ pub(crate) async fn find_user_for_identity(
     Ok(Some(document.into_user()))
 }
 
+/// Merges `changes` into a login's own preferences. Callers have already
+/// resolved `id` from the authenticated token, so no role hierarchy applies:
+/// every login may edit its own preferences and nobody else's.
+pub(crate) async fn update_own_preferences(
+    db: &Db,
+    id: ObjectId,
+    changes: UpdateMyPreferencesRequest,
+) -> AppResult<User> {
+    if let Some(sort) = changes.billing_catalog_sort.as_deref()
+        && !CATALOG_SORT_IDS.contains(&sort)
+    {
+        return Err(AppError::validation(format!(
+            "Unknown billing catalog sort '{sort}'"
+        )));
+    }
+
+    let existing = repository::find_user_by_id(db, id)
+        .await?
+        .ok_or_else(|| AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND))?;
+
+    let mut merged = existing.preferences.unwrap_or_default();
+    if changes.billing_catalog_sort.is_some() {
+        merged.billing_catalog_sort = changes.billing_catalog_sort;
+    }
+    let preferences_doc = mongodb::bson::serialize_to_document(&merged)
+        .map_err(|e| AppError::internal(format!("failed to encode preferences: {e}")))?;
+
+    let updated = repository::update_user(
+        db,
+        id,
+        doc! { "preferences": preferences_doc, "updated_at": BsonDateTime::now() },
+    )
+    .await?
+    .ok_or_else(|| AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND))?;
+    Ok(updated.into_user())
+}
+
 /// Scoped lookup for `GET /users/{id}` — 404s if `id` resolves to an
 /// account outside `manageable_roles(caller_role)` (see `ensure_manageable`).
 pub(crate) async fn get_user_for_caller(
@@ -277,6 +317,7 @@ pub async fn create_user(db: &Db, body: CreateUserRequest) -> AppResult<User> {
         role: body.role,
         is_active: true,
         employee_key: employee_key.clone(),
+        preferences: None,
         created_at: now,
         updated_at: now,
     };
@@ -360,6 +401,7 @@ pub async fn create_owner_admin_if_absent(
         role: Role::Admin,
         is_active: true,
         employee_key: None,
+        preferences: None,
         created_at: now,
         updated_at: now,
     };

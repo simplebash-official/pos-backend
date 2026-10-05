@@ -222,6 +222,18 @@ impl<T: DeserializeOwned + Send + Sync> ScopedCollection<T> {
             .map_err(|e| MongoError::custom(e.to_string()))?;
         self.inner.aggregate(scoped).await
     }
+
+    /// Same tenant confinement as [`Self::aggregate`], with a collation applied
+    /// (e.g. case-insensitive `$sort` on text fields).
+    pub async fn aggregate_with_collation(
+        &self,
+        pipeline: impl IntoIterator<Item = Document>,
+        collation: mongodb::options::Collation,
+    ) -> Result<Cursor<Document>, MongoError> {
+        let scoped = scope_pipeline(&self.tenant, pipeline.into_iter().collect())
+            .map_err(|e| MongoError::custom(e.to_string()))?;
+        self.inner.aggregate(scoped).collation(collation).await
+    }
 }
 
 impl<T: Serialize + DeserializeOwned + Send + Sync> ScopedCollection<T> {

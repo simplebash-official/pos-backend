@@ -77,6 +77,10 @@ pub struct User {
     pub permissions: Vec<String>,
     /// Whether user account is active.
     pub is_active: bool,
+    /// This login's own UI preferences (e.g. the billing catalog sort).
+    /// Always present in responses; unset values are omitted inside.
+    #[serde(default)]
+    pub preferences: UserPreferences,
     /// Key of the `Employee` HR/commission profile this login belongs to,
     /// if any. Optional — a login can exist with no linked employee profile
     /// only in the legacy/no-employee-yet case; going forward every
@@ -90,6 +94,40 @@ pub struct User {
     pub created_at: DateTime<Utc>,
     /// Timestamp when user was last updated.
     pub updated_at: DateTime<Utc>,
+}
+
+/// Sort presets the billing catalog understands. Kept in sync with the
+/// frontend's `features/billing/lib/catalogSort.ts`; the backend only stores
+/// and validates the id; the actual ordering is requested through the
+/// products list's `sortBy`/`sortOrder`.
+pub const CATALOG_SORT_IDS: &[&str] = &[
+    "name_asc",
+    "name_desc",
+    "price_asc",
+    "price_desc",
+    "newest",
+    "recent",
+    "stock_desc",
+    "stock_asc",
+    "sku_asc",
+];
+
+/// Per-login UI preferences, stored on the user document so each login in a
+/// shop (admin, manager, every staff/employee account) keeps its own.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UserPreferences {
+    /// Last sort method picked on the billing catalog (one of `CATALOG_SORT_IDS`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub billing_catalog_sort: Option<String>,
+}
+
+/// Body for `PATCH /auth/me/preferences`. Only fields present are changed.
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateMyPreferencesRequest {
+    /// New billing catalog sort id; must be one of `CATALOG_SORT_IDS`.
+    pub billing_catalog_sort: Option<String>,
 }
 
 /// Body for `POST /users`. Admin-provisioned only — there is no public

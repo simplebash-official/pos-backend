@@ -40,6 +40,25 @@ pub(crate) fn sort_field_for(sort_by: Option<&str>) -> &'static str {
     }
 }
 
+/// Sort document for `GET /products`. With no `sortBy` the list is ordered by
+/// name A-Z so it stays put when products are edited or sold (the old default,
+/// `updated_at DESC`, made rows jump around). An explicit `sortBy` keeps the
+/// historical "desc unless `sortOrder=asc`" rule. Ties always fall back to
+/// name then `_id`, so equal values never swap between requests.
+pub(crate) fn list_sort_for(sort_by: Option<&str>, sort_order: Option<&str>) -> Document {
+    let (field, ascending) = match sort_by {
+        None => ("name", sort_order != Some("desc")),
+        Some(_) => (sort_field_for(sort_by), sort_order == Some("asc")),
+    };
+    let mut sort = Document::new();
+    sort.insert(field, if ascending { 1 } else { -1 });
+    if field != "name" {
+        sort.insert("name", 1);
+    }
+    sort.insert("_id", 1);
+    sort
+}
+
 fn validate_product_numbers(
     selling_price_cents: i64,
     cost_price_cents: i64,
@@ -181,21 +200,11 @@ pub async fn list_products(db: &Db, query: ProductListQuery) -> AppResult<Produc
 
     let (page, limit, skip) = calculate_pagination(query.page, query.limit, 20, 200);
 
-    let sort_field = sort_field_for(query.sort_by.as_deref());
-    let sort_order = if query.sort_order.as_deref() == Some("asc") {
-        1
-    } else {
-        -1
-    };
+    let sort = list_sort_for(query.sort_by.as_deref(), query.sort_order.as_deref());
 
-    let (items, total) = repository::product::list_products_with_display_names(
-        db,
-        filter,
-        doc! { sort_field: sort_order },
-        skip,
-        limit as i64,
-    )
-    .await?;
+    let (items, total) =
+        repository::product::list_products_with_display_names(db, filter, sort, skip, limit as i64)
+            .await?;
 
     let pagination = PaginationMeta {
         page,

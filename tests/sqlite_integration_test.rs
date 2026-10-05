@@ -907,3 +907,146 @@ async fn test_sqlite_deactivating_a_user_revokes_their_live_token() {
     );
     assert_eq!(body["code"], "USER_INACTIVE");
 }
+
+#[tokio::test]
+async fn test_sqlite_product_sort_is_stable_and_preferences_are_per_login() {
+    let ctx = setup_sqlite_app().await;
+    let admin = admin_token(&ctx.config);
+
+    let (_, cat) = send_authed(
+        &ctx.router,
+        "POST",
+        "/api/inventory/categories",
+        Some(json!({ "name": "Sorting", "icon": "devices", "color": "blue" })),
+        &admin,
+    )
+    .await;
+    let category_key = cat["data"]["key"].as_str().unwrap().to_string();
+    let (_, sub) = send_authed(
+        &ctx.router,
+        "POST",
+        &format!("/api/inventory/categories/{category_key}/subcategories"),
+        Some(json!({ "name": "Items" })),
+        &admin,
+    )
+    .await;
+    let subcategory_key = sub["data"]["subcategories"][0]["key"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let mut ids = std::collections::HashMap::new();
+    for (name, price) in [("banana", 300), ("Apple", 200), ("cherry", 200)] {
+        let (status, res) = send_authed(
+            &ctx.router,
+            "POST",
+            "/api/inventory/products",
+            Some(json!({
+                "name": name,
+                "categoryKey": category_key,
+                "subcategoryKey": subcategory_key,
+                "sellingPriceCents": price,
+                "costPriceCents": 100,
+                "stockQuantity": 5,
+                "minStockThreshold": 1
+            })),
+            &admin,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{res}");
+        ids.insert(name, res["data"]["id"].as_str().unwrap().to_string());
+    }
+
+    let names = |body: &Value| -> Vec<String> {
+        body["data"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["name"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    // Default: name A-Z, case-insensitive, unaffected by editing a product.
+    let (status, _) = send_authed(
+        &ctx.router,
+        "PUT",
+        &format!("/api/inventory/products/{}", ids["cherry"]),
+        Some(json!({ "sellingPriceCents": 250 })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = send_authed(
+        &ctx.router,
+        "GET",
+        "/api/inventory/products?limit=50",
+        None,
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(names(&body), ["Apple", "banana", "cherry"]);
+
+    let (_, body) = send_authed(
+        &ctx.router,
+        "GET",
+        "/api/inventory/products?limit=50&sortBy=sellingPriceCents&sortOrder=asc",
+        None,
+        &admin,
+    )
+    .await;
+    assert_eq!(names(&body), ["Apple", "cherry", "banana"]);
+
+    // Preferences: stored per login on SQLite, independent between logins.
+    let mut tokens = Vec::new();
+    for label in ["a", "b"] {
+        let email = format!("pref-{label}-{}@example.test", Uuid::new_v4());
+        let (status, body) = send_authed(
+            &ctx.router,
+            "POST",
+            "/api/users",
+            Some(json!({ "name": "Pref User", "email": email, "password": "Staff-Password-123", "role": "staff" })),
+            &admin,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+        let login = Request::builder()
+            .method("POST")
+            .uri("/api/auth/login")
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({ "email": email, "password": "Staff-Password-123" }).to_string(),
+            ))
+            .unwrap();
+        let (status, body) = execute(&ctx.router, login).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        tokens.push(body["data"]["token"].as_str().unwrap().to_string());
+    }
+
+    let (status, body) = send_authed(
+        &ctx.router,
+        "PATCH",
+        "/api/auth/me/preferences",
+        Some(json!({ "billingCatalogSort": "price_desc" })),
+        &tokens[0],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (_, me_a) = send_authed(&ctx.router, "GET", "/api/auth/me", None, &tokens[0]).await;
+    assert_eq!(
+        me_a["data"]["preferences"]["billingCatalogSort"],
+        "price_desc"
+    );
+    let (_, me_b) = send_authed(&ctx.router, "GET", "/api/auth/me", None, &tokens[1]).await;
+    assert!(me_b["data"]["preferences"]["billingCatalogSort"].is_null());
+
+    let (status, _) = send_authed(
+        &ctx.router,
+        "PATCH",
+        "/api/auth/me/preferences",
+        Some(json!({ "billingCatalogSort": "nope" })),
+        &tokens[0],
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}

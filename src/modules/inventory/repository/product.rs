@@ -652,6 +652,34 @@ struct ProductWithLookups {
     subcategory_docs: Vec<SubcategoryDocument>,
 }
 
+/// Builds a deterministic `ORDER BY` from a (whitelisted) Mongo-style sort
+/// document. Every key in the document is honoured in order; text columns
+/// compare case-insensitively and `_id` maps to the `id` column. Field names
+/// only ever come from `sort_field_for`'s whitelist, never from client input.
+fn sqlite_order_by(sort: &Document) -> String {
+    let mut parts: Vec<String> = sort
+        .iter()
+        .map(|(field, order)| {
+            let column = if field == "_id" { "id" } else { field.as_str() };
+            let dir = if order.as_i32() == Some(-1) {
+                "DESC"
+            } else {
+                "ASC"
+            };
+            let collate = if matches!(column, "name" | "sku") {
+                " COLLATE NOCASE"
+            } else {
+                ""
+            };
+            format!("p.{column}{collate} {dir}")
+        })
+        .collect();
+    if parts.is_empty() {
+        parts.push("p.name COLLATE NOCASE ASC".to_string());
+    }
+    format!("ORDER BY {}", parts.join(", "))
+}
+
 pub(crate) async fn list_products_with_display_names(
     db: &Db,
     filter: Document,
@@ -700,7 +728,16 @@ pub(crate) async fn list_products_with_display_names(
                 }
             });
 
-            let mut cursor = collection.aggregate(pipeline).await?;
+            // Case-insensitive collation so "apple" and "Apple" sort together.
+            let mut cursor = collection
+                .aggregate_with_collation(
+                    pipeline,
+                    mongodb::options::Collation::builder()
+                        .locale("en")
+                        .strength(mongodb::options::CollationStrength::Secondary)
+                        .build(),
+                )
+                .await?;
             let mut items = Vec::new();
 
             while let Some(doc) = cursor.try_next().await? {
@@ -738,15 +775,7 @@ pub(crate) async fn list_products_with_display_names(
             }
             let total: i64 = count_q.fetch_one(pool).await?;
 
-            let mut sort_order_clause = "ORDER BY p.name ASC".to_string();
-            if let Some((field, order)) = sort.iter().next() {
-                let dir = if order.as_i32() == Some(-1) {
-                    "DESC"
-                } else {
-                    "ASC"
-                };
-                sort_order_clause = format!("ORDER BY p.{} {}", field, dir);
-            }
+            let sort_order_clause = sqlite_order_by(&sort);
 
             let select_sql = format!(
                 r#"
@@ -1028,15 +1057,7 @@ pub(crate) async fn aggregate_overview(
             }
             let subcat_rows = subcat_q.fetch_all(pool).await?;
 
-            let mut sort_order_clause = "ORDER BY p.name ASC".to_string();
-            if let Some((field, order)) = sort.iter().next() {
-                let dir = if order.as_i32() == Some(-1) {
-                    "DESC"
-                } else {
-                    "ASC"
-                };
-                sort_order_clause = format!("ORDER BY p.{} {}", field, dir);
-            }
+            let sort_order_clause = sqlite_order_by(&sort);
 
             let mut subcategory_data = HashMap::new();
             for r in subcat_rows {

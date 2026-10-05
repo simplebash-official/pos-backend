@@ -373,6 +373,7 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT NOT NULL,
     role TEXT NOT NULL,
     employee_key TEXT,
+    preferences_json TEXT,
     is_active INTEGER NOT NULL DEFAULT 1,
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,

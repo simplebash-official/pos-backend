@@ -40,6 +40,11 @@ fn user_from_sqlite_row(r: &sqlx::sqlite::SqliteRow) -> UserDocument {
         role: Role::from_str(&role_str).unwrap_or(Role::Staff),
         is_active: is_active_int != 0,
         employee_key: r.get("employee_key"),
+        preferences: r
+            .try_get::<Option<String>, _>("preferences_json")
+            .ok()
+            .flatten()
+            .and_then(|raw| serde_json::from_str(&raw).ok()),
         created_at: to_bson_datetime(&created_str),
         updated_at: to_bson_datetime(&updated_str),
     }
@@ -236,6 +241,13 @@ pub(crate) async fn update_user(
             if let Ok(emp_key) = set_doc.get_str("employee_key") {
                 updates.push(format!("employee_key = ${}", updates.len() + 1));
                 params.push(emp_key.to_string());
+            }
+
+            if let Ok(preferences) = set_doc.get_document("preferences")
+                && let Ok(json) = serde_json::to_string(preferences)
+            {
+                updates.push(format!("preferences_json = ${}", updates.len() + 1));
+                params.push(json);
             }
 
             let now_str = crate::clients::sqlite::now_utc_iso();

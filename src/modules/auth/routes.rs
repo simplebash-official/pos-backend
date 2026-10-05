@@ -28,7 +28,7 @@ use crate::{
             LoginRequest, LoginResponse, LoginSessionListQuery, LoginSessionsResponse,
             ShopLookupResponse,
         },
-        users::User,
+        users::{UpdateMyPreferencesRequest, User},
     },
     modules::auth::service,
 };
@@ -42,6 +42,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(login))
         .routes(routes!(lookup_shop))
         .routes(routes!(me))
+        .routes(routes!(update_my_preferences))
         .routes(routes!(list_sessions))
 }
 
@@ -143,6 +144,35 @@ async fn me(
     Ok(Json(ApiResponse::success(
         current,
         "Current user retrieved successfully",
+    )))
+}
+
+#[utoipa::path(patch, path = "/me/preferences", tag = modules::AUTH,
+    request_body = UpdateMyPreferencesRequest,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Updated current user (with preferences)", body = ApiResponse<User>),
+        (status = 400, description = "Unknown preference value", body = ErrorResponse),
+        (status = 401, description = "Missing/invalid/expired token, or account no longer active", body = ErrorResponse),
+    )
+)]
+async fn update_my_preferences(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Json(body): Json<UpdateMyPreferencesRequest>,
+) -> AppResult<Json<ApiResponse<User>>> {
+    let updated = service::update_my_preferences(
+        &state.db,
+        &user.user_id,
+        user.email.as_deref(),
+        user.name.as_deref(),
+        body,
+    )
+    .await?;
+
+    Ok(Json(ApiResponse::success(
+        updated,
+        "Preferences updated successfully",
     )))
 }
 

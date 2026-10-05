@@ -185,6 +185,151 @@ async fn seed_category_with_subcategory(
     (category_key, subcategory_key)
 }
 
+/// Creates a product named `name` and returns its id.
+async fn create_named_product(
+    app: &common::TestApp,
+    category_key: &str,
+    subcategory_key: &str,
+    name: &str,
+    selling_price_cents: i64,
+) -> String {
+    let (status, created) = send(
+        app,
+        "POST",
+        "/api/inventory/products",
+        Some(json!({
+            "name": name,
+            "categoryKey": category_key,
+            "subcategoryKey": subcategory_key,
+            "costPriceCents": 100,
+            "sellingPriceCents": selling_price_cents,
+            "stockQuantity": 5,
+            "minStockThreshold": 1,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    created["data"]["id"].as_str().unwrap().to_string()
+}
+
+fn listed_names(body: &Value) -> Vec<String> {
+    body["data"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["name"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[tokio::test]
+async fn product_list_defaults_to_stable_case_insensitive_name_order() {
+    let app = common::spawn_app().await;
+    let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Sorting").await;
+    let tag = Uuid::new_v4().simple().to_string();
+    let banana = create_named_product(
+        &app,
+        &category_key,
+        &subcategory_key,
+        &format!("{tag} banana"),
+        300,
+    )
+    .await;
+    create_named_product(
+        &app,
+        &category_key,
+        &subcategory_key,
+        &format!("{tag} Apple"),
+        100,
+    )
+    .await;
+    create_named_product(
+        &app,
+        &category_key,
+        &subcategory_key,
+        &format!("{tag} cherry"),
+        200,
+    )
+    .await;
+
+    let uri = format!("/api/inventory/products?search={tag}&limit=50");
+    let expected = vec![
+        format!("{tag} Apple"),
+        format!("{tag} banana"),
+        format!("{tag} cherry"),
+    ];
+    let (status, body) = send(&app, "GET", &uri, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(listed_names(&body), expected);
+
+    // Touching a product bumps `updated_at`; the old default order would have
+    // moved it to the front. The list must not change.
+    let (status, _) = send(
+        &app,
+        "PUT",
+        &format!("/api/inventory/products/{banana}"),
+        Some(json!({ "sellingPriceCents": 350 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, body) = send(&app, "GET", &uri, None).await;
+    assert_eq!(listed_names(&body), expected);
+}
+
+#[tokio::test]
+async fn product_list_honours_explicit_sort_and_breaks_ties_by_name() {
+    let app = common::spawn_app().await;
+    let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Sorting").await;
+    let tag = Uuid::new_v4().simple().to_string();
+    create_named_product(
+        &app,
+        &category_key,
+        &subcategory_key,
+        &format!("{tag} b"),
+        200,
+    )
+    .await;
+    create_named_product(
+        &app,
+        &category_key,
+        &subcategory_key,
+        &format!("{tag} a"),
+        200,
+    )
+    .await;
+    create_named_product(
+        &app,
+        &category_key,
+        &subcategory_key,
+        &format!("{tag} c"),
+        100,
+    )
+    .await;
+
+    let base = format!("/api/inventory/products?search={tag}&limit=50&sortBy=sellingPriceCents");
+    let (_, asc) = send(&app, "GET", &format!("{base}&sortOrder=asc"), None).await;
+    assert_eq!(
+        listed_names(&asc),
+        vec![format!("{tag} c"), format!("{tag} a"), format!("{tag} b")]
+    );
+    let (_, desc) = send(&app, "GET", &format!("{base}&sortOrder=desc"), None).await;
+    assert_eq!(
+        listed_names(&desc),
+        vec![format!("{tag} a"), format!("{tag} b"), format!("{tag} c")]
+    );
+
+    let (_, name_desc) = send(
+        &app,
+        "GET",
+        &format!("/api/inventory/products?search={tag}&limit=50&sortBy=name&sortOrder=desc"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        listed_names(&name_desc),
+        vec![format!("{tag} c"), format!("{tag} b"), format!("{tag} a")]
+    );
+}
+
 #[tokio::test]
 async fn product_lifecycle_create_get_update_stock_and_delete() {
     let app = common::spawn_app().await;

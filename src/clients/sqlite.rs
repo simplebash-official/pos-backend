@@ -111,6 +111,19 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .await;
     }
 
+    // `users.preferences_json` (per-login UI preferences) arrived after the table did.
+    let user_cols: Vec<(i32, String)> =
+        sqlx::query_as("SELECT cid, name FROM pragma_table_info('users')")
+            .fetch_all(pool)
+            .await
+            .unwrap_or_default();
+    if !user_cols.is_empty() && !user_cols.iter().any(|(_, n)| n == "preferences_json") {
+        tracing::info!("Migrating 'users' table: adding 'preferences_json' column");
+        let _ = pool
+            .execute("ALTER TABLE users ADD COLUMN preferences_json TEXT")
+            .await;
+    }
+
     // Check if 'generated_documents' table is missing required columns from earlier schema versions
     let gen_doc_cols: Vec<(i32, String)> =
         sqlx::query_as("SELECT cid, name FROM pragma_table_info('generated_documents')")
