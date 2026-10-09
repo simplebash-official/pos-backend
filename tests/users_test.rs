@@ -101,7 +101,7 @@ fn staff_token(config: &simplebash_pos_backend::core::config::Config) -> String 
 fn sample_user_payload(role: &str) -> Value {
     json!({
         "name": "Test User",
-        "email": format!("user-{}@example.com", Uuid::new_v4()),
+        "username": format!("user-{}", &Uuid::new_v4().simple().to_string()[..12]),
         "password": "Password123!",
         "role": role,
     })
@@ -197,7 +197,7 @@ async fn manager_can_create_staff_but_not_manager_or_admin() {
 }
 
 #[tokio::test]
-async fn creating_user_with_duplicate_email_returns_409() {
+async fn creating_user_with_duplicate_username_returns_409() {
     let app = common::spawn_app().await;
     let token = admin_token(&app.config);
 
@@ -215,7 +215,73 @@ async fn creating_user_with_duplicate_email_returns_409() {
     let (status, body) =
         send_authed(&app.router, "POST", "/api/users", Some(payload), &token).await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
-    assert_eq!(body["code"], "EMAIL_ALREADY_EXISTS");
+    assert_eq!(body["code"], "USERNAME_ALREADY_EXISTS");
+}
+
+#[tokio::test]
+async fn creating_user_with_an_invalid_username_returns_400() {
+    let app = common::spawn_app().await;
+    let token = admin_token(&app.config);
+
+    // An email address is no longer a valid login identifier.
+    for bad in [
+        "cashier@shop.com",
+        "ab",
+        "Has Space",
+        "-leading",
+        "trailing-",
+        "UPPER!",
+    ] {
+        let mut payload = sample_user_payload("staff");
+        payload["username"] = json!(bad);
+        let (status, body) =
+            send_authed(&app.router, "POST", "/api/users", Some(payload), &token).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{bad:?}: {body}");
+    }
+}
+
+#[tokio::test]
+async fn usernames_are_case_insensitive_and_login_rejects_emails() {
+    let app = common::spawn_app().await;
+    let token = admin_token(&app.config);
+
+    let mut payload = sample_user_payload("staff");
+    let username = format!("mixed-{}", &Uuid::new_v4().simple().to_string()[..10]);
+    payload["username"] = json!(username.to_uppercase());
+    let (status, body) =
+        send_authed(&app.router, "POST", "/api/users", Some(payload), &token).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["data"]["username"], username, "stored lowercase");
+
+    let (status, body) = send(
+        &app.router,
+        "POST",
+        "/api/auth/login",
+        Some(json!({ "username": username.to_uppercase(), "password": "Password123!" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Axum answers a body missing `username` with a plain-text 4xx, not JSON.
+    let response = app
+        .router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "email": "someone@shop.com", "password": "Password123!" }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        response.status().is_client_error(),
+        "an email login body is not accepted"
+    );
 }
 
 #[tokio::test]
@@ -270,12 +336,12 @@ async fn single_admin_invariant_and_admin_invisible_via_users_api() {
         .await
         .expect("failed to clear pre-existing admin accounts before test");
 
-    let email = format!("only-admin-{}@example.com", Uuid::new_v4());
+    let username = "admin".to_string();
     let first = create_user(
         &app.db_handle,
         CreateUserRequest {
             name: "Only Admin".to_string(),
-            email: email.clone(),
+            username: username.clone(),
             password: "Password123!".to_string(),
             role: Role::Admin,
             employee_key: None,
@@ -288,7 +354,7 @@ async fn single_admin_invariant_and_admin_invisible_via_users_api() {
         &app.db_handle,
         CreateUserRequest {
             name: "Second Admin".to_string(),
-            email: format!("second-admin-{}@example.com", Uuid::new_v4()),
+            username: "admin".to_string(),
             password: "Password123!".to_string(),
             role: Role::Admin,
             employee_key: None,
@@ -304,7 +370,7 @@ async fn single_admin_invariant_and_admin_invisible_via_users_api() {
         &app.router,
         "POST",
         "/api/auth/login",
-        Some(json!({ "email": &email, "password": "Password123!" })),
+        Some(json!({ "username": &username, "password": "Password123!" })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -362,11 +428,15 @@ async fn manager_list_only_shows_staff_accounts() {
         "Manager's list must only contain Staff accounts: {users:?}"
     );
     assert!(
-        users.iter().any(|u| u["email"] == staff_account["email"]),
+        users
+            .iter()
+            .any(|u| u["username"] == staff_account["username"]),
         "expected the created Staff account to appear: {users:?}"
     );
     assert!(
-        !users.iter().any(|u| u["email"] == manager_account["email"]),
+        !users
+            .iter()
+            .any(|u| u["username"] == manager_account["username"]),
         "a Manager account must never appear in another Manager's list: {users:?}"
     );
 }
@@ -390,7 +460,7 @@ async fn admin_can_get_manager_and_staff_by_id() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["data"]["email"], created["email"]);
+    assert_eq!(body["data"]["username"], created["username"]);
 }
 
 #[tokio::test]
@@ -417,7 +487,7 @@ async fn manager_cannot_get_manager_or_admin_accounts() {
 // ============================================================================
 
 #[tokio::test]
-async fn admin_update_user_changes_role_name_email() {
+async fn admin_update_user_changes_role_and_name() {
     let app = common::spawn_app().await;
     let token = admin_token(&app.config);
     let (id, _, _) = create_user_via_api(&app.router, &token, "staff").await;
@@ -476,7 +546,7 @@ async fn manager_cannot_promote_staff_to_manager() {
 async fn updated_password_takes_effect_on_next_login() {
     let app = common::spawn_app().await;
     let token = admin_token(&app.config);
-    let email = format!("pwtest-{}@example.com", Uuid::new_v4());
+    let username = format!("pwtest-{}", &Uuid::new_v4().simple().to_string()[..12]);
 
     let (status, body) = send_authed(
         &app.router,
@@ -484,7 +554,7 @@ async fn updated_password_takes_effect_on_next_login() {
         "/api/users",
         Some(json!({
             "name": "Password Test User",
-            "email": &email,
+            "username": &username,
             "password": "OriginalPass123",
             "role": "staff",
         })),
@@ -498,7 +568,7 @@ async fn updated_password_takes_effect_on_next_login() {
         &app.router,
         "POST",
         "/api/auth/login",
-        Some(json!({ "email": &email, "password": "OriginalPass123" })),
+        Some(json!({ "username": &username, "password": "OriginalPass123" })),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -517,7 +587,7 @@ async fn updated_password_takes_effect_on_next_login() {
         &app.router,
         "POST",
         "/api/auth/login",
-        Some(json!({ "email": &email, "password": "OriginalPass123" })),
+        Some(json!({ "username": &username, "password": "OriginalPass123" })),
     )
     .await;
     assert_eq!(
@@ -530,7 +600,7 @@ async fn updated_password_takes_effect_on_next_login() {
         &app.router,
         "POST",
         "/api/auth/login",
-        Some(json!({ "email": &email, "password": "NewPassword456" })),
+        Some(json!({ "username": &username, "password": "NewPassword456" })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "new password should now work");
@@ -635,7 +705,7 @@ async fn creating_user_with_employee_key_links_it() {
         "/api/users",
         Some(json!({
             "name": "Linked User",
-            "email": format!("linked-{}@example.com", Uuid::new_v4()),
+            "username": format!("linked-{}", &Uuid::new_v4().simple().to_string()[..12]),
             "password": "Password123!",
             "role": "staff",
             "employeeKey": employee_key,
@@ -658,7 +728,7 @@ async fn creating_user_with_unresolvable_employee_key_is_not_found() {
         "/api/users",
         Some(json!({
             "name": "Orphan Login",
-            "email": format!("orphan-{}@example.com", Uuid::new_v4()),
+            "username": format!("orphan-{}", &Uuid::new_v4().simple().to_string()[..12]),
             "password": "Password123!",
             "role": "staff",
             "employeeKey": "emp_does_not_exist",
@@ -683,7 +753,7 @@ async fn creating_second_login_for_already_linked_employee_is_rejected() {
         "/api/users",
         Some(json!({
             "name": "First Login",
-            "email": format!("first-{}@example.com", Uuid::new_v4()),
+            "username": format!("first-{}", &Uuid::new_v4().simple().to_string()[..12]),
             "password": "Password123!",
             "role": "staff",
             "employeeKey": employee_key,
@@ -699,7 +769,7 @@ async fn creating_second_login_for_already_linked_employee_is_rejected() {
         "/api/users",
         Some(json!({
             "name": "Second Login",
-            "email": format!("second-{}@example.com", Uuid::new_v4()),
+            "username": format!("second-{}", &Uuid::new_v4().simple().to_string()[..12]),
             "password": "Password123!",
             "role": "staff",
             "employeeKey": employee_key,

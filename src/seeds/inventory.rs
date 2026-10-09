@@ -1,3 +1,5 @@
+use futures_util::{StreamExt, TryStreamExt, stream};
+
 use crate::{
     clients::db::Db,
     core::error::AppError,
@@ -6,6 +8,11 @@ use crate::{
     },
     modules::inventory::service::{category, product},
 };
+
+/// How many sample products are created at the same time.
+const PRODUCT_SEED_CONCURRENCY: usize = 16;
+/// How many sample categories are seeded at the same time.
+const CATEGORY_SEED_CONCURRENCY: usize = 8;
 
 pub struct SeedProduct {
     pub name: &'static str,
@@ -36,127 +43,167 @@ pub struct InventorySeedResult {
     pub products_existing: usize,
 }
 
+/// What seeding one category produced. Categories are independent of each other, so they are
+/// seeded at the same time; their products are collected and created afterwards.
+struct CategoryOutcome {
+    categories: usize,
+    subcategories: usize,
+    products_existing: usize,
+    pending_products: Vec<CreateProductRequest>,
+}
+
+async fn seed_category(db: &Db, cat: SeedCategory) -> Result<CategoryOutcome, AppError> {
+    let mut total_categories = 0;
+    let mut total_subcategories = 0;
+    let mut products_existing = 0;
+    let mut pending_products: Vec<CreateProductRequest> = Vec::new();
+
+    let subcat_names: Vec<String> = cat
+        .subcategories
+        .iter()
+        .map(|s| s.name.to_string())
+        .collect();
+
+    // Check if category already exists via category service
+    let existing_categories = category::list_categories(db).await?;
+
+    let category_info = match existing_categories
+        .categories
+        .into_iter()
+        .find(|c| c.name == cat.name)
+    {
+        Some(existing) => {
+            if existing.icon != cat.icon || existing.color != cat.color {
+                category::update_category(
+                    db,
+                    existing.key.clone(),
+                    UpdateCategoryRequest {
+                        name: None,
+                        icon: Some(cat.icon.to_string()),
+                        color: Some(cat.color.to_string()),
+                    },
+                )
+                .await?
+            } else {
+                existing
+            }
+        }
+        None => {
+            let req = CreateCategoryRequest {
+                name: cat.name.to_string(),
+                icon: cat.icon.to_string(),
+                color: cat.color.to_string(),
+                subcategories: subcat_names,
+            };
+            let created = category::create_category(db, req).await?;
+            total_categories += 1;
+            created
+        }
+    };
+
+    // Map subcategory names to keys, creating missing ones if necessary via category service
+    for subcat in cat.subcategories {
+        let existing_sub = category_info
+            .subcategories
+            .iter()
+            .find(|s| s.name == subcat.name);
+        let subcat_key = match existing_sub {
+            Some(s) => s.key.clone(),
+            None => {
+                let updated_cat = category::add_subcategory(
+                    db,
+                    category_info.key.clone(),
+                    subcat.name.to_string(),
+                )
+                .await?;
+                let created_sub = updated_cat
+                    .subcategories
+                    .into_iter()
+                    .find(|s| s.name == subcat.name)
+                    .ok_or_else(|| AppError::internal("subcategory should exist after creation"))?;
+                total_subcategories += 1;
+                created_sub.key
+            }
+        };
+
+        // Fetch existing products in this subcategory to avoid duplicating on re-run
+        let existing_products = product::list_products(
+            db,
+            ProductListQuery {
+                category_key: Some(category_info.key.clone()),
+                subcategory_key: Some(subcat_key.clone()),
+                page: Some(1),
+                limit: Some(200),
+                ..Default::default()
+            },
+        )
+        .await?;
+
+        for p in subcat.products {
+            let exists = existing_products
+                .items
+                .iter()
+                .any(|item| item.name == p.name);
+            if exists {
+                products_existing += 1;
+                continue;
+            }
+
+            let req = CreateProductRequest {
+                barcode: Some(p.barcode.to_string()),
+                auto_generate_barcode: false,
+                name: p.name.to_string(),
+                category_key: category_info.key.clone(),
+                subcategory_key: subcat_key.clone(),
+                cost_price_cents: p.cost_price_cents,
+                selling_price_cents: p.selling_price_cents,
+                stock_quantity: p.stock_quantity,
+                min_stock_threshold: p.min_stock_threshold,
+                suppliers: Vec::new(),
+                is_serialized: false,
+                warranty_months: None,
+            };
+
+            pending_products.push(req);
+        }
+    }
+
+    Ok(CategoryOutcome {
+        categories: total_categories,
+        subcategories: total_subcategories,
+        products_existing,
+        pending_products,
+    })
+}
+
 pub async fn seed_inventory(db: &Db) -> Result<InventorySeedResult, AppError> {
-    let seed_data = get_seed_data();
+    let outcomes: Vec<CategoryOutcome> = stream::iter(get_seed_data())
+        .map(|cat| seed_category(db, cat))
+        .buffer_unordered(CATEGORY_SEED_CONCURRENCY)
+        .try_collect()
+        .await?;
+
     let mut total_categories = 0;
     let mut total_subcategories = 0;
     let mut total_products = 0;
     let mut products_existing = 0;
-
-    for cat in seed_data {
-        let subcat_names: Vec<String> = cat
-            .subcategories
-            .iter()
-            .map(|s| s.name.to_string())
-            .collect();
-
-        // Check if category already exists via category service
-        let existing_categories = category::list_categories(db).await?;
-
-        let category_info = match existing_categories
-            .categories
-            .into_iter()
-            .find(|c| c.name == cat.name)
-        {
-            Some(existing) => {
-                if existing.icon != cat.icon || existing.color != cat.color {
-                    category::update_category(
-                        db,
-                        existing.key.clone(),
-                        UpdateCategoryRequest {
-                            name: None,
-                            icon: Some(cat.icon.to_string()),
-                            color: Some(cat.color.to_string()),
-                        },
-                    )
-                    .await?
-                } else {
-                    existing
-                }
-            }
-            None => {
-                let req = CreateCategoryRequest {
-                    name: cat.name.to_string(),
-                    icon: cat.icon.to_string(),
-                    color: cat.color.to_string(),
-                    subcategories: subcat_names,
-                };
-                let created = category::create_category(db, req).await?;
-                total_categories += 1;
-                created
-            }
-        };
-
-        // Map subcategory names to keys, creating missing ones if necessary via category service
-        for subcat in cat.subcategories {
-            let existing_sub = category_info
-                .subcategories
-                .iter()
-                .find(|s| s.name == subcat.name);
-            let subcat_key = match existing_sub {
-                Some(s) => s.key.clone(),
-                None => {
-                    let updated_cat = category::add_subcategory(
-                        db,
-                        category_info.key.clone(),
-                        subcat.name.to_string(),
-                    )
-                    .await?;
-                    let created_sub = updated_cat
-                        .subcategories
-                        .into_iter()
-                        .find(|s| s.name == subcat.name)
-                        .ok_or_else(|| {
-                            AppError::internal("subcategory should exist after creation")
-                        })?;
-                    total_subcategories += 1;
-                    created_sub.key
-                }
-            };
-
-            // Fetch existing products in this subcategory to avoid duplicating on re-run
-            let existing_products = product::list_products(
-                db,
-                ProductListQuery {
-                    category_key: Some(category_info.key.clone()),
-                    subcategory_key: Some(subcat_key.clone()),
-                    page: Some(1),
-                    limit: Some(200),
-                    ..Default::default()
-                },
-            )
-            .await?;
-
-            for p in subcat.products {
-                let exists = existing_products
-                    .items
-                    .iter()
-                    .any(|item| item.name == p.name);
-                if exists {
-                    products_existing += 1;
-                    continue;
-                }
-
-                let req = CreateProductRequest {
-                    barcode: Some(p.barcode.to_string()),
-                    auto_generate_barcode: false,
-                    name: p.name.to_string(),
-                    category_key: category_info.key.clone(),
-                    subcategory_key: subcat_key.clone(),
-                    cost_price_cents: p.cost_price_cents,
-                    selling_price_cents: p.selling_price_cents,
-                    stock_quantity: p.stock_quantity,
-                    min_stock_threshold: p.min_stock_threshold,
-                    suppliers: Vec::new(),
-                    is_serialized: false,
-                    warranty_months: None,
-                };
-
-                let _created_product = product::create_product(db, req).await?;
-                total_products += 1;
-            }
-        }
+    let mut pending_products: Vec<CreateProductRequest> = Vec::new();
+    for outcome in outcomes {
+        total_categories += outcome.categories;
+        total_subcategories += outcome.subcategories;
+        products_existing += outcome.products_existing;
+        pending_products.extend(outcome.pending_products);
     }
+
+    // Each product costs several database round trips (category lookups, SKU counter, insert,
+    // opening stock). Over a remote MongoDB doing ~100 of them one after another took ~2 minutes,
+    // so several run at once. They stay on this task, so the tenant scope still applies, and the
+    // SKU counter is an atomic increment, so concurrent products never share a SKU.
+    total_products += stream::iter(pending_products)
+        .map(|req| product::create_product(db, req))
+        .buffer_unordered(PRODUCT_SEED_CONCURRENCY)
+        .try_fold(0usize, |count, _| async move { Ok(count + 1) })
+        .await?;
 
     Ok(InventorySeedResult {
         categories_created: total_categories,

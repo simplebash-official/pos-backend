@@ -1,6 +1,6 @@
 // Tenant directory + multi-tenant login, against a real MongoDB (MONGODB_URI)
 // in a uniquely named throwaway database that is dropped afterwards. Both
-// tenants deliberately use the SAME admin email with different passwords, so a
+// tenants deliberately use the SAME `admin` username with different passwords, so a
 // login that ignored the shop code (or leaked across tenants) would succeed
 // where it must not.
 
@@ -124,7 +124,7 @@ async fn tenant_directory_and_multi_tenant_login_roundtrip() {
         "{unknown:?}"
     );
 
-    // --- same admin email in both tenants ------------------------------------
+    // --- same `admin` username in both tenants ------------------------------------
     for (info, name, password) in [
         (&a, "Alpha Admin", "alpha-password-1"),
         (&b, "Beta Admin", "beta-password-2"),
@@ -134,14 +134,14 @@ async fn tenant_directory_and_multi_tenant_login_roundtrip() {
                 &db,
                 CreateUserRequest {
                     name: name.to_string(),
-                    email: "owner@example.test".to_string(),
+                    username: "admin".to_string(),
                     password: password.to_string(),
                     role: Role::Admin,
                     employee_key: None,
                 },
             )
             .await
-            .expect("each tenant can own the same email")
+            .expect("each tenant can own the same username")
         })
         .await;
     }
@@ -171,7 +171,7 @@ async fn tenant_directory_and_multi_tenant_login_roundtrip() {
 
     let (status, body) = post_login(
         &router,
-        json!({ "email": "owner@example.test", "password": "alpha-password-1", "shopCode": "shop-alpha" }),
+        json!({ "username": "admin", "password": "alpha-password-1", "shopCode": "shop-alpha" }),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -181,7 +181,7 @@ async fn tenant_directory_and_multi_tenant_login_roundtrip() {
 
     let (status, body) = post_login(
         &router,
-        json!({ "email": "owner@example.test", "password": "beta-password-2", "shopCode": "SHOP-BETA" }),
+        json!({ "username": "admin", "password": "beta-password-2", "shopCode": "SHOP-BETA" }),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -196,7 +196,7 @@ async fn tenant_directory_and_multi_tenant_login_roundtrip() {
     // Alpha's password does not work in Beta's shop, and vice versa.
     let (status, _) = post_login(
         &router,
-        json!({ "email": "owner@example.test", "password": "alpha-password-1", "shopCode": "shop-beta" }),
+        json!({ "username": "admin", "password": "alpha-password-1", "shopCode": "shop-beta" }),
     )
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
@@ -204,13 +204,13 @@ async fn tenant_directory_and_multi_tenant_login_roundtrip() {
     // Unknown shop looks exactly like a wrong password; a missing code is a 400.
     let (status, _) = post_login(
         &router,
-        json!({ "email": "owner@example.test", "password": "alpha-password-1", "shopCode": "ghost-shop" }),
+        json!({ "username": "admin", "password": "alpha-password-1", "shopCode": "ghost-shop" }),
     )
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     let (status, _) = post_login(
         &router,
-        json!({ "email": "owner@example.test", "password": "alpha-password-1" }),
+        json!({ "username": "admin", "password": "alpha-password-1" }),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);

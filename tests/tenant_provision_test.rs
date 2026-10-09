@@ -119,7 +119,7 @@ async fn post_with_token(
 fn shop(tenant_id: &str, shop_code: &str, owner_hash: Option<&str>) -> Value {
     let mut body = json!({ "tenantId": tenant_id, "shopCode": shop_code, "name": "Ann's Phones" });
     if let Some(hash) = owner_hash {
-        body["owner"] = json!({ "email": "Ann@Example.com", "name": "Ann", "passwordHash": hash });
+        body["owner"] = json!({ "username": "Admin", "name": "Ann", "passwordHash": hash });
     }
     body
 }
@@ -148,7 +148,7 @@ async fn provisioning_creates_the_shop_and_an_owner_who_can_log_in_with_the_same
         &app.router,
         "/api/auth/login",
         None,
-        json!({ "email": "ann@example.com", "password": PASSWORD, "shopCode": "ann-s-phones" }),
+        json!({ "username": "admin", "password": PASSWORD, "shopCode": "ann-s-phones" }),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -158,7 +158,7 @@ async fn provisioning_creates_the_shop_and_an_owner_who_can_log_in_with_the_same
     let stored = app
         .db
         .collection::<mongodb::bson::Document>("users")
-        .find_one(doc! { "email": "ann@example.com" })
+        .find_one(doc! { "username": "admin" })
         .await
         .unwrap()
         .expect("owner user stored");
@@ -231,7 +231,7 @@ async fn a_desktop_sign_up_registers_the_shop_without_an_owner() {
         &app.router,
         "/api/auth/login",
         None,
-        json!({ "email": "ann@example.com", "password": PASSWORD, "shopCode": "ann-s-phones" }),
+        json!({ "username": "admin", "password": PASSWORD, "shopCode": "ann-s-phones" }),
     )
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
@@ -415,7 +415,7 @@ async fn multi_tenant_onboarding_and_sample_data_seeding() {
         &app.router,
         "/api/auth/login",
         None,
-        json!({ "email": "ann@example.com", "password": PASSWORD, "shopCode": "ann-s-phones" }),
+        json!({ "username": "admin", "password": PASSWORD, "shopCode": "ann-s-phones" }),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -482,7 +482,7 @@ async fn replaying_with_a_new_name_refreshes_names_but_keeps_the_password() {
         "tenantId": TENANT_A,
         "shopCode": "ann-s-phones",
         "name": "Ann Mobile",
-        "owner": { "email": "ann@example.com", "name": "Ann Perera", "passwordHash": argon2_hash("another-pass-9") },
+        "owner": { "username": "admin", "name": "Ann Perera", "passwordHash": argon2_hash("another-pass-9") },
     });
     let (status, body) = post(
         &app.router,
@@ -497,7 +497,7 @@ async fn replaying_with_a_new_name_refreshes_names_but_keeps_the_password() {
     let user = app
         .db
         .collection::<mongodb::bson::Document>("users")
-        .find_one(doc! { "email": "ann@example.com" })
+        .find_one(doc! { "username": "admin" })
         .await
         .unwrap()
         .expect("owner user stored");
@@ -517,7 +517,7 @@ async fn replaying_with_a_new_name_refreshes_names_but_keeps_the_password() {
         &app.router,
         "/api/auth/login",
         None,
-        json!({ "email": "ann@example.com", "password": PASSWORD, "shopCode": "ann-s-phones" }),
+        json!({ "username": "admin", "password": PASSWORD, "shopCode": "ann-s-phones" }),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");

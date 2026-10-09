@@ -57,7 +57,7 @@ pub(crate) async fn login(
             .unwrap_or_default()
             .trim()
             .to_lowercase(),
-        body.email.trim().to_lowercase()
+        body.username.trim().to_lowercase()
     );
     if let Err(retry_after) = limiter.check(&limit_key) {
         let minutes = retry_after.as_secs().div_ceil(60).max(1);
@@ -102,7 +102,7 @@ async fn login_unthrottled(
     }
     let (tenant, shop_name) = tenants_service::lookup_shop_details(db, code)
         .await?
-        .ok_or_else(|| AppError::unauthorized("Invalid shop code, email or password"))?;
+        .ok_or_else(|| AppError::unauthorized("Invalid shop code, username or password"))?;
     crate::core::tenancy::with_tenant(
         tenant,
         login_in_scope(db, config, body, ip_address, user_agent, Some(shop_name)),
@@ -119,11 +119,11 @@ async fn login_in_scope(
     shop_name: Option<String>,
 ) -> AppResult<LoginResponse> {
     crate::core::logging::domain::tracked("auth.login", async move {
-        if body.email.trim().is_empty() || body.password.is_empty() {
-            return Err(AppError::validation("Email and password are required"));
+        if body.username.trim().is_empty() || body.password.is_empty() {
+            return Err(AppError::validation("Username and password are required"));
         }
 
-        let user = users_service::verify_credentials(db, &body.email, &body.password).await?;
+        let user = users_service::verify_credentials(db, &body.username, &body.password).await?;
 
         let permissions: Vec<String> = roles::default_permissions(user.role)
             .iter()
@@ -171,7 +171,7 @@ async fn record_login_session(
             key: generate_id(prefixes::LOGIN_SESSION),
             user_key: user.key.clone(),
             name_at_login: user.name.clone(),
-            email_at_login: user.email.clone(),
+            username_at_login: user.username.clone(),
             role_at_login: user.role,
             ip_address,
             user_agent,
@@ -187,12 +187,7 @@ async fn record_login_session(
 /// one place a caller can discover mid-session that their account was
 /// deactivated (or deleted) *since* their token was issued, since there is
 /// no revocation/blacklist infra to push that information any other way.
-pub(crate) async fn me(
-    db: &Db,
-    user_id: &str,
-    identity_email: Option<&str>,
-    identity_name: Option<&str>,
-) -> AppResult<User> {
+pub(crate) async fn me(db: &Db, user_id: &str, identity_name: Option<&str>) -> AppResult<User> {
     let gone =
         || AppError::unauthorized_with_code("Account no longer exists", codes::USER_NOT_FOUND);
     let user = match ObjectId::parse_str(user_id) {
@@ -203,13 +198,10 @@ pub(crate) async fn me(
                 other => other,
             })?,
         // An identity-server token's subject is an `acc_...` id, not a local
-        // ObjectId: find the shop's user for that account by its email claim.
-        Err(_) => match identity_email {
-            Some(email) => users_service::find_user_for_identity(db, email, identity_name)
-                .await?
-                .ok_or_else(gone)?,
-            None => return Err(AppError::unauthorized("Invalid token subject")),
-        },
+        // ObjectId: an owner-scope identity token maps to the shop's Admin.
+        Err(_) => users_service::find_user_for_identity(db, identity_name)
+            .await?
+            .ok_or_else(gone)?,
     };
 
     if !user.is_active {
@@ -227,11 +219,10 @@ pub(crate) async fn me(
 pub(crate) async fn update_my_preferences(
     db: &Db,
     user_id: &str,
-    identity_email: Option<&str>,
     identity_name: Option<&str>,
     changes: UpdateMyPreferencesRequest,
 ) -> AppResult<User> {
-    let current = me(db, user_id, identity_email, identity_name).await?;
+    let current = me(db, user_id, identity_name).await?;
     let object_id = ObjectId::parse_str(&current.id)
         .map_err(|_| AppError::unauthorized("Invalid token subject"))?;
     users_service::update_own_preferences(db, object_id, changes).await

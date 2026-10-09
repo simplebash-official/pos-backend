@@ -679,7 +679,7 @@ async fn test_sqlite_legacy_user_id_schema_migration() {
             user_key TEXT NOT NULL,
             user_id TEXT NOT NULL,
             name_at_login TEXT NOT NULL,
-            email_at_login TEXT NOT NULL,
+            username_at_login TEXT NOT NULL,
             role_at_login TEXT NOT NULL,
             ip_address TEXT,
             user_agent TEXT,
@@ -711,7 +711,7 @@ async fn test_sqlite_legacy_user_id_schema_migration() {
     sqlx::query(
         r#"
         INSERT INTO login_sessions (
-            id, key, user_key, name_at_login, email_at_login, role_at_login,
+            id, key, user_key, name_at_login, username_at_login, role_at_login,
             ip_address, user_agent, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
@@ -829,16 +829,16 @@ async fn test_sqlite_generated_documents_schema_migration() {
 #[tokio::test]
 async fn test_sqlite_repeated_failed_logins_are_throttled() {
     let ctx = setup_sqlite_app().await;
-    // Unique per run: the limiter is process-wide, so a shared email could be
+    // Unique per run: the limiter is process-wide, so a shared username could be
     // pushed over the limit by other tests' failures.
-    let email = format!("brute-{}@example.test", Uuid::new_v4());
+    let username = format!("brute-{}", &Uuid::new_v4().simple().to_string()[..12]);
     let attempt = || {
         Request::builder()
             .method("POST")
             .uri("/api/auth/login")
             .header(CONTENT_TYPE, "application/json")
             .body(Body::from(
-                json!({ "email": email, "password": "wrong-password-123" }).to_string(),
+                json!({ "username": username, "password": "wrong-password-123" }).to_string(),
             ))
             .unwrap()
     };
@@ -856,14 +856,14 @@ async fn test_sqlite_repeated_failed_logins_are_throttled() {
 async fn test_sqlite_deactivating_a_user_revokes_their_live_token() {
     let ctx = setup_sqlite_app().await;
     let admin = admin_token(&ctx.config);
-    let email = format!("staff-{}@example.test", Uuid::new_v4());
+    let username = format!("staff-{}", &Uuid::new_v4().simple().to_string()[..12]);
     let password = "Staff-Password-123";
 
     let (status, body) = send_authed(
         &ctx.router,
         "POST",
         "/api/users",
-        Some(json!({ "name": "Staff Member", "email": email, "password": password, "role": "staff" })),
+        Some(json!({ "name": "Staff Member", "username": username, "password": password, "role": "staff" })),
         &admin,
     )
     .await;
@@ -875,7 +875,7 @@ async fn test_sqlite_deactivating_a_user_revokes_their_live_token() {
         .uri("/api/auth/login")
         .header(CONTENT_TYPE, "application/json")
         .body(Body::from(
-            json!({ "email": email, "password": password }).to_string(),
+            json!({ "username": username, "password": password }).to_string(),
         ))
         .unwrap();
     let (status, body) = execute(&ctx.router, login).await;
@@ -1000,12 +1000,15 @@ async fn test_sqlite_product_sort_is_stable_and_preferences_are_per_login() {
     // Preferences: stored per login on SQLite, independent between logins.
     let mut tokens = Vec::new();
     for label in ["a", "b"] {
-        let email = format!("pref-{label}-{}@example.test", Uuid::new_v4());
+        let username = format!(
+            "pref-{label}-{}",
+            &Uuid::new_v4().simple().to_string()[..10]
+        );
         let (status, body) = send_authed(
             &ctx.router,
             "POST",
             "/api/users",
-            Some(json!({ "name": "Pref User", "email": email, "password": "Staff-Password-123", "role": "staff" })),
+            Some(json!({ "name": "Pref User", "username": username, "password": "Staff-Password-123", "role": "staff" })),
             &admin,
         )
         .await;
@@ -1015,7 +1018,7 @@ async fn test_sqlite_product_sort_is_stable_and_preferences_are_per_login() {
             .uri("/api/auth/login")
             .header(CONTENT_TYPE, "application/json")
             .body(Body::from(
-                json!({ "email": email, "password": "Staff-Password-123" }).to_string(),
+                json!({ "username": username, "password": "Staff-Password-123" }).to_string(),
             ))
             .unwrap();
         let (status, body) = execute(&ctx.router, login).await;

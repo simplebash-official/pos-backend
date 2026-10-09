@@ -136,7 +136,7 @@ async fn login_responses_are_never_captured_into_the_idempotency_store() {
         "POST",
         "/api/auth/login",
         Some(serde_json::json!({
-            "email": format!("nobody-{}@example.com", Uuid::new_v4()),
+            "username": format!("nobody-{}", &Uuid::new_v4().simple().to_string()[..12]),
             "password": "wrong-password",
         })),
         vec![("idempotency-key", &idem_key)],

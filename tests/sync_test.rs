@@ -888,7 +888,7 @@ async fn sync_changes_redelivers_an_employee_after_a_login_is_linked() {
         "/api/users",
         Some(serde_json::json!({
             "name": "Touch Regression Login",
-            "email": format!("touch-regression-{}@example.com", Uuid::new_v4()),
+            "username": format!("touch-regression-{}", &Uuid::new_v4().simple().to_string()[..12]),
             "password": "Password123!",
             "role": "staff",
             "employeeKey": employee_key,

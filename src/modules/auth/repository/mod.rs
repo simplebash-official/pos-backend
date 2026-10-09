@@ -22,7 +22,7 @@ struct LoginSessionSqliteRow {
     key: String,
     user_key: String,
     name_at_login: String,
-    email_at_login: String,
+    username_at_login: String,
     role_at_login: String,
     ip_address: Option<String>,
     user_agent: Option<String>,
@@ -37,7 +37,7 @@ impl LoginSessionSqliteRow {
             key: self.key,
             user_key: self.user_key,
             name_at_login: self.name_at_login,
-            email_at_login: self.email_at_login,
+            username_at_login: self.username_at_login,
             role_at_login: self.role_at_login.parse().unwrap_or(Role::Staff),
             ip_address: self.ip_address,
             user_agent: self.user_agent,
@@ -77,7 +77,7 @@ pub(crate) async fn insert_login_session(
             sqlx::query(
                 r#"
                 INSERT INTO login_sessions (
-                    id, key, user_key, name_at_login, email_at_login, role_at_login,
+                    id, key, user_key, name_at_login, username_at_login, role_at_login,
                     ip_address, user_agent, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
@@ -86,7 +86,7 @@ pub(crate) async fn insert_login_session(
             .bind(&document.key)
             .bind(&document.user_key)
             .bind(&document.name_at_login)
-            .bind(&document.email_at_login)
+            .bind(&document.username_at_login)
             .bind(document.role_at_login.as_str())
             .bind(&document.ip_address)
             .bind(&document.user_agent)
@@ -128,7 +128,7 @@ pub(crate) async fn list_login_sessions(
                 Some(uk) => {
                     sqlx::query_as(
                         r#"
-                        SELECT id, key, user_key, name_at_login, email_at_login, role_at_login,
+                        SELECT id, key, user_key, name_at_login, username_at_login, role_at_login,
                                ip_address, user_agent, created_at, updated_at
                         FROM login_sessions
                         WHERE user_key = ?
@@ -145,7 +145,7 @@ pub(crate) async fn list_login_sessions(
                 None => {
                     sqlx::query_as(
                         r#"
-                        SELECT id, key, user_key, name_at_login, email_at_login, role_at_login,
+                        SELECT id, key, user_key, name_at_login, username_at_login, role_at_login,
                                ip_address, user_agent, created_at, updated_at
                         FROM login_sessions
                         ORDER BY created_at DESC

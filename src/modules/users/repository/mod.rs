@@ -35,7 +35,7 @@ fn user_from_sqlite_row(r: &sqlx::sqlite::SqliteRow) -> UserDocument {
         id: ObjectId::parse_str(&id_str).ok(),
         key: r.get("key"),
         name: r.get("name"),
-        email: r.get("email"),
+        username: r.get("username"),
         password_hash: r.get("password_hash"),
         role: Role::from_str(&role_str).unwrap_or(Role::Staff),
         is_active: is_active_int != 0,
@@ -68,17 +68,20 @@ pub(crate) async fn find_user_by_id(db: &Db, id: ObjectId) -> AppResult<Option<U
     }
 }
 
-/// Looked up by normalized (lowercase) email — the entry point both
+/// Looked up by normalized (lowercase) username — the entry point both
 /// `create_user`'s uniqueness check and `verify_credentials`'s login lookup
-/// use.
-pub(crate) async fn find_user_by_email(db: &Db, email: &str) -> AppResult<Option<UserDocument>> {
+/// use. Scoped to the current shop by the tenant-aware collection.
+pub(crate) async fn find_user_by_username(
+    db: &Db,
+    username: &str,
+) -> AppResult<Option<UserDocument>> {
     match db {
         Db::Mongo(db) => Ok(users(db)
-            .find_one(doc! { "email": email, "deleted_at": Bson::Null })
+            .find_one(doc! { "username": username, "deleted_at": Bson::Null })
             .await?),
         Db::Sqlite(pool) => {
-            let row = sqlx::query("SELECT * FROM users WHERE LOWER(email) = LOWER($1)")
-                .bind(email)
+            let row = sqlx::query("SELECT * FROM users WHERE LOWER(username) = LOWER($1)")
+                .bind(username)
                 .fetch_optional(pool)
                 .await?;
             Ok(row.as_ref().map(user_from_sqlite_row))
@@ -171,14 +174,14 @@ pub(crate) async fn insert_user(db: &Db, mut document: UserDocument) -> AppResul
 
             sqlx::query(
                 r#"
-                INSERT INTO users (key, id, name, email, password_hash, role, employee_key, is_active, version, created_at, updated_at)
+                INSERT INTO users (key, id, name, username, password_hash, role, employee_key, is_active, version, created_at, updated_at)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, $9, $10)
                 "#,
             )
             .bind(&document.key)
             .bind(&id_str)
             .bind(&document.name)
-            .bind(&document.email)
+            .bind(&document.username)
             .bind(&document.password_hash)
             .bind(document.role.as_str())
             .bind(&document.employee_key)
@@ -218,9 +221,9 @@ pub(crate) async fn update_user(
                 updates.push(format!("name = ${}", updates.len() + 1));
                 params.push(name.to_string());
             }
-            if let Ok(email) = set_doc.get_str("email") {
-                updates.push(format!("email = ${}", updates.len() + 1));
-                params.push(email.to_string());
+            if let Ok(username) = set_doc.get_str("username") {
+                updates.push(format!("username = ${}", updates.len() + 1));
+                params.push(username.to_string());
             }
             if let Ok(password_hash) = set_doc.get_str("password_hash") {
                 updates.push(format!("password_hash = ${}", updates.len() + 1));

@@ -1,6 +1,6 @@
 // Covers `modules::users::service::reset_admin_credentials` (the function
 // `src/bin/reset_admin.rs` calls) — the only way to rotate the single Admin
-// account's email/password, since it's unreachable through any HTTP route.
+// account's password, since it's unreachable through any HTTP route.
 // Uses `spawn_app_sqlite()` (per-test isolated DB), never the shared Mongo
 // test DB, since this touches the single-Admin invariant the same way
 // `users_test.rs`'s `single_admin_invariant_and_admin_invisible_via_users_api`
@@ -46,37 +46,37 @@ async fn send(
 }
 
 #[tokio::test]
-async fn reset_admin_credentials_rotates_email_and_password() {
+async fn reset_admin_credentials_rotates_the_password() {
     let app = common::spawn_app_sqlite().await;
-    seeds::admin::seed_admin(&app.db_handle, None, None, None)
+    seeds::admin::seed_admin(&app.db_handle, None, None)
         .await
         .expect("seed_admin should create the initial admin");
 
-    let updated = service::reset_admin_credentials(&app.db_handle, "new-admin@pos.com", "new@1234")
+    let updated = service::reset_admin_credentials(&app.db_handle, "new@1234")
         .await
         .expect("reset_admin_credentials should succeed against an existing admin");
-    assert_eq!(updated.email, "new-admin@pos.com");
+    assert_eq!(updated.username, "admin");
 
     // Old credentials no longer work.
     let (old_status, _) = send(
         &app.router,
         "POST",
         "/api/auth/login",
-        Some(json!({ "email": "admin@pos.com", "password": "admin@1234" })),
+        Some(json!({ "username": "admin", "password": "admin@1234" })),
     )
     .await;
     assert_eq!(old_status, StatusCode::UNAUTHORIZED);
 
-    // New credentials log in as the same (now-renamed) admin.
+    // The new password logs in as the same admin.
     let (new_status, new_res) = send(
         &app.router,
         "POST",
         "/api/auth/login",
-        Some(json!({ "email": "new-admin@pos.com", "password": "new@1234" })),
+        Some(json!({ "username": "admin", "password": "new@1234" })),
     )
     .await;
     assert_eq!(new_status, StatusCode::OK, "login failed: {new_res}");
-    assert_eq!(new_res["data"]["user"]["email"], "new-admin@pos.com");
+    assert_eq!(new_res["data"]["user"]["username"], "admin");
     assert_eq!(new_res["data"]["user"]["role"], "admin");
 }
 
@@ -84,8 +84,7 @@ async fn reset_admin_credentials_rotates_email_and_password() {
 async fn reset_admin_credentials_errors_when_no_admin_exists() {
     let app = common::spawn_app_sqlite().await;
 
-    let result =
-        service::reset_admin_credentials(&app.db_handle, "x@example.com", "password123").await;
+    let result = service::reset_admin_credentials(&app.db_handle, "password123").await;
 
     assert!(
         matches!(result, Err(AppError::NotFound { .. })),

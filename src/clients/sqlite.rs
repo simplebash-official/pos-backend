@@ -111,6 +111,9 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .await;
     }
 
+    migrate_users_to_usernames(pool).await?;
+    migrate_login_sessions_to_usernames(pool).await?;
+
     // `users.preferences_json` (per-login UI preferences) arrived after the table did.
     let user_cols: Vec<(i32, String)> =
         sqlx::query_as("SELECT cid, name FROM pragma_table_info('users')")
@@ -308,5 +311,183 @@ fn json_to_bson(v: serde_json::Value) -> mongodb::bson::Bson {
             }
             mongodb::bson::Bson::Document(doc)
         }
+    }
+}
+
+/// A login username derived from a legacy email's local part: lowercased,
+/// anything outside `a-z0-9._-` becomes `-`, edges trimmed to a letter or
+/// digit, padded with digits to the 3-character minimum, cut to 32, then made
+/// unique against `taken` with a numeric suffix. Used only by the one-off
+/// email -> username migration below.
+fn derive_username(email: &str, taken: &std::collections::HashSet<String>) -> String {
+    let local = email.split('@').next().unwrap_or_default().to_lowercase();
+    let cleaned: String = local
+        .chars()
+        .map(|c| {
+            if c.is_ascii_lowercase() || c.is_ascii_digit() || "._-".contains(c) {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let mut base = cleaned
+        .trim_matches(|c: char| !c.is_ascii_alphanumeric())
+        .to_string();
+    base.truncate(28);
+    let mut n = 1;
+    while base.chars().count() < 3 {
+        base.push_str(&n.to_string());
+        n += 1;
+    }
+    let mut candidate = base.clone();
+    let mut suffix = 2;
+    while taken.contains(&candidate) {
+        candidate = format!("{base}{suffix}");
+        suffix += 1;
+    }
+    candidate
+}
+
+/// One-off rebuild of a desktop database whose `users` table still logs in by
+/// `email`: the Admin becomes `admin`, every other login gets a username derived
+/// from its email (see `derive_username`), `email` is dropped, and the audit
+/// column `login_sessions.email_at_login` is renamed. There is no email fallback
+/// afterwards. A no-op once the table has `username`.
+async fn migrate_users_to_usernames(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    use sqlx::Row;
+
+    let cols: Vec<(i32, String)> =
+        sqlx::query_as("SELECT cid, name FROM pragma_table_info('users')")
+            .fetch_all(pool)
+            .await
+            .unwrap_or_default();
+    if !cols.iter().any(|(_, n)| n == "email") {
+        return Ok(());
+    }
+    tracing::info!("Migrating 'users' table: replacing 'email' with 'username'");
+
+    let has_prefs = cols.iter().any(|(_, n)| n == "preferences_json");
+    let rows = sqlx::query("SELECT key, email, role FROM users ORDER BY created_at, key")
+        .fetch_all(pool)
+        .await?;
+
+    let mut taken = std::collections::HashSet::new();
+    let mut assigned: Vec<(String, String)> = Vec::new();
+    // The Admin first, so no other login can claim `admin`.
+    for row in rows
+        .iter()
+        .filter(|r| r.get::<String, _>("role") == "admin")
+    {
+        taken.insert("admin".to_string());
+        assigned.push((row.get("key"), "admin".to_string()));
+    }
+    for row in rows
+        .iter()
+        .filter(|r| r.get::<String, _>("role") != "admin")
+    {
+        let username = derive_username(&row.get::<String, _>("email"), &taken);
+        taken.insert(username.clone());
+        assigned.push((row.get("key"), username));
+    }
+
+    let mut tx = pool.begin().await?;
+    sqlx::query("ALTER TABLE users ADD COLUMN username TEXT")
+        .execute(&mut *tx)
+        .await?;
+    for (key, username) in &assigned {
+        sqlx::query("UPDATE users SET username = $1 WHERE key = $2")
+            .bind(username)
+            .bind(key)
+            .execute(&mut *tx)
+            .await?;
+    }
+    // SQLite cannot drop a UNIQUE column, so rebuild the table around it.
+    sqlx::query(
+        r#"CREATE TABLE users_new (
+            key TEXT PRIMARY KEY,
+            id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL,
+            employee_key TEXT,
+            preferences_json TEXT,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            version INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            deleted_at TEXT,
+            updated_by_device TEXT
+        )"#,
+    )
+    .execute(&mut *tx)
+    .await?;
+    let prefs = if has_prefs {
+        "preferences_json"
+    } else {
+        "NULL"
+    };
+    sqlx::query(&format!(
+        "INSERT INTO users_new (key, id, name, username, password_hash, role, employee_key, \
+         preferences_json, is_active, version, created_at, updated_at, deleted_at, updated_by_device) \
+         SELECT key, id, name, username, password_hash, role, employee_key, {prefs}, is_active, \
+         version, created_at, updated_at, deleted_at, updated_by_device FROM users"
+    ))
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("DROP TABLE users").execute(&mut *tx).await?;
+    sqlx::query("ALTER TABLE users_new RENAME TO users")
+        .execute(&mut *tx)
+        .await?;
+
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Renames the login-session audit column `email_at_login` to `username_at_login`
+/// and refreshes each row from its user when that user still exists.
+async fn migrate_login_sessions_to_usernames(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    let session_cols: Vec<(i32, String)> =
+        sqlx::query_as("SELECT cid, name FROM pragma_table_info('login_sessions')")
+            .fetch_all(pool)
+            .await
+            .unwrap_or_default();
+    if !session_cols.iter().any(|(_, n)| n == "email_at_login") {
+        return Ok(());
+    }
+    sqlx::query("ALTER TABLE login_sessions RENAME COLUMN email_at_login TO username_at_login")
+        .execute(pool)
+        .await?;
+    let user_cols: Vec<(i32, String)> =
+        sqlx::query_as("SELECT cid, name FROM pragma_table_info('users')")
+            .fetch_all(pool)
+            .await
+            .unwrap_or_default();
+    if user_cols.iter().any(|(_, n)| n == "username") {
+        sqlx::query(
+            "UPDATE login_sessions SET username_at_login = COALESCE( \
+             (SELECT username FROM users WHERE users.key = login_sessions.user_key), \
+             username_at_login)",
+        )
+        .execute(pool)
+        .await?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod username_migration_tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn derives_clean_unique_usernames() {
+        let mut taken = HashSet::from(["admin".to_string()]);
+        assert_eq!(derive_username("Ann.Lee@shop.com", &taken), "ann.lee");
+        taken.insert("ann.lee".into());
+        assert_eq!(derive_username("ann.lee@other.com", &taken), "ann.lee2");
+        assert_eq!(derive_username("a@x.com", &taken), "a12");
+        assert_eq!(derive_username("+bob+@x.com", &taken), "bob");
     }
 }

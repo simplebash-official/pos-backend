@@ -261,7 +261,7 @@ async fn delete_employee_with_login_is_blocked() {
         "/api/users",
         Some(json!({
             "name": "Linked Login",
-            "email": format!("linked-{}@example.com", Uuid::new_v4()),
+            "username": format!("linked-{}", &Uuid::new_v4().simple().to_string()[..12]),
             "password": "Password123!",
             "role": "staff",
             "employeeKey": employee_key,
@@ -291,7 +291,7 @@ async fn get_employee_reflects_linked_login() {
     let token = admin_token(&app.config);
     let (id, employee) = create_employee_via_api(&app.router, &token).await;
     let employee_key = employee["key"].as_str().unwrap();
-    let email = format!("has-login-{}@example.com", Uuid::new_v4());
+    let username = format!("has-login-{}", &Uuid::new_v4().simple().to_string()[..12]);
 
     let (status, _) = send_authed(
         &app.router,
@@ -299,7 +299,7 @@ async fn get_employee_reflects_linked_login() {
         "/api/users",
         Some(json!({
             "name": "Has Login",
-            "email": email,
+            "username": username,
             "password": "Password123!",
             "role": "staff",
             "employeeKey": employee_key,
@@ -318,7 +318,7 @@ async fn get_employee_reflects_linked_login() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body:?}");
-    assert_eq!(body["data"]["login"]["email"], email);
+    assert_eq!(body["data"]["login"]["username"], username);
     assert_eq!(body["data"]["login"]["role"], "staff");
 }
 
@@ -337,7 +337,7 @@ async fn batch_delete_employees_skips_ones_with_a_login() {
         "/api/users",
         Some(json!({
             "name": "Linked",
-            "email": format!("batch-{}@example.com", Uuid::new_v4()),
+            "username": format!("batch-{}", &Uuid::new_v4().simple().to_string()[..12]),
             "password": "Password123!",
             "role": "staff",
             "employeeKey": employee2["key"].as_str().unwrap(),

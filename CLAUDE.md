@@ -59,7 +59,7 @@ The invariants below apply everywhere and are easy to violate, so they stay resi
 - `cargo test` — run all tests. `tests/sqlite_integration_test.rs`, `tests/seeding_test.rs`, `tests/openapi_test.rs`, and `tests/response_format_test.rs` run without live MongoDB; Mongo-specific integration tests require a reachable MongoDB instance.
 - `cargo test --test scenarios_test health_route_returns_success_format` — run a single integration test by name
 - `cargo run --bin seed_all` — runs all seeds in dependency order (`admin`, `providers`, `suppliers`, `customers`, `inventory`, `api_key`) across SQLite or MongoDB
-- `cargo run --bin seed_admin` — create-if-missing bootstrap of the first Admin account (`admin@pos.com` / `admin@1234`, name: `"System Admin"`). Optional overrides via `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD`/`SEED_ADMIN_NAME` env vars.
+- `cargo run --bin seed_admin` — create-if-missing bootstrap of the first Admin account (username `admin` / `admin@1234`, name: `"System Admin"`). Optional overrides via `SEED_ADMIN_PASSWORD`/`SEED_ADMIN_NAME` env vars.
 - `cargo run --bin seed_providers` — upserts default category/subcategory reference data into the `categories`/`subcategories` tables/collections
 - `cargo run --bin seed_suppliers` — upserts sample repair/retail suppliers into the `suppliers` table/collection
 - `cargo run --bin seed_customers` — upserts 20 realistic retail/repair/corporate/print customer profiles into the `customers` table/collection
@@ -150,7 +150,7 @@ Rules:
 5. **System Setup & Initial Installation Module (`src/modules/system/`)**:
    - `system_installations` SQLite table tracks `installation_id`, `installed_at`, `app_version`, `platform`, `setup_completed`, `setup_completed_at`, and `sample_data_loaded`.
    - `GET /api/system/setup-status`: Public endpoint returning whether the system has been initialized.
-   - `POST /api/system/setup`: Public bootstrap endpoint that initializes the database, creates the primary administrator (`admin@pos.com` / `admin@1234` or custom credentials), seeds API keys, and conditionally populates sample demo data (categories, products, suppliers, customers) if `load_sample_data: true`. If `load_sample_data: false`, leaves all 25 tables completely empty. Issues a JWT token for immediate auto-login.
+   - `POST /api/system/setup`: Public bootstrap endpoint that initializes the database, creates the primary administrator (username `admin`, with the password the caller supplies), seeds API keys, and conditionally populates sample demo data (categories, products, suppliers, customers) if `load_sample_data: true`. If `load_sample_data: false`, leaves all 25 tables completely empty. Issues a JWT token for immediate auto-login.
    - `GET /api/system/installation`: Admin-guarded endpoint to inspect workstation installation metadata.
 
 ### Future Implementation Rules

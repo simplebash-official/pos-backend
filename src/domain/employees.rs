@@ -118,7 +118,7 @@ impl std::str::FromStr for EmployeeStatus {
 #[serde(rename_all = "camelCase")]
 pub struct EmployeeLoginSummary {
     pub user_id: String,
-    pub email: String,
+    pub username: String,
     pub role: crate::domain::users::Role,
     pub is_active: bool,
 }

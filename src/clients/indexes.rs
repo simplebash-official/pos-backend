@@ -106,7 +106,7 @@ impl Specs {
 ///
 /// Unique indexes that exist in MongoDB today are only `idempotency_keys
 /// (key, user_id)` and `product_serials.serial_number`; both become
-/// tenant-qualified. Uniqueness of `sku`, category/supplier names, user emails
+/// tenant-qualified. Uniqueness of `sku`, category/supplier names, usernames
 /// and invoice/credit-note/ticket numbers is enforced in the service layer on
 /// MongoDB (the SQLite schema has the table-level UNIQUEs), and services see
 /// only the tenant's rows, so it is already per tenant.

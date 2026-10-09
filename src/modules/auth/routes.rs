@@ -86,7 +86,7 @@ fn extract_user_agent(headers: &HeaderMap) -> Option<String> {
     responses(
         (status = 200, description = "Login successful", body = ApiResponse<LoginResponse>),
         (status = 400, description = "Validation error (including a missing shopCode when TENANT_MODE=multi)", body = ErrorResponse),
-        (status = 401, description = "Invalid email or password, or account deactivated (in multi-tenant mode also an unknown shopCode)", body = ErrorResponse),
+        (status = 401, description = "Invalid username or password, or account deactivated (in multi-tenant mode also an unknown shopCode)", body = ErrorResponse),
     )
 )]
 async fn login(
@@ -133,13 +133,7 @@ async fn me(
     user: CurrentUser,
     State(state): State<AppState>,
 ) -> AppResult<Json<ApiResponse<User>>> {
-    let current = service::me(
-        &state.db,
-        &user.user_id,
-        user.email.as_deref(),
-        user.name.as_deref(),
-    )
-    .await?;
+    let current = service::me(&state.db, &user.user_id, user.name.as_deref()).await?;
 
     Ok(Json(ApiResponse::success(
         current,
@@ -161,14 +155,9 @@ async fn update_my_preferences(
     State(state): State<AppState>,
     Json(body): Json<UpdateMyPreferencesRequest>,
 ) -> AppResult<Json<ApiResponse<User>>> {
-    let updated = service::update_my_preferences(
-        &state.db,
-        &user.user_id,
-        user.email.as_deref(),
-        user.name.as_deref(),
-        body,
-    )
-    .await?;
+    let updated =
+        service::update_my_preferences(&state.db, &user.user_id, user.name.as_deref(), body)
+            .await?;
 
     Ok(Json(ApiResponse::success(
         updated,

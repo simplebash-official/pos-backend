@@ -1,5 +1,5 @@
 // Business rules for user account CRUD/role management: password
-// hashing/verification, email uniqueness, login-credential checking, and
+// hashing/verification, username uniqueness, login-credential checking, and
 // the Admin/Manager management hierarchy (see `manageable_roles` below).
 // Delegates all Mongo access to `super::repository`.
 
@@ -15,7 +15,7 @@ use mongodb::bson::{DateTime as BsonDateTime, Document, doc, oid::ObjectId};
 use crate::{
     clients::db::Db,
     core::{
-        constants::{codes, prefixes},
+        constants::{codes, prefixes, roles},
         error::{AppError, AppResult},
         id::generate_id,
     },
@@ -65,22 +65,21 @@ fn ensure_manageable(caller_role: Role, target_role: Role) -> AppResult<()> {
     }
 }
 
-/// A deliberately lightweight structural check (single `@`, non-empty local
-/// part, dotted domain) rather than a full RFC 5322 validator — matches the
-/// bar `suppliers::service::validate_email` already sets (no `regex` crate
-/// dependency exists in this codebase).
-fn validate_email(email: &str) -> AppResult<()> {
-    let is_valid = email.matches('@').count() == 1
-        && !email.contains(' ')
-        && email.split_once('@').is_some_and(|(local, domain)| {
-            !local.is_empty()
-                && domain.contains('.')
-                && !domain.starts_with('.')
-                && !domain.ends_with('.')
-        });
-
-    if !is_valid {
-        return Err(AppError::validation("Email is not a valid email address"));
+/// Login usernames are lowercase `a-z0-9._-`, 3-32 characters, starting and
+/// ending with a letter or digit. They are unique within a shop (the lookup is
+/// tenant-scoped), so the same name (e.g. `admin`) can exist in many shops.
+fn validate_username(username: &str) -> AppResult<()> {
+    let len = username.chars().count();
+    let allowed = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit() || "._-".contains(c);
+    let edge_ok = |c: Option<char>| c.is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+    if !(3..=32).contains(&len)
+        || !username.chars().all(allowed)
+        || !edge_ok(username.chars().next())
+        || !edge_ok(username.chars().last())
+    {
+        return Err(AppError::validation(
+            "Username must be 3-32 characters: lowercase letters, digits, '.', '_' or '-'",
+        ));
     }
     Ok(())
 }
@@ -94,8 +93,8 @@ fn validate_password_strength(password: &str) -> AppResult<()> {
     Ok(())
 }
 
-fn normalize_email(email: &str) -> String {
-    email.trim().to_lowercase()
+fn normalize_username(username: &str) -> String {
+    username.trim().to_lowercase()
 }
 
 fn hash_password(password: &str) -> AppResult<String> {
@@ -107,7 +106,7 @@ fn hash_password(password: &str) -> AppResult<String> {
 }
 
 /// A real Argon2 hash of a throwaway value, computed once, for
-/// `verify_credentials` to verify against when the email is unknown.
+/// `verify_credentials` to verify against when the username is unknown.
 static DUMMY_PASSWORD_HASH: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
     hash_password("not-a-real-password").expect("hashing a constant cannot fail")
 });
@@ -121,7 +120,7 @@ fn verify_password(password: &str, hash: &str) -> AppResult<bool> {
 }
 
 /// Builds the Mongo filter from query params (free-text search across
-/// name/email, plus an exact-role filter) — same construction style as
+/// name/username, plus an exact-role filter) — same construction style as
 /// `suppliers::service::list_suppliers`. Not paginated: a shop's staff
 /// roster is small enough to return in full. Always scoped to
 /// `manageable_roles(caller_role)` regardless of what `query.role` asks
@@ -142,7 +141,7 @@ pub(crate) async fn list_users(
         and_clauses.push(doc! {
             "$or": [
                 { "name": { "$regex": pattern.clone() } },
-                { "email": { "$regex": pattern } },
+                { "username": { "$regex": pattern } },
             ]
         });
     }
@@ -181,17 +180,12 @@ pub(crate) async fn get_user(db: &Db, id: ObjectId) -> AppResult<User> {
     Ok(document.into_user())
 }
 
-/// Resolves the local user behind an identity-server account (matched by its
-/// email, which both sides normalise the same way). Identity owns the display
-/// name, so a changed `name` claim is written through. `None` when the shop has
-/// no such user.
-pub(crate) async fn find_user_for_identity(
-    db: &Db,
-    email: &str,
-    name: Option<&str>,
-) -> AppResult<Option<User>> {
-    let Some(mut document) = repository::find_user_by_email(db, &normalize_email(email)).await?
-    else {
+/// Resolves the local user behind an identity-server account token. A shop's
+/// owner is its single Admin (the `admin` login provisioned at shop creation),
+/// so the owner scope maps to that account. Identity owns the display name, so
+/// a changed `name` claim is written through. `None` when the shop has no Admin.
+pub(crate) async fn find_user_for_identity(db: &Db, name: Option<&str>) -> AppResult<Option<User>> {
+    let Some(mut document) = find_admin_document(db).await? else {
         return Ok(None);
     };
     if let (Some(name), Some(id)) = (name.map(str::trim).filter(|n| !n.is_empty()), document.id)
@@ -201,6 +195,16 @@ pub(crate) async fn find_user_for_identity(
         document = updated;
     }
     Ok(Some(document.into_user()))
+}
+
+/// The shop's single Admin document, if one exists.
+async fn find_admin_document(db: &Db) -> AppResult<Option<UserDocument>> {
+    Ok(
+        repository::list_users(db, doc! { "role": Role::Admin.as_str() })
+            .await?
+            .into_iter()
+            .next(),
+    )
 }
 
 /// Merges `changes` into a login's own preferences. Callers have already
@@ -263,13 +267,20 @@ pub(crate) async fn get_user_for_caller(
 /// (what the HTTP route actually calls) never allows `role: Admin` for any
 /// caller (see `manageable_roles`). Enforces the single-Admin invariant
 /// this deployment assumes: creating a second Admin is rejected outright,
-/// including on a `seed_admin` re-run with a different email.
+/// including on a `seed_admin` re-run with a different username.
 pub async fn create_user(db: &Db, body: CreateUserRequest) -> AppResult<User> {
     if body.name.trim().is_empty() {
         return Err(AppError::validation("Name is required"));
     }
-    validate_email(&body.email)?;
+    let username = normalize_username(&body.username);
+    validate_username(&username)?;
     validate_password_strength(&body.password)?;
+    if body.role == Role::Admin && username != roles::ADMIN_USERNAME {
+        return Err(AppError::validation(format!(
+            "The Admin username is always '{}'",
+            roles::ADMIN_USERNAME
+        )));
+    }
 
     if body.role == Role::Admin && repository::count_users_by_role(db, Role::Admin).await? > 0 {
         return Err(AppError::custom(
@@ -279,11 +290,13 @@ pub async fn create_user(db: &Db, body: CreateUserRequest) -> AppResult<User> {
         ));
     }
 
-    let email = normalize_email(&body.email);
-    if repository::find_user_by_email(db, &email).await?.is_some() {
+    if repository::find_user_by_username(db, &username)
+        .await?
+        .is_some()
+    {
         return Err(AppError::conflict(
-            codes::EMAIL_ALREADY_EXISTS,
-            format!("A user with email '{email}' already exists"),
+            codes::USERNAME_ALREADY_EXISTS,
+            format!("A user with username '{username}' already exists"),
         ));
     }
 
@@ -312,7 +325,7 @@ pub async fn create_user(db: &Db, body: CreateUserRequest) -> AppResult<User> {
         id: None,
         key: generate_id(prefixes::USER),
         name: body.name.trim().to_string(),
-        email,
+        username,
         password_hash,
         role: body.role,
         is_active: true,
@@ -333,13 +346,19 @@ pub async fn create_user(db: &Db, body: CreateUserRequest) -> AppResult<User> {
 
 /// Checks an owner login handed over by the identity service without writing
 /// anything, so a provisioning request can be rejected before any tenant row is
-/// created. The hash must be an Argon2 PHC string: anything else could never be
-/// verified by `verify_password` and would create an Admin nobody can log in as.
-pub fn validate_owner_login(name: &str, email: &str, password_hash: &str) -> AppResult<()> {
+/// created. The username must be the fixed Admin username, and the hash must be
+/// an Argon2 PHC string: anything else could never be verified by
+/// `verify_password` and would create an Admin nobody can log in as.
+pub fn validate_owner_login(name: &str, username: &str, password_hash: &str) -> AppResult<()> {
     if name.trim().is_empty() {
         return Err(AppError::validation("Name is required"));
     }
-    validate_email(email)?;
+    if normalize_username(username) != roles::ADMIN_USERNAME {
+        return Err(AppError::validation(format!(
+            "The owner username must be '{}'",
+            roles::ADMIN_USERNAME
+        )));
+    }
     let not_argon2 = || AppError::validation("Owner password hash must be an Argon2 PHC string");
     let parsed = PasswordHash::new(password_hash).map_err(|_| not_argon2())?;
     if !parsed.algorithm.as_str().starts_with("argon2") {
@@ -348,29 +367,25 @@ pub fn validate_owner_login(name: &str, email: &str, password_hash: &str) -> App
     Ok(())
 }
 
-/// Creates the owner's Admin login for a freshly provisioned shop from a password
-/// hash the identity service already made, so the same email + password works in
-/// both places without the plaintext ever reaching this service. Returns `false`
-/// when the shop already has an Admin: the owner's own Admin row is refreshed with
-/// identity's display name, any other existing Admin is left alone, so replaying a
+/// Creates the owner's `admin` login for a freshly provisioned shop from a
+/// password hash the identity service already made (from the admin password the
+/// owner chose at shop creation), so the plaintext never reaches this service.
+/// Returns `false` when the shop already has an Admin: that Admin's display name
+/// is refreshed with identity's, its hash is never touched, so replaying a
 /// provisioning request is harmless. `pub` for the same reason as `create_user`:
 /// the tenants module reaches it across the private `repository` boundary.
 pub async fn create_owner_admin_if_absent(
     db: &Db,
     name: &str,
-    email: &str,
+    username: &str,
     password_hash: &str,
 ) -> AppResult<bool> {
-    validate_owner_login(name, email, password_hash)?;
+    validate_owner_login(name, username, password_hash)?;
 
-    let email = normalize_email(email);
-
-    // Replays are how identity re-syncs a profile: when the owner's Admin already
+    // Replays are how identity re-syncs a profile: when the Admin already
     // exists, identity is the source of truth for its display name. The password
     // hash is deliberately left alone - the shop may have changed it locally.
-    if let Some(existing) = repository::find_user_by_email(db, &email).await?
-        && existing.role == Role::Admin
-    {
+    if let Some(existing) = find_admin_document(db).await? {
         let name = name.trim();
         if existing.name != name
             && let Some(id) = existing.id
@@ -380,14 +395,14 @@ pub async fn create_owner_admin_if_absent(
         return Ok(false);
     }
 
-    if repository::count_users_by_role(db, Role::Admin).await? > 0 {
-        return Ok(false);
-    }
-
-    if repository::find_user_by_email(db, &email).await?.is_some() {
+    let username = normalize_username(username);
+    if repository::find_user_by_username(db, &username)
+        .await?
+        .is_some()
+    {
         return Err(AppError::conflict(
-            codes::EMAIL_ALREADY_EXISTS,
-            format!("A user with email '{email}' already exists"),
+            codes::USERNAME_ALREADY_EXISTS,
+            format!("A user with username '{username}' already exists"),
         ));
     }
 
@@ -396,7 +411,7 @@ pub async fn create_owner_admin_if_absent(
         id: None,
         key: generate_id(prefixes::USER),
         name: name.trim().to_string(),
-        email,
+        username,
         password_hash: password_hash.to_string(),
         role: Role::Admin,
         is_active: true,
@@ -409,43 +424,25 @@ pub async fn create_owner_admin_if_absent(
     Ok(true)
 }
 
-/// Rotates the single Admin account's email/password in place. `pub`, not
-/// `pub(crate)`, so `src/bin/reset_admin.rs` can reach it directly — there is
-/// no HTTP path that can do this, since `ensure_manageable` always 404s an
-/// Admin target for every caller (see `manageable_roles`) and this
-/// deployment has no self-service "forgot password" flow. Requires an Admin
-/// to already exist (use `create_user`/`seed_admin` to create the first
-/// one); overwrites the existing Admin's credentials with no undo.
-pub async fn reset_admin_credentials(db: &Db, email: &str, password: &str) -> AppResult<User> {
-    validate_email(email)?;
+/// Rotates the single Admin account's password in place (its username is always
+/// `admin`). `pub`, not `pub(crate)`, so `src/bin/reset_admin.rs` can reach it
+/// directly — there is no HTTP path that can do this, since `ensure_manageable`
+/// always 404s an Admin target for every caller (see `manageable_roles`) and
+/// this deployment has no self-service "forgot password" flow. Requires an
+/// Admin to already exist (use `create_user`/`seed_admin` to create the first
+/// one); overwrites the existing Admin's password with no undo.
+pub async fn reset_admin_credentials(db: &Db, password: &str) -> AppResult<User> {
     validate_password_strength(password)?;
 
-    let admin = repository::list_users(db, doc! { "role": Role::Admin.as_str() })
-        .await?
-        .into_iter()
-        .next()
-        .ok_or_else(|| {
-            AppError::not_found_with_code(
-                "No Admin account exists yet; run seed_admin first",
-                codes::USER_NOT_FOUND,
-            )
-        })?;
+    let admin = find_admin_document(db).await?.ok_or_else(|| {
+        AppError::not_found_with_code(
+            "No Admin account exists yet; run seed_admin first",
+            codes::USER_NOT_FOUND,
+        )
+    })?;
     let admin_id = admin.id.expect("persisted user document must have an id");
 
-    let normalized_email = normalize_email(email);
-    if normalized_email != admin.email
-        && repository::find_user_by_email(db, &normalized_email)
-            .await?
-            .is_some()
-    {
-        return Err(AppError::conflict(
-            codes::EMAIL_ALREADY_EXISTS,
-            format!("A user with email '{normalized_email}' already exists"),
-        ));
-    }
-
     let set_doc = doc! {
-        "email": &normalized_email,
         "password_hash": hash_password(password)?,
         "updated_at": BsonDateTime::now(),
     };
@@ -485,11 +482,11 @@ pub(crate) async fn create_user_for_caller(
 }
 
 /// Partial update for `PATCH /users/{id}` — every field in `body` is
-/// optional; required fields (name/email) fall back to the existing
+/// optional; required fields (name/username) fall back to the existing
 /// document's value before re-validation. `password` present means rehash
-/// to the new value; absent leaves the stored hash untouched. Email
-/// uniqueness is only re-checked when the email actually changed, so
-/// re-saving a user's existing email never trips the uniqueness guard
+/// to the new value; absent leaves the stored hash untouched. Username
+/// uniqueness is only re-checked when the username actually changed, so
+/// re-saving a user's existing username never trips the uniqueness guard
 /// against itself. `caller_role` gates two things: the *existing* account
 /// must be in `manageable_roles(caller_role)` (404 otherwise), and if
 /// `body.role` requests a role change, the *new* role must be too (403
@@ -521,29 +518,29 @@ pub(crate) async fn update_user(
             return Err(AppError::validation("Name is required"));
         }
 
-        let email = match body.email {
-            Some(email) => {
-                validate_email(&email)?;
-                let normalized = normalize_email(&email);
-                if normalized != existing.email
-                    && repository::find_user_by_email(db, &normalized)
+        let username = match body.username {
+            Some(username) => {
+                let normalized = normalize_username(&username);
+                validate_username(&normalized)?;
+                if normalized != existing.username
+                    && repository::find_user_by_username(db, &normalized)
                         .await?
                         .is_some()
                 {
                     return Err(AppError::custom(
                         StatusCode::CONFLICT,
-                        codes::EMAIL_ALREADY_EXISTS,
-                        format!("A user with email '{normalized}' already exists"),
+                        codes::USERNAME_ALREADY_EXISTS,
+                        format!("A user with username '{normalized}' already exists"),
                     ));
                 }
                 normalized
             }
-            None => existing.email,
+            None => existing.username,
         };
 
         let mut set_doc = doc! {
             "name": &name,
-            "email": &email,
+            "username": &username,
             "updated_at": BsonDateTime::now(),
         };
         if let Some(password) = body.password {
@@ -631,27 +628,27 @@ pub(crate) async fn delete_user(db: &Db, id: ObjectId, caller_role: Role) -> App
     .await
 }
 
-/// Cross-module entry point `auth::service::login` calls. "No such email"
+/// Cross-module entry point `auth::service::login` calls. "No such username"
 /// and "wrong password" both collapse to the same 401
-/// `INVALID_CREDENTIALS` (never distinguish which — avoids email
+/// `INVALID_CREDENTIALS` (never distinguish which — avoids username
 /// enumeration); a correct password against a deactivated account gets its
 /// own 401 `USER_INACTIVE`, since at that point the caller has already
 /// proven they know the real password.
-pub(crate) async fn verify_credentials(db: &Db, email: &str, password: &str) -> AppResult<User> {
-    let normalized = normalize_email(email);
-    let Some(document) = repository::find_user_by_email(db, &normalized).await? else {
+pub(crate) async fn verify_credentials(db: &Db, username: &str, password: &str) -> AppResult<User> {
+    let normalized = normalize_username(username);
+    let Some(document) = repository::find_user_by_username(db, &normalized).await? else {
         // Spend the same Argon2 work as a real check, so response time
-        // doesn't reveal whether the email exists.
+        // doesn't reveal whether the username exists.
         let _ = verify_password(password, &DUMMY_PASSWORD_HASH);
         return Err(AppError::unauthorized_with_code(
-            "Invalid email or password",
+            "Invalid username or password",
             codes::INVALID_CREDENTIALS,
         ));
     };
 
     if !verify_password(password, &document.password_hash)? {
         return Err(AppError::unauthorized_with_code(
-            "Invalid email or password",
+            "Invalid username or password",
             codes::INVALID_CREDENTIALS,
         ));
     }
@@ -672,7 +669,7 @@ fn to_login_summary(document: UserDocument) -> EmployeeLoginSummary {
             .id
             .expect("persisted user document must have an id")
             .to_hex(),
-        email: document.email,
+        username: document.username,
         role: document.role,
         is_active: document.is_active,
     }

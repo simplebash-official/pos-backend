@@ -64,8 +64,8 @@ pub struct User {
     pub key: String,
     /// Full display name.
     pub name: String,
-    /// Unique email address.
-    pub email: String,
+    /// Unique login username (unique within the shop).
+    pub username: String,
     /// User permission role (admin, manager, or staff).
     pub role: Role,
     /// The fixed permission set this role carries, computed from
@@ -138,8 +138,8 @@ pub struct UpdateMyPreferencesRequest {
 pub struct CreateUserRequest {
     /// Full display name.
     pub name: String,
-    /// Login email address.
-    pub email: String,
+    /// Login username (unique within the shop).
+    pub username: String,
     /// Plaintext password to hash and store.
     pub password: String,
     /// Role to assign to new user (admin, manager, or staff).
@@ -161,8 +161,8 @@ pub struct CreateUserRequest {
 pub struct UpdateUserRequest {
     /// Updated display name.
     pub name: Option<String>,
-    /// Updated login email address.
-    pub email: Option<String>,
+    /// Updated login username.
+    pub username: Option<String>,
     /// New plaintext password, if changing password.
     pub password: Option<String>,
     /// Updated user role.
@@ -173,12 +173,12 @@ pub struct UpdateUserRequest {
     pub employee_key: Option<String>,
 }
 
-/// Query params for `GET /users`. `search` matches against name/email.
+/// Query params for `GET /users`. `search` matches against name/username.
 #[derive(Debug, Clone, Default, Deserialize, IntoParams)]
 #[serde(rename_all = "camelCase")]
 #[into_params(parameter_in = Query)]
 pub struct UserListQuery {
-    /// Search term matching name or email.
+    /// Search term matching name or username.
     pub search: Option<String>,
     /// Filter users by role.
     pub role: Option<Role>,

@@ -77,9 +77,9 @@ fn admin_token(config: &simplebash_pos_backend::core::config::Config) -> String 
 }
 
 /// Creates a user via the real (admin-provisioned) API and returns
-/// `(id, email, password)`.
+/// `(id, username, password)`.
 async fn create_user(router: &axum::Router, admin: &str, role: &str) -> (String, String, String) {
-    let email = format!("auth-test-{}@example.com", Uuid::new_v4());
+    let username = format!("auth-test-{}", &Uuid::new_v4().simple().to_string()[..12]);
     let password = "Password123!".to_string();
     let (status, body) = send_authed(
         router,
@@ -87,7 +87,7 @@ async fn create_user(router: &axum::Router, admin: &str, role: &str) -> (String,
         "/api/users",
         Some(json!({
             "name": "Auth Test User",
-            "email": &email,
+            "username": &username,
             "password": &password,
             "role": role,
         })),
@@ -100,7 +100,7 @@ async fn create_user(router: &axum::Router, admin: &str, role: &str) -> (String,
         "failed to create test user: {body}"
     );
     let id = body["data"]["id"].as_str().unwrap().to_string();
-    (id, email, password)
+    (id, username, password)
 }
 
 // ============================================================================
@@ -111,20 +111,20 @@ async fn create_user(router: &axum::Router, admin: &str, role: &str) -> (String,
 async fn login_with_valid_credentials_returns_token_and_user_with_expected_role_and_permissions() {
     let app = common::spawn_app().await;
     let admin = admin_token(&app.config);
-    let (_, email, password) = create_user(&app.router, &admin, "staff").await;
+    let (_, username, password) = create_user(&app.router, &admin, "staff").await;
 
     let (status, body) = send(
         &app.router,
         "POST",
         "/api/auth/login",
-        Some(json!({ "email": &email, "password": &password })),
+        Some(json!({ "username": &username, "password": &password })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
 
     let token = body["data"]["token"].as_str().unwrap();
     assert!(body["data"]["expiresIn"].as_i64().unwrap() > 0);
-    assert_eq!(body["data"]["user"]["email"], email);
+    assert_eq!(body["data"]["user"]["username"], username);
     assert_eq!(body["data"]["user"]["role"], "staff");
 
     let decoded = decode::<Claims>(
@@ -149,13 +149,13 @@ async fn login_with_valid_credentials_returns_token_and_user_with_expected_role_
 async fn login_with_wrong_password_returns_401_invalid_credentials() {
     let app = common::spawn_app().await;
     let admin = admin_token(&app.config);
-    let (_, email, _) = create_user(&app.router, &admin, "staff").await;
+    let (_, username, _) = create_user(&app.router, &admin, "staff").await;
 
     let (status, body) = send(
         &app.router,
         "POST",
         "/api/auth/login",
-        Some(json!({ "email": &email, "password": "WrongPassword" })),
+        Some(json!({ "username": &username, "password": "WrongPassword" })),
     )
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
@@ -170,13 +170,13 @@ async fn login_with_nonexistent_email_returns_same_401_invalid_credentials() {
         &app.router,
         "POST",
         "/api/auth/login",
-        Some(json!({ "email": format!("nobody-{}@example.com", Uuid::new_v4()), "password": "whatever123" })),
+        Some(json!({ "username": format!("nobody-{}", &Uuid::new_v4().simple().to_string()[..12]), "password": "whatever123" })),
     )
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
     assert_eq!(
         body["code"], "INVALID_CREDENTIALS",
-        "a nonexistent email must fail with the same code as a wrong password, to avoid user enumeration"
+        "a nonexistent username must fail with the same code as a wrong password, to avoid user enumeration"
     );
 }
 
@@ -184,7 +184,7 @@ async fn login_with_nonexistent_email_returns_same_401_invalid_credentials() {
 async fn login_with_deactivated_account_returns_401_user_inactive() {
     let app = common::spawn_app().await;
     let admin = admin_token(&app.config);
-    let (id, email, password) = create_user(&app.router, &admin, "staff").await;
+    let (id, username, password) = create_user(&app.router, &admin, "staff").await;
 
     let (status, body) = send_authed(
         &app.router,
@@ -200,7 +200,7 @@ async fn login_with_deactivated_account_returns_401_user_inactive() {
         &app.router,
         "POST",
         "/api/auth/login",
-        Some(json!({ "email": &email, "password": &password })),
+        Some(json!({ "username": &username, "password": &password })),
     )
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
@@ -215,13 +215,13 @@ async fn login_with_deactivated_account_returns_401_user_inactive() {
 async fn me_returns_current_user_info() {
     let app = common::spawn_app().await;
     let admin = admin_token(&app.config);
-    let (_, email, password) = create_user(&app.router, &admin, "manager").await;
+    let (_, username, password) = create_user(&app.router, &admin, "manager").await;
 
     let (status, body) = send(
         &app.router,
         "POST",
         "/api/auth/login",
-        Some(json!({ "email": &email, "password": &password })),
+        Some(json!({ "username": &username, "password": &password })),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -229,7 +229,7 @@ async fn me_returns_current_user_info() {
 
     let (status, body) = send_authed(&app.router, "GET", "/api/auth/me", None, &token).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["data"]["email"], email);
+    assert_eq!(body["data"]["username"], username);
     assert_eq!(body["data"]["role"], "manager");
 }
 
@@ -244,13 +244,13 @@ async fn me_without_token_returns_401() {
 async fn me_for_account_deactivated_after_token_issuance_returns_401() {
     let app = common::spawn_app().await;
     let admin = admin_token(&app.config);
-    let (id, email, password) = create_user(&app.router, &admin, "staff").await;
+    let (id, username, password) = create_user(&app.router, &admin, "staff").await;
 
     let (status, body) = send(
         &app.router,
         "POST",
         "/api/auth/login",
-        Some(json!({ "email": &email, "password": &password })),
+        Some(json!({ "username": &username, "password": &password })),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -282,13 +282,13 @@ async fn me_for_account_deactivated_after_token_issuance_returns_401() {
 async fn login_records_a_session_visible_via_sessions_endpoint() {
     let app = common::spawn_app().await;
     let admin = admin_token(&app.config);
-    let (_, email, password) = create_user(&app.router, &admin, "staff").await;
+    let (_, username, password) = create_user(&app.router, &admin, "staff").await;
 
     let (status, _) = send(
         &app.router,
         "POST",
         "/api/auth/login",
-        Some(json!({ "email": &email, "password": &password })),
+        Some(json!({ "username": &username, "password": &password })),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -299,8 +299,8 @@ async fn login_records_a_session_visible_via_sessions_endpoint() {
     assert!(
         sessions
             .iter()
-            .any(|s| s["email"] == email && s["role"] == "staff"),
-        "expected a session entry for {email}: {sessions:?}"
+            .any(|s| s["username"] == username && s["role"] == "staff"),
+        "expected a session entry for {username}: {sessions:?}"
     );
 }
 
@@ -322,15 +322,15 @@ async fn sessions_requires_sessions_view_permission() {
 async fn sessions_filter_by_user_id() {
     let app = common::spawn_app().await;
     let admin = admin_token(&app.config);
-    let (id_a, email_a, password_a) = create_user(&app.router, &admin, "staff").await;
-    let (_, email_b, password_b) = create_user(&app.router, &admin, "staff").await;
+    let (id_a, username_a, password_a) = create_user(&app.router, &admin, "staff").await;
+    let (_, username_b, password_b) = create_user(&app.router, &admin, "staff").await;
 
-    for (email, password) in [(&email_a, &password_a), (&email_b, &password_b)] {
+    for (username, password) in [(&username_a, &password_a), (&username_b, &password_b)] {
         let (status, _) = send(
             &app.router,
             "POST",
             "/api/auth/login",
-            Some(json!({ "email": email, "password": password })),
+            Some(json!({ "username": username, "password": password })),
         )
         .await;
         assert_eq!(status, StatusCode::OK);
@@ -347,19 +347,19 @@ async fn sessions_filter_by_user_id() {
     assert_eq!(status, StatusCode::OK, "{body}");
     let sessions = body["data"]["sessions"].as_array().unwrap();
     assert!(!sessions.is_empty());
-    assert!(sessions.iter().all(|s| s["email"] == email_a));
+    assert!(sessions.iter().all(|s| s["username"] == username_a));
 }
 
 // ============================================================================
 // Per-login preferences
 // ============================================================================
 
-async fn login_token(router: &axum::Router, email: &str, password: &str) -> String {
+async fn login_token(router: &axum::Router, username: &str, password: &str) -> String {
     let (status, body) = send(
         router,
         "POST",
         "/api/auth/login",
-        Some(json!({ "email": email, "password": password })),
+        Some(json!({ "username": username, "password": password })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -370,8 +370,8 @@ async fn login_token(router: &axum::Router, email: &str, password: &str) -> Stri
 async fn preferences_default_empty_then_persist_and_come_back_from_me() {
     let app = common::spawn_app().await;
     let admin = admin_token(&app.config);
-    let (_, email, password) = create_user(&app.router, &admin, "staff").await;
-    let token = login_token(&app.router, &email, &password).await;
+    let (_, username, password) = create_user(&app.router, &admin, "staff").await;
+    let token = login_token(&app.router, &username, &password).await;
 
     let (status, body) = send_authed(&app.router, "GET", "/api/auth/me", None, &token).await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -403,10 +403,10 @@ async fn preferences_default_empty_then_persist_and_come_back_from_me() {
 async fn preferences_are_independent_per_login() {
     let app = common::spawn_app().await;
     let admin = admin_token(&app.config);
-    let (_, email_a, password_a) = create_user(&app.router, &admin, "staff").await;
-    let (_, email_b, password_b) = create_user(&app.router, &admin, "staff").await;
-    let token_a = login_token(&app.router, &email_a, &password_a).await;
-    let token_b = login_token(&app.router, &email_b, &password_b).await;
+    let (_, username_a, password_a) = create_user(&app.router, &admin, "staff").await;
+    let (_, username_b, password_b) = create_user(&app.router, &admin, "staff").await;
+    let token_a = login_token(&app.router, &username_a, &password_a).await;
+    let token_b = login_token(&app.router, &username_b, &password_b).await;
 
     let (status, body) = send_authed(
         &app.router,
@@ -434,8 +434,8 @@ async fn preferences_are_independent_per_login() {
 async fn preferences_reject_unknown_sort_id() {
     let app = common::spawn_app().await;
     let admin = admin_token(&app.config);
-    let (_, email, password) = create_user(&app.router, &admin, "staff").await;
-    let token = login_token(&app.router, &email, &password).await;
+    let (_, username, password) = create_user(&app.router, &admin, "staff").await;
+    let token = login_token(&app.router, &username, &password).await;
 
     let (status, body) = send_authed(
         &app.router,

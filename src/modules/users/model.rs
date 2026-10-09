@@ -29,8 +29,8 @@ pub struct UserDocument {
     pub key: String,
     /// Full display name of the user.
     pub name: String,
-    /// Unique login email address.
-    pub email: String,
+    /// Login username, unique within the shop (lowercase).
+    pub username: String,
     /// Argon2id hashed password string.
     pub password_hash: String,
     /// System role assigned to this account (Admin, Manager, or Staff).
@@ -67,7 +67,7 @@ impl UserDocument {
                 .to_hex(),
             key,
             name: self.name,
-            email: self.email,
+            username: self.username,
             role: self.role,
             permissions: roles::default_permissions(self.role)
                 .iter()

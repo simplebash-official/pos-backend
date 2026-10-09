@@ -75,7 +75,7 @@ impl FailureLimiter {
     }
 }
 
-/// Failed logins per shop + email: 10 within 15 minutes blocks that account's
+/// Failed logins per shop + username: 10 within 15 minutes blocks that account's
 /// login for the rest of the window. Keyed by account rather than client IP
 /// because the IP headers behind the reverse proxy are client-controlled.
 pub static LOGIN_FAILURES: LazyLock<FailureLimiter> =

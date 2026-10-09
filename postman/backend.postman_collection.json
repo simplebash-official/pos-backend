@@ -46,7 +46,7 @@
                   "    const data = pm.response.json().data;",
                   "    pm.environment.set(\"accessToken\", data.token);",
                   "    pm.environment.set(\"userId\", data.user.id);",
-                  "    console.log(`accessToken set for ${data.user.email} (${data.user.role})`);",
+                  "    console.log(`accessToken set for ${data.user.username} (${data.user.role})`);",
                   "}"
                 ]
               }
@@ -65,7 +65,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"admin@pos.com\",\n  \"password\": \"admin@1234\",\n  \"shopCode\": \"acme-repairs\"\n}",
+              "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"admin@1234\",\n  \"shopCode\": \"acme-repairs\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -83,7 +83,7 @@
                 "login"
               ]
             },
-            "description": "Exchanges email/password for a JWT carrying the account's role and its role's default permission set. No auth required. On success, this request's Tests script auto-populates the `{{accessToken}}`/`{{userId}}` environment variables, so every other request's inherited Bearer auth picks it up immediately.\n\nUse `cargo run --bin seed_admin` or `cargo run --bin seed_all` to bootstrap default seed data including the Admin account (admin@pos.com / admin@1234). Registration is admin-provisioned only — there is no public register endpoint.\n\n**`shopCode`** (multi-tenant deployments only, `TENANT_MODE=multi`): the shop's login code from the platform directory (create one with `cargo run --bin create_tenant -- <shop-code> \"<Business name>\"`). Required there (400 if missing; an unknown code returns the same 401 as a wrong password) and it puts the issued token's `tid` claim on that tenant. Single-shop deployments ignore it, so it is safe to leave in the body."
+            "description": "Exchanges username/password for a JWT carrying the account's role and its role's default permission set. No auth required. On success, this request's Tests script auto-populates the `{{accessToken}}`/`{{userId}}` environment variables, so every other request's inherited Bearer auth picks it up immediately.\n\nUse `cargo run --bin seed_admin` or `cargo run --bin seed_all` to bootstrap default seed data including the Admin account (admin@pos.com / admin@1234). Registration is admin-provisioned only — there is no public register endpoint.\n\n**`shopCode`** (multi-tenant deployments only, `TENANT_MODE=multi`): the shop's login code from the platform directory (create one with `cargo run --bin create_tenant -- <shop-code> \"<Business name>\"`). Required there (400 if missing; an unknown code returns the same 401 as a wrong password) and it puts the issued token's `tid` claim on that tenant. Single-shop deployments ignore it, so it is safe to leave in the body."
           },
           "response": []
         },
@@ -141,7 +141,7 @@
                 }
               ]
             },
-            "description": "Login history audit log — newest first. Each entry snapshots the account's name/email/role at the moment of that login, so it keeps reading the same way even if the account is later renamed. Not paginated the way Suppliers/Products are — this is an append-only log that grows without bound.\n\n**Requires the token's `permissions` claim to include `sessions:view`** (granted to Admin/Manager by default) or the API returns 403 `PERMISSION_DENIED`."
+            "description": "Login history audit log — newest first. Each entry snapshots the account's name/username/role at the moment of that login, so it keeps reading the same way even if the account is later renamed. Not paginated the way Suppliers/Products are — this is an append-only log that grows without bound.\n\n**Requires the token's `permissions` claim to include `sessions:view`** (granted to Admin/Manager by default) or the API returns 403 `PERMISSION_DENIED`."
           },
           "response": []
         }
@@ -3984,7 +3984,7 @@
                 {
                   "key": "search",
                   "value": "jane",
-                  "description": "Free-text search across name/email",
+                  "description": "Free-text search across name/username",
                   "disabled": true
                 },
                 {
@@ -4026,7 +4026,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Jane Fernando\",\n  \"email\": \"jane.fernando@example.com\",\n  \"password\": \"Password123!\",\n  \"role\": \"staff\",\n  \"employeeKey\": \"{{employeeKey}}\"\n}",
+              "raw": "{\n  \"name\": \"Jane Fernando\",\n  \"username\": \"jane.fernando\",\n  \"password\": \"Password123!\",\n  \"role\": \"staff\",\n  \"employeeKey\": \"{{employeeKey}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4382,7 +4382,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"loadSampleData\": true,\n  \"adminName\": \"System Admin\",\n  \"adminEmail\": \"admin@pos.com\",\n  \"adminPassword\": \"admin@1234\"\n}",
+              "raw": "{\n  \"loadSampleData\": true,\n  \"adminName\": \"System Admin\",\n  \"adminPassword\": \"admin@1234\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4451,7 +4451,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"tenantId\": \"tnt_xxxxxxxxxxxxxxxx\",\n  \"shopCode\": \"ann-s-phones\",\n  \"name\": \"Ann's Phones\",\n  \"owner\": {\n    \"email\": \"owner@shop.com\",\n    \"name\": \"Ann\",\n    \"passwordHash\": \"$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>\"\n  }\n}",
+              "raw": "{\n  \"tenantId\": \"tnt_xxxxxxxxxxxxxxxx\",\n  \"shopCode\": \"ann-s-phones\",\n  \"name\": \"Ann's Phones\",\n  \"owner\": {\n    \"username\": \"admin\",\n    \"name\": \"Ann\",\n    \"passwordHash\": \"$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"

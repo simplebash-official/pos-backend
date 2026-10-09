@@ -24,24 +24,47 @@ fn sku_counters(db: &TenantDatabase) -> ScopedCollection<SkuCounterDocument> {
     db.collection("sku_counters")
 }
 
+/// `$inc`s the counter for `code` by `by` and returns the new value, creating it when missing.
+///
+/// Two requests creating the *same new* counter at once both try to insert it, and the loser
+/// fails with a duplicate-key error (E11000) instead of incrementing. The counter exists by then,
+/// so repeating the call increments it normally; this is the retry MongoDB documents for
+/// concurrent upserts. It matters now that sample products are created concurrently.
+async fn bump(db: &TenantDatabase, code: &str, by: i64) -> AppResult<i64> {
+    let id = crate::modules::sequences::counter_id(db, code);
+    let mut attempt = 0;
+    loop {
+        let result = sku_counters(db)
+            .find_one_and_update(doc! { "_id": &id }, doc! { "$inc": { "seq": by } })
+            .upsert(true)
+            .return_document(ReturnDocument::After)
+            .await;
+        match result {
+            Ok(updated) => {
+                return Ok(updated
+                    .expect("upsert guarantees find_one_and_update returns a document")
+                    .seq);
+            }
+            Err(e) if attempt < 3 && is_duplicate_key(&e) => attempt += 1,
+            Err(e) => return Err(e.into()),
+        }
+    }
+}
+
+fn is_duplicate_key(err: &mongodb::error::Error) -> bool {
+    use mongodb::error::{ErrorKind, WriteFailure};
+    match err.kind.as_ref() {
+        ErrorKind::Command(c) => c.code == 11000,
+        ErrorKind::Write(WriteFailure::WriteError(w)) => w.code == 11000,
+        _ => false,
+    }
+}
+
 /// Atomically increments and returns the next sequence number for `code`,
 /// creating the counter starting at 1 if it doesn't exist yet.
 pub(crate) async fn next_sequence(db: &Db, code: &str) -> AppResult<i64> {
     match db {
-        Db::Mongo(db) => {
-            let updated = sku_counters(db)
-                .find_one_and_update(
-                    doc! { "_id": crate::modules::sequences::counter_id(db, code) },
-                    doc! { "$inc": { "seq": 1i64 } },
-                )
-                .upsert(true)
-                .return_document(ReturnDocument::After)
-                .await?;
-
-            Ok(updated
-                .expect("upsert guarantees find_one_and_update returns a document")
-                .seq)
-        }
+        Db::Mongo(db) => bump(db, code, 1).await,
         Db::Sqlite(pool) => {
             let seq: i64 = sqlx::query_scalar(
                 r#"
@@ -67,18 +90,7 @@ pub(crate) async fn next_sequence(db: &Db, code: &str) -> AppResult<i64> {
 pub(crate) async fn reserve_block(db: &Db, code: &str, block_size: i64) -> AppResult<(i64, i64)> {
     match db {
         Db::Mongo(db) => {
-            let updated = sku_counters(db)
-                .find_one_and_update(
-                    doc! { "_id": crate::modules::sequences::counter_id(db, code) },
-                    doc! { "$inc": { "seq": block_size } },
-                )
-                .upsert(true)
-                .return_document(ReturnDocument::After)
-                .await?;
-
-            let seq = updated
-                .expect("upsert guarantees find_one_and_update returns a document")
-                .seq;
+            let seq = bump(db, code, block_size).await?;
             Ok((seq - block_size + 1, seq))
         }
         Db::Sqlite(pool) => {
@@ -129,6 +141,28 @@ mod tests {
                 assert_eq!(n.unwrap(), round, "{t} round {round}");
             }
         }
+        raw.drop().await.ok();
+    }
+
+    // Atlas-backed (MONGODB_URI); skipped when unset.
+    #[tokio::test]
+    async fn concurrent_first_use_of_a_prefix_never_fails_or_repeats_a_number() {
+        dotenvy::dotenv().ok();
+        let Ok(uri) = std::env::var("MONGODB_URI") else {
+            eprintln!("MONGODB_URI not set - skipping");
+            return;
+        };
+        let name = format!("jtcnt_{}", &uuid::Uuid::new_v4().simple().to_string()[..24]);
+        let raw = crate::clients::mongo::connect(&uri, &name).await.unwrap();
+        let db = Db::Mongo(TenantDatabase::multi_tenant(raw.clone()));
+
+        let mut numbers = with_tenant(Tenant::id("shop_a").unwrap(), async {
+            let calls = (0..16).map(|_| next_sequence(&db, "NEW-PFX"));
+            futures_util::future::try_join_all(calls).await.unwrap()
+        })
+        .await;
+        numbers.sort_unstable();
+        assert_eq!(numbers, (1..=16).collect::<Vec<i64>>());
         raw.drop().await.ok();
     }
 

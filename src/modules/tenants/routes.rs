@@ -74,9 +74,10 @@ fn authorize(state: &AppState, headers: &HeaderMap) -> AppResult<()> {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ProvisionOwnerRequest {
-    pub email: String,
+    /// Always `admin`; the shop code + this username is the POS login.
+    pub username: String,
     pub name: String,
-    /// The account's Argon2id PHC string (`$argon2id$...`), never a plaintext password.
+    /// Argon2id PHC string of the admin password the owner chose for this shop (`$argon2id$...`), never a plaintext password.
     pub password_hash: String,
 }
 
@@ -123,7 +124,7 @@ async fn provision_shop(
     authorize(&state, &headers)?;
 
     let owner = body.owner.map(|o| ProvisionOwner {
-        email: o.email,
+        username: o.username,
         name: o.name,
         password_hash: o.password_hash,
     });

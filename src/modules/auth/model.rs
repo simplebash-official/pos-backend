@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::{auth::LoginSession, users::Role};
 
-/// `name_at_login`/`email_at_login`/`role_at_login` are a point-in-time
+/// `name_at_login`/`username_at_login`/`role_at_login` are a point-in-time
 /// snapshot of the account, not a live join against the current user
 /// document — deliberately different from how `purchases` resolves its
 /// supplier/product references. A login-session record is an audit trail of
@@ -27,8 +27,8 @@ pub struct LoginSessionDocument {
     pub user_key: String,
     /// User's display name at the moment they logged in.
     pub name_at_login: String,
-    /// User's email address at the moment they logged in.
-    pub email_at_login: String,
+    /// User's username at the moment they logged in.
+    pub username_at_login: String,
     /// User's assigned role at the moment they logged in.
     pub role_at_login: Role,
     /// IP address where the login request originated from.
@@ -58,7 +58,7 @@ impl LoginSessionDocument {
             key: self.key,
             user_key: self.user_key,
             name: self.name_at_login,
-            email: self.email_at_login,
+            username: self.username_at_login,
             role: self.role_at_login,
             ip_address: self.ip_address,
             user_agent: self.user_agent,

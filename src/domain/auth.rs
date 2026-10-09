@@ -13,8 +13,8 @@ use crate::domain::users::{Role, User};
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginRequest {
-    /// User's login email address.
-    pub email: String,
+    /// User's login username (unique within the shop).
+    pub username: String,
     /// User's plain text password.
     pub password: String,
     /// Shop (tenant) the account belongs to. Required on multi-tenant
@@ -51,7 +51,7 @@ pub struct ShopLookupResponse {
 }
 
 /// A single login event, as returned by `GET /auth/sessions`. `name`/
-/// `email`/`role` are a snapshot of the account *at the moment of login*,
+/// `username`/`role` are a snapshot of the account *at the moment of login*,
 /// not a live join against the current account — see
 /// `modules::auth::model::LoginSessionDocument` for why. `ip_address`/
 /// `user_agent` are best-effort (absent when no proxy header was set).
@@ -66,8 +66,8 @@ pub struct LoginSession {
     pub user_key: String,
     /// User's name at the time of login.
     pub name: String,
-    /// User's email at the time of login.
-    pub email: String,
+    /// User's username at the time of login.
+    pub username: String,
     /// User's role at the time of login.
     pub role: Role,
     /// Originating IP address of the login request, if available.

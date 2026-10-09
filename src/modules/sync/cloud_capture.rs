@@ -12,6 +12,13 @@
 // restart continues where it stopped; re-delivered events are dropped by a
 // per-event `source_token`.
 //
+// If the saved position is no longer usable (the server dropped that part of its
+// history, e.g. after the deployment was down for longer than the oplog window:
+// `ChangeStreamHistoryLost`), retrying it can never succeed. The consumer then
+// opens a fresh stream and re-publishes every document changed since it last
+// saved its position (`catch_up`), so nothing is lost and it does not spin on the
+// same error forever.
+//
 // A hard delete leaves the stream nothing to read (no document, no tenant), so
 // the repositories that delete outright also insert a marker into
 // `sync_tombstones` (`cloud_store::record_hard_deletes`), published here as a
@@ -19,6 +26,8 @@
 // category, whose own event carries them.
 
 use std::{collections::HashMap, time::Duration};
+
+use futures_util::TryStreamExt;
 
 use chrono::Utc;
 use mongodb::{
@@ -56,6 +65,12 @@ const COMPACT_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
 const EVENT_ATTEMPTS: u32 = 5;
 /// Restarts over the same event before it is given up as unpublishable.
 const POISON_RESTARTS: u32 = 3;
+/// Server error codes meaning "this resume token can never work": history lost (286), fatal
+/// stream error (280), invalid token (260) and a token the server cannot even decode (50811).
+const UNUSABLE_POSITION_CODES: [i32; 4] = [286, 280, 260, 50811];
+/// Catch-up starts this long before the last saved position, so a change written just before
+/// the position was saved is not missed (duplicates are harmless: applying a change twice is a no-op).
+const CATCH_UP_MARGIN_MS: i64 = 5 * 60 * 1000;
 /// Wait before re-taking the lease after a stop.
 const RESTART_DELAY: Duration = Duration::from_secs(1);
 const STANDBY_DELAY: Duration = Duration::from_secs(5);
@@ -189,10 +204,101 @@ async fn persist_resume_token(db: &Db, holder: &str, token: &ResumeToken) -> App
     lease_collection(db)?
         .update_one(
             doc! { "_id": LEASE_ID, "holder": holder },
-            doc! { "$set": { "resume_token": value } },
+            // The time lets `catch_up` know how far back to look if this position is ever lost.
+            doc! { "$set": { "resume_token": value, "resume_token_at": BsonDateTime::now() } },
         )
         .await?;
     Ok(())
+}
+
+/// True when the server says the saved position can never be resumed from.
+fn position_unusable(err: &mongodb::error::Error) -> bool {
+    use mongodb::error::ErrorKind;
+    match err.kind.as_ref() {
+        ErrorKind::Command(c) => UNUSABLE_POSITION_CODES.contains(&c.code),
+        _ => false,
+    }
+}
+
+/// When the saved position was last written, if ever.
+async fn load_resume_token_at(db: &Db) -> AppResult<Option<BsonDateTime>> {
+    Ok(lease_collection(db)?
+        .find_one(doc! { "_id": LEASE_ID })
+        .await?
+        .and_then(|d| d.get_datetime("resume_token_at").ok().copied()))
+}
+
+/// Forgets the unusable position, so the next stream starts from now.
+async fn clear_resume_token(db: &Db, holder: &str) -> AppResult<()> {
+    lease_collection(db)?
+        .update_one(
+            doc! { "_id": LEASE_ID, "holder": holder },
+            doc! { "$unset": { "resume_token": "" }, "$set": { "resume_token_at": BsonDateTime::now() } },
+        )
+        .await?;
+    Ok(())
+}
+
+/// Re-publishes everything written since `since` (the last saved position, minus a margin): every
+/// document of a syncable collection changed after it, and every hard-delete marker. Each row gets
+/// its own `source_token`, so a document published twice just produces a second, identical change.
+async fn catch_up(db: &Db, since: BsonDateTime) -> AppResult<usize> {
+    let raw = db
+        .as_mongo()
+        .ok_or_else(|| AppError::internal("cloud sync requires MongoDB"))?
+        .unscoped()
+        .clone();
+    let since = BsonDateTime::from_millis(since.timestamp_millis() - CATCH_UP_MARGIN_MS);
+    let mut published = 0usize;
+
+    for spec in ordered().filter(|s| s.phase == Phase::P3a) {
+        let mut cursor = raw
+            .collection::<Document>(spec.table)
+            .find(doc! { "updated_at": { "$gte": since } })
+            .await?;
+        while let Some(full) = cursor.try_next().await? {
+            let Ok(tenant_id) = full.get_str("tenant_id") else {
+                continue;
+            };
+            if tenant_id == DENY_TENANT {
+                continue;
+            }
+            let tenant = Tenant::id(tenant_id)?;
+            let key = full.get_str("key").unwrap_or_default().to_string();
+            let version = crate::modules::sync::apply_mongo::num_i64(&full, "version").unwrap_or(1);
+            let updated_ms = full
+                .get_datetime("updated_at")
+                .map(|t| t.timestamp_millis())
+                .unwrap_or_default();
+            let token = format!("catchup:{}:{key}:{updated_ms}:{version}", spec.table);
+            with_tenant(tenant, publish(db, spec.table, full, &token)).await?;
+            published += 1;
+        }
+    }
+
+    let mut markers = raw
+        .collection::<Document>(TOMBSTONES)
+        .find(doc! { "deleted_at": { "$gte": since } })
+        .await?;
+    while let Some(marker) = markers.try_next().await? {
+        let Ok(tenant_id) = marker.get_str("tenant_id") else {
+            continue;
+        };
+        if tenant_id == DENY_TENANT {
+            continue;
+        }
+        let tenant = Tenant::id(tenant_id)?;
+        let token = format!(
+            "catchup:tombstone:{}",
+            marker
+                .get("_id")
+                .map(|id| id.to_string())
+                .unwrap_or_default()
+        );
+        with_tenant(tenant, publish_tombstone(db, marker, &token)).await?;
+        published += 1;
+    }
+    Ok(published)
 }
 
 /// Watches the database until the lease is lost or the stream fails. Events
@@ -215,15 +321,43 @@ async fn consume(db: &Db, holder: &str, skip: &[String]) -> Result<(), Stop> {
         "ns.coll": { "$in": tables },
         "operationType": { "$in": ["insert", "update", "replace"] },
     }}];
-    let mut watch = raw
-        .watch()
-        .pipeline(pipeline)
-        .full_document(FullDocumentType::UpdateLookup)
-        .max_await_time(MAX_AWAIT);
-    if let Some(token) = load_resume_token(db).await? {
-        watch = watch.start_after(token);
-    }
-    let mut stream = watch.await?;
+    let open = |token: Option<ResumeToken>| {
+        let mut watch = raw
+            .watch()
+            .pipeline(pipeline.clone())
+            .full_document(FullDocumentType::UpdateLookup)
+            .max_await_time(MAX_AWAIT);
+        if let Some(token) = token {
+            watch = watch.start_after(token);
+        }
+        watch
+    };
+    let saved = load_resume_token(db).await?;
+    let mut stream = match open(saved.clone()).await {
+        Ok(stream) => stream,
+        Err(err) if saved.is_some() && position_unusable(&err) => {
+            // Retrying this position can never work. Start from now FIRST (so nothing written
+            // from here on is missed), then re-publish what was written while we were away.
+            let since = load_resume_token_at(db).await?;
+            tracing::error!(%err, "the saved sync position was lost on the server; starting a fresh stream and catching up");
+            clear_resume_token(db, holder).await?;
+            let stream = open(None).await?;
+            match since {
+                Some(since) => {
+                    let published = catch_up(db, since).await?;
+                    tracing::warn!(
+                        published,
+                        "sync catch-up finished after losing the saved position"
+                    );
+                }
+                None => tracing::error!(
+                    "no time was recorded for the lost sync position, so changes made while the consumer was away cannot be replayed; devices should re-download the shop"
+                ),
+            }
+            stream
+        }
+        Err(err) => return Err(err.into()),
+    };
 
     let mut since_persist = 0u32;
     let mut last_persist = std::time::Instant::now();

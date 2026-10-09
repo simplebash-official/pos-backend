@@ -2,8 +2,8 @@ use simplebash_pos_backend::{
     clients, core::config::Config, modules::users::service::reset_admin_credentials,
 };
 
-/// Rotates the existing Admin account's email/password to
-/// `RESET_ADMIN_EMAIL` (default `admin@pos.com`) / `RESET_ADMIN_PASSWORD`
+/// Rotates the existing Admin account's password (its username is always
+/// `admin`) to `RESET_ADMIN_PASSWORD`
 /// (required — there is deliberately no default, so a reset can never leave
 /// the shop on a publicly documented password).
 ///
@@ -19,7 +19,6 @@ async fn main() {
     dotenvy::dotenv().ok();
     tracing_subscriber::fmt::init();
 
-    let email = std::env::var("RESET_ADMIN_EMAIL").unwrap_or_else(|_| "admin@pos.com".to_string());
     let password = match std::env::var("RESET_ADMIN_PASSWORD") {
         Ok(p) if p.trim().len() >= 8 => p,
         _ => {
@@ -35,8 +34,8 @@ async fn main() {
         .await
         .expect("failed to connect to database");
 
-    match reset_admin_credentials(&db, &email, &password).await {
-        Ok(user) => println!("Admin credentials updated: {}", user.email),
+    match reset_admin_credentials(&db, &password).await {
+        Ok(user) => println!("Admin credentials updated: {}", user.username),
         Err(err) => panic!("failed to reset admin credentials: {err}"),
     }
 }

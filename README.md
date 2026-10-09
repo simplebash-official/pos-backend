@@ -87,7 +87,7 @@ cargo run                  # API on http://localhost:8080
 
 Open **http://localhost:8080/docs** for the interactive API reference.
 
-The demo admin created by the seeder is `admin@pos.com` / `admin@1234` — for
+The demo admin created by the seeder is `admin` / `admin@1234` — for
 local development only. Set `SEED_ADMIN_PASSWORD` to choose your own; the
 server refuses to seed that public default when it is reachable from the
 network or `APP_ENV=production`.
@@ -115,7 +115,7 @@ them at startup and refuses to start with a missing or placeholder secret.
 | `GENERATED_DOCUMENTS_DIR` | `generated_documents` | Where rendered PDFs are cached |
 | `RETURN_WINDOW_DAYS` | `30` | Days after a sale that a return needs no manager override |
 | `AUTO_SEED` | `false` | Run all seeders on startup |
-| `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` / `SEED_ADMIN_NAME` | — | First admin account for the seeder |
+| `SEED_ADMIN_PASSWORD` / `SEED_ADMIN_NAME` | — | First admin account for the seeder (its username is always `admin`) |
 | `TENANT_MODE` | `single` | `multi` = many shops on one server (MongoDB only) |
 | `CORS_ALLOWED_ORIGINS` | desktop + local dev only | Comma-separated browser origins allowed to call the API |
 | `IDENTITY_JWKS_URL`, `IDENTITY_ISSUER`, `IDENTITY_TENANT_ID` | — | Optional sign-in through the SimpleBash identity service |

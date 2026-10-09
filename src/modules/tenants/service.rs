@@ -123,11 +123,11 @@ pub async fn create_tenant_with_key(
     .await
 }
 
-/// The owner login handed over with a shop: identity's email, name and its
-/// existing Argon2id hash (see `users::service::create_owner_admin_if_absent`).
+/// The owner login handed over with a shop: the fixed `admin` username, the
+/// owner's name and the Argon2id hash of the admin password they chose (see `users::service::create_owner_admin_if_absent`).
 #[derive(Debug, Clone)]
 pub struct ProvisionOwner {
-    pub email: String,
+    pub username: String,
     pub name: String,
     pub password_hash: String,
 }
@@ -158,7 +158,7 @@ pub async fn provision_shop(
         return Err(AppError::validation("Tenant name is required"));
     }
     if let Some(owner) = &owner {
-        users::service::validate_owner_login(&owner.name, &owner.email, &owner.password_hash)?;
+        users::service::validate_owner_login(&owner.name, &owner.username, &owner.password_hash)?;
     }
 
     let tenant_created = match repository::find_tenant_by_shop_code(db, &shop_code).await? {
@@ -200,7 +200,7 @@ pub async fn provision_shop(
                 users::service::create_owner_admin_if_absent(
                     db,
                     &owner.name,
-                    &owner.email,
+                    &owner.username,
                     &owner.password_hash,
                 )
                 .await

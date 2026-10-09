@@ -104,6 +104,22 @@ pub(crate) async fn get_tenant_setup_status(
     }
 }
 
+/// Loads the demo data. Suppliers, customers and the catalog do not depend on each other, so they
+/// are seeded at the same time (on this task, so a tenant scope still applies); each one is mostly
+/// waiting on the database, which is what made a web setup take minutes when done one by one.
+async fn seed_sample_data(db: &Db) -> AppResult<()> {
+    let catalog = async {
+        seeds::providers::seed_providers(db).await?;
+        seeds::inventory::seed_inventory(db).await
+    };
+    tokio::try_join!(
+        catalog,
+        seeds::suppliers::seed_suppliers(db),
+        seeds::customers::seed_customers(db),
+    )?;
+    Ok(())
+}
+
 /// Executes tenant-scoped setup in multi-tenant mode, optionally populating demo data into the tenant namespace.
 pub(crate) async fn perform_tenant_setup(
     db: &Db,
@@ -126,10 +142,7 @@ pub(crate) async fn perform_tenant_setup(
         let scope = crate::core::tenancy::Tenant::id(tenant_key)?;
         crate::core::tenancy::with_tenant(scope, async {
             if load_sample_data {
-                seeds::providers::seed_providers(db).await?;
-                seeds::suppliers::seed_suppliers(db).await?;
-                seeds::customers::seed_customers(db).await?;
-                seeds::inventory::seed_inventory(db).await?;
+                seed_sample_data(db).await?;
             }
             Ok::<(), AppError>(())
         })
@@ -137,15 +150,15 @@ pub(crate) async fn perform_tenant_setup(
 
         tenants_repository::complete_tenant_setup(db, tenant_key, load_sample_data).await?;
 
-        let admin_email = admin_user
+        let admin_username = admin_user
             .as_ref()
-            .map(|u| u.email.clone())
-            .unwrap_or_default();
+            .map(|u| u.username.clone())
+            .unwrap_or_else(|| roles::ADMIN_USERNAME.to_string());
 
         Ok(SetupSystemResponse {
             setup_completed: true,
             sample_data_loaded: load_sample_data,
-            admin_email,
+            admin_username,
             token: None,
             user: admin_user,
             message: if load_sample_data {
@@ -176,14 +189,7 @@ pub(crate) async fn perform_setup(
         }
 
         // No built-in fallback credentials: a public default admin login is a
-        // takeover risk on every fresh install, so the caller must choose both.
-        let admin_email = body
-            .admin_email
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .ok_or_else(|| AppError::validation("Admin email is required"))?;
-
+        // takeover risk on every fresh install, so the caller must choose the password (the username is always `admin`).
         let admin_password = body
             .admin_password
             .as_deref()
@@ -209,27 +215,18 @@ pub(crate) async fn perform_setup(
         // effect (API key, sample data, completion flag), so an anonymous
         // caller can't re-run setup against a live shop.
         if users_count > 0 {
-            users_service::verify_credentials(db, admin_email, admin_password).await?;
+            users_service::verify_credentials(db, roles::ADMIN_USERNAME, admin_password).await?;
         }
 
         // 1. Bootstrap the Admin user account
-        seeds::admin::seed_admin(
-            db,
-            Some(admin_email),
-            Some(admin_password),
-            Some(admin_name),
-        )
-        .await?;
+        seeds::admin::seed_admin(db, Some(admin_password), Some(admin_name)).await?;
 
         // 2. Bootstrap the default API key
         seeds::api_key::seed_api_key(db).await?;
 
         // 3. Conditional Seeding: if user requested sample data, seed categories, inventory, suppliers & customers
         if body.load_sample_data {
-            seeds::providers::seed_providers(db).await?;
-            seeds::suppliers::seed_suppliers(db).await?;
-            seeds::customers::seed_customers(db).await?;
-            seeds::inventory::seed_inventory(db).await?;
+            seed_sample_data(db).await?;
         }
 
         // 4. Mark setup completed in database
@@ -237,7 +234,8 @@ pub(crate) async fn perform_setup(
             .await?;
 
         // 5. Verify credentials & issue JWT token for immediate auto-login
-        let user = users_service::verify_credentials(db, admin_email, admin_password).await?;
+        let user =
+            users_service::verify_credentials(db, roles::ADMIN_USERNAME, admin_password).await?;
         let permissions: Vec<String> = roles::default_permissions(user.role)
             .iter()
             .map(|p| p.to_string())
@@ -263,7 +261,7 @@ pub(crate) async fn perform_setup(
         Ok(SetupSystemResponse {
             setup_completed: true,
             sample_data_loaded: body.load_sample_data,
-            admin_email: admin_email.to_string(),
+            admin_username: roles::ADMIN_USERNAME.to_string(),
             token: Some(token),
             user: Some(user),
             message: if body.load_sample_data {

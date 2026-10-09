@@ -121,7 +121,7 @@ async fn requests_get_ids_and_redacted_body_logs() {
     assert!(minted.starts_with("req_"), "minted id: {minted}");
 
     // 3. A login body is logged with the password masked; the 4xx is a warn.
-    let body = r#"{"email":42,"password":"hunter2"}"#;
+    let body = r#"{"username":42,"password":"hunter2"}"#;
     let response = router
         .clone()
         .oneshot(

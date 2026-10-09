@@ -563,6 +563,70 @@ async fn push_pull_roundtrip_dedup_and_isolation() {
 }
 
 #[tokio::test]
+async fn a_lost_stream_position_is_recovered_and_missed_writes_are_replayed() {
+    let _guard = SERIAL.lock().await;
+    let app = common::spawn_app_multi_tenant().await;
+    let tid = "tnt_lostpos";
+    let admin = admin_token(&app, tid);
+
+    // A write made while the consumer was "away": nothing is watching yet, so only
+    // the catch-up can deliver it.
+    let (status, body) = call(
+        &app.router,
+        "POST",
+        "/api/inventory/categories",
+        Some(&admin),
+        Some(json!({ "name": "While Away", "icon": "Box", "color": "blue", "subcategories": [] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+
+    // The consumer's saved position is one the server can never resume from.
+    app.db
+        .collection::<mongodb::bson::Document>("sync_consumer")
+        .insert_one(mongodb::bson::doc! {
+            "_id": "consumer",
+            "holder": "dead-instance",
+            "lease_until": mongodb::bson::DateTime::from_millis(0),
+            "resume_token": { "_data": "8200000000000000000000000000" },
+            "resume_token_at": mongodb::bson::DateTime::from_millis(
+                chrono::Utc::now().timestamp_millis() - 60_000
+            ),
+        })
+        .await
+        .expect("plant the lost position");
+
+    start(&app).await;
+
+    // It recovered (no endless retry), and the category written while away was replayed.
+    let dev = device_token(&app, tid, "dev_lostpos");
+    let feed = wait_for(&app, &dev, 0, |changes| {
+        changes
+            .iter()
+            .any(|c| c.pointer("/payload/name").and_then(Value::as_str) == Some("While Away"))
+    })
+    .await;
+    assert!(feed["changes"].as_array().is_some_and(|c| !c.is_empty()));
+
+    // The bad position was dropped and a good one is saved again later; it is no longer the planted one.
+    let lease = app
+        .db
+        .collection::<mongodb::bson::Document>("sync_consumer")
+        .find_one(mongodb::bson::doc! { "_id": "consumer" })
+        .await
+        .unwrap()
+        .expect("lease document");
+    assert_ne!(
+        lease
+            .get_document("resume_token")
+            .ok()
+            .and_then(|t| t.get_str("_data").ok()),
+        Some("8200000000000000000000000000")
+    );
+    drop_db(&app).await;
+}
+
+#[tokio::test]
 async fn web_write_appears_in_pull_without_an_origin_device() {
     let _guard = SERIAL.lock().await;
     let app = common::spawn_app_multi_tenant().await;
@@ -1024,7 +1088,7 @@ async fn a_pushed_cashier_logs_in_by_shop_code_and_a_web_delete_reaches_devices(
     let now = chrono::Utc::now().to_rfc3339();
     let id = ObjectId::new().to_hex();
     let payload = json!({
-        "id": id, "key": "usr_cashier_cloud", "name": "Cloud Cashier", "email": "cashier@shop.test",
+        "id": id, "key": "usr_cashier_cloud", "name": "Cloud Cashier", "username": "cashier",
         "passwordHash": hash, "role": "staff", "isActive": true, "employeeKey": null,
         "createdAt": now, "updatedAt": now, "version": 1, "deletedAt": null,
     });
@@ -1042,7 +1106,7 @@ async fn a_pushed_cashier_logs_in_by_shop_code_and_a_web_delete_reaches_devices(
     assert_eq!(statuses(&pushed), ["applied"], "{pushed}");
 
     // The cashier logs in on the cloud by shop code and gets a token for THAT shop.
-    let login = |shop_code: &str, password: &str| json!({ "email": "cashier@shop.test", "password": password, "shopCode": shop_code });
+    let login = |shop_code: &str, password: &str| json!({ "username": "cashier", "password": password, "shopCode": shop_code });
     let (status, body) = call(
         &app.router,
         "POST",

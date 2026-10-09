@@ -71,7 +71,6 @@ async fn test_setup_without_sample_data_creates_clean_database() {
         Some(json!({
             "loadSampleData": false,
             "adminName": "Clean Shop Owner",
-            "adminEmail": "clean@pos.com",
             "adminPassword": "password123"
         })),
     )
@@ -81,7 +80,7 @@ async fn test_setup_without_sample_data_creates_clean_database() {
     assert_eq!(setup_res["success"], true);
     assert_eq!(setup_res["data"]["setupCompleted"], true);
     assert_eq!(setup_res["data"]["sampleDataLoaded"], false);
-    assert_eq!(setup_res["data"]["adminEmail"], "clean@pos.com");
+    assert_eq!(setup_res["data"]["adminUsername"], "admin");
 
     let token = setup_res["data"]["token"]
         .as_str()
@@ -137,7 +136,6 @@ async fn test_setup_without_sample_data_creates_clean_database() {
         None,
         Some(json!({
             "loadSampleData": true,
-            "adminEmail": "clean@pos.com",
             "adminPassword": "password123"
         })),
     )
@@ -159,7 +157,6 @@ async fn test_setup_with_sample_data_populates_catalog_and_operations() {
         Some(json!({
             "loadSampleData": true,
             "adminName": "Demo Admin",
-            "adminEmail": "demo@pos.com",
             "adminPassword": "password123"
         })),
     )
@@ -230,7 +227,6 @@ async fn test_setup_with_snake_case_payload_succeeds() {
         Some(json!({
             "load_sample_data": false,
             "admin_name": "Snake Case Admin",
-            "admin_email": "snake@pos.com",
             "admin_password": "password123"
         })),
     )
@@ -240,18 +236,16 @@ async fn test_setup_with_snake_case_payload_succeeds() {
     assert_eq!(setup_res["success"], true);
     assert_eq!(setup_res["data"]["setupCompleted"], true);
     assert_eq!(setup_res["data"]["sampleDataLoaded"], false);
-    assert_eq!(setup_res["data"]["adminEmail"], "snake@pos.com");
+    assert_eq!(setup_res["data"]["adminUsername"], "admin");
 }
 
 #[tokio::test]
-async fn test_setup_requires_explicit_admin_credentials() {
+async fn test_setup_requires_an_explicit_admin_password() {
     let app = common::spawn_app_sqlite().await;
 
     for body in [
         json!({ "loadSampleData": false }),
-        json!({ "loadSampleData": false, "adminEmail": "owner@shop.test" }),
-        json!({ "loadSampleData": false, "adminPassword": "longenough1" }),
-        json!({ "loadSampleData": false, "adminEmail": "owner@shop.test", "adminPassword": "short" }),
+        json!({ "loadSampleData": false, "adminPassword": "short" }),
     ] {
         let (status, res) =
             send_request(&app.router, "POST", "/api/system/setup", None, Some(body)).await;
@@ -270,7 +264,6 @@ async fn test_setup_requires_explicit_admin_credentials() {
         None,
         Some(json!({
             "loadSampleData": false,
-            "adminEmail": "owner@shop.test",
             "adminPassword": "longenough1"
         })),
     )

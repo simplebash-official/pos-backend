@@ -55,7 +55,7 @@ async fn test_seed_all_populates_database_and_allows_login() {
         .expect("seed_all should succeed");
 
     assert!(summary.admin.created);
-    assert_eq!(summary.admin.email, "admin@pos.com");
+    assert_eq!(summary.admin.username, "admin");
     assert!(summary.providers.categories_created >= 3);
     assert_eq!(summary.suppliers.suppliers_created, 5);
     assert_eq!(summary.customers.customers_created, 20);
@@ -68,7 +68,7 @@ async fn test_seed_all_populates_database_and_allows_login() {
         "/api/auth/login",
         None,
         Some(json!({
-            "email": "admin@pos.com",
+            "username": "admin",
             "password": "admin@1234"
         })),
     )
@@ -89,7 +89,7 @@ async fn test_seed_all_populates_database_and_allows_login() {
         send_request(&app.router, "GET", "/api/auth/me", Some(token), None).await;
 
     assert_eq!(me_status, StatusCode::OK);
-    assert_eq!(me_res["data"]["email"], "admin@pos.com");
+    assert_eq!(me_res["data"]["username"], "admin");
     assert_eq!(me_res["data"]["role"], "admin");
     assert_eq!(me_res["data"]["name"], "System Admin");
 
@@ -167,7 +167,7 @@ async fn test_seeded_data_works_in_sale_transaction() {
         "/api/auth/login",
         None,
         Some(json!({
-            "email": "admin@pos.com",
+            "username": "admin",
             "password": "admin@1234"
         })),
     )

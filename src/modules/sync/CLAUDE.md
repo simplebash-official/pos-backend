@@ -37,6 +37,14 @@ Rules that keep it correct:
 - **Derived columns never move last-writer-wins.** A write that only changes `derived`
   columns (`products.stock_quantity`) must not bump `updated_at`/`version`; the SQLite products
   trigger only fires on non-derived columns and the consumer skips derived-only updates.
+- **A lost stream position is recovered, not retried forever.** If the server can no longer resume
+  from the saved token (`ChangeStreamHistoryLost`, e.g. the deployment was down longer than the
+  oplog window; also invalid/undecodable tokens, `UNUSABLE_POSITION_CODES`), `consume` opens a fresh
+  stream first and then `catch_up`s: every document of a syncable collection updated since
+  `resume_token_at` (saved with each token, minus 5 min) and every hard-delete marker is
+  re-published under a `catchup:` `source_token`. Duplicates are harmless (a change applies
+  idempotently by version). Without that, the consumer logged the same error every ~1.5 s forever and
+  captured nothing. Test: `sync_cloud_test::a_lost_stream_position_is_recovered_and_missed_writes_are_replayed`.
 - **The consumer never skips an event.** `cloud_capture` retries, and on persistent failure
   restarts from its last saved resume token (an event failing across 3 restarts is logged and
   dropped so one bad write cannot stop every tenant's feed). Duplicates are absorbed by the

@@ -1,6 +1,6 @@
 use simplebash_pos_backend::{clients, core::config::Config, seeds};
 
-/// Bootstraps the first Admin account with default credentials `admin@pos.com` / `admin@1234`.
+/// Bootstraps the first Admin account with username `admin` and the password from `SEED_ADMIN_PASSWORD`.
 ///
 /// Create-if-missing: re-running this never resets an existing admin's password or creates
 /// duplicate admins. Safe to run against SQLite or MongoDB.
@@ -16,7 +16,7 @@ async fn main() {
         .await
         .expect("failed to connect to database");
 
-    match seeds::admin::seed_admin(&db, None, None, None).await {
+    match seeds::admin::seed_admin(&db, None, None).await {
         Ok(res) => println!("{}", res.message),
         Err(err) => panic!("failed to seed admin account: {err}"),
     }

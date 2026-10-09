@@ -2,31 +2,29 @@ use std::env;
 
 use crate::{
     clients::db::Db,
-    core::{constants::codes, error::AppError},
+    core::{
+        constants::{codes, roles::ADMIN_USERNAME},
+        error::AppError,
+    },
     domain::users::{CreateUserRequest, Role},
     modules::users::service::create_user,
 };
 
 #[derive(Debug, Clone)]
 pub struct AdminSeedResult {
-    pub email: String,
+    pub username: String,
     pub created: bool,
     pub message: String,
 }
 
-/// Bootstraps the Admin account with default credentials `admin@pos.com` / `admin@1234`.
+/// Bootstraps the Admin account: username `admin` (always), password from
+/// `SEED_ADMIN_PASSWORD` (non-production runs fall back to `admin@1234`).
 /// Safe to run repeatedly (idempotent): if an admin account already exists, it leaves it unchanged.
 pub async fn seed_admin(
     db: &Db,
-    email_override: Option<&str>,
     password_override: Option<&str>,
     name_override: Option<&str>,
 ) -> Result<AdminSeedResult, AppError> {
-    let email = email_override
-        .map(String::from)
-        .or_else(|| env::var("SEED_ADMIN_EMAIL").ok())
-        .unwrap_or_else(|| "admin@pos.com".to_string());
-
     let is_prod = env::var("APP_ENV")
         .or_else(|_| env::var("ENVIRONMENT"))
         .map(|v| {
@@ -57,7 +55,7 @@ pub async fn seed_admin(
         db,
         CreateUserRequest {
             name,
-            email: email.clone(),
+            username: ADMIN_USERNAME.to_string(),
             password,
             role: Role::Admin,
             employee_key: None,
@@ -67,17 +65,19 @@ pub async fn seed_admin(
 
     match result {
         Ok(_) => Ok(AdminSeedResult {
-            email: email.clone(),
+            username: ADMIN_USERNAME.to_string(),
             created: true,
-            message: format!("seeded admin account: {email}"),
+            message: format!("seeded admin account: {ADMIN_USERNAME}"),
         }),
         Err(AppError::Custom { code, .. })
-            if code == codes::EMAIL_ALREADY_EXISTS || code == codes::ADMIN_ALREADY_EXISTS =>
+            if code == codes::USERNAME_ALREADY_EXISTS || code == codes::ADMIN_ALREADY_EXISTS =>
         {
             Ok(AdminSeedResult {
-                email: email.clone(),
+                username: ADMIN_USERNAME.to_string(),
                 created: false,
-                message: format!("admin account already exists ({email}) — no changes made"),
+                message: format!(
+                    "admin account already exists ({ADMIN_USERNAME}) — no changes made"
+                ),
             })
         }
         Err(err) => Err(err),

@@ -38,10 +38,7 @@ pub struct SetupSystemRequest {
     /// Administrator display name (defaults to "System Admin").
     #[serde(default, alias = "admin_name")]
     pub admin_name: Option<String>,
-    /// Administrator login email (defaults to "admin@pos.com").
-    #[serde(default, alias = "admin_email")]
-    pub admin_email: Option<String>,
-    /// Administrator password (defaults to "admin@1234").
+    /// Administrator password. Required; the Admin username is always `admin`.
     #[serde(default, alias = "admin_password")]
     pub admin_password: Option<String>,
 }
@@ -54,8 +51,8 @@ pub struct SetupSystemResponse {
     pub setup_completed: bool,
     /// Whether sample demo data was loaded.
     pub sample_data_loaded: bool,
-    /// The administrator email account configured.
-    pub admin_email: String,
+    /// The administrator username configured (always `admin`).
+    pub admin_username: String,
     /// Authentication JWT token for the configured admin account to enable auto-login.
     pub token: Option<String>,
     /// Profile of the authenticated administrator user.

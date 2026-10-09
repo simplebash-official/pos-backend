@@ -484,7 +484,7 @@ async fn random_op(d: &Device, catalog: &Catalog, rng: &mut Rng, step: usize) {
                 "POST",
                 "/api/users",
                 Some(json!({
-                    "name": format!("Cashier {step}"), "email": format!("staff-{}-{step}@shop.test", d.id),
+                    "name": format!("Cashier {step}"), "username": format!("staff-{}-{step}", d.id),
                     "password": format!("cashier-pass-{step}"), "role": "staff"
                 })),
             )

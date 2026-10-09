@@ -1013,7 +1013,6 @@ async fn cloud_shop_with_admin() -> Vec<Value> {
             Some(json!({
                 "loadSampleData": false,
                 "adminName": "Shop Owner",
-                "adminEmail": "owner@shop.test",
                 "adminPassword": "owner-pos-pass-1"
             })),
             None,
@@ -1057,7 +1056,7 @@ async fn downloading_a_shop_with_an_admin_completes_setup_and_the_admin_can_log_
     assert_eq!(after["isFirstRun"], false);
     assert_eq!(after["sampleDataLoaded"], false);
     assert_eq!(
-        login_status(&joining, "owner@shop.test", "owner-pos-pass-1").await,
+        login_status(&joining, "admin", "owner-pos-pass-1").await,
         StatusCode::OK
     );
     // And the one-time setup can no longer create a second admin.
@@ -1065,7 +1064,7 @@ async fn downloading_a_shop_with_an_admin_completes_setup_and_the_admin_can_log_
         .call(
             "POST",
             "/api/system/setup",
-            Some(json!({ "loadSampleData": false, "adminEmail": "other@shop.test", "adminPassword": "another-pass-1" })),
+            Some(json!({ "loadSampleData": false, "adminPassword": "another-pass-1" })),
             None,
         )
         .await;
@@ -1103,7 +1102,7 @@ async fn downloading_a_shop_without_an_admin_leaves_the_setup_to_the_owner() {
     cloud
         .sync("POST", "/api/sync/enable", Some(json!({})))
         .await;
-    create_cashier(&cloud, "cash@shop.test", "cashier-pass-1").await;
+    create_cashier(&cloud, "cash", "cashier-pass-1").await;
     let changes = as_pulled(&cloud.drain_outbox().await);
 
     let joining = Device::new().await;
@@ -1163,7 +1162,6 @@ async fn a_shop_the_cloud_has_not_set_up_leaves_the_choice_to_the_owner_with_the
                 "/api/system/setup",
                 Some(json!({
                     "loadSampleData": false,
-                    "adminEmail": "owner@shop.test",
                     "adminPassword": "not-the-password"
                 })),
                 None,
@@ -1179,7 +1177,6 @@ async fn a_shop_the_cloud_has_not_set_up_leaves_the_choice_to_the_owner_with_the
                 "/api/system/setup",
                 Some(json!({
                     "loadSampleData": false,
-                    "adminEmail": "owner@shop.test",
                     "adminPassword": "owner-pos-pass-1"
                 })),
                 None,
@@ -1520,9 +1517,9 @@ async fn backups_never_carry_sync_bookkeeping() {
 // ---------------------------------------------------------------------------
 
 /// Creates a staff login on `dev` and returns `(id, key)`.
-async fn create_cashier(dev: &Device, email: &str, password: &str) -> (String, String) {
+async fn create_cashier(dev: &Device, username: &str, password: &str) -> (String, String) {
     let created = dev
-        .api("POST", "/api/users", Some(json!({ "name": "Cashier One", "email": email, "password": password, "role": "staff" })))
+        .api("POST", "/api/users", Some(json!({ "name": "Cashier One", "username": username, "password": password, "role": "staff" })))
         .await;
     (
         created["data"]["id"].as_str().unwrap().to_string(),
@@ -1530,11 +1527,11 @@ async fn create_cashier(dev: &Device, email: &str, password: &str) -> (String, S
     )
 }
 
-async fn login_status(dev: &Device, email: &str, password: &str) -> StatusCode {
+async fn login_status(dev: &Device, username: &str, password: &str) -> StatusCode {
     dev.call(
         "POST",
         "/api/auth/login",
-        Some(json!({ "email": email, "password": password })),
+        Some(json!({ "username": username, "password": password })),
         None,
     )
     .await
@@ -1576,7 +1573,7 @@ async fn hand_over(from: &Device, to: &Device) -> Value {
 #[tokio::test]
 async fn a_cashier_created_on_one_device_can_log_in_on_another() {
     let (a, b) = linked_pair().await;
-    let (id, key) = create_cashier(&a, "cash1@shop.test", "cashier-pass-1").await;
+    let (id, key) = create_cashier(&a, "cash1", "cashier-pass-1").await;
 
     let changes = as_pulled(&a.drain_outbox().await);
     let record = changes
@@ -1616,11 +1613,11 @@ async fn a_cashier_created_on_one_device_can_log_in_on_another() {
     assert_eq!(row_b.0, id);
 
     assert_eq!(
-        login_status(&b, "cash1@shop.test", "cashier-pass-1").await,
+        login_status(&b, "cash1", "cashier-pass-1").await,
         StatusCode::OK
     );
     assert_eq!(
-        login_status(&b, "cash1@shop.test", "wrong-password").await,
+        login_status(&b, "cash1", "wrong-password").await,
         StatusCode::UNAUTHORIZED
     );
     // Applying created no echo: B has nothing to send back.
@@ -1630,10 +1627,10 @@ async fn a_cashier_created_on_one_device_can_log_in_on_another() {
 #[tokio::test]
 async fn deactivating_and_deleting_a_cashier_propagates() {
     let (a, b) = linked_pair().await;
-    let (id, key) = create_cashier(&a, "cash2@shop.test", "cashier-pass-2").await;
+    let (id, key) = create_cashier(&a, "cash2", "cashier-pass-2").await;
     hand_over(&a, &b).await;
     assert_eq!(
-        login_status(&b, "cash2@shop.test", "cashier-pass-2").await,
+        login_status(&b, "cash2", "cashier-pass-2").await,
         StatusCode::OK
     );
 
@@ -1652,7 +1649,7 @@ async fn deactivating_and_deleting_a_cashier_propagates() {
         .unwrap();
     assert!(!active, "the deactivation reached B");
     assert_ne!(
-        login_status(&b, "cash2@shop.test", "cashier-pass-2").await,
+        login_status(&b, "cash2", "cashier-pass-2").await,
         StatusCode::OK,
         "a deactivated cashier cannot log in"
     );
@@ -1667,7 +1664,7 @@ async fn deactivating_and_deleting_a_cashier_propagates() {
         .unwrap();
     assert_eq!(remaining, 0, "the delete removed the login on B");
     assert_ne!(
-        login_status(&b, "cash2@shop.test", "cashier-pass-2").await,
+        login_status(&b, "cash2", "cashier-pass-2").await,
         StatusCode::OK
     );
 }
@@ -1675,7 +1672,7 @@ async fn deactivating_and_deleting_a_cashier_propagates() {
 #[tokio::test]
 async fn the_password_hash_never_lands_in_a_conflict_record() {
     let (a, b) = linked_pair().await;
-    let (id, key) = create_cashier(&a, "cash3@shop.test", "cashier-pass-3").await;
+    let (id, key) = create_cashier(&a, "cash3", "cashier-pass-3").await;
     hand_over(&a, &b).await;
 
     // Both devices rename the cashier; B's edit is later, so A's edit loses on B.
@@ -1730,7 +1727,7 @@ async fn the_password_hash_never_lands_in_a_conflict_record() {
 async fn two_admins_from_two_devices_are_both_kept_and_reported() {
     let (a, b) = linked_pair().await;
     // Each device made its own shop owner offline.
-    let mk = |dev: &Device, email: &'static str| {
+    let mk = |dev: &Device, username: &'static str| {
         let dev_admin = dev.admin.clone();
         let router = dev.app.router.clone();
         async move {
@@ -1739,14 +1736,14 @@ async fn two_admins_from_two_devices_are_both_kept_and_reported() {
                 .uri("/api/users")
                 .header(CONTENT_TYPE, "application/json")
                 .header(AUTHORIZATION, format!("Bearer {dev_admin}"))
-                .body(Body::from(json!({ "name": "Owner", "email": email, "password": "owner-pass-12", "role": "staff" }).to_string()))
+                .body(Body::from(json!({ "name": "Owner", "username": username, "password": "owner-pass-12", "role": "staff" }).to_string()))
                 .unwrap();
             let response = router.oneshot(request).await.unwrap();
             assert!(response.status().is_success());
         }
     };
-    mk(&a, "owner-a@shop.test").await;
-    mk(&b, "owner-b@shop.test").await;
+    mk(&a, "owner-a").await;
+    mk(&b, "owner-b").await;
     // Promote both to admin directly (the service's one-admin rule guards the API path only).
     for dev in [&a, &b] {
         sqlx::query("UPDATE users SET role = 'admin'")

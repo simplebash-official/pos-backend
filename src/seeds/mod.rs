@@ -20,7 +20,7 @@ pub struct SeedSummary {
 /// Runs all seeders sequentially to bootstrap a complete, realistic POS environment.
 /// Compatible with both SQLite and MongoDB.
 pub async fn seed_all(db: &Db) -> Result<SeedSummary, AppError> {
-    let admin = admin::seed_admin(db, None, None, None).await?;
+    let admin = admin::seed_admin(db, None, None).await?;
     let providers = providers::seed_providers(db).await?;
     let suppliers = suppliers::seed_suppliers(db).await?;
     let customers = customers::seed_customers(db).await?;
