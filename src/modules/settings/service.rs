@@ -28,9 +28,12 @@ pub(crate) async fn get_shop_profile(
     let mut response = ShopProfileResponse::default();
 
     if let Some(tid) = tenant_id {
-        if let Ok(Some(tenant)) = tenants_repository::find_tenant_by_key(db, tid).await {
-            response.trading_name = tenant.name;
-        }
+        response.trading_name = tenants_repository::find_tenant_by_key(db, tid)
+            .await
+            .ok()
+            .flatten()
+            .map(|t| t.name)
+            .unwrap_or_default();
     }
 
     Ok(response)
