@@ -113,6 +113,7 @@ async fn openapi_json_lists_all_module_paths() {
         "/api/users",
         "/api/backup/export",
         "/api/backup/import",
+        "/api/settings/shop-profile",
     ] {
         assert!(paths.contains_key(expected), "missing path: {expected}");
     }

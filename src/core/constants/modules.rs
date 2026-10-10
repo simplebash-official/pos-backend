@@ -16,4 +16,5 @@ pub const SEQUENCES: &str = "sequences";
 pub const IMPORTS: &str = "imports";
 pub const BACKUP: &str = "backup";
 pub const SYSTEM: &str = "system";
+pub const SETTINGS: &str = "settings";
 pub const TENANTS: &str = "tenants";

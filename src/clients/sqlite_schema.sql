@@ -556,3 +556,30 @@ CREATE TABLE IF NOT EXISTS sync_number_blocks (
     expires_at TEXT NOT NULL,
     PRIMARY KEY (name, start_seq)
 );
+
+CREATE TABLE IF NOT EXISTS shop_profiles (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    legal_name TEXT NOT NULL DEFAULT '',
+    trading_name TEXT NOT NULL DEFAULT '',
+    address_lines TEXT NOT NULL DEFAULT '[]',
+    primary_phone TEXT NOT NULL DEFAULT '',
+    secondary_phone TEXT NOT NULL DEFAULT '',
+    email TEXT NOT NULL DEFAULT '',
+    website TEXT NOT NULL DEFAULT '',
+    business_reg_no TEXT NOT NULL DEFAULT '',
+    logo_base64 TEXT NOT NULL DEFAULT '',
+    bank_name TEXT NOT NULL DEFAULT '',
+    bank_branch TEXT NOT NULL DEFAULT '',
+    account_name TEXT NOT NULL DEFAULT '',
+    account_number TEXT NOT NULL DEFAULT '',
+    default_warranty_text TEXT NOT NULL DEFAULT '',
+    default_footer_text TEXT NOT NULL DEFAULT '',
+    receipt_footer_text TEXT NOT NULL DEFAULT '',
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT,
+    updated_by_device TEXT
+);
+

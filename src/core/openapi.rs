@@ -29,6 +29,7 @@ use utoipa::{
         (name = "users", description = "User accounts & role management"),
         (name = "backup", description = "Data backup and restore"),
         (name = "system", description = "Initial installation, onboarding and system setup"),
+        (name = "settings", description = "Shop profile and document settings"),
         (name = "tenants", description = "Server-to-server shop provisioning (identity service only)"),
     )
 )]

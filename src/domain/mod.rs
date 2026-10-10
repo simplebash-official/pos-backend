@@ -19,6 +19,7 @@ pub mod sync;
 pub mod sync_local;
 pub mod sync_v2;
 pub mod system;
+pub mod settings;
 pub mod users;
 
 use serde::Serialize;
