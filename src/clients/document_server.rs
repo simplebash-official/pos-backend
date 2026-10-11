@@ -22,6 +22,7 @@ use crate::core::{
 /// which is also what `generated_documents.template_name` stores.
 const TEMPLATE_DESCRIPTIONS: &[(&str, &str)] = &[
     ("a4-invoice", "A4 Invoice"),
+    ("a4-invoice-modern", "A4 Invoice Modern"),
     ("thermal-receipt", "Thermal Receipt"),
     ("credit-note", "Credit Note"),
     ("analytics-report", "Analytics Report"),

@@ -422,6 +422,7 @@ mod schema_drift_tests {
     fn load_schema(slug: &str) -> Option<serde_json::Value> {
         let title = match slug {
             "a4-invoice" => "A4 Invoice",
+            "a4-invoice-modern" => "A4 Invoice Modern",
             "thermal-receipt" => "Thermal Receipt",
             "credit-note" => "Credit Note",
             other => other,
@@ -561,6 +562,8 @@ mod schema_drift_tests {
             invoice.amount_received_cents.unwrap_or(0),
         );
         assert_matches_schema("a4-invoice", &payload);
+        // The modern design reuses this builder, so it must satisfy its contract too.
+        assert_matches_schema("a4-invoice-modern", &payload);
     }
 
     #[test]

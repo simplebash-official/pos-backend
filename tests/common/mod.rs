@@ -77,6 +77,21 @@ fn mock_templates_json() -> serde_json::Value {
                     }
                 },
                 {
+                    "key": "tpl_a4_invoice_modern",
+                    "name": "doc_temp_ZahcoYg8xCQjuc8c",
+                    "description": "A4 Invoice Modern",
+                    "dataSchema": {
+                        "$schema": "http://json-schema.org/draft-07/schema#",
+                        "type": "object",
+                        "additionalProperties": true,
+                        "required": ["invoiceNumber"],
+                        "properties": {
+                            "invoiceNumber": { "type": "string" },
+                            "logoUrl": { "type": "string" }
+                        }
+                    }
+                },
+                {
                     "key": "tpl_thermal_receipt",
                     "name": "doc_temp_4pz79z5iba7TcEIp",
                     "description": "Thermal Receipt",

@@ -459,7 +459,7 @@
                 "a4-invoice"
               ]
             },
-            "description": "Renders (or returns the cached) PDF for an invoice. `documentType` in the path is either `a4-invoice` or `thermal-receipt` — this request is the A4 variant; duplicate it and change the last path segment to `thermal-receipt` for the receipt variant, which also accepts the `paperWidthMm` query param (58 or 80, default 80). Response is `application/pdf` bytes, not the usual JSON envelope.\n\n**Requires a valid Bearer token** (any role — `CurrentUser`, no specific permission) or the API returns 401."
+            "description": "Renders (or returns the cached) PDF for an invoice. `documentType` in the path is `a4-invoice`, `a4-invoice-modern` (same data, the orange/charcoal design, cached separately) or `thermal-receipt` — this request is the classic A4 variant; duplicate it and change the last path segment to `a4-invoice-modern` or `thermal-receipt` for the other variants (the receipt variant also accepts the `paperWidthMm` query param: 58 or 80, default 80). Response is `application/pdf` bytes, not the usual JSON envelope.\n\n**Requires a valid Bearer token** (any role — `CurrentUser`, no specific permission) or the API returns 401."
           },
           "response": []
         },

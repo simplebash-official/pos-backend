@@ -208,7 +208,7 @@ struct DocumentQueryParams {
 #[utoipa::path(get, path = "/invoices/{id}/documents/{documentType}", tag = modules::BILLING,
     params(
         ("id" = String, Path, description = "Invoice ID or prefixed key"),
-        ("documentType" = String, Path, description = "'a4-invoice' or 'thermal-receipt'"),
+        ("documentType" = String, Path, description = "'a4-invoice', 'a4-invoice-modern' or 'thermal-receipt'"),
         ("paperWidthMm" = Option<u32>, Query, description = "58 or 80 — thermal-receipt only, defaults to 80 (D9)"),
     ),
     security(("bearerAuth" = [])),
@@ -236,9 +236,11 @@ async fn get_invoice_document(
         .sum();
 
     let (cache_key, template_name, data) = match document_type.as_str() {
-        "a4-invoice" => (
-            "a4-invoice".to_string(),
-            "a4-invoice",
+        // Two designs over one payload: each is its own slug *and* cache key,
+        // so a cached classic PDF is never served for the modern design.
+        a4 @ ("a4-invoice" | "a4-invoice-modern") => (
+            a4.to_string(),
+            a4,
             service::print_payload::build_a4_invoice_data(
                 &invoice,
                 "ORIGINAL — CUSTOMER COPY",
@@ -260,7 +262,7 @@ async fn get_invoice_document(
         }
         other => {
             return Err(AppError::validation(format!(
-                "Unknown documentType '{other}'. Must be 'a4-invoice' or 'thermal-receipt'"
+                "Unknown documentType '{other}'. Must be 'a4-invoice', 'a4-invoice-modern' or 'thermal-receipt'"
             )));
         }
     };
