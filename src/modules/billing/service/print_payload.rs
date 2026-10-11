@@ -124,6 +124,9 @@ pub(crate) fn build_a4_invoice_data(
     // recursion limit for this many keys.
     data["amountPaidCents"] = json!(amount_paid_cents);
     data["balanceDueCents"] = json!(balance_due_cents);
+    // Change handed back for cash over the total, so the invoice can show
+    // "amount received -> change -> total due" without re-deriving it.
+    data["changeDueCents"] = json!(invoice.change_due_cents.unwrap_or(0));
     data
 }
 
@@ -559,6 +562,34 @@ mod schema_drift_tests {
             false,
             invoice.amount_received_cents.unwrap_or(0),
         );
+        assert_matches_schema("a4-invoice", &payload);
+    }
+
+    // The invoice shows "amount received -> change -> total due", so the A4 payload
+    // must carry all four numbers and a paid invoice must owe nothing.
+    #[test]
+    fn a4_invoice_payload_carries_amount_given_change_and_what_is_still_owed() {
+        let invoice = cash_sale_invoice();
+        let payload = build_a4_invoice_data(&invoice, "ORIGINAL", false, 104_500);
+        assert_eq!(payload["totalCents"], 104_500);
+        assert_eq!(payload["tenderedAmountCents"], 110_000);
+        assert_eq!(payload["changeDueCents"], 5_500);
+        assert_eq!(payload["amountPaidCents"], 104_500);
+        assert_eq!(payload["balanceDueCents"], 0);
+        assert_matches_schema("a4-invoice", &payload);
+    }
+
+    #[test]
+    fn a4_credit_invoice_owes_the_balance_and_gives_no_change() {
+        let mut invoice = cash_sale_invoice();
+        invoice.is_credit = true;
+        invoice.amount_received_cents = Some(40_000);
+        invoice.change_due_cents = None;
+        let payload = build_a4_invoice_data(&invoice, "ORIGINAL", false, 40_000);
+        assert_eq!(payload["tenderedAmountCents"], 40_000);
+        assert_eq!(payload["changeDueCents"], 0);
+        assert_eq!(payload["amountPaidCents"], 40_000);
+        assert_eq!(payload["balanceDueCents"], 64_500);
         assert_matches_schema("a4-invoice", &payload);
     }
 
