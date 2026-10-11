@@ -1830,78 +1830,10 @@ async fn get_invoice_document_persists_document_server_template_key() {
     );
     // The mock document-server publishes exactly this key for the template.
     assert_eq!(template_key, "tpl_a4_invoice");
-}
-
-// The modern A4 design is its own documentType: same payload builder, but
-// its own template key and its own cache entry, so asking for one design
-// never returns the cached PDF of the other.
-#[tokio::test]
-async fn a4_invoice_modern_renders_and_caches_separately_from_classic() {
-    let app = common::spawn_app().await;
-    let token = staff_token(&app.config);
-
-    let mut payload = base_sale_payload();
-    payload["items"] = json!([{
-        "name": "Widget",
-        "unitPriceCents": 1000,
-        "quantity": 1,
-        "discountCents": 0,
-        "sourceType": "retail",
-    }]);
-    let (_, sale_body) = send_authed(
-        &app.router,
-        "POST",
-        "/api/billing/sales",
-        Some(payload),
-        &token,
-    )
-    .await;
-    let invoice_key = sale_body["data"]["invoice"]["key"]
-        .as_str()
-        .unwrap()
-        .to_string();
-
-    for document_type in ["a4-invoice", "a4-invoice-modern"] {
-        let request = Request::builder()
-            .method("GET")
-            .uri(format!(
-                "/api/billing/invoices/{invoice_key}/documents/{document_type}"
-            ))
-            .header(AUTHORIZATION, format!("Bearer {token}"))
-            .body(Body::empty())
-            .unwrap();
-        let response = app.router.clone().oneshot(request).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK, "{document_type}");
-    }
-
-    let modern = app
-        .db
-        .collection::<mongodb::bson::Document>("generated_documents")
-        .find_one(mongodb::bson::doc! {
-            "entity_key": &invoice_key,
-            "document_type": "a4-invoice-modern",
-        })
-        .await
-        .expect("query generated_documents")
-        .expect("the modern render should have its own row, not reuse the classic cache");
-    assert_eq!(
-        modern.get_str("template_name").unwrap(),
-        "a4-invoice-modern"
-    );
-    assert_eq!(
-        modern.get_str("template_key").unwrap(),
-        "tpl_a4_invoice_modern"
-    );
-    let classic_rows = app
-        .db
-        .collection::<mongodb::bson::Document>("generated_documents")
-        .count_documents(mongodb::bson::doc! {
-            "entity_key": &invoice_key,
-            "document_type": "a4-invoice",
-        })
-        .await
-        .expect("count generated_documents");
-    assert_eq!(classic_rows, 1);
+    // With no design chosen, the built-in default prints under the kind's
+    // historical cache key — so PDFs cached before designs were selectable
+    // stay valid.
+    assert_eq!(record.get_str("document_type").unwrap(), "a4-invoice");
 }
 
 // Pre-validation: a payload that violates the schema the document-server

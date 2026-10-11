@@ -1,5 +1,7 @@
 // Storage document shapes for settings.
 
+use std::collections::HashMap;
+
 use mongodb::bson::{DateTime as BsonDateTime, oid::ObjectId};
 use serde::{Deserialize, Serialize};
 
@@ -80,4 +82,21 @@ impl ShopProfileDocument {
             receipt_footer_text: self.receipt_footer_text,
         }
     }
+}
+
+/// The shop's chosen template per document kind (`kind slug -> template name`).
+/// One row per shop (key `main`); tenant-scoped like `shop_profiles`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocumentTemplateSettingsDocument {
+    #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
+    pub id: Option<ObjectId>,
+    pub key: String,
+    #[serde(default)]
+    pub selections: HashMap<String, String>,
+    #[serde(default = "default_version")]
+    pub version: i64,
+    #[serde(default = "BsonDateTime::now")]
+    pub created_at: BsonDateTime,
+    #[serde(default = "BsonDateTime::now")]
+    pub updated_at: BsonDateTime,
 }

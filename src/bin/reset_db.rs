@@ -63,6 +63,7 @@ async fn main() {
             "repairs",
             "print_jobs",
             "generated_documents",
+            "document_template_settings",
             "login_sessions",
             "users",
             "api_keys",

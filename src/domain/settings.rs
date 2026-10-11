@@ -1,5 +1,7 @@
 // Pure business types for settings and shop profile persistence.
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -88,4 +90,47 @@ pub struct UpdateShopProfileRequest {
     pub default_footer_text: Option<String>,
     #[serde(default)]
     pub receipt_footer_text: Option<String>,
+}
+
+/// One template in a document kind's dropdown.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentTemplateOption {
+    /// The template's stable id (`doc_temp_...`) — what a shop stores.
+    pub name: String,
+    /// The label to show (the template's schema title).
+    pub title: String,
+    /// True for the kind's built-in "standard design".
+    pub is_default: bool,
+}
+
+/// A kind of printed document and the designs a shop can pick for it.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentKindSettings {
+    /// `a4-invoice`, `thermal-receipt` or `credit-note`.
+    pub kind: String,
+    pub label: String,
+    /// The shop's choice, or `null` for the standard design (also `null` when
+    /// the chosen template has since been removed).
+    pub selected: Option<String>,
+    /// The template prints use right now.
+    pub effective: String,
+    /// The standard design first, then the rest by title.
+    pub templates: Vec<DocumentTemplateOption>,
+}
+
+/// The shop's document designs, one entry per kind.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentTemplatesResponse {
+    pub kinds: Vec<DocumentKindSettings>,
+}
+
+/// Request payload to change the shop's designs. Only the kinds present are
+/// changed; `null` returns a kind to the standard design.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateDocumentTemplatesRequest {
+    pub selections: HashMap<String, Option<String>>,
 }

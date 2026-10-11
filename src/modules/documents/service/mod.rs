@@ -14,6 +14,9 @@ use crate::{
     modules::documents::{model::GeneratedDocumentDocument, repository},
 };
 
+pub(crate) mod templates;
+use templates::ResolvedTemplate;
+
 /// Renders a template through the document-server without caching or writing
 /// a `generated_documents` row. For **dynamic** documents whose source data
 /// changes between renders and that have no owning entity to key a cache on —
@@ -44,18 +47,20 @@ fn is_safe_path_segment(segment: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
-/// Returns the PDF bytes for `(entity_key, cache_key)`, rendering and
-/// persisting a fresh copy only if one doesn't already exist. `cache_key`
-/// and `template_name` are deliberately separate: `cache_key` is whatever
-/// discriminates two renderings that must never be confused for caching
-/// purposes (e.g. `billing::routes` uses `"thermal-receipt-80mm"` vs
-/// `"thermal-receipt-58mm"` so a terminal's paper-width choice, D9, can't
-/// serve a cached PDF sized for the wrong roll), while `template_name` is
-/// the stable document-server template *slug* to render (`"a4-invoice"` /
-/// `"thermal-receipt"` — document-server has no concept of a width variant,
-/// that's encoded in `data.paperWidthMm` instead). The slug is what's
-/// persisted on the row; `clients::document_server` maps it to the
-/// template's current `description` for the wire lookup.
+/// Returns the PDF bytes for `(entity_key, cache key)`, rendering and
+/// persisting a fresh copy only if one doesn't already exist.
+///
+/// `legacy_cache_key` discriminates two renderings that must never be
+/// confused for caching purposes (e.g. `billing::routes` uses
+/// `"thermal-receipt-80mm"` vs `"thermal-receipt-58mm"` so a terminal's
+/// paper-width choice, D9, can't serve a cached PDF sized for the wrong
+/// roll). The key actually stored is `templates::cache_key`: the same value
+/// for the kind's built-in default template (so PDFs cached before templates
+/// were selectable stay valid), and a template-specific one otherwise, so one
+/// design is never served from another's cache. `resolved.kind` (e.g.
+/// `"a4-invoice"`) is persisted as the row's `template_name` — document-server
+/// has no concept of a width variant, that's encoded in `data.paperWidthMm`
+/// instead — and the template's own `tpl_...` key as `template_key`.
 ///
 /// Invoices are immutable once created (see `modules::billing`'s design —
 /// no general edit endpoint), so caching by entity+cache_key is safe: the
@@ -70,10 +75,13 @@ pub(crate) async fn get_or_render(
     doc_server: &DocumentServerClient,
     generated_documents_dir: &str,
     entity_key: &str,
-    cache_key: &str,
-    template_name: &str,
+    legacy_cache_key: &str,
+    resolved: &ResolvedTemplate,
     data: serde_json::Value,
 ) -> AppResult<Vec<u8>> {
+    let cache_key = templates::cache_key(legacy_cache_key, resolved);
+    let cache_key = cache_key.as_str();
+
     // Both keys become path segments under `generated_documents_dir`. Entity
     // keys normally look like `inv_<nanoid>`, but a sync push can create an
     // invoice/credit note with any key string, so a `../` or absolute key
@@ -102,12 +110,7 @@ pub(crate) async fn get_or_render(
         }
     }
 
-    let pdf_bytes = doc_server.render(template_name, data).await?;
-    // The document-server-minted unique template key, resolved from the
-    // client's (now warm) name→info cache — recorded so this row states not
-    // just *which* template layout but *which ID the document server gave
-    // it*, per the integration contract.
-    let template_key = doc_server.resolve_template_key(template_name).await?;
+    let pdf_bytes = doc_server.render_template(&resolved.info, data).await?;
 
     let file_name = format!(
         "{cache_key}_{}_{}.pdf",
@@ -140,8 +143,8 @@ pub(crate) async fn get_or_render(
             key: generate_id(prefixes::GENERATED_DOCUMENT),
             entity_key: entity_key.to_string(),
             document_type: cache_key.to_string(),
-            template_name: template_name.to_string(),
-            template_key,
+            template_name: resolved.kind.to_string(),
+            template_key: resolved.info.key.clone(),
             file_path: relative_path,
             file_size_bytes: pdf_bytes.len() as i64,
             created_at: now,

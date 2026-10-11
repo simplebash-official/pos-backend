@@ -411,37 +411,28 @@ mod schema_drift_tests {
     use crate::domain::billing::{CreditNote, Invoice, InvoiceStatus};
     use serde_json::json;
 
-    /// The `<name>.schema.json` sidecar the sibling document-server publishes
-    /// for the template addressed by `slug`. document-server's on-disk
-    /// filenames are opaque `doc_temp_<nanoid>.schema.json` now, so this
-    /// scans that directory and matches on the schema's `title` (the human
-    /// label — `"A4 Invoice"` etc.). Returns `None` when that repository
-    /// isn't checked out next to this one, so the suite stays runnable in a
-    /// backend-only checkout — where it prints a notice instead of silently
-    /// passing an empty guarantee.
-    fn load_schema(slug: &str) -> Option<serde_json::Value> {
-        let title = match slug {
-            "a4-invoice" => "A4 Invoice",
-            "a4-invoice-modern" => "A4 Invoice Modern",
-            "thermal-receipt" => "Thermal Receipt",
-            "credit-note" => "Credit Note",
-            other => other,
-        };
+    /// Every `<name>.schema.json` the sibling document-server publishes for a
+    /// *document kind* (`x-document-kind` in the schema), as `(title, schema)`.
+    /// The payload builders feed **all** templates of a kind, so each one must
+    /// be checked, not just the first. Returns an empty list (with a notice)
+    /// when that repository isn't checked out next to this one, so the suite
+    /// stays runnable in a backend-only checkout — where it prints a notice
+    /// instead of silently passing an empty guarantee.
+    fn load_schemas_of_kind(kind: &str) -> Vec<(String, serde_json::Value)> {
         let dir = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../document-server/templates/documents"
         );
         let Ok(entries) = std::fs::read_dir(dir) else {
             eprintln!(
-                "skipping schema drift check for {slug}: no document-server checkout at {dir}"
+                "skipping schema drift check for {kind}: no document-server checkout at {dir}"
             );
-            return None;
+            return Vec::new();
         };
+        let mut found = Vec::new();
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("json")
-                || !path.to_string_lossy().ends_with(".schema.json")
-            {
+            if !path.to_string_lossy().ends_with(".schema.json") {
                 continue;
             }
             let Ok(contents) = std::fs::read_to_string(&path) else {
@@ -450,38 +441,45 @@ mod schema_drift_tests {
             let Ok(schema) = serde_json::from_str::<serde_json::Value>(&contents) else {
                 continue;
             };
-            if schema.get("title").and_then(|t| t.as_str()) == Some(title) {
-                return Some(schema);
+            if schema.get("x-document-kind").and_then(|k| k.as_str()) == Some(kind) {
+                let title = schema
+                    .get("title")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("(untitled)")
+                    .to_string();
+                found.push((title, schema));
             }
         }
-        eprintln!("skipping schema drift check for {slug}: no schema titled {title:?} in {dir}");
-        None
+        if found.is_empty() {
+            panic!("no template in {dir} declares x-document-kind {kind:?}");
+        }
+        found
     }
 
     /// Panics with every violation listed when `payload` doesn't satisfy the
-    /// published contract — the same check `DocumentServerClient::render`
-    /// enforces at request time, run here against the *real* sidecar files.
-    fn assert_matches_schema(template_name: &str, payload: &serde_json::Value) {
-        let Some(schema) = load_schema(template_name) else {
-            return;
-        };
-        let validator = jsonschema::validator_for(&schema).expect("published schema compiles");
-        let violations: Vec<String> = validator
-            .iter_errors(payload)
-            .map(|err| {
-                let path = err.instance_path().to_string();
-                if path.is_empty() {
-                    err.to_string()
-                } else {
-                    format!("at '{path}': {err}")
-                }
-            })
-            .collect();
-        assert!(
-            violations.is_empty(),
-            "{template_name} payload drifted from its published data schema:\n  {}",
-            violations.join("\n  ")
-        );
+    /// published contract of **any** template of this kind — the same check
+    /// `DocumentServerClient::render_template` enforces at request time, run
+    /// here against the *real* sidecar files.
+    fn assert_matches_schema(kind: &str, payload: &serde_json::Value) {
+        for (title, schema) in load_schemas_of_kind(kind) {
+            let validator = jsonschema::validator_for(&schema).expect("published schema compiles");
+            let violations: Vec<String> = validator
+                .iter_errors(payload)
+                .map(|err| {
+                    let path = err.instance_path().to_string();
+                    if path.is_empty() {
+                        err.to_string()
+                    } else {
+                        format!("at '{path}': {err}")
+                    }
+                })
+                .collect();
+            assert!(
+                violations.is_empty(),
+                "{kind} payload drifted from the published data schema of {title:?}:\n  {}",
+                violations.join("\n  ")
+            );
+        }
     }
 
     fn cash_sale_invoice() -> Invoice {
@@ -562,8 +560,6 @@ mod schema_drift_tests {
             invoice.amount_received_cents.unwrap_or(0),
         );
         assert_matches_schema("a4-invoice", &payload);
-        // The modern design reuses this builder, so it must satisfy its contract too.
-        assert_matches_schema("a4-invoice-modern", &payload);
     }
 
     #[test]

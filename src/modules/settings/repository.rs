@@ -9,7 +9,7 @@ use crate::{
         sqlite::{bson_to_iso, to_bson_datetime},
     },
     core::error::{AppError, AppResult},
-    modules::settings::model::ShopProfileDocument,
+    modules::settings::model::{DocumentTemplateSettingsDocument, ShopProfileDocument},
 };
 
 pub(crate) async fn find_shop_profile(
@@ -176,6 +176,102 @@ pub(crate) async fn upsert_shop_profile(db: &Db, doc: &ShopProfileDocument) -> A
                 .await
                 .map_err(|e| AppError::internal(format!("Failed to save shop profile: {e}")))?;
 
+            Ok(())
+        }
+    }
+}
+
+const DOCUMENT_TEMPLATE_SETTINGS: &str = "document_template_settings";
+
+pub(crate) async fn find_document_template_settings(
+    db: &Db,
+    key: &str,
+) -> AppResult<Option<DocumentTemplateSettingsDocument>> {
+    let fetch_err = |e: &dyn std::fmt::Display| {
+        AppError::internal(format!("Failed to fetch document template settings: {e}"))
+    };
+    match db {
+        Db::Sqlite(pool) => {
+            let row = sqlx::query(
+                "SELECT key, selections, version, created_at, updated_at \
+                 FROM document_template_settings WHERE key = ?1 LIMIT 1",
+            )
+            .bind(key)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| fetch_err(&e))?;
+
+            Ok(row.map(|r| {
+                let selections_json: String = r.get("selections");
+                let created_at: String = r.get("created_at");
+                let updated_at: String = r.get("updated_at");
+                DocumentTemplateSettingsDocument {
+                    id: None,
+                    key: r.get("key"),
+                    selections: serde_json::from_str(&selections_json).unwrap_or_default(),
+                    version: r.get("version"),
+                    created_at: to_bson_datetime(&created_at),
+                    updated_at: to_bson_datetime(&updated_at),
+                }
+            }))
+        }
+        Db::Mongo(mongo) => mongo
+            .collection::<DocumentTemplateSettingsDocument>(DOCUMENT_TEMPLATE_SETTINGS)
+            .find_one(doc! { "key": key })
+            .await
+            .map_err(|e| fetch_err(&e)),
+    }
+}
+
+pub(crate) async fn upsert_document_template_settings(
+    db: &Db,
+    doc: &DocumentTemplateSettingsDocument,
+) -> AppResult<()> {
+    let save_err = |e: &dyn std::fmt::Display| {
+        AppError::internal(format!("Failed to save document template settings: {e}"))
+    };
+    match db {
+        Db::Sqlite(pool) => {
+            let selections_json =
+                serde_json::to_string(&doc.selections).map_err(|e| save_err(&e))?;
+            sqlx::query(
+                "INSERT INTO document_template_settings (key, selections, version, created_at, updated_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5) \
+                 ON CONFLICT(key) DO UPDATE SET \
+                    selections = excluded.selections, \
+                    version = excluded.version, \
+                    updated_at = excluded.updated_at",
+            )
+            .bind(&doc.key)
+            .bind(&selections_json)
+            .bind(doc.version)
+            .bind(bson_to_iso(&doc.created_at))
+            .bind(bson_to_iso(&doc.updated_at))
+            .execute(pool)
+            .await
+            .map_err(|e| save_err(&e))?;
+            Ok(())
+        }
+        Db::Mongo(mongo) => {
+            let selections =
+                mongodb::bson::serialize_to_bson(&doc.selections).map_err(|e| save_err(&e))?;
+            mongo
+                .collection::<mongodb::bson::Document>(DOCUMENT_TEMPLATE_SETTINGS)
+                .update_one(
+                    doc! { "key": &doc.key },
+                    doc! {
+                        "$set": {
+                            "key": &doc.key,
+                            "selections": selections,
+                            "version": doc.version,
+                            "updated_at": doc.updated_at,
+                        },
+                        "$setOnInsert": { "created_at": doc.created_at },
+                    },
+                )
+                .upsert(true)
+                .await
+                .map_err(|e| save_err(&e))?;
             Ok(())
         }
     }

@@ -1,6 +1,12 @@
 // HTTP route handlers and OpenAPI declarations for settings and shop profiles.
 
-use axum::{Json, extract::State};
+use axum::{
+    Json,
+    body::Body,
+    extract::{Path, State},
+    http::{StatusCode, header},
+    response::{IntoResponse, Response},
+};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::{
@@ -11,12 +17,18 @@ use crate::{
         middleware::auth::{AdminUser, CurrentUser},
         response::{ApiResponse, ErrorResponse},
     },
-    domain::settings::{ShopProfileResponse, UpdateShopProfileRequest},
+    domain::settings::{
+        DocumentTemplatesResponse, ShopProfileResponse, UpdateDocumentTemplatesRequest,
+        UpdateShopProfileRequest,
+    },
     modules::settings::service,
 };
 
 pub fn router() -> OpenApiRouter<AppState> {
-    OpenApiRouter::new().routes(routes!(get_shop_profile, update_shop_profile))
+    OpenApiRouter::new()
+        .routes(routes!(get_shop_profile, update_shop_profile))
+        .routes(routes!(get_document_templates, update_document_templates))
+        .routes(routes!(get_document_template_preview))
 }
 
 /// Retrieve the active shop profile.
@@ -66,4 +78,83 @@ pub async fn update_shop_profile(
         profile,
         "Shop profile updated successfully",
     )))
+}
+
+/// The shop's document designs: for each kind (A4 invoice, receipt, credit
+/// note) the designs available and which one is in use.
+#[utoipa::path(
+    get,
+    path = "/document-templates",
+    tag = modules::SETTINGS,
+    responses(
+        (status = 200, description = "Document designs retrieved successfully", body = ApiResponse<DocumentTemplatesResponse>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+    ),
+    security(("bearerAuth" = []))
+)]
+pub async fn get_document_templates(
+    _user: CurrentUser,
+    State(state): State<AppState>,
+) -> AppResult<Json<ApiResponse<DocumentTemplatesResponse>>> {
+    let response = service::get_document_templates(&state.db, &state.document_server).await?;
+    Ok(Json(ApiResponse::success(
+        response,
+        "Document designs retrieved successfully",
+    )))
+}
+
+/// Choose the shop's designs. Only the kinds in the request change; `null`
+/// returns a kind to the standard design.
+#[utoipa::path(
+    put,
+    path = "/document-templates",
+    tag = modules::SETTINGS,
+    request_body = UpdateDocumentTemplatesRequest,
+    responses(
+        (status = 200, description = "Document designs updated successfully", body = ApiResponse<DocumentTemplatesResponse>),
+        (status = 400, description = "Unknown document kind", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Admin role required", body = ErrorResponse),
+        (status = 422, description = "TEMPLATE_UNAVAILABLE: that design does not exist or is not for this kind of document", body = ErrorResponse),
+    ),
+    security(("bearerAuth" = []))
+)]
+pub async fn update_document_templates(
+    _admin: AdminUser,
+    State(state): State<AppState>,
+    Json(body): Json<UpdateDocumentTemplatesRequest>,
+) -> AppResult<Json<ApiResponse<DocumentTemplatesResponse>>> {
+    let response =
+        service::update_document_templates(&state.db, &state.document_server, body).await?;
+    Ok(Json(ApiResponse::success(
+        response,
+        "Document designs updated successfully",
+    )))
+}
+
+/// A PDF of one design rendered with its own sample data.
+#[utoipa::path(
+    get,
+    path = "/document-templates/{name}/preview",
+    tag = modules::SETTINGS,
+    params(("name" = String, Path, description = "The design's id, as listed by GET /settings/document-templates")),
+    responses(
+        (status = 200, description = "Sample PDF", content_type = "application/pdf", body = Vec<u8>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 404, description = "TEMPLATE_UNAVAILABLE: no such design, or it has no sample", body = ErrorResponse),
+    ),
+    security(("bearerAuth" = []))
+)]
+pub async fn get_document_template_preview(
+    _user: CurrentUser,
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> AppResult<Response> {
+    let pdf = service::render_document_template_preview(&state.document_server, &name).await?;
+    Ok((
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/pdf")],
+        Body::from(pdf),
+    )
+        .into_response())
 }

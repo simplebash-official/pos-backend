@@ -7,6 +7,7 @@
 // not a public REST resource. `repository` stays private so nothing outside
 // this module tree can touch the `generated_documents` Mongo collection
 // directly.
+pub mod kinds;
 mod model;
 mod repository;
 pub mod service;
