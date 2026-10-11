@@ -210,6 +210,13 @@ pub fn index_specs(multi_tenant: bool) -> Vec<IndexSpec> {
         true,
     );
 
+    // One document-template choice row per shop (`modules::settings`).
+    specs.add(
+        "document_template_settings",
+        "document_template_settings_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
 
     // Platform directory (`modules::tenants`): shop codes are globally unique
     // and the collection is not tenant-owned, so it is never tenant-prefixed.
@@ -349,8 +356,9 @@ mod tests {
     fn single_tenant_specs_are_the_historical_set() {
         let specs = index_specs(false);
         // 15 sync + 4 created_at + 2 invoice analytics + 3 reminders + products_key
-        // + idempotency unique/ttl + serial unique + serial status + shop_profiles.
-        assert_eq!(specs.len(), 30);
+        // + idempotency unique/ttl + serial unique + serial status + shop_profiles
+        // + document_template_settings.
+        assert_eq!(specs.len(), 31);
         assert!(specs.iter().all(|s| s.keys.get(TENANT_FIELD).is_none()));
         assert!(names(&specs).contains(&"products.sync_updated_at_key".to_string()));
         assert!(names(&specs).contains(&"idempotency_keys.idempotency_ttl".to_string()));
@@ -366,6 +374,7 @@ mod tests {
                 "idempotency_key_user_unique",
                 "product_serials_serial_number_unique",
                 "shop_profiles_key_unique",
+                "document_template_settings_key_unique",
             ]
         );
         let sync = specs

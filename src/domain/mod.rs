@@ -13,13 +13,13 @@ pub mod purchases;
 pub mod repairs;
 pub mod reports;
 pub mod sequences;
+pub mod settings;
 pub mod supplier_products;
 pub mod suppliers;
 pub mod sync;
 pub mod sync_local;
 pub mod sync_v2;
 pub mod system;
-pub mod settings;
 pub mod users;
 
 use serde::Serialize;

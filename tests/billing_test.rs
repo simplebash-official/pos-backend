@@ -1830,6 +1830,10 @@ async fn get_invoice_document_persists_document_server_template_key() {
     );
     // The mock document-server publishes exactly this key for the template.
     assert_eq!(template_key, "tpl_a4_invoice");
+    // With no design chosen, the built-in default prints under the kind's
+    // historical cache key — so PDFs cached before designs were selectable
+    // stay valid.
+    assert_eq!(record.get_str("document_type").unwrap(), "a4-invoice");
 }
 
 // Pre-validation: a payload that violates the schema the document-server

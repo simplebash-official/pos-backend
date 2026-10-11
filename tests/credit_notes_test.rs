@@ -1173,6 +1173,81 @@ async fn credit_note_list_get_and_auth_guards() {
     assert!(list_body["data"]["creditNotes"].is_array());
 }
 
+// A credit note prints in the shop's design, or in one picked for that single
+// print; the choice is part of the cache key so designs never share a PDF.
+#[tokio::test]
+async fn credit_note_document_accepts_a_design_for_one_print() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let (_prod_id, prod_key, price_cents) = seed_product(&app, "Design Test Phone", 5000, 5).await;
+    let invoice_key = complete_simple_sale(&app, &token, &prod_key, 1, price_cents, None).await;
+    let (cn_status, cn_body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/billing/credit-notes",
+        Some(json!({
+            "invoiceKey": invoice_key,
+            "returnedItems": [{
+                "productKey": prod_key,
+                "quantity": 1,
+                "reason": "defective",
+                "condition": "damaged",
+                "disposition": "write_off_scrap",
+            }],
+            "paymentMethod": "cash",
+        })),
+        &token,
+    )
+    .await;
+    assert_eq!(cn_status, StatusCode::OK, "Credit note body: {cn_body}");
+    let credit_note_key = cn_body["data"]["key"].as_str().unwrap().to_string();
+
+    let get = |query: &'static str| {
+        let router = app.router.clone();
+        let token = token.clone();
+        let uri =
+            format!("/api/billing/credit-notes/{credit_note_key}/documents/credit-note{query}");
+        async move {
+            let response = router
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri(uri)
+                        .header(AUTHORIZATION, format!("Bearer {token}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = response.status();
+            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            (status, String::from_utf8_lossy(&bytes).into_owned())
+        }
+    };
+
+    let (status, pdf) = get("?template=doc_temp_CompactCredit000").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(pdf.contains("tpl_credit_note_compact"), "{pdf}");
+
+    // The plain print is still the standard design.
+    let (status, pdf) = get("").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(pdf.contains("tpl_credit_note "), "{pdf}");
+
+    // A design that does not exist (or is for another document) is a clear error.
+    for bad in [
+        "?template=doc_temp_nope",
+        "?template=doc_temp_ZahcoYg8xCQjuc8c",
+    ] {
+        let (status, body) = get(bad).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{bad}: {body}");
+        assert!(body.contains("TEMPLATE_UNAVAILABLE"), "{bad}: {body}");
+    }
+}
+
 #[tokio::test]
 async fn credit_note_document_returns_pdf() {
     let app = common::spawn_app().await;

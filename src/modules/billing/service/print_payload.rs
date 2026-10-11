@@ -124,6 +124,9 @@ pub(crate) fn build_a4_invoice_data(
     // recursion limit for this many keys.
     data["amountPaidCents"] = json!(amount_paid_cents);
     data["balanceDueCents"] = json!(balance_due_cents);
+    // Change handed back for cash over the total, so the invoice can show
+    // "amount received -> change -> total due" without re-deriving it.
+    data["changeDueCents"] = json!(invoice.change_due_cents.unwrap_or(0));
     data
 }
 
@@ -411,36 +414,28 @@ mod schema_drift_tests {
     use crate::domain::billing::{CreditNote, Invoice, InvoiceStatus};
     use serde_json::json;
 
-    /// The `<name>.schema.json` sidecar the sibling document-server publishes
-    /// for the template addressed by `slug`. document-server's on-disk
-    /// filenames are opaque `doc_temp_<nanoid>.schema.json` now, so this
-    /// scans that directory and matches on the schema's `title` (the human
-    /// label — `"A4 Invoice"` etc.). Returns `None` when that repository
-    /// isn't checked out next to this one, so the suite stays runnable in a
-    /// backend-only checkout — where it prints a notice instead of silently
-    /// passing an empty guarantee.
-    fn load_schema(slug: &str) -> Option<serde_json::Value> {
-        let title = match slug {
-            "a4-invoice" => "A4 Invoice",
-            "thermal-receipt" => "Thermal Receipt",
-            "credit-note" => "Credit Note",
-            other => other,
-        };
+    /// Every `<name>.schema.json` the sibling document-server publishes for a
+    /// *document kind* (`x-document-kind` in the schema), as `(title, schema)`.
+    /// The payload builders feed **all** templates of a kind, so each one must
+    /// be checked, not just the first. Returns an empty list (with a notice)
+    /// when that repository isn't checked out next to this one, so the suite
+    /// stays runnable in a backend-only checkout — where it prints a notice
+    /// instead of silently passing an empty guarantee.
+    fn load_schemas_of_kind(kind: &str) -> Vec<(String, serde_json::Value)> {
         let dir = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../document-server/templates/documents"
         );
         let Ok(entries) = std::fs::read_dir(dir) else {
             eprintln!(
-                "skipping schema drift check for {slug}: no document-server checkout at {dir}"
+                "skipping schema drift check for {kind}: no document-server checkout at {dir}"
             );
-            return None;
+            return Vec::new();
         };
+        let mut found = Vec::new();
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("json")
-                || !path.to_string_lossy().ends_with(".schema.json")
-            {
+            if !path.to_string_lossy().ends_with(".schema.json") {
                 continue;
             }
             let Ok(contents) = std::fs::read_to_string(&path) else {
@@ -449,38 +444,45 @@ mod schema_drift_tests {
             let Ok(schema) = serde_json::from_str::<serde_json::Value>(&contents) else {
                 continue;
             };
-            if schema.get("title").and_then(|t| t.as_str()) == Some(title) {
-                return Some(schema);
+            if schema.get("x-document-kind").and_then(|k| k.as_str()) == Some(kind) {
+                let title = schema
+                    .get("title")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("(untitled)")
+                    .to_string();
+                found.push((title, schema));
             }
         }
-        eprintln!("skipping schema drift check for {slug}: no schema titled {title:?} in {dir}");
-        None
+        if found.is_empty() {
+            panic!("no template in {dir} declares x-document-kind {kind:?}");
+        }
+        found
     }
 
     /// Panics with every violation listed when `payload` doesn't satisfy the
-    /// published contract — the same check `DocumentServerClient::render`
-    /// enforces at request time, run here against the *real* sidecar files.
-    fn assert_matches_schema(template_name: &str, payload: &serde_json::Value) {
-        let Some(schema) = load_schema(template_name) else {
-            return;
-        };
-        let validator = jsonschema::validator_for(&schema).expect("published schema compiles");
-        let violations: Vec<String> = validator
-            .iter_errors(payload)
-            .map(|err| {
-                let path = err.instance_path().to_string();
-                if path.is_empty() {
-                    err.to_string()
-                } else {
-                    format!("at '{path}': {err}")
-                }
-            })
-            .collect();
-        assert!(
-            violations.is_empty(),
-            "{template_name} payload drifted from its published data schema:\n  {}",
-            violations.join("\n  ")
-        );
+    /// published contract of **any** template of this kind — the same check
+    /// `DocumentServerClient::render_template` enforces at request time, run
+    /// here against the *real* sidecar files.
+    fn assert_matches_schema(kind: &str, payload: &serde_json::Value) {
+        for (title, schema) in load_schemas_of_kind(kind) {
+            let validator = jsonschema::validator_for(&schema).expect("published schema compiles");
+            let violations: Vec<String> = validator
+                .iter_errors(payload)
+                .map(|err| {
+                    let path = err.instance_path().to_string();
+                    if path.is_empty() {
+                        err.to_string()
+                    } else {
+                        format!("at '{path}': {err}")
+                    }
+                })
+                .collect();
+            assert!(
+                violations.is_empty(),
+                "{kind} payload drifted from the published data schema of {title:?}:\n  {}",
+                violations.join("\n  ")
+            );
+        }
     }
 
     fn cash_sale_invoice() -> Invoice {
@@ -560,6 +562,34 @@ mod schema_drift_tests {
             false,
             invoice.amount_received_cents.unwrap_or(0),
         );
+        assert_matches_schema("a4-invoice", &payload);
+    }
+
+    // The invoice shows "amount received -> change -> total due", so the A4 payload
+    // must carry all four numbers and a paid invoice must owe nothing.
+    #[test]
+    fn a4_invoice_payload_carries_amount_given_change_and_what_is_still_owed() {
+        let invoice = cash_sale_invoice();
+        let payload = build_a4_invoice_data(&invoice, "ORIGINAL", false, 104_500);
+        assert_eq!(payload["totalCents"], 104_500);
+        assert_eq!(payload["tenderedAmountCents"], 110_000);
+        assert_eq!(payload["changeDueCents"], 5_500);
+        assert_eq!(payload["amountPaidCents"], 104_500);
+        assert_eq!(payload["balanceDueCents"], 0);
+        assert_matches_schema("a4-invoice", &payload);
+    }
+
+    #[test]
+    fn a4_credit_invoice_owes_the_balance_and_gives_no_change() {
+        let mut invoice = cash_sale_invoice();
+        invoice.is_credit = true;
+        invoice.amount_received_cents = Some(40_000);
+        invoice.change_due_cents = None;
+        let payload = build_a4_invoice_data(&invoice, "ORIGINAL", false, 40_000);
+        assert_eq!(payload["tenderedAmountCents"], 40_000);
+        assert_eq!(payload["changeDueCents"], 0);
+        assert_eq!(payload["amountPaidCents"], 40_000);
+        assert_eq!(payload["balanceDueCents"], 64_500);
         assert_matches_schema("a4-invoice", &payload);
     }
 

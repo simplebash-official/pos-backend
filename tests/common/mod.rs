@@ -55,64 +55,137 @@ pub async fn start_strict_mock_document_server() -> String {
     start_mock_document_server_with_templates(templates).await
 }
 
+/// One template entry as `GET /api/templates` publishes it. `kind` goes into
+/// the schema as `x-document-kind` — the marker the backend lists by.
+fn mock_template(
+    key: &str,
+    name: &str,
+    title: &str,
+    kind: &str,
+    contract: serde_json::Value,
+    is_active: bool,
+    sample: Option<serde_json::Value>,
+) -> serde_json::Value {
+    let mut template = json!({
+        "key": key,
+        "name": name,
+        "type": "document",
+        "description": title,
+        "isActive": is_active,
+        "dataSchema": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "title": title,
+            "x-document-kind": kind,
+            "type": "object",
+            "additionalProperties": true,
+            "required": contract["required"],
+            "properties": contract["properties"]
+        }
+    });
+    if let Some(sample) = sample {
+        template["data"] = sample;
+    }
+    template
+}
+
 fn mock_templates_json() -> serde_json::Value {
+    let a4 = json!({
+        "required": ["invoiceNumber"],
+        "properties": {
+            "invoiceNumber": { "type": "string" },
+            "logoUrl": { "type": "string" }
+        }
+    });
+    let receipt = json!({
+        "required": ["paperWidthMm", "invoiceNumber"],
+        "properties": {
+            "paperWidthMm": { "type": "integer", "enum": [58, 80] },
+            "invoiceNumber": { "type": "string" }
+        }
+    });
+    let sample_logo = "https://example.invalid/logo.png";
     json!({
         "success": true,
         "message": "Templates fetched",
         "data": {
             "templates": [
-                {
-                    "key": "tpl_a4_invoice",
-                    "name": "doc_temp_vEf0Y7jQHQj2rIuO",
-                    "description": "A4 Invoice",
-                    "dataSchema": {
-                        "$schema": "http://json-schema.org/draft-07/schema#",
-                        "type": "object",
-                        "additionalProperties": true,
-                        "required": ["invoiceNumber"],
-                        "properties": {
-                            "invoiceNumber": { "type": "string" },
-                            "logoUrl": { "type": "string" }
-                        }
-                    }
-                },
-                {
-                    "key": "tpl_thermal_receipt",
-                    "name": "doc_temp_4pz79z5iba7TcEIp",
-                    "description": "Thermal Receipt",
-                    "dataSchema": {
-                        "$schema": "http://json-schema.org/draft-07/schema#",
-                        "type": "object",
-                        "additionalProperties": true,
-                        "required": ["paperWidthMm", "invoiceNumber"],
-                        "properties": {
-                            "paperWidthMm": { "type": "integer", "enum": [58, 80] },
-                            "invoiceNumber": { "type": "string" }
-                        }
-                    }
-                },
-                {
-                    "key": "tpl_credit_note",
-                    "name": "doc_temp_5DHl8hUQTX3oLBSR",
-                    "description": "Credit Note",
-                    "dataSchema": {
-                        "$schema": "http://json-schema.org/draft-07/schema#",
-                        "type": "object",
-                        "additionalProperties": true,
+                mock_template(
+                    "tpl_a4_invoice",
+                    "doc_temp_vEf0Y7jQHQj2rIuO",
+                    "A4 Invoice",
+                    "a4-invoice",
+                    a4.clone(),
+                    true,
+                    Some(json!({ "invoiceNumber": "INV-CLASSIC", "logoUrl": sample_logo })),
+                ),
+                mock_template(
+                    "tpl_a4_invoice_modern",
+                    "doc_temp_ZahcoYg8xCQjuc8c",
+                    "A4 Invoice Modern",
+                    "a4-invoice",
+                    a4.clone(),
+                    true,
+                    Some(json!({ "invoiceNumber": "INV-MODERN", "logoUrl": sample_logo })),
+                ),
+                // Retired: its `.typ` vanished, so the document-server keeps the row but
+                // marks it inactive. It must never be offered or rendered.
+                mock_template(
+                    "tpl_a4_invoice_retired",
+                    "doc_temp_RetiredInvoice00",
+                    "A4 Invoice Retired",
+                    "a4-invoice",
+                    a4,
+                    false,
+                    None,
+                ),
+                mock_template(
+                    "tpl_thermal_receipt",
+                    "doc_temp_4pz79z5iba7TcEIp",
+                    "Thermal Receipt",
+                    "thermal-receipt",
+                    receipt.clone(),
+                    true,
+                    Some(json!({ "paperWidthMm": 80, "invoiceNumber": "INV-RECEIPT" })),
+                ),
+                mock_template(
+                    "tpl_thermal_receipt_compact",
+                    "doc_temp_CompactReceipt00",
+                    "Compact Receipt",
+                    "thermal-receipt",
+                    receipt,
+                    true,
+                    Some(json!({ "paperWidthMm": 58, "invoiceNumber": "INV-COMPACT" })),
+                ),
+                mock_template(
+                    "tpl_credit_note",
+                    "doc_temp_5DHl8hUQTX3oLBSR",
+                    "Credit Note",
+                    "credit-note",
+                    json!({
                         "required": ["creditNoteNumber"],
-                        "properties": {
-                            "creditNoteNumber": { "type": "string" }
-                        }
-                    }
-                },
-                {
-                    "key": "tpl_analytics_report",
-                    "name": "doc_temp_An1yT1csRep0rtV1",
-                    "description": "Analytics Report",
-                    "dataSchema": {
-                        "$schema": "http://json-schema.org/draft-07/schema#",
-                        "type": "object",
-                        "additionalProperties": true,
+                        "properties": { "creditNoteNumber": { "type": "string" } }
+                    }),
+                    true,
+                    Some(json!({ "creditNoteNumber": "CN-SAMPLE" })),
+                ),
+                mock_template(
+                    "tpl_credit_note_compact",
+                    "doc_temp_CompactCredit000",
+                    "Credit Note Compact",
+                    "credit-note",
+                    json!({
+                        "required": ["creditNoteNumber"],
+                        "properties": { "creditNoteNumber": { "type": "string" } }
+                    }),
+                    true,
+                    Some(json!({ "creditNoteNumber": "CN-COMPACT" })),
+                ),
+                mock_template(
+                    "tpl_analytics_report",
+                    "doc_temp_An1yT1csRep0rtV1",
+                    "Analytics Report",
+                    "analytics-report",
+                    json!({
                         "required": ["generatedAt", "periodLabel", "granularityLabel", "kpis", "timeseries"],
                         "properties": {
                             "generatedAt": { "type": "string" },
@@ -121,8 +194,10 @@ fn mock_templates_json() -> serde_json::Value {
                             "kpis": { "type": "array" },
                             "timeseries": { "type": "object" }
                         }
-                    }
-                },
+                    }),
+                    true,
+                    None,
+                ),
             ]
         }
     })
@@ -162,7 +237,7 @@ async fn start_mock_document_server_with_templates(
             post(
                 |Path(template_key): Path<String>,
                  headers: HeaderMap,
-                 _body: axum::body::Bytes| async move {
+                 body: axum::body::Bytes| async move {
                     if let Some(auth) = headers.get("X-Internal-Api-Key")
                         && auth.is_empty()
                     {
@@ -178,8 +253,13 @@ async fn start_mock_document_server_with_templates(
                         StatusCode::OK,
                         [(header::CONTENT_TYPE, "application/pdf")],
                         Body::from(
-                            format!("%PDF-1.7 mock rendered PDF for template {template_key}")
-                                .into_bytes(),
+                            // Tests read which template rendered, and whether the
+                            // payload still carried a `logoUrl`, from this text.
+                            format!(
+                                "%PDF-1.7 mock rendered PDF for template {template_key} logoUrl={}",
+                                String::from_utf8_lossy(&body).contains("\"logoUrl\"")
+                            )
+                            .into_bytes(),
                         ),
                     )
                 },
@@ -213,10 +293,29 @@ pub async fn spawn_app() -> TestApp {
 #[allow(dead_code)]
 pub async fn spawn_app_with_document_server_url(document_server_url: String) -> TestApp {
     dotenvy::dotenv().ok();
-
-    let mut config = Config::from_env().expect("invalid configuration for test run");
-    config.mongodb_db_name =
+    let db_name =
         std::env::var("MONGODB_TEST_DB_NAME").unwrap_or_else(|_| "simplebash_pos_test".to_string());
+    spawn_mongo_app(db_name, document_server_url).await
+}
+
+/// Single-tenant app against a uniquely named throwaway Atlas database
+/// (`jtdocs_<uuid24>`, under Atlas's 38-byte cap). For tests that change
+/// shop-wide settings (such as the chosen document design), which would
+/// otherwise leak into every other test sharing `simplebash_pos_test`. The
+/// caller drops the database when done (`app.db.drop()`).
+#[allow(dead_code)]
+pub async fn spawn_app_isolated() -> TestApp {
+    dotenvy::dotenv().ok();
+    let db_name = format!(
+        "jtdocs_{}",
+        &uuid::Uuid::new_v4().simple().to_string()[..24]
+    );
+    spawn_mongo_app(db_name, start_mock_document_server().await).await
+}
+
+async fn spawn_mongo_app(db_name: String, document_server_url: String) -> TestApp {
+    let mut config = Config::from_env().expect("invalid configuration for test run");
+    config.mongodb_db_name = db_name;
 
     let db = clients::mongo::connect(&config.mongodb_uri, &config.mongodb_db_name)
         .await

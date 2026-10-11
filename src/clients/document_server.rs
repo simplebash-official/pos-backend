@@ -6,7 +6,10 @@
 // the same "connect/build once, hand out a shared handle" shape as
 // `clients::mongo::connect`.
 
-use std::collections::HashMap;
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use tokio::sync::RwLock;
 
@@ -16,10 +19,10 @@ use crate::core::{
 };
 
 /// Stable call-site slug -> the human label document-server publishes as a
-/// template's `description`. Its on-disk `name` is an opaque
-/// `doc_temp_<nanoid>` now, so the wire lookup keys off `description`; call
-/// sites (`billing::routes`, `documents::service`) keep passing these slugs,
-/// which is also what `generated_documents.template_name` stores.
+/// template's `description` (its schema `title`). Its on-disk `name` is an
+/// opaque `doc_temp_<nanoid>`, so slugs resolve through the title; this is
+/// the **built-in default** template of each kind, and what
+/// `generated_documents.template_name` stores.
 const TEMPLATE_DESCRIPTIONS: &[(&str, &str)] = &[
     ("a4-invoice", "A4 Invoice"),
     ("thermal-receipt", "Thermal Receipt"),
@@ -27,60 +30,118 @@ const TEMPLATE_DESCRIPTIONS: &[(&str, &str)] = &[
     ("analytics-report", "Analytics Report"),
 ];
 
-/// Resolves a call-site slug to the `description` document-server publishes.
-/// An unrecognised value is returned unchanged, so a caller that already
-/// holds a real description still works.
-fn slug_to_description(slug: &str) -> &str {
+/// The built-in default template's title for a call-site slug, if it has one.
+pub fn default_title(slug: &str) -> Option<&'static str> {
     TEMPLATE_DESCRIPTIONS
         .iter()
         .find(|(s, _)| *s == slug)
         .map(|(_, d)| *d)
-        .unwrap_or(slug)
+}
+
+/// Resolves a call-site slug to the `description` document-server publishes.
+/// An unrecognised value is returned unchanged, so a caller that already
+/// holds a real description still works.
+fn slug_to_description(slug: &str) -> &str {
+    default_title(slug).unwrap_or(slug)
+}
+
+/// How long a fetched template list is trusted. Templates are added and
+/// edited on the document-server without a restart (`POST /api/templates/sync`),
+/// so the list must refresh by itself; a minute keeps the per-print cost at
+/// zero while a new template shows up almost immediately.
+const TEMPLATE_CACHE_TTL: Duration = Duration::from_secs(60);
+
+/// The schema keyword a template uses to declare what it is for (see
+/// `document-server/templates/CLAUDE.md`).
+const KIND_KEYWORD: &str = "x-document-kind";
+
+/// One **active** template as the document-server publishes it.
+#[derive(Debug, Clone)]
+pub struct TemplateInfo {
+    /// The document-server-minted unique key (`tpl_...`) — persisted onto
+    /// `generated_documents` rows so the POS side durably holds the ID the
+    /// document server assigned. Differs per document-server database.
+    pub key: String,
+    /// The opaque, stable template id (`doc_temp_<nanoid>`, the `.typ` file
+    /// stem). Identical on every deployment, so this is what shops store.
+    pub name: String,
+    /// Human label (the schema `title`) shown in the dropdowns.
+    pub title: String,
+    /// What the template is for (`x-document-kind` in its schema), e.g.
+    /// `a4-invoice`. `None` for a template that does not declare one.
+    pub kind: Option<String>,
+    /// JSON Schema for the template's render payload (`dataSchema`), when
+    /// the template ships one. `None` → no pre-validation (matches that
+    /// service's render-time behavior).
+    pub data_schema: Option<serde_json::Value>,
+    /// The template's worked sample payload (`data`), used for previews.
+    pub sample: Option<serde_json::Value>,
+}
+
+struct TemplateCache {
+    loaded_at: Instant,
+    templates: Arc<Vec<TemplateInfo>>,
 }
 
 pub struct DocumentServerClient {
     http: reqwest::Client,
     base_url: String,
     api_key: String,
-    // Template `description` -> info (stable `tpl_...` key + optional input
-    // schema), populated lazily from `GET /api/templates` on first use.
-    // Template keys are stable for the lifetime of a document-server database
-    // (re-syncing a template on disk upserts by name, never regenerating the
-    // key — see that service's `sync_templates_from_disk`), so caching avoids
-    // an extra round trip on every render without ever going stale in
-    // practice; a process restart clears the cache anyway. The schema rides
-    // along in the same entry because `render()` validates every payload
-    // against it *before* sending — the schema the document-server publishes
-    // is the one contract this backend codes its payload builders against.
-    template_cache: RwLock<HashMap<String, TemplateInfo>>,
-}
-
-#[derive(Debug, Clone)]
-struct TemplateInfo {
-    /// The document-server-minted unique key (`tpl_...`) — persisted onto
-    /// `generated_documents` rows so the POS side durably holds the ID the
-    /// document server assigned.
-    key: String,
-    /// JSON Schema for the template's render payload (`dataSchema`), when
-    /// the template ships one. `None` → no pre-validation (matches that
-    /// service's render-time behavior).
-    data_schema: Option<serde_json::Value>,
+    cache_ttl: Duration,
+    // The active templates from `GET /api/templates`, refreshed after
+    // `cache_ttl`. If a refresh fails while a previous list exists, that list
+    // keeps being served (with a warning): a document-server hiccup must not
+    // stop the shop from printing. The schema rides along in the same entry
+    // because `render()` validates every payload against it *before*
+    // sending — the schema the document-server publishes is the one contract
+    // this backend codes its payload builders against.
+    template_cache: RwLock<Option<TemplateCache>>,
 }
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TemplateSummary {
     key: String,
-    /// Human label (the template's schema `title`) — the identifier this
-    /// backend resolves against. `name` is an opaque `doc_temp_<nanoid>`.
+    /// The opaque `doc_temp_<nanoid>` id.
+    name: String,
+    /// Human label (the template's schema `title`).
     #[serde(default)]
     description: Option<String>,
+    /// `GET /api/templates` also lists templates whose `.typ` vanished from
+    /// disk (deactivated, never deleted); those must not be offered or used.
+    #[serde(default = "default_true")]
+    is_active: bool,
     data_schema: Option<serde_json::Value>,
+    data: Option<serde_json::Value>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(serde::Deserialize)]
 struct TemplatesResponse {
     templates: Vec<TemplateSummary>,
+}
+
+impl TemplateSummary {
+    fn into_info(self) -> TemplateInfo {
+        let kind = self
+            .data_schema
+            .as_ref()
+            .and_then(|schema| schema.get(KIND_KEYWORD))
+            .and_then(|kind| kind.as_str())
+            .filter(|kind| !kind.is_empty())
+            .map(str::to_string);
+        TemplateInfo {
+            title: self.description.unwrap_or_else(|| self.name.clone()),
+            key: self.key,
+            name: self.name,
+            kind,
+            data_schema: self.data_schema,
+            sample: self.data,
+        }
+    }
 }
 
 impl DocumentServerClient {
@@ -89,8 +150,16 @@ impl DocumentServerClient {
             http: reqwest::Client::new(),
             base_url,
             api_key,
-            template_cache: RwLock::new(HashMap::new()),
+            cache_ttl: TEMPLATE_CACHE_TTL,
+            template_cache: RwLock::new(None),
         }
+    }
+
+    /// Overrides how long the template list is trusted (tests use zero to
+    /// force a refresh on every call).
+    pub fn with_cache_ttl(mut self, ttl: Duration) -> Self {
+        self.cache_ttl = ttl;
+        self
     }
 
     /// Polls `GET {base_url}/api/health` until it responds successfully or
@@ -126,26 +195,42 @@ impl DocumentServerClient {
         ))
     }
 
-    /// Resolves a template's stable call-site slug (e.g. `"a4-invoice"`) to
-    /// its `templates.key` (`tpl_...`) — the document-server-minted unique
-    /// ID. Public because `modules::documents::service::get_or_render`
-    /// persists it on every generated-document row. Unauthenticated on
-    /// document-server's side (`templates` routes are deliberately left
-    /// open — see that service's auth notes), so no header here.
-    pub async fn resolve_template_key(&self, template_slug: &str) -> AppResult<String> {
-        Ok(self.get_template_info(template_slug).await?.key)
-    }
-
-    /// Cached lookup by the template's published `description` (translated
-    /// from `template_slug` via `TEMPLATE_DESCRIPTIONS`); populates the whole
-    /// cache from one `GET /api/templates` call on first miss.
-    async fn get_template_info(&self, template_slug: &str) -> AppResult<TemplateInfo> {
-        let description = slug_to_description(template_slug);
-
-        if let Some(info) = self.template_cache.read().await.get(description) {
-            return Ok(info.clone());
+    /// Every **active** template, from the cache while it is fresh, else
+    /// from `GET /api/templates`. Unauthenticated on document-server's side
+    /// (`templates` routes are deliberately left open — see that service's
+    /// auth notes), so no API-key header here.
+    pub async fn list_templates(&self) -> AppResult<Arc<Vec<TemplateInfo>>> {
+        if let Some(cache) = self.template_cache.read().await.as_ref()
+            && cache.loaded_at.elapsed() < self.cache_ttl
+        {
+            return Ok(cache.templates.clone());
         }
 
+        match self.fetch_templates().await {
+            Ok(templates) => {
+                let templates = Arc::new(templates);
+                *self.template_cache.write().await = Some(TemplateCache {
+                    loaded_at: Instant::now(),
+                    templates: templates.clone(),
+                });
+                Ok(templates)
+            }
+            Err(err) => {
+                if let Some(cache) = self.template_cache.read().await.as_ref() {
+                    tracing::warn!(
+                        category = "http",
+                        event = "outbound",
+                        service = "document-server",
+                        "could not refresh the template list, serving the previous one"
+                    );
+                    return Ok(cache.templates.clone());
+                }
+                Err(err)
+            }
+        }
+    }
+
+    async fn fetch_templates(&self) -> AppResult<Vec<TemplateInfo>> {
         let url = format!("{}/api/templates", self.base_url);
         let response = self
             .http
@@ -167,37 +252,79 @@ impl DocumentServerClient {
             .ok_or_else(|| AppError::internal("document-server returned no template list"))?
             .templates;
 
-        let mut cache = self.template_cache.write().await;
-        for template in &templates {
-            if let Some(desc) = &template.description {
-                cache.insert(
-                    desc.clone(),
-                    TemplateInfo {
-                        key: template.key.clone(),
-                        data_schema: template.data_schema.clone(),
-                    },
-                );
-            }
-        }
-
-        cache.get(description).cloned().ok_or_else(|| {
-            AppError::internal(format!(
-                "document-server has no template described as '{description}' (slug '{template_slug}')"
-            ))
-        })
+        Ok(templates
+            .into_iter()
+            .filter(|template| template.is_active)
+            .map(TemplateSummary::into_info)
+            .collect())
     }
 
-    /// Renders the template addressed by `template_slug` against `data` and
-    /// returns the raw PDF bytes. The payload is validated against the
-    /// template's published schema first when it has one — a builder/template
-    /// contract drift is caught *here*, with field-level messages, instead of
-    /// surfacing as that service's identical 422 after a wasted round trip
-    /// (or worse, silently rendering blanks for a template without
-    /// server-side validation). `data` becomes the Typst template's
-    /// `sys.inputs` — see each `.typ` file's header comment in
-    /// `document-server/templates/documents/` for the exact field contract.
+    /// The active template with this opaque `name` (`doc_temp_<nanoid>`).
+    pub async fn find_by_name(&self, name: &str) -> AppResult<Option<TemplateInfo>> {
+        Ok(self
+            .list_templates()
+            .await?
+            .iter()
+            .find(|template| template.name == name)
+            .cloned())
+    }
+
+    /// The template a call-site slug (e.g. `"a4-invoice"`) stands for: the
+    /// active template published under that slug's built-in title.
+    async fn get_template_info(&self, template_slug: &str) -> AppResult<TemplateInfo> {
+        let description = slug_to_description(template_slug);
+        self.list_templates()
+            .await?
+            .iter()
+            .find(|template| template.title == description)
+            .cloned()
+            .ok_or_else(|| {
+                AppError::internal(format!(
+                    "document-server has no template described as '{description}' (slug '{template_slug}')"
+                ))
+            })
+    }
+
+    /// Renders the built-in template of a call-site slug (e.g.
+    /// `"analytics-report"`) against `data`; see [`Self::render_template`].
     pub async fn render(&self, template_slug: &str, data: serde_json::Value) -> AppResult<Vec<u8>> {
         let info = self.get_template_info(template_slug).await?;
+        self.render_template(&info, data).await
+    }
+
+    /// Renders a specific template's own sample payload — what the Settings
+    /// preview shows. The sample's `logoUrl` is dropped: it points at an
+    /// external image and a preview must not depend on the network.
+    pub async fn render_sample(&self, template: &TemplateInfo) -> AppResult<Vec<u8>> {
+        let mut sample = template.sample.clone().ok_or_else(|| {
+            AppError::not_found_with_code(
+                format!(
+                    "template '{}' has no sample data to preview",
+                    template.title
+                ),
+                "TEMPLATE_SAMPLE_MISSING",
+            )
+        })?;
+        if let Some(fields) = sample.as_object_mut() {
+            fields.remove("logoUrl");
+        }
+        self.render_template(template, sample).await
+    }
+
+    /// Renders `template` against `data` and returns the raw PDF bytes. The
+    /// payload is validated against the template's published schema first
+    /// when it has one — a builder/template contract drift is caught *here*,
+    /// with field-level messages, instead of surfacing as that service's
+    /// identical 422 after a wasted round trip (or worse, silently rendering
+    /// blanks for a template without server-side validation). `data` becomes
+    /// the Typst template's `sys.inputs` — see each `.typ` file's header
+    /// comment in `document-server/templates/documents/` for the exact field
+    /// contract.
+    pub async fn render_template(
+        &self,
+        info: &TemplateInfo,
+        data: serde_json::Value,
+    ) -> AppResult<Vec<u8>> {
         validate_payload(info.data_schema.as_ref(), &data)?;
 
         let url = format!("{}/api/render/{}", self.base_url, info.key);
@@ -220,7 +347,7 @@ impl DocumentServerClient {
                 event = "outbound",
                 service = "document-server",
                 url = %url,
-                template = template_slug,
+                template = %info.name,
                 status = status.as_u16(),
                 latency_ms = started.elapsed().as_millis() as u64,
                 "document-server render failed"
@@ -238,7 +365,7 @@ impl DocumentServerClient {
             event = "outbound",
             service = "document-server",
             url = %url,
-            template = template_slug,
+            template = %info.name,
             status = status.as_u16(),
             pdf_bytes = bytes.len(),
             latency_ms = started.elapsed().as_millis() as u64,

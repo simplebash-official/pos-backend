@@ -459,7 +459,36 @@
                 "a4-invoice"
               ]
             },
-            "description": "Renders (or returns the cached) PDF for an invoice. `documentType` in the path is either `a4-invoice` or `thermal-receipt` — this request is the A4 variant; duplicate it and change the last path segment to `thermal-receipt` for the receipt variant, which also accepts the `paperWidthMm` query param (58 or 80, default 80). Response is `application/pdf` bytes, not the usual JSON envelope.\n\n**Requires a valid Bearer token** (any role — `CurrentUser`, no specific permission) or the API returns 401."
+            "description": "Renders (or returns the cached) PDF for an invoice. `documentType` in the path is `a4-invoice` or `thermal-receipt` — this request is the A4 variant; duplicate it and change the last path segment for the receipt, which also accepts the `paperWidthMm` query param (58 or 80, default 80). Which design prints is the shop's choice for that kind (Settings → Document Designs, `GET/PUT /api/settings/document-templates`), or the standard design when nothing was chosen; add `?template=<design id>` to use a different design for this one print (422 `TEMPLATE_UNAVAILABLE` if it does not exist or is for another kind of document). Response is `application/pdf` bytes, not the usual JSON envelope.\n\n**Requires a valid Bearer token** (any role — `CurrentUser`, no specific permission) or the API returns 401."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Invoice Document (A4 Invoice, chosen design)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/billing/invoices/{{invoiceKey}}/documents/a4-invoice?template={{templateName}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "billing",
+                "invoices",
+                "{{invoiceKey}}",
+                "documents",
+                "a4-invoice"
+              ],
+              "query": [
+                {
+                  "key": "template",
+                  "value": "{{templateName}}"
+                }
+              ]
+            },
+            "description": "Same as above, but printed in the design named by `templateName` for this one print (a design id from `GET /api/settings/document-templates`, e.g. `doc_temp_ZahcoYg8xCQjuc8c`). The shop's own choice is not changed."
           },
           "response": []
         },
@@ -735,7 +764,7 @@
                 "credit-note"
               ]
             },
-            "description": "Renders (or returns the cached copy of) the credit note's printable PDF via the external document-server. The only supported documentType is `credit-note`; anything else returns 400. Responds with `application/pdf` bytes.\n\n**Requires a valid Bearer token** (any role)."
+            "description": "Renders (or returns the cached copy of) the credit note's printable PDF via the external document-server. The only supported documentType is `credit-note`; anything else returns 400. Responds with `application/pdf` bytes.\n\n**Requires a valid Bearer token** (any role).\n\nOptional `?template=<design id>` prints this credit note in another design for this one print; without it the shop's chosen credit-note design (or the standard one) is used. 422 `TEMPLATE_UNAVAILABLE` if the design does not exist or is for another kind of document."
           },
           "response": []
         }
@@ -4348,6 +4377,87 @@
       "description": "Desktop-only backup and restore endpoints for exporting and restoring full SQLite database state and app settings."
     },
     {
+      "name": "Settings",
+      "item": [
+        {
+          "name": "Get Document Designs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/settings/document-templates",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "settings",
+                "document-templates"
+              ]
+            },
+            "description": "For each kind of document the shop can choose a design for (`a4-invoice`, `thermal-receipt`, `credit-note`): its label, the designs available (`templates`, standard design first, then by title; retired designs never appear), the shop's choice (`selected`, `null` = standard design, also `null` if the chosen design was removed) and the design prints use right now (`effective`). New designs appear here automatically once the document-server publishes them.\n\n**Requires a valid Bearer token** (any role) or the API returns 401."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Document Designs",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"selections\": {\n    \"a4-invoice\": \"doc_temp_ZahcoYg8xCQjuc8c\",\n    \"thermal-receipt\": null\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/settings/document-templates",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "settings",
+                "document-templates"
+              ]
+            },
+            "description": "Chooses the shop's designs. Only the kinds in `selections` change; a design id picks it, `null` returns that kind to the standard design. Nothing is saved unless every pick is valid: 400 for an unknown kind, 422 `TEMPLATE_UNAVAILABLE` for a design that does not exist, was retired or is for another kind. Returns the same body as the GET.\n\n**Requires Admin JWT** (`role: admin` claim) — 403 for other roles."
+          },
+          "response": []
+        },
+        {
+          "name": "Preview Document Design",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/settings/document-templates/{{templateName}}/preview",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "settings",
+                "document-templates",
+                "{{templateName}}",
+                "preview"
+              ]
+            },
+            "description": "A PDF of one design rendered with its own sample data (never a real invoice), for choosing before saving. 404 `TEMPLATE_UNAVAILABLE` for an unknown or retired design. Response is `application/pdf` bytes.\n\n**Requires a valid Bearer token** (any role) or the API returns 401."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "System",
       "item": [
         {
@@ -4574,6 +4684,10 @@
       "key": "provisionSecret",
       "value": "replace-with-PROVISION_SECRET",
       "description": "Shared secret for the internal provisioning endpoint (backend PROVISION_SECRET)."
+    },
+    {
+      "key": "templateName",
+      "value": "doc_temp_ZahcoYg8xCQjuc8c"
     }
   ]
 }
