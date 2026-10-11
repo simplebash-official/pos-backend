@@ -99,7 +99,9 @@ pub(crate) async fn update_shop_profile(
         if let Some(trading_name) = req.trading_name {
             let trimmed = trading_name.trim();
             if trimmed.is_empty() {
-                return Err(AppError::validation("Trading name / store name cannot be empty"));
+                return Err(AppError::validation(
+                    "Trading name / store name cannot be empty",
+                ));
             }
             doc.trading_name = trimmed.to_string();
 

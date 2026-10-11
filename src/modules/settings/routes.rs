@@ -16,8 +16,7 @@ use crate::{
 };
 
 pub fn router() -> OpenApiRouter<AppState> {
-    OpenApiRouter::new()
-        .routes(routes!(get_shop_profile, update_shop_profile))
+    OpenApiRouter::new().routes(routes!(get_shop_profile, update_shop_profile))
 }
 
 /// Retrieve the active shop profile.

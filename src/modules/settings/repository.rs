@@ -73,10 +73,7 @@ pub(crate) async fn find_shop_profile(
     }
 }
 
-pub(crate) async fn upsert_shop_profile(
-    db: &Db,
-    doc: &ShopProfileDocument,
-) -> AppResult<()> {
+pub(crate) async fn upsert_shop_profile(db: &Db, doc: &ShopProfileDocument) -> AppResult<()> {
     match db {
         Db::Sqlite(pool) => {
             let address_lines_json =

@@ -210,7 +210,6 @@ pub fn index_specs(multi_tenant: bool) -> Vec<IndexSpec> {
         true,
     );
 
-
     // Platform directory (`modules::tenants`): shop codes are globally unique
     // and the collection is not tenant-owned, so it is never tenant-prefixed.
     if multi_tenant {

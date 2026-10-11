@@ -51,8 +51,14 @@ async fn test_shop_profile_initial_defaults_are_empty_in_sqlite() {
     let app = common::spawn_app_sqlite().await;
     let token = common::mint_token(&app.config, Some(Role::Admin), &[]);
 
-    let (status, res) =
-        send_request(&app.router, "GET", "/api/settings/shop-profile", Some(&token), None).await;
+    let (status, res) = send_request(
+        &app.router,
+        "GET",
+        "/api/settings/shop-profile",
+        Some(&token),
+        None,
+    )
+    .await;
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(res["success"], true);
