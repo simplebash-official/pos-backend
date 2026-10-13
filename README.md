@@ -118,6 +118,8 @@ them at startup and refuses to start with a missing or placeholder secret.
 | `SEED_ADMIN_PASSWORD` / `SEED_ADMIN_NAME` | — | First admin account for the seeder (its username is always `admin`) |
 | `TENANT_MODE` | `single` | `multi` = many shops on one server (MongoDB only) |
 | `CORS_ALLOWED_ORIGINS` | desktop + local dev only | Comma-separated browser origins allowed to call the API |
+| `RATE_LIMIT_BURST` / `RATE_LIMIT_REFILL_PER_SEC` | `200` / `50` | Per-client request bucket for every route (client = nginx `X-Real-IP`; direct callers share one bucket) |
+| `RATE_LIMIT_SENSITIVE_BURST` / `RATE_LIMIT_SENSITIVE_REFILL_PER_SEC` | `20` / `0.5` | Tighter per-client bucket for `/api/auth`, `/api/system`, `/api/internal`; exceeding either answers `429 RATE_LIMITED` |
 | `IDENTITY_JWKS_URL`, `IDENTITY_ISSUER`, `IDENTITY_TENANT_ID` | — | Optional sign-in through the SimpleBash identity service |
 | `PROVISION_SECRET` | — | Multi-tenant only: lets the identity service create shops |
 | `APP_ENV` | `development` | `production` tightens seeding rules |

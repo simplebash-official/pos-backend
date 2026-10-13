@@ -24,6 +24,22 @@ use simplebash_pos_backend::{
 };
 use tower::ServiceExt;
 
+/// These tests deliberately fire hundreds of requests from one client, which
+/// the per-client request limiter (`core::rate_limit`) would answer with 429.
+/// The limits are read when the router is built, so lift them before the first
+/// `spawn_app()`; `Once` keeps the four tests from racing on the environment.
+async fn spawn_unthrottled() -> common::TestApp {
+    static LIFT: std::sync::Once = std::sync::Once::new();
+    LIFT.call_once(|| {
+        // SAFETY: runs once, before any test in this binary has built a router.
+        unsafe {
+            std::env::set_var("RATE_LIMIT_BURST", "1000000");
+            std::env::set_var("RATE_LIMIT_REFILL_PER_SEC", "1000000");
+        }
+    });
+    common::spawn_app().await
+}
+
 async fn execute(router: &axum::Router, request: Request<Body>) -> (StatusCode, Value) {
     let response = router.clone().oneshot(request).await.unwrap();
     let status = response.status();
@@ -129,7 +145,7 @@ fn seed_invoice(
 /// Verifies SingleFlight deduplicates all 50 requests into 1 execution with 100% response integrity.
 #[tokio::test]
 async fn test_singleflight_thundering_herd_stress() {
-    let app = common::spawn_app().await;
+    let app = spawn_unthrottled().await;
     let admin_token = Arc::new(common::mint_token(
         &app.config,
         Some(Role::Admin),
@@ -226,7 +242,7 @@ async fn test_singleflight_thundering_herd_stress() {
 /// Verifies sub-millisecond p99 latency and high throughput when serving from the in-memory cache.
 #[tokio::test]
 async fn test_hot_cache_throughput_and_latency_stress() {
-    let app = common::spawn_app().await;
+    let app = spawn_unthrottled().await;
     let admin_token = Arc::new(common::mint_token(
         &app.config,
         Some(Role::Admin),
@@ -310,7 +326,7 @@ async fn test_hot_cache_throughput_and_latency_stress() {
 /// perform POS sales, validating deadlock-freedom and real-time cache consistency.
 #[tokio::test]
 async fn test_concurrent_mutations_and_invalidation_race() {
-    let app = common::spawn_app().await;
+    let app = spawn_unthrottled().await;
     let admin_token = Arc::new(common::mint_token(
         &app.config,
         Some(Role::Admin),
@@ -437,7 +453,7 @@ async fn test_concurrent_mutations_and_invalidation_race() {
 /// Seeds 30 invoices across historical dates and requests 'section=all' under concurrency.
 #[tokio::test]
 async fn test_heavy_multi_dataset_fanout_stress() {
-    let app = common::spawn_app().await;
+    let app = spawn_unthrottled().await;
     let admin_token = Arc::new(common::mint_token(
         &app.config,
         Some(Role::Admin),

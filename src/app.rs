@@ -233,6 +233,12 @@ pub fn build_router(state: AppState) -> Router {
         .route("/", axum::routing::get(portal))
         .route("/api", axum::routing::get(portal))
         .merge(SwaggerUi::new("/docs").url("/api-docs/openapi.json", openapi))
+        // Inside CORS/trace so a 429 still carries CORS headers and is logged.
+        // Inside CORS/trace so a 429 still carries CORS headers and is logged.
+        .layer(axum::middleware::from_fn_with_state(
+            std::sync::Arc::new(crate::core::rate_limit::RequestLimits::from_env()),
+            crate::core::rate_limit::limit_requests,
+        ))
         .layer(cors)
         .layer(trace)
         // Desktop: wakes the sync agent after each write so it uploads at
