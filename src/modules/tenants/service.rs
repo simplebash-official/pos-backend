@@ -108,6 +108,7 @@ pub async fn create_tenant_with_key(
             setup_completed: false,
             sample_data_loaded: false,
             setup_completed_at: None,
+            suspended_at: None,
         };
         // A concurrent creator can pass the check above; the unique index then
         // rejects the second insert.
@@ -255,6 +256,78 @@ pub async fn resolve_shop_code(db: &Db, code: &str) -> AppResult<Tenant> {
             codes::TENANT_NOT_FOUND,
         )
     })
+}
+
+// ----------------------------------------------------------------------------
+// Suspension
+// ----------------------------------------------------------------------------
+
+/// How long a looked-up suspension flag is trusted before the next request re-reads it. Changes
+/// made through `set_suspended` on this instance take effect at once; another instance of the
+/// backend picks them up within this window, which is the "about 30 seconds" the cloud promises.
+const SUSPENSION_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+
+type SuspensionCache = std::collections::HashMap<String, (bool, std::time::Instant)>;
+
+static SUSPENDED: std::sync::LazyLock<std::sync::Mutex<SuspensionCache>> =
+    std::sync::LazyLock::new(Default::default);
+
+fn suspension_cache() -> std::sync::MutexGuard<'static, SuspensionCache> {
+    SUSPENDED.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Whether the shop's owner account is currently suspended. Cached for `SUSPENSION_TTL`.
+/// Always `false` outside the multi-tenant (MongoDB) cloud and for a tenant that is not in the
+/// directory (its token is then refused elsewhere).
+pub(crate) async fn is_suspended(db: &Db, tenant_key: &str) -> AppResult<bool> {
+    if db.as_mongo().is_none() {
+        return Ok(false);
+    }
+    if let Some(known) = suspension_cache()
+        .get(tenant_key)
+        .filter(|(_, read_at)| read_at.elapsed() < SUSPENSION_TTL)
+        .map(|(suspended, _)| *suspended)
+    {
+        return Ok(known);
+    }
+    let suspended = repository::find_tenant_by_key(db, tenant_key)
+        .await?
+        .is_some_and(|t| t.suspended_at.is_some());
+    suspension_cache().insert(
+        tenant_key.to_string(),
+        (suspended, std::time::Instant::now()),
+    );
+    Ok(suspended)
+}
+
+/// The refusal every request of a suspended shop gets.
+pub(crate) fn suspended_error() -> AppError {
+    AppError::custom(
+        axum::http::StatusCode::FORBIDDEN,
+        codes::ACCOUNT_SUSPENDED,
+        "This shop's cloud access is suspended. The desktop app keeps working offline; contact SimpleBash to restore access.",
+    )
+}
+
+/// Switches a shop's cloud access off or on (called by the identity service when an operator
+/// suspends or reinstates the owner's account). Idempotent. 404 `TENANT_NOT_FOUND` for an
+/// unknown shop, so identity can tell "not provisioned yet" from success and re-provision first.
+pub async fn set_suspended(db: &Db, tenant_id: &str, suspended: bool) -> AppResult<()> {
+    crate::core::logging::domain::tracked("tenants.suspension", async move {
+        validate_tenant_key(tenant_id)?;
+        if !repository::set_tenant_suspended(db, tenant_id, suspended).await? {
+            return Err(AppError::not_found_with_code(
+                format!("No shop with id '{tenant_id}'"),
+                codes::TENANT_NOT_FOUND,
+            ));
+        }
+        suspension_cache().insert(
+            tenant_id.to_string(),
+            (suspended, std::time::Instant::now()),
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[cfg(test)]
