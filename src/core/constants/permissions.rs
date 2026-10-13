@@ -54,3 +54,8 @@ pub const EMPLOYEES_READ: &str = "employees:read";
 /// separate action gated by `USERS_MANAGE`/`USERS_MANAGE_STAFF` instead (see
 /// `modules::users::service`), not this permission.
 pub const EMPLOYEES_WRITE: &str = "employees:write";
+
+/// Create, list, print/reprint and cancel customer quotations (price offers,
+/// not sales). Granted to Admin and Manager only — Staff tokens get a 403 from
+/// every `/api/quotations` route, so hiding the UI is never the only guard.
+pub const QUOTATIONS_MANAGE: &str = "quotations:manage";

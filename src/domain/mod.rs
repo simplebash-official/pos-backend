@@ -10,6 +10,7 @@ pub mod imports;
 pub mod inventory;
 pub mod print_jobs;
 pub mod purchases;
+pub mod quotations;
 pub mod repairs;
 pub mod reports;
 pub mod sequences;

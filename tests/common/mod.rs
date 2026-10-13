@@ -181,6 +181,22 @@ fn mock_templates_json() -> serde_json::Value {
                     Some(json!({ "creditNoteNumber": "CN-COMPACT" })),
                 ),
                 mock_template(
+                    "tpl_quotation",
+                    "doc_temp_Qu0tati0nV1Std00",
+                    "Quotation",
+                    "quotation",
+                    json!({
+                        "required": ["quotationNumber", "validUntil", "items"],
+                        "properties": {
+                            "quotationNumber": { "type": "string" },
+                            "validUntil": { "type": "string" },
+                            "items": { "type": "array" }
+                        }
+                    }),
+                    true,
+                    Some(json!({ "quotationNumber": "QUO-SAMPLE", "validUntil": "01 Jan 2030", "items": [] })),
+                ),
+                mock_template(
                     "tpl_analytics_report",
                     "doc_temp_An1yT1csRep0rtV1",
                     "Analytics Report",

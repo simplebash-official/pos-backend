@@ -175,6 +175,37 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .await;
     }
 
+    // `quotations` was first created without the sync columns. The capture triggers
+    // (`sync_capture::install_triggers`) read `NEW.version`, so every write to the
+    // table would fail if these were missing: unlike the best-effort ALTERs above,
+    // an error here is propagated.
+    let quotation_cols: Vec<(i32, String)> =
+        sqlx::query_as("SELECT cid, name FROM pragma_table_info('quotations')")
+            .fetch_all(pool)
+            .await
+            .unwrap_or_default();
+    if !quotation_cols.is_empty() {
+        for (column, ddl) in [
+            (
+                "version",
+                "ALTER TABLE quotations ADD COLUMN version INTEGER NOT NULL DEFAULT 1",
+            ),
+            (
+                "deleted_at",
+                "ALTER TABLE quotations ADD COLUMN deleted_at TEXT",
+            ),
+            (
+                "updated_by_device",
+                "ALTER TABLE quotations ADD COLUMN updated_by_device TEXT",
+            ),
+        ] {
+            if !quotation_cols.iter().any(|(_, name)| name == column) {
+                tracing::info!("Migrating 'quotations' table: adding '{column}' column");
+                pool.execute(ddl).await?;
+            }
+        }
+    }
+
     Ok(())
 }
 

@@ -25,6 +25,7 @@ const ADMIN_PERMISSIONS: &[&str] = &[
     perm::CUSTOMERS_WRITE,
     perm::EMPLOYEES_READ,
     perm::EMPLOYEES_WRITE,
+    perm::QUOTATIONS_MANAGE,
 ];
 
 // Everything an Admin has except full account management — a Manager runs
@@ -44,6 +45,7 @@ const MANAGER_PERMISSIONS: &[&str] = &[
     perm::CUSTOMERS_WRITE,
     perm::EMPLOYEES_READ,
     perm::EMPLOYEES_WRITE,
+    perm::QUOTATIONS_MANAGE,
 ];
 
 // Day-to-day operational permissions only — no inventory administration, no

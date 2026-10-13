@@ -454,6 +454,44 @@ CREATE TABLE IF NOT EXISTS import_batches (
     updated_at TEXT NOT NULL
 );
 
+-- Customer quotations (priced offers; no stock/payment effect). Synced between
+-- devices and the cloud (`Lifecycle` merge: the body is immutable, `status` only
+-- moves active -> cancelled), hence version/deleted_at/updated_by_device and the
+-- sync index below. `items` and `shop_profile_snapshot` are JSON text;
+-- `valid_until` is YYYY-MM-DD so plain string comparison orders it correctly.
+-- A database created before sync gets the three sync columns from
+-- `clients::sqlite::migrate_schema`.
+CREATE TABLE IF NOT EXISTS quotations (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    quotation_number TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL,
+    customer_key TEXT,
+    customer_name TEXT NOT NULL,
+    customer_phone TEXT,
+    customer_address TEXT,
+    items TEXT NOT NULL,
+    subtotal_cents INTEGER NOT NULL,
+    discount_type TEXT NOT NULL,
+    discount_value REAL NOT NULL,
+    discount_cents INTEGER NOT NULL,
+    total_cents INTEGER NOT NULL,
+    valid_until TEXT NOT NULL,
+    notes TEXT,
+    terms TEXT,
+    prepared_by TEXT,
+    shop_profile_snapshot TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT,
+    updated_by_device TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_quotations_created_at ON quotations(created_at);
+CREATE INDEX IF NOT EXISTS idx_quotations_sync ON quotations(updated_at, key);
+CREATE INDEX IF NOT EXISTS idx_quotations_id ON quotations(id);
+
 CREATE TABLE IF NOT EXISTS generated_documents (
     key TEXT PRIMARY KEY,
     id TEXT NOT NULL,

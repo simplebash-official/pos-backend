@@ -38,6 +38,8 @@ const INVOICE_LIFECYCLE: &[&str] = &[
 /// Invoice columns recomputed from ledger rows (never merged from a payload).
 const INVOICE_DERIVED: &[&str] = &["refundedCents", "creditNoteCount"];
 const CREDIT_NOTE_LIFECYCLE: &[&str] = &["status", "voidedAt", "voidedBy", "voidedReason"];
+/// A quotation's only post-creation change is its status (active -> cancelled).
+const QUOTATION_LIFECYCLE: &[&str] = &["status"];
 
 /// Maximum accepted clock lead of a sender over the receiver.
 const MAX_FUTURE_MS: i64 = 5 * 60 * 1000;
@@ -195,6 +197,8 @@ pub fn lifecycle_rank(resource: &str, status: &str) -> Option<u8> {
         ("creditNotes" | "credit_notes" | "creditNote", "awaiting_resolution") => Some(0),
         ("creditNotes" | "credit_notes" | "creditNote", "resolved") => Some(1),
         ("creditNotes" | "credit_notes" | "creditNote", "voided") => Some(2),
+        ("quotations" | "quotation", "active") => Some(0),
+        ("quotations" | "quotation", "cancelled") => Some(1),
         _ => None,
     }
 }
@@ -203,6 +207,7 @@ fn lifecycle_keys(resource: &str) -> Option<&'static [&'static str]> {
     match resource {
         "invoices" | "invoice" => Some(INVOICE_LIFECYCLE),
         "creditNotes" | "credit_notes" | "creditNote" => Some(CREDIT_NOTE_LIFECYCLE),
+        "quotations" | "quotation" => Some(QUOTATION_LIFECYCLE),
         _ => None,
     }
 }
@@ -483,6 +488,7 @@ mod tests {
             "payments",
             "invoices",
             "creditNotes",
+            "quotations",
             "productSerials",
         ] {
             let s = spec(name).unwrap();
@@ -772,6 +778,70 @@ mod tests {
         assert_eq!(
             merge_lifecycle("creditNotes", &open, &changed_body).rejected,
             Some("IMMUTABLE_MISMATCH")
+        );
+    }
+
+    fn quotation(status: &str, total_cents: i64) -> Value {
+        json!({
+            "key": "quo_1", "quotationNumber": "QUO-0001", "status": status,
+            "totalCents": total_cents, "items": [{ "name": "Screen", "quantity": 1 }],
+            "shopProfileSnapshot": { "tradingName": "TechFix" },
+            "updatedAt": "2026-10-13T09:00:00Z", "version": 1
+        })
+    }
+
+    #[test]
+    fn quotation_lifecycle_only_moves_forward() {
+        assert_eq!(lifecycle_rank("quotations", "active"), Some(0));
+        assert_eq!(lifecycle_rank("quotations", "cancelled"), Some(1));
+        // `expired` is derived from the date, never a stored status.
+        assert_eq!(lifecycle_rank("quotations", "expired"), None);
+    }
+
+    #[test]
+    fn a_cancelled_quotation_wins_in_every_delivery_order_and_is_never_undone() {
+        let active = quotation("active", 1000);
+        let cancelled = quotation("cancelled", 1000);
+
+        // active then cancel, cancel then a late (stale) active: both end cancelled.
+        let forward = merge_lifecycle("quotations", &active, &cancelled);
+        assert_eq!(forward.merged["status"], "cancelled");
+        assert!(forward.changed && forward.rejected.is_none());
+
+        let stale = merge_lifecycle("quotations", &cancelled, &active);
+        assert_eq!(stale.merged["status"], "cancelled");
+        assert!(!stale.changed, "a stale active write must change nothing");
+    }
+
+    #[test]
+    fn cancelling_twice_is_a_no_op() {
+        let cancelled = quotation("cancelled", 1000);
+        let again = merge_lifecycle("quotations", &cancelled, &cancelled.clone());
+        assert!(!again.changed);
+        assert!(again.rejected.is_none());
+    }
+
+    #[test]
+    fn a_quotation_body_is_immutable_and_unknown_statuses_are_rejected() {
+        let active = quotation("active", 1000);
+        // Same key, different content: a replica must never silently adopt it.
+        assert_eq!(
+            merge_lifecycle("quotations", &active, &quotation("cancelled", 999)).rejected,
+            Some("IMMUTABLE_MISMATCH")
+        );
+        assert_eq!(
+            merge_lifecycle("quotations", &active, &quotation("expired", 1000)).rejected,
+            Some("INVALID_PAYLOAD")
+        );
+        // Write metadata never counts as a content difference.
+        let mut later = quotation("cancelled", 1000);
+        later["updatedAt"] = json!("2026-10-14T09:00:00Z");
+        later["version"] = json!(2);
+        later["updatedByDevice"] = json!("dev_b");
+        assert!(
+            merge_lifecycle("quotations", &active, &later)
+                .rejected
+                .is_none()
         );
     }
 

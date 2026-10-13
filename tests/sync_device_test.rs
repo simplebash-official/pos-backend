@@ -275,6 +275,7 @@ const SYNCED: &[&str] = &[
     "invoices",
     "payments",
     "credit_notes",
+    "quotations",
 ];
 
 async fn assert_same_data(a: &Device, b: &Device) {
@@ -1778,4 +1779,247 @@ fn logging_redaction_masks_the_password_hash_under_both_spellings() {
     let text = value.to_string();
     assert!(!text.contains("argon2"), "{text}");
     assert!(text.contains("\"name\":\"A\""));
+}
+
+// ---------------------------------------------------------------------------
+// Quotations
+// ---------------------------------------------------------------------------
+
+fn quotation_body(customer: &str) -> Value {
+    let until = (chrono::Utc::now() + chrono::Duration::days(30))
+        .format("%Y-%m-%d")
+        .to_string();
+    json!({
+        "customer": { "customerName": customer, "customerPhone": "0771234567" },
+        "items": [{ "name": "Screen replacement", "unitPriceCents": 10000, "quantity": 2, "discountCents": 500 }],
+        "pricingAdjustments": { "discountType": "percentage", "discountValue": 10.0 },
+        "validUntil": until, "notes": "Excludes courier", "terms": "50% advance", "preparedBy": "Kamal"
+    })
+}
+
+async fn create_quotation(dev: &Device, customer: &str) -> String {
+    let created = dev
+        .api("POST", "/api/quotations", Some(quotation_body(customer)))
+        .await;
+    created["data"]["key"].as_str().unwrap().to_string()
+}
+
+async fn cancel_quotation(dev: &Device, key: &str) {
+    dev.api("POST", &format!("/api/quotations/{key}/cancel"), None)
+        .await;
+}
+
+/// The quotation entries of an outbox drain, as the `changes` of an apply request.
+fn quotation_changes(items: &[Value]) -> Vec<Value> {
+    let only: Vec<Value> = items
+        .iter()
+        .filter(|item| item["record"]["resource"] == "quotations")
+        .cloned()
+        .collect();
+    as_pulled(&only)
+}
+
+async fn apply(dev: &Device, changes: Vec<Value>) -> Value {
+    let applied = dev
+        .sync(
+            "POST",
+            "/api/sync/apply",
+            Some(json!({ "mode": "incremental", "changes": changes })),
+        )
+        .await;
+    assert_eq!(applied["conflicts"], 0, "{applied}");
+    applied
+}
+
+async fn quotation_status(dev: &Device, key: &str) -> String {
+    let found = dev
+        .api("GET", &format!("/api/quotations/{key}"), None)
+        .await;
+    found["data"]["status"].as_str().unwrap().to_string()
+}
+
+async fn enabled_pair() -> (Device, Device) {
+    let (a, b) = (Device::new().await, Device::new().await);
+    a.sync("POST", "/api/sync/enable", Some(json!({}))).await;
+    b.sync("POST", "/api/sync/enable", Some(json!({}))).await;
+    for dev in [&a, &b] {
+        dev.sync(
+            "POST",
+            "/api/sync/outbox/ack",
+            Some(json!({ "upToSeq": 1_000_000 })),
+        )
+        .await;
+    }
+    (a, b)
+}
+
+async fn ack_all(dev: &Device) {
+    dev.sync(
+        "POST",
+        "/api/sync/outbox/ack",
+        Some(json!({ "upToSeq": 1_000_000 })),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_quotation_and_its_cancellation_reach_another_device_and_back() {
+    let (a, b) = enabled_pair().await;
+
+    let first = create_quotation(&a, "Nimal").await;
+    let second = create_quotation(&a, "Rita").await;
+    cancel_quotation(&a, &second).await;
+
+    let outbox = a.drain_outbox().await;
+    let changes = quotation_changes(&outbox);
+    assert_eq!(
+        changes.len(),
+        2,
+        "the second quotation's create and cancel coalesce into one entry: {changes:?}"
+    );
+    let cancelled = changes
+        .iter()
+        .find(|c| c["key"] == second.as_str())
+        .expect("the cancelled quotation is queued");
+    assert_eq!(cancelled["payload"]["status"], "cancelled");
+    assert_eq!(cancelled["version"], 2);
+    // Everything a device needs to reprint travels; the date-derived flag does not.
+    assert!(cancelled["payload"]["shopProfileSnapshot"].is_object());
+    assert!(cancelled["payload"].get("isExpired").is_none());
+
+    apply(&b, changes).await;
+    assert_eq!(
+        table_rows(a.pool(), "quotations").await,
+        table_rows(b.pool(), "quotations").await
+    );
+    assert_eq!(quotation_status(&b, &first).await, "active");
+    assert_eq!(quotation_status(&b, &second).await, "cancelled");
+    assert_eq!(b.pending_out().await, 0, "applied changes never echo");
+
+    // The receiving device can list and print what it received.
+    let listed = b.api("GET", "/api/quotations?status=cancelled", None).await;
+    assert_eq!(listed["data"]["total"], 1);
+    let (status, _) = b
+        .call(
+            "GET",
+            &format!("/api/quotations/{first}/document"),
+            None,
+            Some(&b.admin.clone()),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // And the other way: B cancels the first one and A learns of it.
+    cancel_quotation(&b, &first).await;
+    let back = quotation_changes(&b.drain_outbox().await);
+    assert_eq!(back.len(), 1);
+    assert_eq!(back[0]["version"], 2);
+    apply(&a, back).await;
+    assert_eq!(quotation_status(&a, &first).await, "cancelled");
+    assert_eq!(
+        table_rows(a.pool(), "quotations").await,
+        table_rows(b.pool(), "quotations").await
+    );
+}
+
+#[tokio::test]
+async fn applying_a_quotation_batch_twice_changes_nothing() {
+    let (a, b) = enabled_pair().await;
+    create_quotation(&a, "Nimal").await;
+    let changes = quotation_changes(&a.drain_outbox().await);
+
+    let first = apply(&b, changes.clone()).await;
+    let before = table_rows(b.pool(), "quotations").await;
+    let second = apply(&b, changes).await;
+    assert_eq!(second["applied"], 0, "{second}");
+    assert_eq!(second["duplicates"], first["applied"]);
+    assert_eq!(before, table_rows(b.pool(), "quotations").await);
+}
+
+#[tokio::test]
+async fn a_late_active_copy_never_undoes_a_cancellation() {
+    let (a, b) = enabled_pair().await;
+    let key = create_quotation(&a, "Nimal").await;
+    let active = quotation_changes(&a.drain_outbox().await);
+    ack_all(&a).await;
+    cancel_quotation(&a, &key).await;
+    let cancelled = quotation_changes(&a.drain_outbox().await);
+
+    apply(&b, active.clone()).await;
+    apply(&b, cancelled).await;
+    assert_eq!(quotation_status(&b, &key).await, "cancelled");
+
+    // The old "active" copy shows up again (a retry, or a slow device): ignored.
+    apply(&b, active).await;
+    assert_eq!(quotation_status(&b, &key).await, "cancelled");
+}
+
+#[tokio::test]
+async fn cancelling_on_two_devices_at_once_converges_without_a_conflict() {
+    let (a, b) = enabled_pair().await;
+    let key = create_quotation(&a, "Nimal").await;
+    apply(&b, quotation_changes(&a.drain_outbox().await)).await;
+    ack_all(&a).await;
+
+    cancel_quotation(&a, &key).await;
+    cancel_quotation(&b, &key).await;
+    let from_a = quotation_changes(&a.drain_outbox().await);
+    let from_b = quotation_changes(&b.drain_outbox().await);
+
+    apply(&a, from_b).await;
+    apply(&b, from_a).await;
+
+    assert_eq!(quotation_status(&a, &key).await, "cancelled");
+    assert_eq!(quotation_status(&b, &key).await, "cancelled");
+    assert_eq!(
+        table_rows(a.pool(), "quotations").await,
+        table_rows(b.pool(), "quotations").await
+    );
+}
+
+#[tokio::test]
+async fn linked_devices_draw_quotation_numbers_from_blocks_then_a_unique_fallback() {
+    use simplebash_pos_backend::modules::sequences::service::reserve_sequence;
+    let dev = Device::new().await;
+    let single = || ReserveSequenceRequest {
+        block_size: Some(1),
+        device_id: None,
+    };
+
+    // Unlinked: the ordinary local counter, four digits.
+    let plain = reserve_sequence(&dev.app.db_handle, "quotation".to_string(), single())
+        .await
+        .unwrap();
+    assert_eq!(
+        (plain.prefix.as_str(), plain.start, plain.padding),
+        ("QUO-", 1, 4)
+    );
+
+    dev.sync(
+        "POST",
+        "/api/sync/enable",
+        Some(json!({ "deviceId": "dev_zzzz0000aaaa1111" })),
+    )
+    .await;
+    dev.sync(
+        "POST",
+        "/api/sync/blocks",
+        Some(json!({ "name": "quotation", "prefix": "QUO-", "padding": 4, "start": 700, "end": 701, "expiresAt": "2099-01-01T00:00:00Z" })),
+    )
+    .await;
+    let n1 = reserve_sequence(&dev.app.db_handle, "quotation".to_string(), single())
+        .await
+        .unwrap();
+    let n2 = reserve_sequence(&dev.app.db_handle, "quotations".to_string(), single())
+        .await
+        .unwrap();
+    assert_eq!((n1.prefix.as_str(), n1.start), ("QUO-", 700));
+    assert_eq!((n2.prefix.as_str(), n2.start), ("QUO-", 701));
+
+    // Block used up: a per-device series that cannot collide with the cloud's numbers.
+    let fallback = reserve_sequence(&dev.app.db_handle, "quotation".to_string(), single())
+        .await
+        .unwrap();
+    assert_eq!(fallback.prefix, "QUO-Dzzzz-");
+    assert_eq!(fallback.start, 1);
 }

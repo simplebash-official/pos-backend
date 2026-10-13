@@ -117,7 +117,10 @@ async fn lists_each_kind_with_its_active_designs_standard_design_first() {
         .iter()
         .map(|k| k["kind"].as_str().unwrap())
         .collect();
-    assert_eq!(slugs, ["a4-invoice", "thermal-receipt", "credit-note"]);
+    assert_eq!(
+        slugs,
+        ["a4-invoice", "thermal-receipt", "credit-note", "quotation"]
+    );
 
     let invoice = kind(&body, "a4-invoice");
     // The retired design is never offered; the standard design leads.

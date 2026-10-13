@@ -23,6 +23,7 @@ use crate::{
         },
         print_jobs::service as print_jobs_service,
         purchases::service::purchase as purchases_service,
+        quotations::service as quotations_service,
         repairs::service as repairs_service,
         supplier_products::service::link as supplier_products_service,
         suppliers::service as suppliers_service,
@@ -151,6 +152,7 @@ pub(crate) async fn hydrate(
         "creditNotes" => to_values(billing_credit_notes_service::hydrate_sync_documents(
             documents,
         )?)?,
+        "quotations" => to_values(quotations_service::hydrate_sync_documents(documents)?)?,
         "productSerials" => {
             to_values(inventory_product_serial::hydrate_sync_documents(documents)?)?
         }

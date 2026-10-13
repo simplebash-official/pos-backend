@@ -25,6 +25,7 @@ pub(crate) fn canonical_name(name: &str) -> String {
         "printjob" | "printjobs" => "printjob",
         "purchase" | "purchases" => "purchase",
         "order" | "orders" => "order",
+        "quotation" | "quotations" => "quotation",
         other => return other.to_string(),
     }
     .to_string()

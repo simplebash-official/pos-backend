@@ -53,6 +53,9 @@ pub async fn reserve_sequence(
             "printjob" | "printjobs" | "print_job" | "print_jobs" => ("PRN-", 6),
             "purchase" | "purchases" => ("PUR-", 6),
             "order" | "orders" => ("ORD-", 6),
+            // Four digits: quotations are rarer than invoices. No year in the
+            // number — the counter is one running sequence.
+            "quotation" | "quotations" => ("QUO-", 4),
             _ => {
                 return Err(AppError::validation_with_code(
                     format!("Unknown sequence name: {name}"),

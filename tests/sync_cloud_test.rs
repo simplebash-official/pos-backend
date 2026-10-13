@@ -221,6 +221,46 @@ fn movement(key: &str, product_id: &str, delta: i64) -> Value {
     })
 }
 
+/// A quotation made through the REST API (a web user, or a device's own UI).
+async fn web_quotation(app: &common::TestApp, tid: &str, who: &str) -> Value {
+    let (status, body) = call(
+        &app.router,
+        "POST",
+        "/api/quotations",
+        Some(&admin_token(app, tid)),
+        Some(json!({
+            "customer": { "customerName": who },
+            "items": [{ "name": "Screen replacement", "unitPriceCents": 10000, "quantity": 2, "discountCents": 0 }],
+            "validUntil": "2099-12-31", "terms": "50% advance"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "quotation: {body}");
+    body["data"].clone()
+}
+
+async fn web_cancel_quotation(app: &common::TestApp, tid: &str, key: &str) {
+    let (status, body) = call(
+        &app.router,
+        "POST",
+        &format!("/api/quotations/{key}/cancel"),
+        Some(&admin_token(app, tid)),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "cancel: {body}");
+}
+
+/// The stored cloud document of a quotation.
+async fn stored_quotation(app: &common::TestApp, tid: &str, key: &str) -> Document {
+    app.db
+        .collection::<Document>("quotations")
+        .find_one(doc! { "tenant_id": tid, "key": key })
+        .await
+        .unwrap()
+        .unwrap_or_else(|| panic!("quotation {key} is not stored for {tid}"))
+}
+
 struct Seed {
     category: Value,
     product: Value,
@@ -369,6 +409,10 @@ async fn codec_round_trips_real_documents() {
     let _guard = SERIAL.lock().await;
     let app = common::spawn_app_multi_tenant().await;
     seed_tenant(&app, "tnt_codec").await;
+    // One active and one cancelled quotation: the cancelled one carries a bumped version.
+    web_quotation(&app, "tnt_codec", "Active customer").await;
+    let cancelled = web_quotation(&app, "tnt_codec", "Cancelled customer").await;
+    web_cancel_quotation(&app, "tnt_codec", &text(&cancelled, "/key")).await;
     let tenant = Tenant::id("tnt_codec").unwrap();
 
     // Exactly the columns the merge rules manage themselves.
@@ -391,6 +435,7 @@ async fn codec_round_trips_real_documents() {
         ("stockMovements", "stock_movements"),
         ("invoices", "invoices"),
         ("payments", "payments"),
+        ("quotations", "quotations"),
     ] {
         let mut cursor = mongodb::Collection::<Document>::find(
             &app.db.collection::<Document>(table),
@@ -436,7 +481,7 @@ async fn codec_round_trips_real_documents() {
             }
         }
     }
-    assert!(checked >= 8, "round-tripped only {checked} documents");
+    assert!(checked >= 10, "round-tripped only {checked} documents");
     drop_db(&app).await;
 }
 
@@ -924,6 +969,193 @@ async fn unique_collision_is_renamed_and_reported() {
 }
 
 // ---------------------------------------------------------------------------
+// Quotations
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn pushed_quotations_apply_merge_forward_and_are_never_reopened() {
+    let _guard = SERIAL.lock().await;
+    let app = common::spawn_app_multi_tenant().await;
+
+    // A genuine wire payload: a stored document run through the same hydrate a pull uses.
+    let made = web_quotation(&app, "tnt_qsrc", "Nimal").await;
+    let raw = stored_quotation(&app, "tnt_qsrc", &text(&made, "/key")).await;
+    let payload = with_tenant(
+        Tenant::id("tnt_qsrc").unwrap(),
+        hydrate_for_test(&app.db_handle, "quotations", raw),
+    )
+    .await
+    .unwrap();
+    assert!(payload["shopProfileSnapshot"].is_object(), "{payload}");
+    assert!(payload.get("isExpired").is_none(), "{payload}");
+    let payload = reid(&payload);
+    let key = text(&payload, "/key");
+
+    // 1. A new quotation applies, with its frozen shop profile and number intact.
+    let (_, body) = push(
+        &app,
+        "tnt_qd",
+        "dev_q1",
+        "b1",
+        vec![record("quotations", &payload, "dev_q1")],
+    )
+    .await;
+    assert_eq!(statuses(&body), ["applied"], "{body}");
+    let stored = stored_quotation(&app, "tnt_qd", &key).await;
+    assert_eq!(stored.get_str("status").unwrap(), "active");
+    assert_eq!(
+        stored.get_str("quotation_number").unwrap(),
+        payload["quotationNumber"].as_str().unwrap()
+    );
+    assert!(stored.get_document("shop_profile_snapshot").is_ok());
+    assert_eq!(stored.get_array("items").unwrap().len(), 1);
+
+    // 2. Its cancellation (a later version of the same row) moves it forward.
+    let mut cancelled = payload.clone();
+    cancelled["status"] = json!("cancelled");
+    cancelled["version"] = json!(2);
+    cancelled["updatedAt"] = json!(chrono::Utc::now().to_rfc3339());
+    let (_, body) = push(
+        &app,
+        "tnt_qd",
+        "dev_q1",
+        "b2",
+        vec![record("quotations", &cancelled, "dev_q1")],
+    )
+    .await;
+    assert_eq!(statuses(&body), ["applied"], "{body}");
+    let stored = stored_quotation(&app, "tnt_qd", &key).await;
+    assert_eq!(stored.get_str("status").unwrap(), "cancelled");
+    assert_eq!(stored.get_i64("version").unwrap(), 2);
+
+    // 3. A stale "active" copy arriving afterwards (a slow device) cannot reopen it.
+    let (_, body) = push(
+        &app,
+        "tnt_qd",
+        "dev_q2",
+        "b3",
+        vec![record("quotations", &payload, "dev_q2")],
+    )
+    .await;
+    assert!(
+        !statuses(&body).contains(&"rejected".to_string()),
+        "a stale copy is ignored, not an error: {body}"
+    );
+    assert_eq!(
+        stored_quotation(&app, "tnt_qd", &key)
+            .await
+            .get_str("status")
+            .unwrap(),
+        "cancelled"
+    );
+
+    // 4. The same key with different content is refused, never silently adopted.
+    let mut tampered = cancelled.clone();
+    tampered["totalCents"] = json!(1);
+    tampered["updatedAt"] = json!(chrono::Utc::now().to_rfc3339());
+    let (_, body) = push(
+        &app,
+        "tnt_qd",
+        "dev_q3",
+        "b4",
+        vec![record("quotations", &tampered, "dev_q3")],
+    )
+    .await;
+    assert_eq!(statuses(&body), ["rejected"], "{body}");
+    assert_ne!(
+        stored_quotation(&app, "tnt_qd", &key)
+            .await
+            .get_i64("total_cents")
+            .unwrap(),
+        1
+    );
+
+    // 5. Two quotations that were given the same number: the second is renumbered and reported.
+    let mut twin = reid(&payload);
+    twin["key"] = json!("quo_twin_2");
+    twin["version"] = json!(1);
+    twin["status"] = json!("active");
+    let (_, body) = push(
+        &app,
+        "tnt_qd",
+        "dev_q1",
+        "b5",
+        vec![record("quotations", &twin, "dev_q1")],
+    )
+    .await;
+    assert_eq!(statuses(&body), ["applied"], "{body}");
+    let original_number = payload["quotationNumber"].as_str().unwrap();
+    let renamed = stored_quotation(&app, "tnt_qd", "quo_twin_2").await;
+    let renamed_number = renamed.get_str("quotation_number").unwrap();
+    assert!(
+        renamed_number.starts_with(&format!("{original_number}-")),
+        "expected a device-tagged number, got {renamed_number}"
+    );
+    let conflicts = app
+        .db
+        .collection::<Document>("sync_conflicts")
+        .count_documents(doc! { "tenant_id": "tnt_qd", "kind": "UNIQUE_VIOLATION" })
+        .await
+        .unwrap();
+    assert_eq!(conflicts, 1);
+    drop_db(&app).await;
+}
+
+#[tokio::test]
+async fn a_web_quotation_and_its_cancellation_reach_devices() {
+    let _guard = SERIAL.lock().await;
+    let app = common::spawn_app_multi_tenant().await;
+    start(&app).await;
+
+    let made = web_quotation(&app, "tnt_wq", "Web customer").await;
+    let key = text(&made, "/key");
+    let dev = device_token(&app, "tnt_wq", "dev_wq1");
+
+    let feed = wait_for(&app, &dev, 0, |c| {
+        c.iter()
+            .any(|x| x["resource"] == "quotations" && x["key"] == key)
+    })
+    .await;
+    let change = feed["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["resource"] == "quotations" && c["key"] == key)
+        .unwrap();
+    // A web write has no device: every device receives it, in full wire form.
+    assert_eq!(change["originDeviceId"], "cloud", "{change}");
+    assert_eq!(change["payload"]["status"], "active");
+    assert_eq!(
+        change["payload"]["quotationNumber"],
+        made["quotationNumber"]
+    );
+    assert!(change["payload"]["shopProfileSnapshot"].is_object());
+    assert!(change["payload"].get("isExpired").is_none());
+
+    web_cancel_quotation(&app, "tnt_wq", &key).await;
+    let feed = wait_for(&app, &dev, 0, |c| {
+        c.iter().any(|x| {
+            x["resource"] == "quotations"
+                && x["key"] == key
+                && x["payload"]["status"] == "cancelled"
+        })
+    })
+    .await;
+    let cancelled = feed["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| {
+            c["resource"] == "quotations"
+                && c["key"] == key
+                && c["payload"]["status"] == "cancelled"
+        })
+        .unwrap();
+    assert_eq!(cancelled["payload"]["version"], 2);
+    drop_db(&app).await;
+}
+
+// ---------------------------------------------------------------------------
 // Compaction, snapshot bootstrap and pagination
 // ---------------------------------------------------------------------------
 
@@ -994,6 +1226,7 @@ async fn snapshot_pagination_is_consistent() {
     let _guard = SERIAL.lock().await;
     let app = common::spawn_app_multi_tenant().await;
     seed_tenant(&app, "tnt_p").await;
+    web_quotation(&app, "tnt_p", "Snapshot customer").await;
     let dev = device_token(&app, "tnt_p", "dev_p1");
 
     let mut expected = 0u64;
@@ -1012,6 +1245,7 @@ async fn snapshot_pagination_is_consistent() {
         "invoices",
         "payments",
         "credit_notes",
+        "quotations",
     ] {
         expected += app
             .db

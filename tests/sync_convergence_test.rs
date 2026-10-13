@@ -267,27 +267,29 @@ async fn bootstrap(cloud: &common::TestApp, d: &mut Device) {
     d.cursor = as_of;
 }
 
-/// Reserve a block of invoice numbers from the cloud and hand it to the device.
+/// Reserve a block of invoice and quotation numbers from the cloud and hand them to the device.
 async fn reserve_blocks(cloud: &common::TestApp, d: &Device) {
-    let (status, body) = call(
-        &cloud.router,
-        "POST",
-        "/api/sequences/invoice/reserve",
-        &d.cloud_token,
-        Some(json!({ "blockSize": 200, "deviceId": d.id })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "[{}] reserve: {body}", d.id);
-    let b = &body["data"];
-    d.sync(
-        "POST",
-        "/api/sync/blocks",
-        Some(json!({
-            "name": "invoice", "prefix": b["prefix"], "padding": b["padding"],
-            "start": b["start"], "end": b["end"], "expiresAt": b["expiresAt"]
-        })),
-    )
-    .await;
+    for name in ["invoice", "quotation"] {
+        let (status, body) = call(
+            &cloud.router,
+            "POST",
+            &format!("/api/sequences/{name}/reserve"),
+            &d.cloud_token,
+            Some(json!({ "blockSize": 200, "deviceId": d.id })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "[{}] reserve {name}: {body}", d.id);
+        let b = &body["data"];
+        d.sync(
+            "POST",
+            "/api/sync/blocks",
+            Some(json!({
+                "name": name, "prefix": b["prefix"], "padding": b["padding"],
+                "start": b["start"], "end": b["end"], "expiresAt": b["expiresAt"]
+            })),
+        )
+        .await;
+    }
 }
 
 /// Every change the cloud holds, read as a device that never wrote anything.
@@ -454,7 +456,7 @@ async fn create_shop(d: &Device) -> Catalog {
 
 async fn random_op(d: &Device, catalog: &Catalog, rng: &mut Rng, step: usize) {
     let (key, id) = &catalog.products[rng.below(catalog.products.len())];
-    match rng.below(5) {
+    match rng.below(6) {
         0 | 1 => {
             let quantity = 1 + rng.below(3);
             d.api(
@@ -489,6 +491,35 @@ async fn random_op(d: &Device, catalog: &Catalog, rng: &mut Rng, step: usize) {
                 })),
             )
             .await;
+        }
+        5 => {
+            // A price offer: a new quotation, or the cancellation of one this device holds.
+            let active = d
+                .api("GET", "/api/quotations?status=active&limit=50", None)
+                .await;
+            let open: Vec<String> = active["data"]["quotations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|q| q["key"].as_str().unwrap().to_string())
+                .collect();
+            if !open.is_empty() && rng.below(3) == 0 {
+                let key = &open[rng.below(open.len())];
+                d.api("POST", &format!("/api/quotations/{key}/cancel"), None)
+                    .await;
+            } else {
+                d.api(
+                    "POST",
+                    "/api/quotations",
+                    Some(json!({
+                        "customer": { "customerName": format!("Prospect {} {step}", d.id) },
+                        "items": [{ "productKey": key, "quantity": 1 + rng.below(3), "discountCents": 0 }],
+                        "validUntil": "2099-12-31",
+                        "terms": "Prices held until the date above."
+                    })),
+                )
+                .await;
+            }
         }
         _ => {
             if rng.below(2) == 0 {
@@ -532,6 +563,7 @@ const SYNCED: &[&str] = &[
     "invoices",
     "payments",
     "credit_notes",
+    "quotations",
     "users",
 ];
 
@@ -681,6 +713,7 @@ async fn three_devices_and_the_cloud_converge() {
         ("stockMovements", "stock_movements"),
         ("invoices", "invoices"),
         ("payments", "payments"),
+        ("quotations", "quotations"),
         ("users", "users"),
     ] {
         let in_cloud: BTreeSet<String> = cloud_log
@@ -1146,6 +1179,129 @@ async fn concurrent_full_refunds_raise_over_refund_not_silent_corruption() {
         cloud_hits + device_hits as usize >= 1,
         "no OVER_REFUND conflict was recorded anywhere"
     );
+
+    cloud.db.drop().await.ok();
+}
+
+/// Two devices work on quotations offline: both cancel the same one and each makes a new
+/// one of its own. Cancelling is the only change a quotation ever gets, so whichever order
+/// it reaches the cloud in, everybody must end up with the same three quotations, the
+/// shared one cancelled, three different numbers, and no change rejected or renamed.
+#[tokio::test]
+async fn concurrent_quotation_cancels_and_creates_converge_across_devices_and_the_cloud() {
+    let cloud = common::spawn_app_multi_tenant().await;
+    start_consumer(&cloud).await;
+
+    let mut devices = vec![Device::new(41, &cloud).await, Device::new(42, &cloud).await];
+    for d in &devices {
+        d.sync(
+            "POST",
+            "/api/sync/enable",
+            Some(json!({ "tenantId": TENANT, "deviceId": d.id })),
+        )
+        .await;
+        reserve_blocks(&cloud, d).await;
+    }
+
+    let new_quotation = |who: &str| {
+        json!({
+            "customer": { "customerName": who },
+            "items": [{ "name": "Screen replacement", "unitPriceCents": 10000, "quantity": 1, "discountCents": 0 }],
+            "validUntil": "2099-12-31"
+        })
+    };
+
+    // Device 1 makes a quotation and uploads it; device 2 joins and receives it.
+    let shared = devices[0]
+        .api("POST", "/api/quotations", Some(new_quotation("Shared")))
+        .await["data"]["key"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    push_all(&cloud, &devices[0]).await;
+    wait_for_cloud_quiet(&cloud).await;
+    bootstrap(&cloud, &mut devices[1]).await;
+
+    // Offline: both cancel the shared one, and each makes its own.
+    let mut own = Vec::new();
+    for d in &devices {
+        d.api("POST", &format!("/api/quotations/{shared}/cancel"), None)
+            .await;
+        let made = d
+            .api("POST", "/api/quotations", Some(new_quotation(&d.id)))
+            .await;
+        own.push(made["data"]["key"].as_str().unwrap().to_string());
+    }
+
+    for _ in 0..2 {
+        for d in &devices {
+            push_all(&cloud, d).await; // fails the test if the cloud rejects anything
+        }
+        wait_for_cloud_quiet(&cloud).await;
+        for d in devices.iter_mut() {
+            pull_all(&cloud, d).await;
+        }
+    }
+
+    for d in &devices {
+        let rows: Vec<(String, String)> =
+            sqlx::query_as("SELECT key, status FROM quotations ORDER BY key")
+                .fetch_all(d.pool())
+                .await
+                .unwrap();
+        assert_eq!(rows.len(), 3, "three quotations on {}: {rows:?}", d.id);
+        let status_of = |key: &str| {
+            rows.iter()
+                .find(|(k, _)| k == key)
+                .unwrap_or_else(|| panic!("{key} missing on {}", d.id))
+                .1
+                .clone()
+        };
+        assert_eq!(status_of(&shared), "cancelled", "on {}", d.id);
+        assert_eq!(status_of(&own[0]), "active", "on {}", d.id);
+        assert_eq!(status_of(&own[1]), "active", "on {}", d.id);
+
+        let numbers: BTreeSet<String> =
+            sqlx::query_scalar::<_, String>("SELECT quotation_number FROM quotations")
+                .fetch_all(d.pool())
+                .await
+                .unwrap()
+                .into_iter()
+                .collect();
+        assert_eq!(numbers.len(), 3, "numbers must not collide: {numbers:?}");
+        assert!(numbers.iter().all(|n| n.starts_with("QUO-")), "{numbers:?}");
+
+        let renamed: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sync_conflicts WHERE kind = 'UNIQUE_VIOLATION'",
+        )
+        .fetch_one(d.pool())
+        .await
+        .unwrap();
+        assert_eq!(renamed, 0, "{} had to renumber a quotation", d.id);
+    }
+    assert_eq!(
+        table_rows(devices[0].pool(), "quotations").await,
+        table_rows(devices[1].pool(), "quotations").await,
+        "the two devices must hold identical quotations"
+    );
+
+    // The cloud holds the same three, with the shared one cancelled (a version past its creation).
+    let stored = cloud
+        .db
+        .collection::<Document>("quotations")
+        .find_one(doc! { "tenant_id": TENANT, "key": &shared })
+        .await
+        .unwrap()
+        .expect("the cloud holds the shared quotation");
+    assert_eq!(stored.get_str("status").unwrap(), "cancelled");
+    assert!(stored.get_i64("version").unwrap() >= 2);
+    let in_cloud: BTreeSet<String> = cloud_changes(&cloud)
+        .await
+        .iter()
+        .filter(|c| c["resource"] == "quotations" && c["op"] == "upsert")
+        .map(|c| c["key"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(in_cloud, keys(devices[0].pool(), "quotations").await);
 
     cloud.db.drop().await.ok();
 }

@@ -21,6 +21,7 @@ use utoipa::{
         (name = "employees", description = "Employee HR/commission profiles"),
         (name = "inventory", description = "Inventory"),
         (name = "print_jobs", description = "Print jobs"),
+        (name = "quotations", description = "Customer quotations (Admin and Manager)"),
         (name = "repairs", description = "Repairs"),
         (name = "reports", description = "Reports"),
         (name = "suppliers", description = "Suppliers"),

@@ -9,7 +9,10 @@
 
 use serde_json::{Value, json};
 
-use crate::domain::billing::{CreditNote, Invoice, ItemCondition, ItemDisposition};
+use crate::domain::{
+    billing::{CreditNote, Invoice, ItemCondition, ItemDisposition},
+    quotations::Quotation,
+};
 
 /// `invoice.shop_profile_snapshot` is the frontend's `ShopProfile` object,
 /// embedded verbatim at sale-completion time (D2) — this just reads fields
@@ -278,6 +281,56 @@ pub(crate) fn build_credit_note_data(credit_note: &CreditNote, invoice: Option<&
         "shopPrimaryPhone": shop_field_or_empty(shop, "primaryPhone"),
         "shopSecondaryPhone": shop_field_or_empty(shop, "secondaryPhone"),
     })
+}
+
+/// Builds `data` for the "Quotation" template. `shop` is the shop profile
+/// frozen on the quotation when it was made (as a JSON object with the same
+/// keys the invoice snapshot uses), kept out of `Quotation` itself because it
+/// can carry a base64 logo. A quotation is an offer, not a bill: there is no
+/// payment, cashier, tax or status-of-payment in the contract.
+pub(crate) fn build_quotation_data(quotation: &Quotation, shop: &Value) -> Value {
+    let long_date = |d: chrono::NaiveDate| d.format("%d %b %Y").to_string();
+    // A stored `valid_until` is validated as YYYY-MM-DD on create; if it ever
+    // is not, print it as stored rather than fail the whole print.
+    let valid_until = chrono::NaiveDate::parse_from_str(&quotation.valid_until, "%Y-%m-%d")
+        .map(long_date)
+        .unwrap_or_else(|_| quotation.valid_until.clone());
+
+    let mut data = json!({
+        "logoUrl": shop_field_or_empty(shop, "logoBase64"),
+        "quotationNumber": quotation.quotation_number,
+        "formattedDate": quotation.created_at.format("%d %b %Y").to_string(),
+        "validUntil": valid_until,
+        "isCancelled": quotation.status == crate::domain::quotations::STATUS_CANCELLED,
+        "customerName": quotation.customer_name,
+        "customerPhone": quotation.customer_phone.clone().unwrap_or_default(),
+        "customerAddress": quotation.customer_address.clone().unwrap_or_default(),
+        "items": quotation.items,
+        "subtotalCents": quotation.subtotal_cents,
+        "discountType": quotation.discount_type,
+        "discountValue": quotation.discount_value,
+        "discountCents": quotation.discount_cents,
+        "totalCents": quotation.total_cents,
+        "amountInWords": number_to_words_rupees(quotation.total_cents),
+        "notes": quotation.notes.clone().unwrap_or_default(),
+        "terms": quotation.terms.clone().unwrap_or_default(),
+        "preparedBy": quotation.prepared_by.clone().unwrap_or_default(),
+        "footerText": shop_field_or_empty(shop, "defaultFooterText"),
+        "shopTradingName": shop_field_or_empty(shop, "tradingName"),
+        "shopLegalName": shop_field_or_empty(shop, "legalName"),
+        "shopEmail": shop_field_or_empty(shop, "email"),
+        "shopWebsite": shop_field_or_empty(shop, "website"),
+        "shopBusinessRegNo": shop_field_or_empty(shop, "businessRegNo"),
+        "shopAddressLines": shop_address_lines(shop),
+        "shopPrimaryPhone": shop_field_or_empty(shop, "primaryPhone"),
+        "shopSecondaryPhone": shop_field_or_empty(shop, "secondaryPhone"),
+    });
+    // Inserted after the fact: the `json!` above is near the macro recursion limit.
+    data["bankName"] = json!(shop_field_or_empty(shop, "bankName"));
+    data["bankBranch"] = json!(shop_field_or_empty(shop, "bankBranch"));
+    data["accountName"] = json!(shop_field_or_empty(shop, "accountName"));
+    data["accountNumber"] = json!(shop_field_or_empty(shop, "accountNumber"));
+    data
 }
 
 /// Rust port of the frontend's `numberToWordsRupees` (`src/shared/lib/
@@ -742,5 +795,79 @@ mod schema_drift_tests {
         no_receipt.invoice_number = None;
         let payload = build_credit_note_data(&no_receipt, None);
         assert_matches_schema("credit-note", &payload);
+    }
+
+    fn quotation(status: &str, discount_cents: i64) -> crate::domain::quotations::Quotation {
+        use crate::domain::quotations::{Quotation, QuotationItem};
+        Quotation {
+            id: "64b0000000000000000000b1".to_string(),
+            key: "quo_test".to_string(),
+            quotation_number: "QUO-0001".to_string(),
+            status: status.to_string(),
+            is_expired: false,
+            customer_key: None,
+            customer_name: "Nimal Perera".to_string(),
+            customer_phone: Some("077 123 4567".to_string()),
+            customer_address: None,
+            items: vec![QuotationItem {
+                product_key: None,
+                name: "Screen replacement".to_string(),
+                sku: None,
+                unit_price_cents: 10_000,
+                quantity: 2,
+                discount_cents: 0,
+                total_cents: 20_000,
+            }],
+            subtotal_cents: 20_000,
+            discount_type: "fixed".to_string(),
+            discount_value: discount_cents as f64,
+            discount_cents,
+            total_cents: 20_000 - discount_cents,
+            valid_until: "2030-01-31".to_string(),
+            notes: None,
+            terms: Some("50% advance.".to_string()),
+            prepared_by: Some("Kamal".to_string()),
+            created_at: "2026-10-13T09:00:00Z".parse().unwrap(),
+            updated_at: "2026-10-13T09:00:00Z".parse().unwrap(),
+        }
+    }
+
+    #[test]
+    fn quotation_payload_matches_published_schema() {
+        let shop = cash_sale_invoice().shop_profile_snapshot;
+        assert_matches_schema(
+            "quotation",
+            &build_quotation_data(&quotation("active", 0), &shop),
+        );
+        // Cancelled, discounted, and printed for a shop that never filled in
+        // its profile (every shop field empty): still satisfies the contract.
+        assert_matches_schema(
+            "quotation",
+            &build_quotation_data(&quotation("cancelled", 500), &json!({})),
+        );
+    }
+
+    #[test]
+    fn quotation_payload_carries_dates_cancellation_and_words() {
+        let shop = json!({ "tradingName": "TechFix", "logoBase64": "data:image/png;base64,AAAA" });
+        let active = build_quotation_data(&quotation("active", 0), &shop);
+        assert_eq!(active["quotationNumber"], "QUO-0001");
+        assert_eq!(active["formattedDate"], "13 Oct 2026");
+        assert_eq!(active["validUntil"], "31 Jan 2030");
+        assert_eq!(active["isCancelled"], false);
+        assert_eq!(active["logoUrl"], "data:image/png;base64,AAAA");
+        assert_eq!(active["shopTradingName"], "TechFix");
+        assert_eq!(active["totalCents"], 20_000);
+        assert_eq!(
+            active["amountInWords"],
+            "Sri Lankan Rupees Two Hundred Only"
+        );
+        // A quotation is an offer: none of the invoice-only fields leak in.
+        for invoice_only in ["cashierName", "paymentMethod", "balanceDueCents", "status"] {
+            assert!(active.get(invoice_only).is_none(), "{invoice_only}");
+        }
+
+        let cancelled = build_quotation_data(&quotation("cancelled", 0), &shop);
+        assert_eq!(cancelled["isCancelled"], true);
     }
 }

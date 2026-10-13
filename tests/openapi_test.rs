@@ -101,6 +101,7 @@ async fn openapi_json_lists_all_module_paths() {
         "/api/customers",
         "/api/inventory",
         "/api/print-jobs",
+        "/api/quotations",
         "/api/repairs",
         "/api/reports",
         "/api/suppliers",

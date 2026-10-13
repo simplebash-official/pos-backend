@@ -26,6 +26,10 @@ pub(crate) const SELECTABLE_KINDS: &[DocumentKind] = &[
         slug: "credit-note",
         label: "Credit Note",
     },
+    DocumentKind {
+        slug: "quotation",
+        label: "Quotation",
+    },
 ];
 
 pub(crate) fn find(slug: &str) -> Option<&'static DocumentKind> {

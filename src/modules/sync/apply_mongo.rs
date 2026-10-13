@@ -91,6 +91,7 @@ fn unique_columns(resource: &str) -> &'static [&'static str] {
         "categories" | "suppliers" => &["name"],
         "invoices" => &["invoice_number"],
         "creditNotes" => &["credit_note_number"],
+        "quotations" => &["quotation_number"],
         "repairs" | "printJobs" => &["ticket_number"],
         "productSerials" => &["serial_number"],
         "users" => &["username"],

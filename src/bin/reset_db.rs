@@ -62,6 +62,7 @@ async fn main() {
             "purchases",
             "repairs",
             "print_jobs",
+            "quotations",
             "generated_documents",
             "document_template_settings",
             "login_sessions",

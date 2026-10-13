@@ -12,7 +12,7 @@ pub enum MergeClass {
     Lww,
     /// LWW on ordinary columns; `derived` columns are recomputed from ledgers.
     LwwWithDerived,
-    /// Body immutable; lifecycle columns merge monotonically (invoices, credit notes).
+    /// Body immutable; lifecycle columns merge monotonically (invoices, credit notes, quotations).
     Lifecycle,
 }
 
@@ -188,6 +188,18 @@ pub const SYNC_RESOURCES: &[ResourceSpec] = &[
         order: 130,
         phase: Phase::P3a,
     },
+    // Body immutable; `status` only moves active -> cancelled (see `core::sync_merge`).
+    // Never deleted, so no tombstones and nothing derived.
+    ResourceSpec {
+        name: "quotations",
+        table: "quotations",
+        class: MergeClass::Lifecycle,
+        soft_delete: false,
+        derived: &[],
+        local_only: &[],
+        order: 135,
+        phase: Phase::P3a,
+    },
     ResourceSpec {
         name: "users",
         table: "users",
@@ -237,6 +249,7 @@ pub fn label_column(table: &str) -> Option<&'static str> {
     match table {
         "invoices" => Some("invoice_number"),
         "credit_notes" => Some("credit_note_number"),
+        "quotations" => Some("quotation_number"),
         "repairs" | "print_jobs" => Some("ticket_number"),
         "purchases" => Some("reference_no"),
         "products" | "customers" | "suppliers" | "employees" | "categories" | "users" => {
@@ -320,6 +333,18 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn quotations_sync_as_an_undeletable_lifecycle_resource_named_by_number() {
+        let s = spec("quotations").expect("quotations must sync");
+        assert_eq!(s.table, "quotations");
+        assert_eq!(s.class, MergeClass::Lifecycle);
+        assert!(!s.soft_delete && s.derived.is_empty());
+        assert_eq!(label_column("quotations"), Some("quotation_number"));
+        // Applied after the invoices/credit notes it sits beside, before users.
+        assert!(spec("creditNotes").unwrap().order < s.order);
+        assert!(s.order < spec("users").unwrap().order);
     }
 
     #[test]

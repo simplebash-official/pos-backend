@@ -45,6 +45,7 @@ const SYNCED_COLLECTIONS: &[&str] = &[
     "invoices",
     "payments",
     "credit_notes",
+    "quotations",
     "product_serials",
 ];
 
@@ -355,10 +356,10 @@ mod tests {
     #[test]
     fn single_tenant_specs_are_the_historical_set() {
         let specs = index_specs(false);
-        // 15 sync + 4 created_at + 2 invoice analytics + 3 reminders + products_key
+        // 16 sync + 4 created_at + 2 invoice analytics + 3 reminders + products_key
         // + idempotency unique/ttl + serial unique + serial status + shop_profiles
         // + document_template_settings.
-        assert_eq!(specs.len(), 31);
+        assert_eq!(specs.len(), 32);
         assert!(specs.iter().all(|s| s.keys.get(TENANT_FIELD).is_none()));
         assert!(names(&specs).contains(&"products.sync_updated_at_key".to_string()));
         assert!(names(&specs).contains(&"idempotency_keys.idempotency_ttl".to_string()));

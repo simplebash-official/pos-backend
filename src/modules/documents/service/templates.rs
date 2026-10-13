@@ -132,14 +132,26 @@ pub(crate) fn cache_key(legacy_key: &str, resolved: &ResolvedTemplate) -> String
     }
 }
 
+/// What the Settings screen offers per kind. A kind whose built-in default is
+/// not published (a document-server older than this backend — e.g. one that
+/// predates the Quotation template) is left out, with a warning, rather than
+/// failing the whole listing: one missing optional design must never take the
+/// invoice/receipt design pickers down with it. Printing that kind still
+/// fails loudly in `resolve_in`, which is where the gap actually matters.
 pub(crate) fn list_in(
     templates: &[TemplateInfo],
     selections: &Selections,
 ) -> AppResult<Vec<KindListing>> {
-    kinds::SELECTABLE_KINDS
+    let listings = kinds::SELECTABLE_KINDS
         .iter()
-        .map(|kind| {
-            let default = default_for(templates, kind.slug)?;
+        .filter_map(|kind| {
+            let default = match default_for(templates, kind.slug) {
+                Ok(default) => default,
+                Err(err) => {
+                    tracing::warn!(kind = kind.slug, error = %err, "document kind left out of the design listing");
+                    return None;
+                }
+            };
             let mut options: Vec<TemplateOption> = templates
                 .iter()
                 .filter(|template| {
@@ -163,7 +175,7 @@ pub(crate) fn list_in(
                 .filter(|name| options.iter().any(|option| &option.name == *name))
                 .cloned();
             let effective = selected.clone().unwrap_or_else(|| default.name.clone());
-            Ok(KindListing {
+            Some(KindListing {
                 kind: kind.slug,
                 label: kind.label,
                 selected,
@@ -171,7 +183,8 @@ pub(crate) fn list_in(
                 templates: options,
             })
         })
-        .collect()
+        .collect();
+    Ok(listings)
 }
 
 /// Applies an admin's update (`None` = back to the default) to the stored
@@ -274,6 +287,7 @@ mod tests {
                 Some("thermal-receipt"),
             ),
             template("doc_temp_credit", "Credit Note", Some("credit-note")),
+            template("doc_temp_quote", "Quotation", Some("quotation")),
             template(
                 "doc_temp_report",
                 "Analytics Report",
@@ -385,7 +399,7 @@ mod tests {
         let listing = list_in(&catalog(), &picks("a4-invoice", "doc_temp_modern")).unwrap();
         assert_eq!(
             listing.iter().map(|k| k.kind).collect::<Vec<_>>(),
-            ["a4-invoice", "thermal-receipt", "credit-note"]
+            ["a4-invoice", "thermal-receipt", "credit-note", "quotation"]
         );
         let invoice = &listing[0];
         assert_eq!(
@@ -404,6 +418,25 @@ mod tests {
         assert_eq!(receipt.templates.len(), 1);
         assert_eq!(receipt.selected, None);
         assert_eq!(receipt.effective, "doc_temp_receipt");
+    }
+
+    #[test]
+    fn a_kind_whose_default_is_not_published_is_left_out_not_an_error() {
+        // A document-server that predates the Quotation template.
+        let older: Vec<TemplateInfo> = catalog()
+            .into_iter()
+            .filter(|t| t.title != "Quotation")
+            .collect();
+        let listing = list_in(&older, &Selections::new()).unwrap();
+        assert_eq!(
+            listing.iter().map(|k| k.kind).collect::<Vec<_>>(),
+            ["a4-invoice", "thermal-receipt", "credit-note"]
+        );
+        // Printing that kind is where the gap is reported.
+        let err = resolve_in(&older, "quotation", None, &Selections::new())
+            .err()
+            .unwrap();
+        assert!(format!("{err:?}").contains("Quotation"), "{err:?}");
     }
 
     #[test]
