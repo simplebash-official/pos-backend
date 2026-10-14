@@ -246,7 +246,7 @@ pub(crate) async fn resolve_sale_item(
                     product.selling_price_cents,
                     None,
                     None,
-                    Some(product.cost_price_cents),
+                    product.cost_price_cents,
                 )
             }
             None => (

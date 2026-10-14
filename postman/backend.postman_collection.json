@@ -1362,7 +1362,7 @@
                     }
                   ]
                 },
-                "description": "Hierarchical Inventory & Stock overview for the frontend accordion page: dashboard metrics (total items, category/subcategory counts, low-stock alerts), every category paired with its subcategories, and — per subcategory — a paginated (max 10/page) product data table. Backed by a single MongoDB `$facet` aggregation pipeline over `products` (see CLAUDE.md's \"MongoDB Aggregation Pipelines\" section) rather than one query per subcategory, so `page`/`limit` here apply uniformly to every subcategory table in the response.\n\n**Requires the `inventory:read` permission** — held by all three roles, so any logged-in user may call it. Returns 401 without a token."
+                "description": "Hierarchical Inventory & Stock overview for the frontend accordion page: dashboard metrics (total items, category/subcategory counts, low-stock alerts), every category paired with its subcategories, and — per subcategory — a paginated (max 10/page) product data table. Backed by a single MongoDB `$facet` aggregation pipeline over `products` (see CLAUDE.md's \"MongoDB Aggregation Pipelines\" section) rather than one query per subcategory, so `page`/`limit` here apply uniformly to every subcategory table in the response.\n\n**Requires the `inventory:read` permission** — held by all three roles, so any logged-in user may call it. Returns 401 without a token. `costPriceCents` is returned to Admin callers only; for Manager and Staff the field is absent."
               },
               "response": []
             }
@@ -1435,7 +1435,7 @@
                     }
                   ]
                 },
-                "description": "List products with search, filters, pagination and sorting.\n\n**Requires the `inventory:read` permission** — held by all three roles, so any logged-in user may call it. Returns 401 without a token."
+                "description": "List products with search, filters, pagination and sorting.\n\n**Requires the `inventory:read` permission** — held by all three roles, so any logged-in user may call it. Returns 401 without a token. `costPriceCents` is returned to Admin callers only; for Manager and Staff the field is absent."
               },
               "response": []
             },
@@ -1456,7 +1456,7 @@
                     "{{productId}}"
                   ]
                 },
-                "description": "Fetch a single product by its Mongo ObjectId.\n\n**Requires the `inventory:read` permission** — held by all three roles, so any logged-in user may call it. Returns 401 without a token."
+                "description": "Fetch a single product by its Mongo ObjectId.\n\n**Requires the `inventory:read` permission** — held by all three roles, so any logged-in user may call it. Returns 401 without a token. `costPriceCents` is returned to Admin callers only; for Manager and Staff the field is absent."
               },
               "response": []
             },
@@ -1478,7 +1478,7 @@
                     "4901234567894"
                   ]
                 },
-                "description": "Resolve an exact barcode to the one product that carries it — an anchored equality match (not the substring regex the `search` list param uses), so a scanner gets a single unambiguous result. 404 `PRODUCT_NOT_FOUND` when no product has that barcode.\n\n**Requires the `inventory:read` permission** — held by all three roles. Returns 401 without a token."
+                "description": "Resolve an exact barcode to the one product that carries it — an anchored equality match (not the substring regex the `search` list param uses), so a scanner gets a single unambiguous result. 404 `PRODUCT_NOT_FOUND` when no product has that barcode.\n\n**Requires the `inventory:read` permission** — held by all three roles. Returns 401 without a token. `costPriceCents` is returned to Admin callers only; for Manager and Staff the field is absent."
               },
               "response": []
             },
@@ -1528,7 +1528,7 @@
                     "products"
                   ]
                 },
-                "description": "Create a new physical product. `categoryKey`/`subcategoryKey` must be a valid pair — the system-generated keys of an existing category/subcategory (see GET /categories/valid), never their display names. Prices are integer cents. `sku` is NOT sent — it's auto-generated server-side from the resolved category/subcategory names (e.g. \"PHO-SCR-0001\"); the request body has no field for it. For barcode generation, either set `autoGenerateBarcode: true` to have the server mint an EAN-13 barcode, or supply a manual `barcode` (8-14 numeric digits) — the two are mutually exclusive, and both may be omitted if the product doesn't need one yet. `suppliers`, if provided as a list of intakes with `supplierKey`, `quantity`, `costPriceCents`, `referenceNo`, and `notes`, will atomically link each supplier, record purchase history receipts, and compute the starting `stockQuantity` as the sum of all intake quantities. Like `sku`, `barcode` is immutable after creation.\n\n**Requires the `inventory:write` permission** — held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token."
+                "description": "Create a new physical product. `categoryKey`/`subcategoryKey` must be a valid pair — the system-generated keys of an existing category/subcategory (see GET /categories/valid), never their display names. Prices are integer cents. `sku` is NOT sent — it's auto-generated server-side from the resolved category/subcategory names (e.g. \"PHO-SCR-0001\"); the request body has no field for it. For barcode generation, either set `autoGenerateBarcode: true` to have the server mint an EAN-13 barcode, or supply a manual `barcode` (8-14 numeric digits) — the two are mutually exclusive, and both may be omitted if the product doesn't need one yet. `suppliers`, if provided as a list of intakes with `supplierKey`, `quantity`, `costPriceCents`, `referenceNo`, and `notes`, will atomically link each supplier, record purchase history receipts, and compute the starting `stockQuantity` as the sum of all intake quantities. Like `sku`, `barcode` is immutable after creation.\n\n**Requires the `inventory:write` permission** — held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token. `costPriceCents` is returned to Admin callers only; for Manager and Staff the field is absent."
               },
               "response": []
             },
@@ -1563,7 +1563,7 @@
                     "{{productId}}"
                   ]
                 },
-                "description": "Partially update a product — omit any field to leave it unchanged. `barcode` may be set or corrected here (8–14 digits; stored as a manual barcode; 409 `BARCODE_ALREADY_EXISTS` if another product already carries it). `sku` stays immutable.\n\n**Requires the `inventory:write` permission** — held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token."
+                "description": "Partially update a product — omit any field to leave it unchanged. `barcode` may be set or corrected here (8–14 digits; stored as a manual barcode; 409 `BARCODE_ALREADY_EXISTS` if another product already carries it). `sku` stays immutable.\n\n**Requires the `inventory:write` permission** — held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token. `costPriceCents` is returned to Admin callers only; for Manager and Staff the field is absent."
               },
               "response": []
             },
@@ -1584,7 +1584,7 @@
                     "{{productId}}"
                   ]
                 },
-                "description": "Delete a single product by id.\n\n**Requires the `inventory:write` permission** — held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token."
+                "description": "Delete a single product by id.\n\n**Requires the `inventory:write` permission** — held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token. `costPriceCents` is returned to Admin callers only; for Manager and Staff the field is absent."
               },
               "response": []
             },

@@ -104,7 +104,7 @@ impl ProductDocument {
             category: category_name,
             subcategory_key: self.subcategory_key,
             subcategory: subcategory_name,
-            cost_price_cents: self.cost_price_cents,
+            cost_price_cents: Some(self.cost_price_cents),
             selling_price_cents: self.selling_price_cents,
             stock_quantity: self.stock_quantity,
             min_stock_threshold: self.min_stock_threshold,

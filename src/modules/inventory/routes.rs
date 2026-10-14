@@ -34,6 +34,7 @@ use crate::{
             SubcategoriesResponse, UpdateCategoryRequest, UpdateProductRequest,
             ValidCategoriesResponse,
         },
+        users::Role,
     },
     modules::inventory::service,
 };
@@ -85,6 +86,17 @@ fn parse_object_id(id: &str) -> AppResult<ObjectId> {
     parse_mongo_id(id, "Product")
 }
 
+/// What the shop paid for a product is Admin-only: every other caller gets
+/// the product with `costPriceCents` absent. Applied here, on the way out,
+/// because the service layer and sync work with the real value.
+fn product_for(user: &CurrentUser, product: Product) -> Product {
+    if user.role == Some(Role::Admin) {
+        product
+    } else {
+        product.without_cost()
+    }
+}
+
 // ============================================================================
 // Module status
 // ============================================================================
@@ -114,7 +126,15 @@ async fn inventory_overview(
     Query(query): Query<InventoryOverviewQuery>,
 ) -> AppResult<Json<ApiResponse<InventoryOverviewResponse>>> {
     user.require_permission(perm::INVENTORY_READ)?;
-    let response = service::overview::get_inventory_overview(&state.db, query).await?;
+    let mut response = service::overview::get_inventory_overview(&state.db, query).await?;
+    for category in &mut response.categories {
+        for subcategory in &mut category.subcategories {
+            subcategory.products = std::mem::take(&mut subcategory.products)
+                .into_iter()
+                .map(|product| product_for(&user, product))
+                .collect();
+        }
+    }
 
     Ok(Json(ApiResponse::success(
         response,
@@ -164,7 +184,12 @@ async fn list_products(
     Query(query): Query<ProductListQuery>,
 ) -> AppResult<Json<ApiResponse<ProductListResponse>>> {
     user.require_permission(perm::INVENTORY_READ)?;
-    let response = service::product::list_products(&state.db, query).await?;
+    let mut response = service::product::list_products(&state.db, query).await?;
+    response.items = response
+        .items
+        .into_iter()
+        .map(|product| product_for(&user, product))
+        .collect();
 
     Ok(Json(ApiResponse::success(
         response,
@@ -189,7 +214,10 @@ async fn get_product(
 ) -> AppResult<Json<ApiResponse<Product>>> {
     user.require_permission(perm::INVENTORY_READ)?;
     let object_id = parse_object_id(&id)?;
-    let product = service::product::get_product(&state.db, object_id).await?;
+    let product = product_for(
+        &user,
+        service::product::get_product(&state.db, object_id).await?,
+    );
 
     Ok(Json(ApiResponse::success(
         product,
@@ -213,7 +241,10 @@ async fn get_product_by_barcode(
     Path(barcode): Path<String>,
 ) -> AppResult<Json<ApiResponse<Product>>> {
     user.require_permission(perm::INVENTORY_READ)?;
-    let product = service::product::get_product_by_barcode(&state.db, &barcode).await?;
+    let product = product_for(
+        &user,
+        service::product::get_product_by_barcode(&state.db, &barcode).await?,
+    );
 
     Ok(Json(ApiResponse::success(
         product,
@@ -237,7 +268,10 @@ async fn create_product(
     Json(body): Json<CreateProductRequest>,
 ) -> AppResult<(StatusCode, Json<ApiResponse<Product>>)> {
     user.require_permission(perm::INVENTORY_WRITE)?;
-    let product = service::product::create_product(&state.db, body).await?;
+    let product = product_for(
+        &user,
+        service::product::create_product(&state.db, body).await?,
+    );
 
     Ok((
         StatusCode::CREATED,
@@ -271,9 +305,11 @@ async fn update_product(
 ) -> AppResult<Json<ApiResponse<Product>>> {
     user.require_permission(perm::INVENTORY_WRITE)?;
     let object_id = parse_object_id(&id)?;
-    let product =
+    let product = product_for(
+        &user,
         service::product::update_product(&state.db, object_id, body, if_match.0, device_id.0)
-            .await?;
+            .await?,
+    );
 
     Ok(Json(ApiResponse::success(
         product,
@@ -301,8 +337,10 @@ async fn delete_product(
 ) -> AppResult<Json<ApiResponse<Product>>> {
     user.require_permission(perm::INVENTORY_WRITE)?;
     let object_id = parse_object_id(&id)?;
-    let product =
-        service::product::delete_product(&state.db, object_id, if_match.0, device_id.0).await?;
+    let product = product_for(
+        &user,
+        service::product::delete_product(&state.db, object_id, if_match.0, device_id.0).await?,
+    );
 
     Ok(Json(ApiResponse::success(
         product,

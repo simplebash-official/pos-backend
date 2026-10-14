@@ -43,8 +43,11 @@ pub struct Product {
     pub subcategory_key: String,
     /// Resolved display name of subcategory.
     pub subcategory: String,
-    /// Cost/wholesale price in cents.
-    pub cost_price_cents: i64,
+    /// Cost/wholesale price in cents. Present only for an Admin caller — the
+    /// routes call `Product::without_cost` for everyone else, so the field is
+    /// absent from their responses rather than zeroed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_price_cents: Option<i64>,
     /// Retail sales price in cents.
     pub selling_price_cents: i64,
     /// Current count of items in stock.
@@ -75,6 +78,14 @@ pub struct Product {
     /// ID of client device that last updated this product.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by_device: Option<String>,
+}
+
+impl Product {
+    /// The product as a caller who may not see what the shop paid for it gets it.
+    pub fn without_cost(mut self) -> Self {
+        self.cost_price_cents = None;
+        self
+    }
 }
 
 fn default_version() -> i64 {

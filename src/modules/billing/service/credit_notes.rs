@@ -93,7 +93,7 @@ async fn resolve_exchange_item(
                     product.selling_price_cents,
                     None,
                     None,
-                    Some(product.cost_price_cents),
+                    product.cost_price_cents,
                 )
             }
             None => (

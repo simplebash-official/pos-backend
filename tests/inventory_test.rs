@@ -330,6 +330,78 @@ async fn product_list_honours_explicit_sort_and_breaks_ties_by_name() {
     );
 }
 
+/// What the shop paid for a product is Admin-only: every product-returning
+/// route omits `costPriceCents` for Manager and Staff, and a write by a
+/// Manager still stores the cost it was given.
+#[tokio::test]
+async fn cost_price_is_returned_to_admin_only() {
+    let app = common::spawn_app().await;
+    let (category_key, subcategory_key) = seed_category_with_subcategory(&app.db, "Widgets").await;
+    let barcode = unique_manual_barcode();
+    let admin = token_for_role(&app.config, Role::Admin);
+
+    let create_body = json!({
+        "name": "Costed Widget",
+        "categoryKey": category_key,
+        "subcategoryKey": subcategory_key,
+        "barcode": barcode,
+        "costPriceCents": 1234,
+        "sellingPriceCents": 2000,
+        "stockQuantity": 4,
+        "minStockThreshold": 1,
+    });
+    // Created by a Manager: the response hides cost, the stored value is kept.
+    let (status, created) = send(&app, "POST", "/api/inventory/products", Some(create_body)).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    assert!(created["data"].get("costPriceCents").is_none());
+    let id = created["data"]["id"].as_str().unwrap().to_string();
+
+    let by_id = format!("/api/inventory/products/{id}");
+    let by_barcode = format!("/api/inventory/products/by-barcode/{barcode}");
+    let list = format!("/api/inventory/products?search={barcode}");
+
+    for role in [Role::Manager, Role::Staff] {
+        let token = token_for_role(&app.config, role);
+        for uri in [by_id.as_str(), by_barcode.as_str()] {
+            let (status, body) = send_authed(&app.router, "GET", uri, None, &token).await;
+            assert_eq!(status, StatusCode::OK, "{role:?} {uri}: {body}");
+            assert!(
+                body["data"].get("costPriceCents").is_none(),
+                "{role:?} {uri}"
+            );
+            assert_eq!(body["data"]["sellingPriceCents"], 2000);
+        }
+        let (status, body) = send_authed(&app.router, "GET", &list, None, &token).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let items = body["data"]["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        assert!(items[0].get("costPriceCents").is_none(), "{role:?} list");
+    }
+
+    for uri in [by_id.as_str(), by_barcode.as_str()] {
+        let (status, body) = send_authed(&app.router, "GET", uri, None, &admin).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["data"]["costPriceCents"], 1234, "{uri}");
+    }
+    let (status, body) = send_authed(&app.router, "GET", &list, None, &admin).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["items"][0]["costPriceCents"], 1234);
+
+    // A Manager's edit that does not mention cost leaves the stored cost alone.
+    let (status, updated) = send(
+        &app,
+        "PUT",
+        &by_id,
+        Some(json!({ "sellingPriceCents": 2500 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    assert!(updated["data"].get("costPriceCents").is_none());
+    let (_, body) = send_authed(&app.router, "GET", &by_id, None, &admin).await;
+    assert_eq!(body["data"]["costPriceCents"], 1234);
+    assert_eq!(body["data"]["sellingPriceCents"], 2500);
+}
+
 #[tokio::test]
 async fn product_lifecycle_create_get_update_stock_and_delete() {
     let app = common::spawn_app().await;
@@ -781,7 +853,18 @@ async fn create_product_with_multiple_suppliers_links_and_records_intake_atomica
 
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(created["data"]["stockQuantity"], 50);
-    assert_eq!(created["data"]["costPriceCents"], 450);
+    let (_, as_admin) = send_authed(
+        &app.router,
+        "GET",
+        &format!(
+            "/api/inventory/products/{}",
+            created["data"]["id"].as_str().unwrap()
+        ),
+        None,
+        &token_for_role(&app.config, Role::Admin),
+    )
+    .await;
+    assert_eq!(as_admin["data"]["costPriceCents"], 450);
 
     let product_key = created["data"]["key"].as_str().unwrap();
     let product_id = created["data"]["id"].as_str().unwrap();
