@@ -129,9 +129,9 @@ async fn login_in_scope(
         // semi-public, so this must not reveal it to a stranger).
         if shop_name.is_some()
             && let Some(tenant_id) = crate::core::tenancy::current_tenant_id()
-            && tenants_service::is_suspended(db, &tenant_id).await?
+            && let Some(info) = tenants_service::suspension_of(db, &tenant_id).await?
         {
-            return Err(tenants_service::suspended_error());
+            return Err(tenants_service::suspended_error(&info));
         }
 
         let permissions: Vec<String> = roles::default_permissions(user.role)

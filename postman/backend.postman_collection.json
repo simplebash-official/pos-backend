@@ -4783,7 +4783,7 @@
             "description": "Suspends or reinstates a shop. While suspended every request carrying a token of the shop is refused with 403 ACCOUNT_SUSPENDED (cached 30 s per instance) and a shop-code login is refused after the password check. Idempotent. 404 TENANT_NOT_FOUND for an unknown shop, 400 for a malformed tenant id.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"suspended\": true\n}",
+              "raw": "{\n  \"suspended\": true,\n  \"suspendedAt\": \"2026-10-01T08:30:00Z\",\n  \"reason\": \"unpaid invoice\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

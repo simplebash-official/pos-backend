@@ -43,9 +43,11 @@ pub async fn tenant_context(State(state): State<AppState>, req: Request, next: N
     // handler runs. The check is cached (30 s) and fails open: a directory read error must not
     // become a second way for every request to fail, since the handler's own queries would fail too.
     if let Some(tenant_id) = verified.as_ref().and_then(|token| token.tenant_id()) {
-        match crate::modules::tenants::service::is_suspended(&state.db, &tenant_id).await {
-            Ok(true) => return crate::modules::tenants::service::suspended_error().into_response(),
-            Ok(false) => {}
+        match crate::modules::tenants::service::suspension_of(&state.db, &tenant_id).await {
+            Ok(Some(info)) => {
+                return crate::modules::tenants::service::suspended_error(&info).into_response();
+            }
+            Ok(None) => {}
             Err(err) => {
                 tracing::warn!(%tenant_id, error = %err, "could not read the shop's suspension flag")
             }
