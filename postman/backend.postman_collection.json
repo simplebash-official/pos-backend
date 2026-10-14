@@ -4705,7 +4705,7 @@
     },
     {
       "name": "Internal",
-      "description": "Server-to-server endpoints. Not for browsers: authenticated by a shared secret, and nginx refuses to forward /api/internal/ from the internet.",
+      "description": "Server-to-server endpoints (identity service and the admin console). Not for browsers: authenticated by a shared secret, and nginx refuses to forward /api/internal/ from the internet.",
       "item": [
         {
           "name": "Provision Shop (identity → POS)",
@@ -4746,6 +4746,124 @@
               ]
             },
             "description": "Registers a shop created by the identity service and, when `owner` is present, its first Admin login (using the account's existing Argon2id hash, so the same password works in the POS). Idempotent: replaying the same tenant is a no-op; a shop code owned by a different tenant is 409 SHOP_CODE_ALREADY_EXISTS; an existing Admin is left alone. `owner` is omitted for desktop sign-ups."
+          },
+          "response": []
+        },
+        {
+          "name": "Set Shop Suspension (identity → POS)",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Provision-Secret",
+                "value": "{{provisionSecret}}",
+                "description": "Must equal the backend's PROVISION_SECRET (404 when TENANT_MODE is not multi or no secret is set)."
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/internal/tenants/{{tenantId}}/status",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "internal",
+                "tenants",
+                "{{tenantId}}",
+                "status"
+              ]
+            },
+            "description": "Suspends or reinstates a shop. While suspended every request carrying a token of the shop is refused with 403 ACCOUNT_SUSPENDED (cached 30 s per instance) and a shop-code login is refused after the password check. Idempotent. 404 TENANT_NOT_FOUND for an unknown shop, 400 for a malformed tenant id.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"suspended\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Shop Usage (admin console)",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Provision-Secret",
+                "value": "{{provisionSecret}}",
+                "description": "Must equal the backend's PROVISION_SECRET (404 when TENANT_MODE is not multi or no secret is set)."
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/internal/tenants/{{tenantId}}/usage",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "internal",
+                "tenants",
+                "{{tenantId}}",
+                "usage"
+              ]
+            },
+            "description": "How much one shop uses the POS: non-voided bills (total / 30 days / 7 days), gross sales in cents, last bill, products, customers, active staff, non-revoked devices, last sync and a bills-per-day series for 30 days (Asia/Colombo days). Counts and totals only. 404 TENANT_NOT_FOUND for an unknown shop."
+          },
+          "response": []
+        },
+        {
+          "name": "Batch Shop Usage (admin console)",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Provision-Secret",
+                "value": "{{provisionSecret}}",
+                "description": "Must equal the backend's PROVISION_SECRET (404 when TENANT_MODE is not multi or no secret is set)."
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/internal/tenants/usage",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "internal",
+                "tenants",
+                "usage"
+              ]
+            },
+            "description": "Usage of up to 100 shops at once. Shops that are not in the directory are left out of `data.items`; more than 100 ids is a 400.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenantIds\": [\n    \"tnt_xxxxxxxxxxxxxxxx\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
           },
           "response": []
         }
@@ -4859,6 +4977,11 @@
     {
       "key": "templateName",
       "value": "doc_temp_ZahcoYg8xCQjuc8c"
+    },
+    {
+      "key": "tenantId",
+      "value": "tnt_xxxxxxxxxxxxxxxx",
+      "description": "Tenant id issued by the identity service (tnt_...)."
     }
   ]
 }

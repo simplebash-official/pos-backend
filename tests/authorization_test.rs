@@ -62,6 +62,10 @@ const PUBLIC_ROUTES: &[(&str, &str)] = &[
     // Server-to-server: authenticated by the shared X-Provision-Secret header, not a
     // bearer token, and blocked from the internet at nginx.
     ("POST", "/api/internal/provision"),
+    // Same guard, for the operator console: suspend/reinstate a shop and read its usage.
+    ("PUT", "/api/internal/tenants/{tenant_id}/status"),
+    ("GET", "/api/internal/tenants/{tenant_id}/usage"),
+    ("POST", "/api/internal/tenants/usage"),
 ];
 
 async fn build_test_app() -> axum::Router {

@@ -9,6 +9,8 @@ pub const ADMIN_REQUIRED: &str = "ADMIN_REQUIRED";
 pub const INTERNAL_SERVER_ERROR: &str = "INTERNAL_SERVER_ERROR";
 pub const SETUP_ALREADY_COMPLETED: &str = "SETUP_ALREADY_COMPLETED";
 pub const TENANT_NOT_FOUND: &str = "TENANT_NOT_FOUND";
+/// The shop's owner account was switched off by an operator (set via `PUT /api/internal/tenants/{id}/status`).
+pub const ACCOUNT_SUSPENDED: &str = "ACCOUNT_SUSPENDED";
 pub const SHOP_CODE_ALREADY_EXISTS: &str = "SHOP_CODE_ALREADY_EXISTS";
 pub const TENANT_ALREADY_EXISTS: &str = "TENANT_ALREADY_EXISTS";
 

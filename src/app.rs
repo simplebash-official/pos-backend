@@ -125,6 +125,8 @@ pub fn build_router(state: AppState) -> Router {
     //   POST /api/system/setup        bootstrap administrator and initialize database
     //   POST /api/internal/provision  identity -> POS shop hand-off; authenticated by the
     //                                 shared X-Provision-Secret header, blocked at nginx
+    //   PUT  /api/internal/tenants/{tenant_id}/status, GET .../usage, POST /api/internal/tenants/usage
+    //                                 operator console (suspend a shop, read usage); same secret
     //   GET  /docs, /api-docs/openapi.json   Swagger UI
     //   GET  /api/{inventory,billing,reports}
     //                                 static module-status stubs

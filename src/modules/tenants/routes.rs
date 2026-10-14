@@ -4,7 +4,11 @@
 // forward `/api/internal/` from the internet, so only containers on the compose
 // network can reach it.
 
-use axum::{Json, extract::State, http::HeaderMap};
+use axum::{
+    Json,
+    extract::{Path, State},
+    http::HeaderMap,
+};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
@@ -17,7 +21,10 @@ use crate::{
         error::{AppError, AppResult},
         response::{ApiResponse, ErrorResponse},
     },
-    modules::tenants::service::{self, ProvisionOwner},
+    modules::tenants::{
+        service::{self, ProvisionOwner},
+        usage::{self, TenantUsage},
+    },
 };
 
 // ============================================================================
@@ -25,7 +32,11 @@ use crate::{
 // ============================================================================
 
 pub fn router() -> OpenApiRouter<AppState> {
-    OpenApiRouter::new().routes(routes!(provision_shop))
+    OpenApiRouter::new()
+        .routes(routes!(provision_shop))
+        .routes(routes!(set_status))
+        .routes(routes!(shop_usage))
+        .routes(routes!(batch_usage))
 }
 
 // ============================================================================
@@ -143,6 +154,129 @@ async fn provision_shop(
             admin_created: outcome.admin_created,
         },
         "Shop provisioned",
+    )))
+}
+
+// ============================================================================
+// Suspension and usage (operator console)
+// ============================================================================
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SetStatusRequest {
+    /// True switches the shop's cloud access off; false switches it back on.
+    pub suspended: bool,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusResponse {
+    pub tenant_id: String,
+    pub suspended: bool,
+}
+
+/// Suspends or reinstates a shop. While suspended, every request carrying a token of the shop is
+/// refused with 403 `ACCOUNT_SUSPENDED` (within about 30 s on every instance) and shop-code
+/// logins are refused after the password check. Idempotent; requires `X-Provision-Secret`.
+#[utoipa::path(
+    put,
+    path = "/tenants/{tenant_id}/status",
+    tag = modules::TENANTS,
+    params(("tenant_id" = String, Path, description = "The identity service's tenant id (`tnt_...`)")),
+    request_body = SetStatusRequest,
+    responses(
+        (status = 200, description = "Status applied", body = ApiResponse<StatusResponse>),
+        (status = 400, description = "Malformed tenant id", body = ErrorResponse),
+        (status = 401, description = "Missing or wrong provisioning secret", body = ErrorResponse),
+        (status = 404, description = "Unknown shop, or the endpoint is not enabled on this deployment", body = ErrorResponse),
+    )
+)]
+async fn set_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(tenant_id): Path<String>,
+    Json(body): Json<SetStatusRequest>,
+) -> AppResult<Json<ApiResponse<StatusResponse>>> {
+    authorize(&state, &headers)?;
+    let tenant_id = tenant_id.trim().to_string();
+    service::set_suspended(&state.db, &tenant_id, body.suspended).await?;
+    Ok(Json(ApiResponse::success(
+        StatusResponse {
+            tenant_id,
+            suspended: body.suspended,
+        },
+        if body.suspended {
+            "Shop suspended"
+        } else {
+            "Shop reinstated"
+        },
+    )))
+}
+
+/// How much one shop uses the POS: bill counts, gross sales, catalogue and staff sizes, devices
+/// and the last sync. Counts and totals only, no record content. Requires `X-Provision-Secret`.
+#[utoipa::path(
+    get,
+    path = "/tenants/{tenant_id}/usage",
+    tag = modules::TENANTS,
+    params(("tenant_id" = String, Path, description = "The identity service's tenant id (`tnt_...`)")),
+    responses(
+        (status = 200, description = "Usage figures", body = ApiResponse<TenantUsage>),
+        (status = 401, description = "Missing or wrong provisioning secret", body = ErrorResponse),
+        (status = 404, description = "Unknown shop, or the endpoint is not enabled on this deployment", body = ErrorResponse),
+    )
+)]
+async fn shop_usage(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(tenant_id): Path<String>,
+) -> AppResult<Json<ApiResponse<TenantUsage>>> {
+    authorize(&state, &headers)?;
+    let usage = usage::usage_for(&state.db, tenant_id.trim()).await?;
+    Ok(Json(ApiResponse::success(usage, "Shop usage")))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchUsageRequest {
+    /// Up to 100 tenant ids; ids that are not in the directory are left out of the answer.
+    pub tenant_ids: Vec<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchUsageResponse {
+    pub items: Vec<TenantUsage>,
+}
+
+/// Usage of several shops in one call (the console's lists). Requires `X-Provision-Secret`.
+#[utoipa::path(
+    post,
+    path = "/tenants/usage",
+    tag = modules::TENANTS,
+    request_body = BatchUsageRequest,
+    responses(
+        (status = 200, description = "Usage figures", body = ApiResponse<BatchUsageResponse>),
+        (status = 400, description = "More than 100 shops", body = ErrorResponse),
+        (status = 401, description = "Missing or wrong provisioning secret", body = ErrorResponse),
+        (status = 404, description = "The endpoint is not enabled on this deployment", body = ErrorResponse),
+    )
+)]
+async fn batch_usage(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<BatchUsageRequest>,
+) -> AppResult<Json<ApiResponse<BatchUsageResponse>>> {
+    authorize(&state, &headers)?;
+    let ids: Vec<String> = body
+        .tenant_ids
+        .iter()
+        .map(|i| i.trim().to_string())
+        .collect();
+    let items = usage::usage_for_many(&state.db, &ids).await?;
+    Ok(Json(ApiResponse::success(
+        BatchUsageResponse { items },
+        "Shop usage",
     )))
 }
 

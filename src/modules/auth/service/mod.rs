@@ -125,6 +125,15 @@ async fn login_in_scope(
 
         let user = users_service::verify_credentials(db, &body.username, &body.password).await?;
 
+        // Only someone who proved the password learns the shop is suspended (shop codes are
+        // semi-public, so this must not reveal it to a stranger).
+        if shop_name.is_some()
+            && let Some(tenant_id) = crate::core::tenancy::current_tenant_id()
+            && tenants_service::is_suspended(db, &tenant_id).await?
+        {
+            return Err(tenants_service::suspended_error());
+        }
+
         let permissions: Vec<String> = roles::default_permissions(user.role)
             .iter()
             .map(|p| p.to_string())

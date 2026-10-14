@@ -11,7 +11,7 @@
 use axum::{
     extract::{Request, State},
     middleware::Next,
-    response::Response,
+    response::{IntoResponse, Response},
 };
 
 use crate::{
@@ -39,6 +39,18 @@ pub async fn tenant_context(State(state): State<AppState>, req: Request, next: N
         verified.as_ref().and_then(|t| t.device_id.as_deref()),
         header_device,
     );
+    // A suspended shop is refused here, once, for every route and every token type, before any
+    // handler runs. The check is cached (30 s) and fails open: a directory read error must not
+    // become a second way for every request to fail, since the handler's own queries would fail too.
+    if let Some(tenant_id) = verified.as_ref().and_then(|token| token.tenant_id()) {
+        match crate::modules::tenants::service::is_suspended(&state.db, &tenant_id).await {
+            Ok(true) => return crate::modules::tenants::service::suspended_error().into_response(),
+            Ok(false) => {}
+            Err(err) => {
+                tracing::warn!(%tenant_id, error = %err, "could not read the shop's suspension flag")
+            }
+        }
+    }
     let tenant = verified
         .and_then(|token| token.tenant)
         .unwrap_or(Tenant::Deny);

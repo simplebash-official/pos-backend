@@ -9,3 +9,4 @@ mod model;
 pub(crate) mod repository;
 pub mod routes;
 pub mod service;
+pub mod usage;
