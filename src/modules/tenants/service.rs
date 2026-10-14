@@ -12,7 +12,7 @@ use crate::{
         tenancy::{Tenant, with_tenant},
     },
     modules::{
-        tenants::{model::TenantDocument, repository},
+        tenants::{model::TenantDocument, repository, usage},
         users,
     },
 };
@@ -109,6 +109,7 @@ pub async fn create_tenant_with_key(
             sample_data_loaded: false,
             setup_completed_at: None,
             suspended_at: None,
+            suspended_reason: None,
         };
         // A concurrent creator can pass the check above; the unique index then
         // rejects the second insert.
@@ -267,7 +268,32 @@ pub async fn resolve_shop_code(db: &Db, code: &str) -> AppResult<Tenant> {
 /// backend picks them up within this window, which is the "about 30 seconds" the cloud promises.
 const SUSPENSION_TTL: std::time::Duration = std::time::Duration::from_secs(30);
 
-type SuspensionCache = std::collections::HashMap<String, (bool, std::time::Instant)>;
+/// What a suspended shop's staff are shown: when and why the account was suspended, and proof that
+/// the shop's data is still stored.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SuspensionInfo {
+    pub shop_name: String,
+    /// RFC 3339.
+    pub suspended_at: String,
+    pub reason: String,
+    pub retained: Retained,
+}
+
+/// Counts read from the shop's own data (no amounts, no record content).
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Retained {
+    pub bills: u64,
+    pub products: u64,
+    pub customers: u64,
+    pub staff: u64,
+    /// RFC 3339 time of the newest non-voided invoice.
+    pub last_bill_at: Option<String>,
+}
+
+type SuspensionCache =
+    std::collections::HashMap<String, (Option<SuspensionInfo>, std::time::Instant)>;
 
 static SUSPENDED: std::sync::LazyLock<std::sync::Mutex<SuspensionCache>> =
     std::sync::LazyLock::new(Default::default);
@@ -276,55 +302,85 @@ fn suspension_cache() -> std::sync::MutexGuard<'static, SuspensionCache> {
     SUSPENDED.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Whether the shop's owner account is currently suspended. Cached for `SUSPENSION_TTL`.
-/// Always `false` outside the multi-tenant (MongoDB) cloud and for a tenant that is not in the
+/// The shop's current suspension, `None` while it is active. Cached for `SUSPENSION_TTL`, so the
+/// retained-data counts are computed at most once per window however often a refused client retries.
+/// Always `None` outside the multi-tenant (MongoDB) cloud and for a tenant that is not in the
 /// directory (its token is then refused elsewhere).
-pub(crate) async fn is_suspended(db: &Db, tenant_key: &str) -> AppResult<bool> {
+pub(crate) async fn suspension_of(db: &Db, tenant_key: &str) -> AppResult<Option<SuspensionInfo>> {
     if db.as_mongo().is_none() {
-        return Ok(false);
+        return Ok(None);
     }
     if let Some(known) = suspension_cache()
         .get(tenant_key)
         .filter(|(_, read_at)| read_at.elapsed() < SUSPENSION_TTL)
-        .map(|(suspended, _)| *suspended)
+        .map(|(info, _)| info.clone())
     {
         return Ok(known);
     }
-    let suspended = repository::find_tenant_by_key(db, tenant_key)
-        .await?
-        .is_some_and(|t| t.suspended_at.is_some());
+    let info = match repository::find_tenant_by_key(db, tenant_key).await? {
+        Some(TenantDocument {
+            name,
+            suspended_at: Some(at),
+            suspended_reason,
+            ..
+        }) => {
+            let reason = suspended_reason.ok_or_else(|| {
+                AppError::internal(format!("shop {tenant_key} is suspended without a reason"))
+            })?;
+            let usage = usage::usage_for(db, tenant_key).await?;
+            Some(SuspensionInfo {
+                shop_name: name,
+                suspended_at: at
+                    .try_to_rfc3339_string()
+                    .map_err(|e| AppError::internal(e.to_string()))?,
+                reason,
+                retained: Retained {
+                    bills: usage.bills_total,
+                    products: usage.products,
+                    customers: usage.customers,
+                    staff: usage.users,
+                    last_bill_at: usage.last_bill_at,
+                },
+            })
+        }
+        _ => None,
+    };
     suspension_cache().insert(
         tenant_key.to_string(),
-        (suspended, std::time::Instant::now()),
+        (info.clone(), std::time::Instant::now()),
     );
-    Ok(suspended)
+    Ok(info)
 }
 
-/// The refusal every request of a suspended shop gets.
-pub(crate) fn suspended_error() -> AppError {
-    AppError::custom(
+/// The refusal every request of a suspended shop gets; `details` feeds the suspended page.
+pub(crate) fn suspended_error(info: &SuspensionInfo) -> AppError {
+    AppError::custom_with_details(
         axum::http::StatusCode::FORBIDDEN,
         codes::ACCOUNT_SUSPENDED,
         "This shop's cloud access is suspended. The desktop app keeps working offline; contact SimpleBash to restore access.",
+        serde_json::to_value(info).expect("SuspensionInfo serialises"),
     )
 }
 
-/// Switches a shop's cloud access off or on (called by the identity service when an operator
-/// suspends or reinstates the owner's account). Idempotent. 404 `TENANT_NOT_FOUND` for an
-/// unknown shop, so identity can tell "not provisioned yet" from success and re-provision first.
-pub async fn set_suspended(db: &Db, tenant_id: &str, suspended: bool) -> AppResult<()> {
+/// Switches a shop's cloud access off (`Some((since, reason))`, identity's own time and reason) or
+/// on (`None`). Called by the identity service when an operator suspends or reinstates the owner's
+/// account. Idempotent. 404 `TENANT_NOT_FOUND` for an unknown shop, so identity can tell "not
+/// provisioned yet" from success and re-provision first.
+pub async fn set_suspended(
+    db: &Db,
+    tenant_id: &str,
+    suspension: Option<(BsonDateTime, &str)>,
+) -> AppResult<()> {
     crate::core::logging::domain::tracked("tenants.suspension", async move {
         validate_tenant_key(tenant_id)?;
-        if !repository::set_tenant_suspended(db, tenant_id, suspended).await? {
+        if !repository::set_tenant_suspended(db, tenant_id, suspension).await? {
             return Err(AppError::not_found_with_code(
                 format!("No shop with id '{tenant_id}'"),
                 codes::TENANT_NOT_FOUND,
             ));
         }
-        suspension_cache().insert(
-            tenant_id.to_string(),
-            (suspended, std::time::Instant::now()),
-        );
+        // Dropping the entry makes this instance re-read (and re-count) on the very next request.
+        suspension_cache().remove(tenant_id);
         Ok(())
     })
     .await

@@ -50,13 +50,22 @@ pub(crate) async fn update_tenant_name(db: &Db, key: &str, name: &str) -> AppRes
     Ok(())
 }
 
-/// Sets or clears a tenant's suspension marker. `false` when no such tenant exists.
-pub(crate) async fn set_tenant_suspended(db: &Db, key: &str, suspended: bool) -> AppResult<bool> {
+/// Sets (`Some((since, reason))`) or clears (`None`) a tenant's suspension marker. `false` when no
+/// such tenant exists.
+pub(crate) async fn set_tenant_suspended(
+    db: &Db,
+    key: &str,
+    suspension: Option<(mongodb::bson::DateTime, &str)>,
+) -> AppResult<bool> {
     let now = mongodb::bson::DateTime::now();
-    let update = if suspended {
-        doc! { "$set": { "suspended_at": now, "updated_at": now } }
-    } else {
-        doc! { "$set": { "updated_at": now }, "$unset": { "suspended_at": "" } }
+    let update = match suspension {
+        Some((since, reason)) => doc! {
+            "$set": { "suspended_at": since, "suspended_reason": reason, "updated_at": now }
+        },
+        None => doc! {
+            "$set": { "updated_at": now },
+            "$unset": { "suspended_at": "", "suspended_reason": "" }
+        },
     };
     let result = directory(db)?
         .update_one(doc! { "key": key }, update)

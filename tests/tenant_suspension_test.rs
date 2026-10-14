@@ -108,16 +108,28 @@ async fn login(router: &Router, code: &str, password: &str) -> (StatusCode, Valu
     .await
 }
 
-async fn set_status(router: &Router, tenant: &str, suspended: bool) -> (StatusCode, Value) {
+const SINCE: &str = "2026-10-01T08:30:00Z";
+const REASON: &str = "unpaid invoice";
+
+async fn put_status(router: &Router, tenant: &str, body: Value) -> (StatusCode, Value) {
     send(
         router,
         "PUT",
         &format!("/api/internal/tenants/{tenant}/status"),
         Some(SECRET),
         None,
-        Some(json!({ "suspended": suspended })),
+        Some(body),
     )
     .await
+}
+
+async fn set_status(router: &Router, tenant: &str, suspended: bool) -> (StatusCode, Value) {
+    let body = if suspended {
+        json!({ "suspended": true, "suspendedAt": SINCE, "reason": REASON })
+    } else {
+        json!({ "suspended": false })
+    };
+    put_status(router, tenant, body).await
 }
 
 #[tokio::test]
@@ -153,6 +165,20 @@ async fn a_suspended_shop_is_refused_everywhere_and_can_be_reinstated() {
         (StatusCode::FORBIDDEN, Some("ACCOUNT_SUSPENDED")),
         "{body}"
     );
+    // The refusal carries what the suspended page shows: identity's time, the reason, and proof
+    // the shop's data is still stored (the shop has its Admin, so at least one staff account).
+    let details = &body["details"];
+    assert_eq!(details["suspendedAt"], SINCE, "{body}");
+    assert_eq!(details["reason"], REASON, "{body}");
+    assert!(
+        details["shopName"].as_str().is_some_and(|n| !n.is_empty()),
+        "{body}"
+    );
+    assert!(
+        details["retained"]["staff"].as_u64().unwrap() >= 1,
+        "{body}"
+    );
+    assert_eq!(details["retained"]["bills"], 0, "{body}");
     let (status, body) = send(
         &app.router,
         "GET",
@@ -173,6 +199,7 @@ async fn a_suspended_shop_is_refused_everywhere_and_can_be_reinstated() {
         (StatusCode::FORBIDDEN, Some("ACCOUNT_SUSPENDED")),
         "{body}"
     );
+    assert_eq!(body["details"]["reason"], REASON, "{body}");
     // ...but a stranger guessing the password learns nothing about the suspension.
     let (status, body) = login(&app.router, "ann-s-phones", "wrong-password-1").await;
     assert_eq!(
@@ -180,6 +207,19 @@ async fn a_suspended_shop_is_refused_everywhere_and_can_be_reinstated() {
         (StatusCode::UNAUTHORIZED, Some("INVALID_CREDENTIALS")),
         "{body}"
     );
+
+    // Re-sending the suspension keeps identity's time (the POS never re-stamps it) and takes the
+    // new reason at once on this instance.
+    let (status, body) = put_status(
+        &app.router,
+        &tenant,
+        json!({ "suspended": true, "suspendedAt": SINCE, "reason": "second notice" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (_, body) = me(token.clone()).await;
+    assert_eq!(body["details"]["suspendedAt"], SINCE, "{body}");
+    assert_eq!(body["details"]["reason"], "second notice", "{body}");
 
     // Another shop is untouched.
     let (status, body) = login(&app.router, "bob-repairs", PASSWORD).await;
@@ -271,6 +311,34 @@ async fn the_status_route_needs_the_secret_and_a_known_shop() {
     );
     let (status, _) = set_status(&app.router, "not-a-tenant", true).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // The body must match `suspended`: a suspension needs its time and reason, a reinstatement
+    // carries neither.
+    for body in [
+        json!({ "suspended": true }),
+        json!({ "suspended": true, "suspendedAt": SINCE }),
+        json!({ "suspended": true, "reason": REASON }),
+        json!({ "suspended": true, "suspendedAt": SINCE, "reason": "   " }),
+        json!({ "suspended": true, "suspendedAt": SINCE, "reason": "x".repeat(501) }),
+        json!({ "suspended": true, "suspendedAt": "yesterday", "reason": REASON }),
+        json!({ "suspended": false, "reason": REASON }),
+        json!({ "suspended": false, "suspendedAt": SINCE }),
+    ] {
+        let (status, resp) = put_status(&app.router, &tenant, body.clone()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body} -> {resp}");
+    }
+    let still_active = app
+        .db
+        .collection::<Document>("tenants")
+        .find_one(doc! { "key": &tenant })
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        still_active.get("suspended_at").is_none()
+            && still_active.get("suspended_reason").is_none(),
+        "a rejected request changed nothing"
+    );
 
     // Without a configured secret the routes do not exist.
     let off = common::spawn_app_multi_tenant_with_secret(None).await;
@@ -458,6 +526,107 @@ async fn usage_counts_this_shop_only_and_leaves_out_voided_and_deleted_rows() {
     assert_eq!(
         (status, body["code"].as_str()),
         (StatusCode::NOT_FOUND, Some("TENANT_NOT_FOUND"))
+    );
+
+    let _ = app.db.drop().await;
+}
+
+#[tokio::test]
+async fn a_suspended_shop_reports_what_it_still_holds_and_reinstating_changes_none_of_it() {
+    if !has_mongo() {
+        return;
+    }
+    let app = common::spawn_app_multi_tenant_with_secret(Some(SECRET)).await;
+    ensure_indexes(&app.db, true).await;
+    let (tenant, other) = (tenant_id(), tenant_id());
+    provision(&app.router, &tenant, "ann-s-phones").await;
+    provision(&app.router, &other, "bob-repairs").await;
+
+    let now = DateTime::now();
+    let insert = |name: &'static str, docs: Vec<Document>| {
+        let db = app.db.clone();
+        async move {
+            db.collection::<Document>(name)
+                .insert_many(docs)
+                .await
+                .unwrap()
+        }
+    };
+    insert(
+        "invoices",
+        vec![
+            doc! { "tenant_id": &tenant, "status": "paid", "total_cents": 1_000, "created_at": now },
+            doc! { "tenant_id": &tenant, "status": "paid", "total_cents": 2_000, "created_at": now },
+            doc! { "tenant_id": &tenant, "status": "voided", "total_cents": 9_000, "created_at": now },
+            doc! { "tenant_id": &other, "status": "paid", "total_cents": 5_000, "created_at": now },
+        ],
+    )
+    .await;
+    insert(
+        "products",
+        vec![
+            doc! { "tenant_id": &tenant, "name": "a" },
+            doc! { "tenant_id": &tenant, "name": "b" },
+            doc! { "tenant_id": &tenant, "name": "gone", "deleted_at": now },
+            doc! { "tenant_id": &other, "name": "c" },
+        ],
+    )
+    .await;
+    insert(
+        "customers",
+        vec![
+            doc! { "tenant_id": &tenant, "name": "x" },
+            doc! { "tenant_id": &other, "name": "y" },
+        ],
+    )
+    .await;
+
+    let (_, login_body) = login(&app.router, "ann-s-phones", PASSWORD).await;
+    let token = login_body["data"]["token"].as_str().unwrap().to_string();
+
+    assert_eq!(
+        set_status(&app.router, &tenant, true).await.0,
+        StatusCode::OK
+    );
+    let (status, body) = send(&app.router, "GET", "/api/auth/me", None, Some(&token), None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    let retained = &body["details"]["retained"];
+    assert_eq!(
+        retained["bills"], 2,
+        "voided and other shops' bills are not counted: {body}"
+    );
+    assert_eq!(retained["products"], 2, "{body}");
+    assert_eq!(retained["customers"], 1, "{body}");
+    assert!(retained["lastBillAt"].is_string(), "{body}");
+
+    // Reinstating touches nothing: the same rows are there and the same token works.
+    assert_eq!(
+        set_status(&app.router, &tenant, false).await.0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        send(&app.router, "GET", "/api/auth/me", None, Some(&token), None)
+            .await
+            .0,
+        StatusCode::OK
+    );
+    let kept = |name: &'static str| {
+        let db = app.db.clone();
+        let tenant = tenant.clone();
+        async move {
+            db.collection::<Document>(name)
+                .count_documents(doc! { "tenant_id": tenant })
+                .await
+                .unwrap()
+        }
+    };
+    assert_eq!(
+        (
+            kept("invoices").await,
+            kept("products").await,
+            kept("customers").await
+        ),
+        (3, 3, 1)
     );
 
     let _ = app.db.drop().await;

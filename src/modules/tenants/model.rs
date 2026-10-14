@@ -28,10 +28,14 @@ pub struct TenantDocument {
     /// Timestamp when onboarding setup was completed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub setup_completed_at: Option<BsonDateTime>,
-    /// Set while the identity service has the shop's owner account suspended (for example for
-    /// non-payment). Every request carrying a token of this shop is refused with
+    /// When the identity service suspended the shop's owner account (for example for
+    /// non-payment); identity's timestamp, not the time this directory heard of it. Every request carrying a token of this shop is refused with
     /// `ACCOUNT_SUSPENDED`; the desktop app keeps working offline because it never needs this
     /// backend. Absent = active.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub suspended_at: Option<BsonDateTime>,
+    /// Why the owner account was suspended (set and cleared together with `suspended_at`); shown
+    /// to the shop's staff on the suspended page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suspended_reason: Option<String>,
 }
