@@ -494,7 +494,7 @@ pub fn mint_device_token(config: &Config, tid: &str, device_id: &str) -> String 
 pub async fn registered_device_token(app: &TestApp, tid: &str, device_id: &str) -> String {
     use tower::ServiceExt;
     let token = mint_device_token(&app.config, tid, device_id);
-    let body = json!({ "deviceId": device_id, "deviceName": "Test PC", "appVersion": "1.13.0" });
+    let body = json!({ "deviceId": device_id, "deviceName": "Test PC", "appVersion": "1.14.0" });
     let request = axum::http::Request::builder()
         .method("POST")
         .uri("/api/sync/devices/register")
