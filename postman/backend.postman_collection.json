@@ -1461,6 +1461,28 @@
               "response": []
             },
             {
+              "name": "Create Product Barcode",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{backendBaseUrl}}/api/inventory/products/{{productId}}/barcode",
+                  "host": [
+                    "{{backendBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory",
+                    "products",
+                    "{{productId}}",
+                    "barcode"
+                  ]
+                },
+                "description": "Gives a product that has **no barcode** a generated shop barcode (13 digits, same numbering as `autoGenerateBarcode` on create; `barcodeSource: generated`). The write bumps the product's version so it syncs. A product that already has a barcode is refused: 409 `PRODUCT_HAS_BARCODE`. **Requires the `inventory:write` permission** — Admin and Manager only; Staff get 403 `PERMISSION_DENIED`."
+              },
+              "response": []
+            },
+            {
               "name": "Get Product By Barcode",
               "request": {
                 "method": "GET",
@@ -1841,6 +1863,28 @@
                 "description": "Paginated stock movement (audit trail) history across every product, optionally filtered by product and movement type. Use Product Stock Movements instead for a single product's unpaginated history.\n\n**Requires the `inventory:read` permission** — held by all three roles, so any logged-in user may call it. Returns 401 without a token."
               },
               "response": []
+            },
+            {
+              "name": "Get Serial By Number",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{backendBaseUrl}}/api/inventory/serials/by-number/{{serialNumber}}",
+                  "host": [
+                    "{{backendBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory",
+                    "serials",
+                    "by-number",
+                    "{{serialNumber}}"
+                  ]
+                },
+                "description": "Resolves a scanned serial number (any product) to its in-stock unit, product and selling price (its own batch's price) — what the till adds to a sale when a serial label is scanned. 404 `SERIAL_NOT_FOUND`; 409 `SERIAL_ALREADY_SOLD` when the unit is not in stock. Cost fields are Admin-only. **Requires the `inventory:read` permission** — held by all three roles."
+              },
+              "response": []
             }
           ]
         },
@@ -2126,6 +2170,199 @@
         }
       ],
       "description": "Reference module — full product CRUD, stock adjustment/movements, and category/subcategory management."
+    },
+    {
+      "name": "Labels",
+      "item": [
+        {
+          "name": "Designs",
+          "item": [
+            {
+              "name": "List Label Designs",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{backendBaseUrl}}/api/labels/templates",
+                  "host": [
+                    "{{backendBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "labels",
+                    "templates"
+                  ]
+                },
+                "description": "The ready-made designs (`builtIn: true`, keys `starter_*`, read-only) followed by the shop's own designs by name. **Requires the `inventory:read` permission** — held by all three roles."
+              },
+              "response": []
+            },
+            {
+              "name": "Create Label Design",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{backendBaseUrl}}/api/labels/templates",
+                  "host": [
+                    "{{backendBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "labels",
+                    "templates"
+                  ]
+                },
+                "description": "Save a shop-built label design. A design is a label size plus up to 30 absolutely placed elements (`text`, `barcode`, `qr`, `line`), all in millimetres from the top-left corner; every field is required. Names are unique per shop (case-insensitive, starters included): 409 `LABEL_TEMPLATE_NAME_TAKEN`. Invalid designs are 400. **Requires the `inventory:write` permission** — Admin and Manager only; Staff get 403 `PERMISSION_DENIED`.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Price tag with barcode\",\n  \"widthMm\": 50,\n  \"heightMm\": 30,\n  \"elements\": [\n    {\n      \"id\": \"name\",\n      \"type\": \"text\",\n      \"source\": \"productName\",\n      \"customText\": null,\n      \"xMm\": 2,\n      \"yMm\": 1.5,\n      \"widthMm\": 46,\n      \"heightMm\": 6,\n      \"fontSizePt\": 8,\n      \"bold\": true,\n      \"align\": \"left\"\n    },\n    {\n      \"id\": \"barcode\",\n      \"type\": \"barcode\",\n      \"xMm\": 2,\n      \"yMm\": 8,\n      \"widthMm\": 46,\n      \"heightMm\": 15,\n      \"showValue\": true,\n      \"fontSizePt\": 6\n    },\n    {\n      \"id\": \"price\",\n      \"type\": \"text\",\n      \"source\": \"price\",\n      \"customText\": null,\n      \"xMm\": 2,\n      \"yMm\": 24,\n      \"widthMm\": 46,\n      \"heightMm\": 5,\n      \"fontSizePt\": 9,\n      \"bold\": true,\n      \"align\": \"right\"\n    }\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Update Label Design",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{backendBaseUrl}}/api/labels/templates/{{labelTemplateKey}}",
+                  "host": [
+                    "{{backendBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "labels",
+                    "templates",
+                    "{{labelTemplateKey}}"
+                  ]
+                },
+                "description": "Replace a shop design (same body as create). A ready-made design cannot be changed: 409 `LABEL_TEMPLATE_BUILT_IN`; unknown key: 404 `LABEL_TEMPLATE_NOT_FOUND`. **Requires the `inventory:write` permission** — Admin and Manager only; Staff get 403 `PERMISSION_DENIED`.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Price tag with barcode\",\n  \"widthMm\": 50,\n  \"heightMm\": 30,\n  \"elements\": [\n    {\n      \"id\": \"name\",\n      \"type\": \"text\",\n      \"source\": \"productName\",\n      \"customText\": null,\n      \"xMm\": 2,\n      \"yMm\": 1.5,\n      \"widthMm\": 46,\n      \"heightMm\": 6,\n      \"fontSizePt\": 8,\n      \"bold\": true,\n      \"align\": \"left\"\n    },\n    {\n      \"id\": \"barcode\",\n      \"type\": \"barcode\",\n      \"xMm\": 2,\n      \"yMm\": 8,\n      \"widthMm\": 46,\n      \"heightMm\": 15,\n      \"showValue\": true,\n      \"fontSizePt\": 6\n    },\n    {\n      \"id\": \"price\",\n      \"type\": \"text\",\n      \"source\": \"price\",\n      \"customText\": null,\n      \"xMm\": 2,\n      \"yMm\": 24,\n      \"widthMm\": 46,\n      \"heightMm\": 5,\n      \"fontSizePt\": 9,\n      \"bold\": true,\n      \"align\": \"right\"\n    }\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Delete Label Design",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{backendBaseUrl}}/api/labels/templates/{{labelTemplateKey}}",
+                  "host": [
+                    "{{backendBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "labels",
+                    "templates",
+                    "{{labelTemplateKey}}"
+                  ]
+                },
+                "description": "Delete a shop design. A ready-made design cannot be deleted: 409 `LABEL_TEMPLATE_BUILT_IN`. **Requires the `inventory:write` permission** — Admin and Manager only; Staff get 403 `PERMISSION_DENIED`."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Printing",
+          "item": [
+            {
+              "name": "Render Labels",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{backendBaseUrl}}/api/labels/render",
+                  "host": [
+                    "{{backendBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "labels",
+                    "render"
+                  ]
+                },
+                "description": "Returns a PDF with **one page per sticker** (`copies` repeats a sticker), each page exactly the label size. Items are `product` (`productKey`, `copies`, `priceCents` = one of the product's current selling prices, required when the design has a price element) or `serial` (`serialNumber`, `copies`; prints that unit's serial at its own batch's price, in-stock units only). Everything else comes from the stored records. Limits: 200 items, 500 copies per item, 500 stickers per print (400). 422 codes: `LABEL_PRODUCT_WITHOUT_BARCODE`, `LABEL_PRICE_REQUIRED`, `PRICE_TIER_UNAVAILABLE`, `LABEL_BARCODE_TOO_NARROW`, `LABEL_QR_TOO_SMALL`. **Requires the `inventory:read` permission** — held by all three roles.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"templateKey\": \"starter_price_tag_50x30\",\n  \"items\": [\n    {\n      \"kind\": \"product\",\n      \"productKey\": \"{{productKey}}\",\n      \"copies\": 3,\n      \"priceCents\": 150000\n    },\n    {\n      \"kind\": \"serial\",\n      \"serialNumber\": \"{{serialNumber}}\",\n      \"copies\": 1\n    }\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Preview Label Design",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{backendBaseUrl}}/api/labels/preview",
+                  "host": [
+                    "{{backendBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "labels",
+                    "preview"
+                  ]
+                },
+                "description": "Draws one sticker of an **unsaved** design with example values, as a one-page PDF, for the designer's live preview. Same validation and scannability rules as a real print. **Requires the `inventory:write` permission** — Admin and Manager only; Staff get 403 `PERMISSION_DENIED`.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"template\": {\n    \"name\": \"Price tag with barcode\",\n    \"widthMm\": 50,\n    \"heightMm\": 30,\n    \"elements\": [\n      {\n        \"id\": \"name\",\n        \"type\": \"text\",\n        \"source\": \"productName\",\n        \"customText\": null,\n        \"xMm\": 2,\n        \"yMm\": 1.5,\n        \"widthMm\": 46,\n        \"heightMm\": 6,\n        \"fontSizePt\": 8,\n        \"bold\": true,\n        \"align\": \"left\"\n      },\n      {\n        \"id\": \"barcode\",\n        \"type\": \"barcode\",\n        \"xMm\": 2,\n        \"yMm\": 8,\n        \"widthMm\": 46,\n        \"heightMm\": 15,\n        \"showValue\": true,\n        \"fontSizePt\": 6\n      },\n      {\n        \"id\": \"price\",\n        \"type\": \"text\",\n        \"source\": \"price\",\n        \"customText\": null,\n        \"xMm\": 2,\n        \"yMm\": 24,\n        \"widthMm\": 46,\n        \"heightMm\": 5,\n        \"fontSizePt\": 9,\n        \"bold\": true,\n        \"align\": \"right\"\n      }\n    ]\n  },\n  \"sample\": {\n    \"name\": \"USB-C Cable 1m\",\n    \"sku\": \"CAB-USB-0042\",\n    \"category\": \"Cables\",\n    \"priceCents\": 125000,\n    \"code\": \"2000000000015\"\n  }\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "Print Jobs",
@@ -5049,6 +5286,14 @@
       "key": "batchKey",
       "value": "stb_xxxxxxxxxxxxxxxx",
       "description": "A stock batch's system-generated `key` (from List Product Batches)."
+    },
+    {
+      "key": "labelTemplateKey",
+      "value": "ltpl_xxxxxxxxxxxxxxxx"
+    },
+    {
+      "key": "serialNumber",
+      "value": "356938035643809"
     }
   ]
 }

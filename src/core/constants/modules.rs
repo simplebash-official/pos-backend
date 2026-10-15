@@ -19,3 +19,4 @@ pub const SYSTEM: &str = "system";
 pub const SETTINGS: &str = "settings";
 pub const TENANTS: &str = "tenants";
 pub const QUOTATIONS: &str = "quotations";
+pub const LABELS: &str = "labels";

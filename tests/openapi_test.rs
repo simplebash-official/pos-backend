@@ -117,6 +117,12 @@ async fn openapi_json_lists_all_module_paths() {
         "/api/settings/shop-profile",
         "/api/settings/document-templates",
         "/api/settings/document-templates/{name}/preview",
+        "/api/labels/templates",
+        "/api/labels/templates/{key}",
+        "/api/labels/render",
+        "/api/labels/preview",
+        "/api/inventory/products/{id}/barcode",
+        "/api/inventory/serials/by-number/{serialNumber}",
     ] {
         assert!(paths.contains_key(expected), "missing path: {expected}");
     }

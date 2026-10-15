@@ -29,6 +29,7 @@ const TEMPLATE_DESCRIPTIONS: &[(&str, &str)] = &[
     ("credit-note", "Credit Note"),
     ("quotation", "Quotation"),
     ("analytics-report", "Analytics Report"),
+    ("product-label", "Product Sticker Label"),
 ];
 
 /// The built-in default template's title for a call-site slug, if it has one.

@@ -628,6 +628,17 @@ CREATE TABLE IF NOT EXISTS document_template_settings (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS label_templates (
+    key TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    width_mm REAL NOT NULL,
+    height_mm REAL NOT NULL,
+    elements TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS shop_profiles (
     key TEXT PRIMARY KEY,
     id TEXT NOT NULL,

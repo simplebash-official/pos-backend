@@ -229,6 +229,14 @@ pub fn index_specs(multi_tenant: bool) -> Vec<IndexSpec> {
         true,
     );
 
+    // A shop's own label designs (`modules::labels`).
+    specs.add(
+        "label_templates",
+        "label_templates_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+
     // Platform directory (`modules::tenants`): shop codes are globally unique
     // and the collection is not tenant-owned, so it is never tenant-prefixed.
     if multi_tenant {
@@ -368,8 +376,9 @@ mod tests {
         let specs = index_specs(false);
         // 17 sync + 4 created_at + 2 invoice analytics + 3 reminders + products_key
         // + idempotency unique/ttl + serial unique + serial status
-        // + stock_batches product_key + shop_profiles + document_template_settings.
-        assert_eq!(specs.len(), 34);
+        // + stock_batches product_key + shop_profiles + document_template_settings
+        // + label_templates.
+        assert_eq!(specs.len(), 35);
         assert!(specs.iter().all(|s| s.keys.get(TENANT_FIELD).is_none()));
         assert!(names(&specs).contains(&"products.sync_updated_at_key".to_string()));
         assert!(names(&specs).contains(&"idempotency_keys.idempotency_ttl".to_string()));
@@ -386,6 +395,7 @@ mod tests {
                 "product_serials_serial_number_unique",
                 "shop_profiles_key_unique",
                 "document_template_settings_key_unique",
+                "label_templates_key_unique",
             ]
         );
         let sync = specs

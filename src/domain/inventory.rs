@@ -999,6 +999,17 @@ pub struct ProductSerial {
     pub version: i64,
 }
 
+/// What scanning a serial number resolves to: the unit, its product and the
+/// price it sells at (its own batch's selling price). Admin-only cost fields are
+/// stripped from `product` by the route, like every other product read.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SerialLookup {
+    pub serial: ProductSerial,
+    pub product: Product,
+    pub selling_price_cents: i64,
+}
+
 /// Query params for `GET /products/{key}/serials`.
 #[derive(Debug, Clone, Default, Deserialize, IntoParams)]
 #[serde(rename_all = "camelCase")]

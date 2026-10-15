@@ -29,10 +29,11 @@ use crate::{
             CreateProductRequest, DeleteProductsRequest, DeleteProductsResponse, InventoryMetrics,
             InventoryOverviewQuery, InventoryOverviewResponse, LowStockResponse, Product,
             ProductListQuery, ProductListResponse, ProductSerialListQuery,
-            ProductSerialListResponse, StockAdjustmentRequest, StockAdjustmentResponse, StockBatch,
-            StockBatchListResponse, StockMovementListQuery, StockMovementListResponse,
-            StockMovementsResponse, SubcategoriesResponse, UpdateCategoryRequest,
-            UpdateProductRequest, UpdateStockBatchRequest, ValidCategoriesResponse,
+            ProductSerialListResponse, SerialLookup, StockAdjustmentRequest,
+            StockAdjustmentResponse, StockBatch, StockBatchListResponse, StockMovementListQuery,
+            StockMovementListResponse, StockMovementsResponse, SubcategoriesResponse,
+            UpdateCategoryRequest, UpdateProductRequest, UpdateStockBatchRequest,
+            ValidCategoriesResponse,
         },
         users::Role,
     },
@@ -59,6 +60,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         // Products
         .routes(routes!(list_products, create_product, delete_products))
         .routes(routes!(get_product_by_barcode))
+        .routes(routes!(generate_product_barcode))
         .routes(routes!(get_product, update_product, delete_product))
         // Stock
         .routes(routes!(list_all_stock_movements))
@@ -66,6 +68,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(low_stock))
         .routes(routes!(product_movements))
         .routes(routes!(product_serials))
+        .routes(routes!(get_serial_by_number))
         .routes(routes!(product_batches))
         .routes(routes!(update_stock_batch))
         // Categories
@@ -260,6 +263,36 @@ async fn get_product_by_barcode(
     Ok(Json(ApiResponse::success(
         product,
         "Product retrieved successfully",
+    )))
+}
+
+#[utoipa::path(post, path = "/products/{id}/barcode", tag = modules::INVENTORY,
+    params(("id" = String, Path, description = "Product id")),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "A shop barcode was generated for the product", body = ApiResponse<Product>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+        (status = 404, description = "Product not found", body = ErrorResponse),
+        (status = 409, description = "PRODUCT_HAS_BARCODE: the product already has a barcode", body = ErrorResponse),
+    )
+)]
+async fn generate_product_barcode(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    device_id: crate::core::middleware::sync_headers::DeviceId,
+    Path(id): Path<String>,
+) -> AppResult<Json<ApiResponse<Product>>> {
+    user.require_permission(perm::INVENTORY_WRITE)?;
+    let object_id = parse_object_id(&id)?;
+    let product = product_for(
+        &user,
+        service::product::generate_barcode(&state.db, object_id, device_id.0).await?,
+    );
+
+    Ok(Json(ApiResponse::success(
+        product,
+        "Barcode created successfully",
     )))
 }
 
@@ -517,6 +550,33 @@ async fn product_serials(
     Ok(Json(ApiResponse::success(
         ProductSerialListResponse { items },
         "Product serials retrieved successfully",
+    )))
+}
+
+#[utoipa::path(get, path = "/serials/by-number/{serialNumber}", tag = modules::INVENTORY,
+    params(("serialNumber" = String, Path, description = "Exact serial number, as printed on a serial label")),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "The in-stock unit with this serial number, its product and selling price", body = ApiResponse<SerialLookup>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+        (status = 404, description = "SERIAL_NOT_FOUND: no unit has this serial number", body = ErrorResponse),
+        (status = 409, description = "SERIAL_ALREADY_SOLD: the unit is not in stock", body = ErrorResponse),
+    )
+)]
+async fn get_serial_by_number(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Path(serial_number): Path<String>,
+) -> AppResult<Json<ApiResponse<SerialLookup>>> {
+    user.require_permission(perm::INVENTORY_READ)?;
+    let mut lookup =
+        service::product_serial::lookup_in_stock_serial(&state.db, &serial_number).await?;
+    lookup.product = product_for(&user, lookup.product);
+
+    Ok(Json(ApiResponse::success(
+        lookup,
+        "Serial number retrieved successfully",
     )))
 }
 

@@ -8,6 +8,7 @@ pub mod customers;
 pub mod employees;
 pub mod imports;
 pub mod inventory;
+pub mod labels;
 pub mod print_jobs;
 pub mod purchases;
 pub mod quotations;

@@ -104,6 +104,43 @@ fn mock_templates_json() -> serde_json::Value {
         }
     });
     let sample_logo = "https://example.invalid/logo.png";
+    // The label template declares no `x-document-kind` (it is not a shop-chosen
+    // design) and is typed `label`, like the real one.
+    let mut product_label = mock_template(
+        "tpl_product_label",
+        "lbl_temp_qklcWIolwoFFN3xk",
+        "Product Sticker Label",
+        "",
+        json!({
+            "required": ["widthMm", "heightMm", "shopName", "elements", "labels"],
+            "properties": {
+                "widthMm": { "type": "number" },
+                "heightMm": { "type": "number" },
+                "shopName": { "type": "string" },
+                "elements": { "type": "array", "minItems": 1 },
+                "labels": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "object",
+                        "required": ["name", "sku", "category", "priceCents", "code", "copies"],
+                        "properties": {
+                            "priceCents": { "type": ["integer", "null"] },
+                            "code": { "type": "string", "minLength": 1 },
+                            "copies": { "type": "integer", "minimum": 1 }
+                        }
+                    }
+                }
+            }
+        }),
+        true,
+        None,
+    );
+    product_label["type"] = json!("label");
+    product_label["dataSchema"]
+        .as_object_mut()
+        .expect("mock schema is an object")
+        .remove("x-document-kind");
     json!({
         "success": true,
         "message": "Templates fetched",
@@ -196,6 +233,7 @@ fn mock_templates_json() -> serde_json::Value {
                     true,
                     Some(json!({ "quotationNumber": "QUO-SAMPLE", "validUntil": "01 Jan 2030", "items": [] })),
                 ),
+                product_label,
                 mock_template(
                     "tpl_analytics_report",
                     "doc_temp_An1yT1csRep0rtV1",
@@ -272,8 +310,9 @@ async fn start_mock_document_server_with_templates(
                             // Tests read which template rendered, and whether the
                             // payload still carried a `logoUrl`, from this text.
                             format!(
-                                "%PDF-1.7 mock rendered PDF for template {template_key} logoUrl={}",
-                                String::from_utf8_lossy(&body).contains("\"logoUrl\"")
+                                "%PDF-1.7 mock rendered PDF for template {template_key} logoUrl={} body={}",
+                                String::from_utf8_lossy(&body).contains("\"logoUrl\""),
+                                String::from_utf8_lossy(&body)
                             )
                             .into_bytes(),
                         ),

@@ -66,6 +66,7 @@ async fn main() {
             "quotations",
             "generated_documents",
             "document_template_settings",
+            "label_templates",
             "login_sessions",
             "users",
             "api_keys",

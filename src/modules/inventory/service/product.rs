@@ -295,8 +295,9 @@ async fn ensure_barcode_available(db: &Db, barcode: &str) -> AppResult<()> {
 
 /// Resolves what (if anything) `create_product` should persist for
 /// `barcode`/`barcode_source`, enforcing that a manual value and
-/// auto-generation are mutually exclusive. A product supplying neither is fine,
-/// since a barcode can never be added later (it's immutable after creation).
+/// auto-generation are mutually exclusive. A product supplying neither is fine:
+/// a barcode can be added later, by hand (`update_product`) or generated
+/// (`generate_barcode`).
 async fn resolve_barcode(
     db: &Db,
     barcode: Option<String>,
@@ -633,6 +634,63 @@ pub(crate) async fn update_product(
                 AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
             })?;
 
+        super::stock_batch::with_price_tiers(
+            db,
+            updated.into_product(category_name, subcategory_name),
+        )
+        .await
+    })
+    .await
+}
+
+/// Gives a product that has no barcode a generated shop barcode, numbered
+/// exactly like `autoGenerateBarcode` on create. Refused (409
+/// `PRODUCT_HAS_BARCODE`) when the product already has one, so a barcode that
+/// may already be printed on stickers can never change underneath them.
+pub(crate) async fn generate_barcode(
+    db: &Db,
+    id: ObjectId,
+    device_id: Option<String>,
+) -> AppResult<Product> {
+    crate::core::logging::domain::tracked("inventory.product_barcode_generated", async move {
+        let existing = repository::product::find_product_by_id(db, id)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
+            })?;
+        if existing.barcode.is_some() {
+            return Err(AppError::custom(
+                StatusCode::CONFLICT,
+                codes::PRODUCT_HAS_BARCODE,
+                format!("'{}' already has a barcode", existing.name),
+            ));
+        }
+
+        let generated = crate::modules::barcode::service::generator::generate(
+            db,
+            crate::modules::barcode::service::generator::namespaces::PRODUCT,
+        )
+        .await?;
+        ensure_barcode_available(db, &generated).await?;
+
+        let source = mongodb::bson::serialize_to_bson(&BarcodeSource::Generated)
+            .expect("BarcodeSource serializes to a plain string");
+        let mut set_doc = doc! {
+            "barcode": &generated,
+            "barcode_source": source,
+            "updated_at": BsonDateTime::now(),
+        };
+        if let Some(device) = device_id {
+            set_doc.insert("updated_by_device", device);
+        }
+
+        let updated = repository::product::update_product(db, id, set_doc)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
+            })?;
+        let (category_name, subcategory_name) =
+            resolve_display_names(db, &updated.category_key, &updated.subcategory_key).await?;
         super::stock_batch::with_price_tiers(
             db,
             updated.into_product(category_name, subcategory_name),
