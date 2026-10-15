@@ -158,9 +158,9 @@ fn check_font(font_size_pt: f64) -> AppResult<()> {
 }
 
 /// Space the template reserves under a barcode's bars for the printed number
-/// (`(font * 1.25 + 1) pt`, mirroring `lbl_temp_*.typ`).
+/// (`(font * 1.25 + 2) pt`, mirroring `lbl_temp_*.typ`).
 fn caption_height_mm(font_size_pt: f64) -> f64 {
-    (font_size_pt * 1.25 + 1.0) * PT_TO_MM
+    (font_size_pt * 1.25 + 2.0) * PT_TO_MM
 }
 
 /// Width of a Code128 symbol in modules (bars and spaces, quiet zones
@@ -380,7 +380,7 @@ mod tests {
 
     #[test]
     fn a_barcode_must_keep_readable_bars_below_its_caption() {
-        // 6pt caption reserves (6 * 1.25 + 1) * 0.3528 = 3.0mm.
+        // 6pt caption reserves (6 * 1.25 + 2) * 0.3528 = 3.35mm.
         assert!(validate_template(&input(vec![barcode(46.0, 6.5, true)])).is_ok());
         assert!(
             message(validate_template(&input(vec![barcode(46.0, 5.9, true)])))
