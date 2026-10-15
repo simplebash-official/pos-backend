@@ -52,6 +52,7 @@ async fn main() {
             "payments",
             "invoices",
             "stock_movements",
+            "stock_batches",
             "product_serials",
             "products",
             "subcategories",

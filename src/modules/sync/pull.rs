@@ -103,17 +103,19 @@ pub async fn pull(
     if since < 0 {
         return Err(AppError::validation("since must not be negative"));
     }
+    if !cloud_store::ensure_device_active(db, device_id).await? {
+        return Err(AppError::forbidden_with_code(
+            "This device has been revoked",
+            "DEVICE_REVOKED",
+        ));
+    }
+    // Before the cursor check: an expired cursor would send an old app to the snapshot instead.
+    cloud_store::ensure_device_app_current(db, device_id).await?;
     if since < cloud_store::compacted_through(db).await? {
         return Err(AppError::custom(
             StatusCode::GONE,
             "CURSOR_EXPIRED",
             "The change history behind this cursor was compacted; bootstrap from a snapshot",
-        ));
-    }
-    if !cloud_store::ensure_device_active(db, device_id).await? {
-        return Err(AppError::forbidden_with_code(
-            "This device has been revoked",
-            "DEVICE_REVOKED",
         ));
     }
 

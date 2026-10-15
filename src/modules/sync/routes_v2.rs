@@ -78,6 +78,7 @@ fn require_cloud(state: &AppState) -> AppResult<()> {
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
         (status = 403, description = "Not a device token, device mismatch or revoked device", body = ErrorResponse),
         (status = 404, description = "Cloud sync is not enabled on this deployment", body = ErrorResponse),
+        (status = 503, description = "APP_UPDATE_REQUIRED: the desktop app is too old to sync", body = ErrorResponse),
     )
 )]
 async fn push_changes(
@@ -117,6 +118,7 @@ pub struct PullQuery {
         (status = 403, description = "Not a device token or revoked device", body = ErrorResponse),
         (status = 404, description = "Cloud sync is not enabled on this deployment", body = ErrorResponse),
         (status = 410, description = "CURSOR_EXPIRED: the history behind the cursor was compacted; bootstrap from a snapshot", body = ErrorResponse),
+        (status = 503, description = "APP_UPDATE_REQUIRED: the desktop app is too old to sync", body = ErrorResponse),
     )
 )]
 async fn pull_changes(
@@ -189,6 +191,7 @@ pub struct SnapshotQuery {
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
         (status = 403, description = "Not a device token", body = ErrorResponse),
         (status = 404, description = "Cloud sync is not enabled on this deployment", body = ErrorResponse),
+        (status = 503, description = "APP_UPDATE_REQUIRED: the desktop app is too old to sync", body = ErrorResponse),
     )
 )]
 async fn get_snapshot(
@@ -206,6 +209,7 @@ async fn get_snapshot(
             "DEVICE_REVOKED",
         ));
     }
+    super::cloud_store::ensure_device_app_current(&state.db, &device_id).await?;
     let response = snapshot::snapshot(&state.db, query.page.as_deref(), query.limit).await?;
     Ok(Json(ApiResponse::success(
         response,
@@ -217,6 +221,14 @@ async fn get_snapshot(
 // Device registration
 // ============================================================================
 
+/// Body of `POST /sync/devices/register`, as every desktop app sends it.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterDeviceRequest {
+    /// The desktop app's version (`"1.13.0"`); too old a version cannot sync.
+    pub app_version: String,
+}
+
 /// Answer of `POST /sync/devices/register`.
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -227,17 +239,20 @@ pub struct RegisteredDevice {
 }
 
 #[utoipa::path(post, path = "/devices/register", tag = modules::SYNC,
+    request_body = RegisterDeviceRequest,
     security(("bearerAuth" = [])),
     responses(
         (status = 200, description = "The device is registered for sync (idempotent)", body = ApiResponse<RegisteredDevice>),
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
         (status = 403, description = "Not a device token or revoked device", body = ErrorResponse),
         (status = 404, description = "Cloud sync is not enabled on this deployment", body = ErrorResponse),
+        (status = 503, description = "APP_UPDATE_REQUIRED: the desktop app is too old to sync", body = ErrorResponse),
     )
 )]
 async fn register_device(
     user: CurrentUser,
     State(state): State<AppState>,
+    Json(body): Json<RegisterDeviceRequest>,
 ) -> AppResult<Json<ApiResponse<RegisteredDevice>>> {
     require_cloud(&state)?;
     let device_id = user.require_device()?;
@@ -247,6 +262,7 @@ async fn register_device(
             "DEVICE_REVOKED",
         ));
     }
+    cloud_store::record_device_app_version(&state.db, &device_id, &body.app_version).await?;
     let server_seq = cloud_store::current_seq(&state.db).await?;
     Ok(Json(ApiResponse::success(
         RegisteredDevice {

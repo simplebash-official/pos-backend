@@ -276,12 +276,14 @@ pub async fn migrate_opening_balances(pool: &SqlitePool) -> AppResult<i64> {
         let product_key: String = row.get("key");
         let done = sqlx::query(
             "INSERT OR IGNORE INTO stock_movements \
-             (key, id, product_id, quantity_delta, movement_type, reference_id, note, version, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, 'opening_balance', ?, 'Opening balance (ledger migration)', 1, ?, ?)",
+             (key, id, product_id, batch_key, quantity_delta, movement_type, reference_id, note, version, created_at, updated_at) \
+             VALUES (?, ?, ?, ?, ?, 'opening_balance', ?, 'Opening balance (ledger migration)', 1, ?, ?)",
         )
         .bind(format!("sm_open_{product_key}"))
         .bind(generate_id_hex())
         .bind(row.get::<String, _>("id"))
+        // Stock that predates the ledger is the product's opening batch.
+        .bind(crate::core::constants::prefixes::opening_batch_key(&product_key))
         .bind(stock - ledger)
         .bind(&product_key)
         .bind(&now)

@@ -74,6 +74,17 @@ pub const SYNC_RESOURCES: &[ResourceSpec] = &[
         phase: Phase::P3a,
     },
     ResourceSpec {
+        name: "stockBatches",
+        table: "stock_batches",
+        class: MergeClass::LwwWithDerived,
+        soft_delete: true,
+        // Like a product's stock: the sum of the movements carrying the batch key.
+        derived: &["remaining_quantity"],
+        local_only: &[],
+        order: 35,
+        phase: Phase::P3a,
+    },
+    ResourceSpec {
         name: "supplierProducts",
         table: "supplier_products",
         class: MergeClass::Lww,

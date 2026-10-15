@@ -199,7 +199,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"staff\": {\n    \"cashierName\": \"Nimal Perera\"\n  },\n  \"customer\": {\n    \"customerName\": \"Walk-in Customer\"\n  },\n  \"items\": [\n    {\n      \"productKey\": \"prod_vV5MdqUu9pb4PLRB\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_bnwm19dFjZMb_MlV\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_YyeS9HYrB1mrJXbu\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_Od-SNpuusY0BD-hM\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_0GTJkxVVeQRM6DhS\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_bmep131grOtOLlg1\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_sUoKrjtaRkqnrWst\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_87DxPdIW9_CLjNzb\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_8SFmf69yOPnyyPZ4\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_zgic03VcQen4KOyx\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_S0lMggeli71oKQGR\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_LJXiyEc6Igt9opli\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_xdZqGbnzBYiktVNy\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_M_qR-bJlMP3qqQZT\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_llQi0geWF01LmvuW\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_JdC2stRLyIir4nlr\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_ISaUzZfR6EInrAVn\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_KBFeChexGaBcWvNq\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_EK7e44M50ZsdNfja\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_y1UK17b1gvE9ZI0K\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    }\n  ],\n  \"pricingAdjustments\": {\n    \"discountType\": \"fixed\",\n    \"discountValue\": 0\n  },\n  \"payment\": {\n    \"paymentMethod\": \"cash\",\n    \"isCredit\": false,\n    \"amountReceivedCents\": 700000\n  },\n  \"shopProfileSnapshot\": {\n    \"tradingName\": \"TechFix Repairs\",\n    \"address\": \"123 Galle Road, Colombo 03\",\n    \"phone\": \"011 234 5678\"\n  }\n}",
+              "raw": "{\n  \"staff\": {\n    \"cashierName\": \"Nimal Perera\"\n  },\n  \"customer\": {\n    \"customerName\": \"Walk-in Customer\"\n  },\n  \"items\": [\n    {\n      \"productKey\": \"prod_vV5MdqUu9pb4PLRB\",\n      \"sellingPriceCents\": 35000,\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_bnwm19dFjZMb_MlV\",\n      \"sellingPriceCents\": 35000,\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_YyeS9HYrB1mrJXbu\",\n      \"sellingPriceCents\": 35000,\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_Od-SNpuusY0BD-hM\",\n      \"sellingPriceCents\": 35000,\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_0GTJkxVVeQRM6DhS\",\n      \"sellingPriceCents\": 35000,\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_bmep131grOtOLlg1\",\n      \"sellingPriceCents\": 35000,\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_sUoKrjtaRkqnrWst\",\n      \"sellingPriceCents\": 35000,\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_87DxPdIW9_CLjNzb\",\n      \"sellingPriceCents\": 35000,\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_8SFmf69yOPnyyPZ4\",\n      \"sellingPriceCents\": 35000,\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_zgic03VcQen4KOyx\",\n      \"sellingPriceCents\": 35000,\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_S0lMggeli71oKQGR\",\n      \"sellingPriceCents\": 35000,\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_LJXiyEc6Igt9opli\",\n      \"sellingPriceCents\": 35000,\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_xdZqGbnzBYiktVNy\",\n      \"sellingPriceCents\": 35000,\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_M_qR-bJlMP3qqQZT\",\n      \"sellingPriceCents\": 35000,\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_llQi0geWF01LmvuW\",\n      \"sellingPriceCents\": 35000,\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_JdC2stRLyIir4nlr\",\n      \"sellingPriceCents\": 35000,\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_ISaUzZfR6EInrAVn\",\n      \"sellingPriceCents\": 35000,\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_KBFeChexGaBcWvNq\",\n      \"sellingPriceCents\": 35000,\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_EK7e44M50ZsdNfja\",\n      \"sellingPriceCents\": 35000,\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"productKey\": \"prod_y1UK17b1gvE9ZI0K\",\n      \"sellingPriceCents\": 35000,\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    }\n  ],\n  \"pricingAdjustments\": {\n    \"discountType\": \"fixed\",\n    \"discountValue\": 0\n  },\n  \"payment\": {\n    \"paymentMethod\": \"cash\",\n    \"isCredit\": false,\n    \"amountReceivedCents\": 700000\n  },\n  \"shopProfileSnapshot\": {\n    \"tradingName\": \"TechFix Repairs\",\n    \"address\": \"123 Galle Road, Colombo 03\",\n    \"phone\": \"011 234 5678\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -217,7 +217,7 @@
                 "sales"
               ]
             },
-            "description": "Completes a sale: creates the invoice (and, unless `payment.isCredit`, its payment record(s)), decrements stock for any `productKey` line items, and marks any linked repair/print-job ticket (`sourceTicketKey`) delivered. `cashierId` is never sent — the completing cashier is always the bearer token's user. There is no tax in this system. The request is grouped into sub-objects: `staff{cashierName}`, `customer{}` (optional — omit for a walk-in with no linked account; only used as typed when `customerKey` is absent, otherwise resolved from the linked `Customer` record), `items[]`, `pricingAdjustments{}` (optional — omit for no discount; `discountType` is `\"percentage\"` [0-100, e.g. 7.5] or `\"fixed\"` [a cents amount]; the server computes the actual `discountCents` from this against the resolved subtotal), and `payment{paymentMethod, isCredit, amountReceivedCents, splitPayments, cardLast4, cardRef, onlineRef, onlineNote, dueDate}`. `shopProfileSnapshot`/`notes`/`warrantyTermsSnapshot`/`documentSelection` stay top-level. Line items are resolved server-side, never trusted from the payload: a retail item's `name`/`sku`/`unitPriceCents` come from the product record via `productKey`, a repair/print item's `unitPriceCents`/`assignedEmployeeName`/`sourceTicketNumber` come from the ticket via `sourceTicketKey`, and an item's `totalCents` is always computed as `unitPriceCents * quantity - discountCents`. `name`/`unitPriceCents` are only required on an item when it has no `productKey`/`sourceTicketKey` to resolve from (an ad-hoc line). `subtotalCents`/`totalCents`/`changeDueCents` are likewise never sent — `subtotalCents` is the sum of the resolved items' `totalCents`, `totalCents` is `subtotalCents - discountCents`, and `changeDueCents` (when `payment.amountReceivedCents` is given) is `amountReceivedCents - totalCents`. An unresolvable `productKey`/`sourceTicketKey`/`customerKey` rejects the whole request before any write. `warnings` in the response surfaces any post-write side effect (stock decrement, ticket status, customer balance) that failed without rolling back the already-durable invoice/payment — see CLAUDE.md's billing module notes.\n\n**Requires the `billing:write` permission** in the token's `permissions` claim — granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role, 400 for an invalid `pricingAdjustments`/split-leg total, 404 if a `productKey`/`sourceTicketKey`/`customerKey` doesn't resolve."
+            "description": "Completes a sale: creates the invoice (and, unless `payment.isCredit`, its payment record(s)), decrements stock for any `productKey` line items, and marks any linked repair/print-job ticket (`sourceTicketKey`) delivered. `cashierId` is never sent — the completing cashier is always the bearer token's user. There is no tax in this system. The request is grouped into sub-objects: `staff{cashierName}`, `customer{}` (optional — omit for a walk-in with no linked account; only used as typed when `customerKey` is absent, otherwise resolved from the linked `Customer` record), `items[]`, `pricingAdjustments{}` (optional — omit for no discount; `discountType` is `\"percentage\"` [0-100, e.g. 7.5] or `\"fixed\"` [a cents amount]; the server computes the actual `discountCents` from this against the resolved subtotal), and `payment{paymentMethod, isCredit, amountReceivedCents, splitPayments, cardLast4, cardRef, onlineRef, onlineNote, dueDate}`. `shopProfileSnapshot`/`notes`/`warrantyTermsSnapshot`/`documentSelection` stay top-level. Line items are resolved server-side, never trusted from the payload: a retail item's `name`/`sku`/`unitPriceCents` come from the product record via `productKey`, a repair/print item's `unitPriceCents`/`assignedEmployeeName`/`sourceTicketNumber` come from the ticket via `sourceTicketKey`, and an item's `totalCents` is always computed as `unitPriceCents * quantity - discountCents`. `name`/`unitPriceCents` are only required on an item when it has no `productKey`/`sourceTicketKey` to resolve from (an ad-hoc line). `subtotalCents`/`totalCents`/`changeDueCents` are likewise never sent — `subtotalCents` is the sum of the resolved items' `totalCents`, `totalCents` is `subtotalCents - discountCents`, and `changeDueCents` (when `payment.amountReceivedCents` is given) is `amountReceivedCents - totalCents`. An unresolvable `productKey`/`sourceTicketKey`/`customerKey` rejects the whole request before any write. `warnings` in the response surfaces any post-write side effect (stock decrement, ticket status, customer balance) that failed without rolling back the already-durable invoice/payment — see CLAUDE.md's billing module notes.\n\n**Requires the `billing:write` permission** in the token's `permissions` claim — granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role, 400 for an invalid `pricingAdjustments`/split-leg total, 404 if a `productKey`/`sourceTicketKey`/`customerKey` doesn't resolve.\n\nEvery product line (non-serialized) names the price tier it is sold at in `sellingPriceCents` — one of the product's `priceTiers` (400 when missing, 409 `PRICE_TIER_UNAVAILABLE` when no in-stock batch sells at it, 409 `INSUFFICIENT_STOCK` when the tier holds too few units). The units are drawn from that tier's batches oldest first and recorded on the invoice line as `batchAllocations`; the line's `unitCostCents` is their weighted cost. A serialized line sends `serialNumbers` instead and is priced at its units' batch. One line per product and price."
           },
           "response": []
         },
@@ -250,7 +250,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"staff\": {\n    \"cashierName\": \"Nimal Perera\"\n  },\n  \"customer\": {\n    \"customerKey\": \"{{customerKey}}\"\n  },\n  \"items\": [\n    {\n      \"productKey\": \"{{productKey}}\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    }\n  ],\n  \"payment\": {\n    \"paymentMethod\": \"credit\",\n    \"isCredit\": true,\n    \"amountReceivedCents\": 50000,\n    \"depositMethod\": \"cash\",\n    \"dueDate\": \"2026-12-31\"\n  },\n  \"shopProfileSnapshot\": {\n    \"tradingName\": \"TechFix Repairs\"\n  }\n}",
+              "raw": "{\n  \"staff\": {\n    \"cashierName\": \"Nimal Perera\"\n  },\n  \"customer\": {\n    \"customerKey\": \"{{customerKey}}\"\n  },\n  \"items\": [\n    {\n      \"productKey\": \"{{productKey}}\",\n      \"sellingPriceCents\": 35000,\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"retail\"\n    }\n  ],\n  \"payment\": {\n    \"paymentMethod\": \"credit\",\n    \"isCredit\": true,\n    \"amountReceivedCents\": 50000,\n    \"depositMethod\": \"cash\",\n    \"dueDate\": \"2026-12-31\"\n  },\n  \"shopProfileSnapshot\": {\n    \"tradingName\": \"TechFix Repairs\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -268,7 +268,7 @@
                 "sales"
               ]
             },
-            "description": "Completes a sale: creates the invoice (and, unless `payment.isCredit`, its payment record(s)), decrements stock for any `productKey` line items, and marks any linked repair/print-job ticket (`sourceTicketKey`) delivered. `cashierId` is never sent — the completing cashier is always the bearer token's user. There is no tax in this system. The request is grouped into sub-objects: `staff{cashierName}`, `customer{}` (optional — omit for a walk-in with no linked account; only used as typed when `customerKey` is absent, otherwise resolved from the linked `Customer` record), `items[]`, `pricingAdjustments{}` (optional — omit for no discount; `discountType` is `\"percentage\"` [0-100, e.g. 7.5] or `\"fixed\"` [a cents amount]; the server computes the actual `discountCents` from this against the resolved subtotal), and `payment{paymentMethod, isCredit, amountReceivedCents, splitPayments, cardLast4, cardRef, onlineRef, onlineNote, dueDate}`. `shopProfileSnapshot`/`notes`/`warrantyTermsSnapshot`/`documentSelection` stay top-level. Line items are resolved server-side, never trusted from the payload: a retail item's `name`/`sku`/`unitPriceCents` come from the product record via `productKey`, a repair/print item's `unitPriceCents`/`assignedEmployeeName`/`sourceTicketNumber` come from the ticket via `sourceTicketKey`, and an item's `totalCents` is always computed as `unitPriceCents * quantity - discountCents`. `name`/`unitPriceCents` are only required on an item when it has no `productKey`/`sourceTicketKey` to resolve from (an ad-hoc line). `subtotalCents`/`totalCents`/`changeDueCents` are likewise never sent — `subtotalCents` is the sum of the resolved items' `totalCents`, `totalCents` is `subtotalCents - discountCents`, and `changeDueCents` (when `payment.amountReceivedCents` is given) is `amountReceivedCents - totalCents`. An unresolvable `productKey`/`sourceTicketKey`/`customerKey` rejects the whole request before any write. `warnings` in the response surfaces any post-write side effect (stock decrement, ticket status, customer balance) that failed without rolling back the already-durable invoice/payment — see CLAUDE.md's billing module notes.\n\n**Requires the `billing:write` permission** in the token's `permissions` claim — granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role, 400 for an invalid `pricingAdjustments`/split-leg total, 404 if a `productKey`/`sourceTicketKey`/`customerKey` doesn't resolve."
+            "description": "Completes a sale: creates the invoice (and, unless `payment.isCredit`, its payment record(s)), decrements stock for any `productKey` line items, and marks any linked repair/print-job ticket (`sourceTicketKey`) delivered. `cashierId` is never sent — the completing cashier is always the bearer token's user. There is no tax in this system. The request is grouped into sub-objects: `staff{cashierName}`, `customer{}` (optional — omit for a walk-in with no linked account; only used as typed when `customerKey` is absent, otherwise resolved from the linked `Customer` record), `items[]`, `pricingAdjustments{}` (optional — omit for no discount; `discountType` is `\"percentage\"` [0-100, e.g. 7.5] or `\"fixed\"` [a cents amount]; the server computes the actual `discountCents` from this against the resolved subtotal), and `payment{paymentMethod, isCredit, amountReceivedCents, splitPayments, cardLast4, cardRef, onlineRef, onlineNote, dueDate}`. `shopProfileSnapshot`/`notes`/`warrantyTermsSnapshot`/`documentSelection` stay top-level. Line items are resolved server-side, never trusted from the payload: a retail item's `name`/`sku`/`unitPriceCents` come from the product record via `productKey`, a repair/print item's `unitPriceCents`/`assignedEmployeeName`/`sourceTicketNumber` come from the ticket via `sourceTicketKey`, and an item's `totalCents` is always computed as `unitPriceCents * quantity - discountCents`. `name`/`unitPriceCents` are only required on an item when it has no `productKey`/`sourceTicketKey` to resolve from (an ad-hoc line). `subtotalCents`/`totalCents`/`changeDueCents` are likewise never sent — `subtotalCents` is the sum of the resolved items' `totalCents`, `totalCents` is `subtotalCents - discountCents`, and `changeDueCents` (when `payment.amountReceivedCents` is given) is `amountReceivedCents - totalCents`. An unresolvable `productKey`/`sourceTicketKey`/`customerKey` rejects the whole request before any write. `warnings` in the response surfaces any post-write side effect (stock decrement, ticket status, customer balance) that failed without rolling back the already-durable invoice/payment — see CLAUDE.md's billing module notes.\n\n**Requires the `billing:write` permission** in the token's `permissions` claim — granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role, 400 for an invalid `pricingAdjustments`/split-leg total, 404 if a `productKey`/`sourceTicketKey`/`customerKey` doesn't resolve.\n\nEvery product line (non-serialized) names the price tier it is sold at in `sellingPriceCents` — one of the product's `priceTiers` (400 when missing, 409 `PRICE_TIER_UNAVAILABLE` when no in-stock batch sells at it, 409 `INSUFFICIENT_STOCK` when the tier holds too few units). The units are drawn from that tier's batches oldest first and recorded on the invoice line as `batchAllocations`; the line's `unitCostCents` is their weighted cost. A serialized line sends `serialNumbers` instead and is priced at its units' batch. One line per product and price."
           },
           "response": []
         },
@@ -610,7 +610,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"invoiceKey\": \"{{invoiceKey}}\",\n  \"returnedItems\": [\n    {\n      \"productKey\": \"{{productKey}}\",\n      \"quantity\": 1,\n      \"reason\": \"defective\",\n      \"condition\": \"resalable\",\n      \"notes\": \"Item returned in original box\"\n    }\n  ],\n  \"paymentMethod\": \"cash\",\n  \"notes\": \"Customer returned defective product\"\n}",
+              "raw": "{\n  \"invoiceKey\": \"{{invoiceKey}}\",\n  \"returnedItems\": [\n    {\n      \"productKey\": \"{{productKey}}\",\n      \"quantity\": 1,\n      \"reason\": \"defective\",\n      \"condition\": \"resalable\",\n      \"notes\": \"Item returned in original box\",\n      \"sellingPriceCents\": 35000\n    }\n  ],\n  \"paymentMethod\": \"cash\",\n  \"notes\": \"Customer returned defective product\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -628,7 +628,7 @@
                 "credit-notes"
               ]
             },
-            "description": "Creates a credit note against an existing invoice (or, with `noReceipt: true` + `overrideReason` + an Admin token, without one): adjusts stock per returned line's `condition`/`disposition`, calculates net cashback or extra amount due (capped at what was actually paid, allocated across payment methods via `refundBreakdown` for a split-paid invoice), updates customer financials, and updates the invoice's returned quantity / `refundedCents` / `creditNoteCount`.\n\n**Requires the `billing:write` permission** in the token's `permissions` claim. No-receipt and past-return-window requests additionally require the caller to hold `Role::Admin`, with a non-empty `overrideReason`. Returns 401 without token, 403 `PERMISSION_DENIED`/`MANAGER_OVERRIDE_REQUIRED`, 400 if return quantity exceeds purchased quantity or a `damaged` line has no `disposition`, 404 if invoice/product not found, 409 `INVOICE_NOT_ELIGIBLE_FOR_CREDIT_NOTE` if the invoice is voided, `RETURN_WINDOW_EXPIRED` if past the window without override."
+            "description": "Creates a credit note against an existing invoice (or, with `noReceipt: true` + `overrideReason` + an Admin token, without one): adjusts stock per returned line's `condition`/`disposition`, calculates net cashback or extra amount due (capped at what was actually paid, allocated across payment methods via `refundBreakdown` for a split-paid invoice), updates customer financials, and updates the invoice's returned quantity / `refundedCents` / `creditNoteCount`.\n\n**Requires the `billing:write` permission** in the token's `permissions` claim. No-receipt and past-return-window requests additionally require the caller to hold `Role::Admin`, with a non-empty `overrideReason`. Returns 401 without token, 403 `PERMISSION_DENIED`/`MANAGER_OVERRIDE_REQUIRED`, 400 if return quantity exceeds purchased quantity or a `damaged` line has no `disposition`, 404 if invoice/product not found, 409 `INVOICE_NOT_ELIGIBLE_FOR_CREDIT_NOTE` if the invoice is voided, `RETURN_WINDOW_EXPIRED` if past the window without override.\n\nReturned units go back into the stock batches the invoice line sold them from (newest first). A product sold at two prices is on two invoice lines; send the line's price as `sellingPriceCents` so the return lands on the right one (a price the invoice never sold it at is a 400). A no-receipt product line must also send `sellingPriceCents` (the price it was sold at); it is valued at that price and restocked into the newest batch ever sold at it (409 `PRICE_TIER_UNAVAILABLE` if none). Exchange items are priced and drawn from batches exactly like sale lines."
           },
           "response": []
         },
@@ -1510,7 +1510,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"autoGenerateBarcode\": true,\n  \"name\": \"iPhone 15 Pro Max Tempered Glass\",\n  \"categoryKey\": \"{{categoryKey}}\",\n  \"subcategoryKey\": \"{{subcategoryKey}}\",\n  \"costPriceCents\": 450,\n  \"sellingPriceCents\": 1500,\n  \"minStockThreshold\": 10,\n  \"suppliers\": [\n    {\n      \"supplierKey\": \"{{supplierKey}}\",\n      \"quantity\": 30,\n      \"costPriceCents\": 450,\n      \"referenceNo\": \"INV-2026-001\",\n      \"notes\": \"Initial stock batch\"\n    }\n  ]\n}",
+                  "raw": "{\n  \"autoGenerateBarcode\": true,\n  \"name\": \"iPhone 15 Pro Max Tempered Glass\",\n  \"categoryKey\": \"{{categoryKey}}\",\n  \"subcategoryKey\": \"{{subcategoryKey}}\",\n  \"minStockThreshold\": 10,\n  \"openingStock\": {\n    \"quantity\": 5,\n    \"unitCostCents\": 400,\n    \"sellingPriceCents\": 1500\n  },\n  \"suppliers\": [\n    {\n      \"supplierKey\": \"{{supplierKey}}\",\n      \"quantity\": 30,\n      \"costPriceCents\": 450,\n      \"sellingPriceCents\": 1500,\n      \"referenceNo\": \"INV-2026-001\",\n      \"notes\": \"Initial stock batch\"\n    }\n  ]\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -1528,7 +1528,7 @@
                     "products"
                   ]
                 },
-                "description": "Create a new physical product. `categoryKey`/`subcategoryKey` must be a valid pair — the system-generated keys of an existing category/subcategory (see GET /categories/valid), never their display names. Prices are integer cents. `sku` is NOT sent — it's auto-generated server-side from the resolved category/subcategory names (e.g. \"PHO-SCR-0001\"); the request body has no field for it. For barcode generation, either set `autoGenerateBarcode: true` to have the server mint an EAN-13 barcode, or supply a manual `barcode` (8-14 numeric digits) — the two are mutually exclusive, and both may be omitted if the product doesn't need one yet. `suppliers`, if provided as a list of intakes with `supplierKey`, `quantity`, `costPriceCents`, `referenceNo`, and `notes`, will atomically link each supplier, record purchase history receipts, and compute the starting `stockQuantity` as the sum of all intake quantities. Like `sku`, `barcode` is immutable after creation.\n\n**Requires the `inventory:write` permission** — held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token. `costPriceCents` is returned to Admin callers only; for Manager and Staff the field is absent."
+                "description": "Create a new physical product. `categoryKey`/`subcategoryKey` must be a valid pair — the system-generated keys of an existing category/subcategory (see GET /categories/valid), never their display names. Prices are integer cents. `sku` is NOT sent — it's auto-generated server-side from the resolved category/subcategory names (e.g. \"PHO-SCR-0001\"); the request body has no field for it. For barcode generation, either set `autoGenerateBarcode: true` to have the server mint an EAN-13 barcode, or supply a manual `barcode` (8-14 numeric digits) — the two are mutually exclusive, and both may be omitted if the product doesn't need one yet. `suppliers`, if provided as a list of intakes with `supplierKey`, `quantity`, `costPriceCents`, `referenceNo`, and `notes`, will atomically link each supplier, record purchase history receipts, and compute the starting `stockQuantity` as the sum of all intake quantities. Like `sku`, `barcode` is immutable after creation.\n\n**Requires the `inventory:write` permission** — held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token. `costPriceCents` is returned to Admin callers only; for Manager and Staff the field is absent.\n\nA product stores no price: its units arrive as stock batches, each with its own cost and selling price — `openingStock` for units already on hand (an `opening` batch) and one purchase batch per `suppliers` entry. Both are optional; a product created with neither has no stock and no price until its first purchase. Responses carry `priceTiers` (one per selling price in stock; the cost range only for Admin)."
               },
               "response": []
             },
@@ -1544,7 +1544,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"name\": \"iPhone 13 Screen Replacement (OEM)\",\n  \"sellingPriceCents\": 680000,\n  \"minStockThreshold\": 5,\n  \"barcode\": \"4901234567894\"\n}",
+                  "raw": "{\n  \"name\": \"iPhone 13 Screen Replacement (OEM)\",\n  \"minStockThreshold\": 5,\n  \"barcode\": \"4901234567894\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -1563,7 +1563,7 @@
                     "{{productId}}"
                   ]
                 },
-                "description": "Partially update a product — omit any field to leave it unchanged. `barcode` may be set or corrected here (8–14 digits; stored as a manual barcode; 409 `BARCODE_ALREADY_EXISTS` if another product already carries it). `sku` stays immutable.\n\n**Requires the `inventory:write` permission** — held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token. `costPriceCents` is returned to Admin callers only; for Manager and Staff the field is absent."
+                "description": "Partially update a product — omit any field to leave it unchanged. `barcode` may be set or corrected here (8–14 digits; stored as a manual barcode; 409 `BARCODE_ALREADY_EXISTS` if another product already carries it). `sku` stays immutable.\n\n**Requires the `inventory:write` permission** — held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token. `costPriceCents` is returned to Admin callers only; for Manager and Staff the field is absent.\n\nPrices are not edited here — re-price a stock batch with Inventory > Stock > Update Stock Batch."
               },
               "response": []
             },
@@ -1639,7 +1639,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"delta\": -1,\n  \"reason\": \"Sold to walk-in customer\"\n}",
+                  "raw": "{\n  \"delta\": -1,\n  \"reason\": \"Damaged in store\",\n  \"batchKey\": \"{{batchKey}}\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -1659,7 +1659,69 @@
                     "stock"
                   ]
                 },
-                "description": "Adjust a product's stock by a signed delta (positive = receipt, negative = consumption/sale).\n\n**Requires the `inventory:write` permission** — held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token."
+                "description": "Adjust a product's stock by a signed delta. A negative delta takes units out of the batch named by `batchKey`; a positive delta brings units in as a new `adjustment` batch and needs that batch's `unitCostCents` and `sellingPriceCents` (e.g. `{ \"delta\": 5, \"unitCostCents\": 110000, \"sellingPriceCents\": 150000 }`).\n\n**Requires the `inventory:write` permission** — held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token."
+              },
+              "response": []
+            },
+            {
+              "name": "List Product Batches",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{backendBaseUrl}}/api/inventory/products/{{productKey}}/batches",
+                  "host": [
+                    "{{backendBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory",
+                    "products",
+                    "{{productKey}}",
+                    "batches"
+                  ]
+                },
+                "description": "Every stock batch (one per delivery) of the product, newest first, empty ones included: source, purchase/supplier, received and remaining quantity, selling price and — for Admin only — unit cost. Use a batch's `key` for Adjust Stock (stock out) and Update Stock Batch.\n\n**Requires the `inventory:read` permission.**"
+              },
+              "response": []
+            },
+            {
+              "name": "Update Stock Batch",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"sellingPriceCents\": 155000\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{backendBaseUrl}}/api/inventory/batches/{{batchKey}}",
+                  "host": [
+                    "{{backendBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory",
+                    "batches",
+                    "{{batchKey}}"
+                  ]
+                },
+                "description": "Re-price a stock batch's remaining units (`sellingPriceCents`) and/or correct its `unitCostCents`. Changing the cost is Admin-only (403 `ADMIN_REQUIRED` otherwise).\n\n**Requires the `inventory:write` permission** — held by Admin and Manager."
               },
               "response": []
             },
@@ -2335,7 +2397,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"customer\": {\n    \"customerKey\": \"{{customerKey}}\"\n  },\n  \"items\": [\n    {\n      \"productKey\": \"{{productKey}}\",\n      \"quantity\": 2,\n      \"discountCents\": 0\n    },\n    {\n      \"name\": \"Labour - screen fitting\",\n      \"unitPriceCents\": 150000,\n      \"quantity\": 1,\n      \"discountCents\": 10000\n    }\n  ],\n  \"pricingAdjustments\": {\n    \"discountType\": \"percentage\",\n    \"discountValue\": 5\n  },\n  \"validUntil\": \"2026-12-31\",\n  \"notes\": \"Price excludes courier charges.\",\n  \"terms\": \"50% advance to start work.\",\n  \"preparedBy\": \"Kamal\"\n}",
+              "raw": "{\n  \"customer\": {\n    \"customerKey\": \"{{customerKey}}\"\n  },\n  \"items\": [\n    {\n      \"productKey\": \"{{productKey}}\",\n      \"sellingPriceCents\": 35000,\n      \"quantity\": 2,\n      \"discountCents\": 0\n    },\n    {\n      \"name\": \"Labour - screen fitting\",\n      \"unitPriceCents\": 150000,\n      \"quantity\": 1,\n      \"discountCents\": 10000\n    }\n  ],\n  \"pricingAdjustments\": {\n    \"discountType\": \"percentage\",\n    \"discountValue\": 5\n  },\n  \"validUntil\": \"2026-12-31\",\n  \"notes\": \"Price excludes courier charges.\",\n  \"terms\": \"50% advance to start work.\",\n  \"preparedBy\": \"Kamal\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2352,7 +2414,7 @@
                 "quotations"
               ]
             },
-            "description": "Create a quotation. It is a price offer only: no stock, payment, invoice or report is touched. `quotationNumber` (`QUO-0001`…) is reserved server-side. Every total is recomputed by the server — none is accepted from the client. A line with `productKey` takes its name, SKU and price from the catalog; a line without one is ad hoc and needs `name` + `unitPriceCents`. With `customer.customerKey` the customer's own record is used; without it `customer.customerName` is required (walk-in). `validUntil` is `YYYY-MM-DD`, today or later. The shop profile is read from Settings and frozen on the quotation.\n\n**Requires a valid Bearer token whose `permissions` claim includes `quotations:manage`** (held by the Admin and Manager roles only). Staff and permission-less tokens get 403 `PERMISSION_DENIED`; a missing token gets 401."
+            "description": "Create a quotation. It is a price offer only: no stock, payment, invoice or report is touched. `quotationNumber` (`QUO-0001`…) is reserved server-side. Every total is recomputed by the server — none is accepted from the client. A line with `productKey` takes its name, SKU and price from the catalog; a line without one is ad hoc and needs `name` + `unitPriceCents`. With `customer.customerKey` the customer's own record is used; without it `customer.customerName` is required (walk-in). `validUntil` is `YYYY-MM-DD`, today or later. The shop profile is read from Settings and frozen on the quotation.\n\n**Requires a valid Bearer token whose `permissions` claim includes `quotations:manage`** (held by the Admin and Manager roles only). Staff and permission-less tokens get 403 `PERMISSION_DENIED`; a missing token gets 401.\n\nA `productKey` line quotes the price in `sellingPriceCents`, which must be one of the product's current `priceTiers` (409 `PRICE_TIER_UNAVAILABLE` otherwise)."
           },
           "response": []
         },
@@ -4011,7 +4073,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"supplierKey\": \"{{supplierKey}}\",\n  \"productKey\": \"{{productKey}}\",\n  \"quantity\": 50,\n  \"unitCostCents\": 150000,\n  \"date\": \"2026-07-30T10:00:00Z\",\n  \"referenceNo\": \"INV-1001\",\n  \"notes\": \"Monthly restock\"\n}",
+              "raw": "{\n  \"supplierKey\": \"{{supplierKey}}\",\n  \"productKey\": \"{{productKey}}\",\n  \"quantity\": 50,\n  \"unitCostCents\": 150000,\n  \"sellingPriceCents\": 180000,\n  \"date\": \"2026-07-30T10:00:00Z\",\n  \"referenceNo\": \"INV-1001\",\n  \"notes\": \"Monthly restock\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4028,7 +4090,7 @@
                 "purchases"
               ]
             },
-            "description": "Records a stock intake from a supplier. Also increments the product's stockQuantity and writes a PurchaseReceipt stock movement (see Inventory > Stock > Product Stock Movements). Both keys must reference existing documents (404 otherwise).\n\n**Requires Admin JWT** (`role: admin` claim) — every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
+            "description": "Records a stock intake from a supplier. Its units come in as a new stock batch at this purchase's `unitCostCents` and `sellingPriceCents` (both required), with a PurchaseReceipt stock movement (see Inventory > Stock > Product Stock Movements). Both keys must reference existing documents (404 otherwise).\n\n**Requires Admin JWT** (`role: admin` claim) — every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
           },
           "response": []
         }
@@ -4406,7 +4468,7 @@
                 "imports"
               ]
             },
-            "description": "Submits a batch of extracted spreadsheet rows for server-side validation and database persistence. Requires CurrentUser with write permission for the target module (e.g. inventory:write for inventory)."
+            "description": "Submits a batch of extracted spreadsheet rows for server-side validation and database persistence. Requires CurrentUser with write permission for the target module (e.g. inventory:write for inventory).\n\nA row with stock comes in as an `import` stock batch at its `sellingPrice`/`costPrice`; such a row must carry its cost price."
           },
           "response": []
         },
@@ -4982,6 +5044,11 @@
       "key": "tenantId",
       "value": "tnt_xxxxxxxxxxxxxxxx",
       "description": "Tenant id issued by the identity service (tnt_...)."
+    },
+    {
+      "key": "batchKey",
+      "value": "stb_xxxxxxxxxxxxxxxx",
+      "description": "A stock batch's system-generated `key` (from List Product Batches)."
     }
   ]
 }

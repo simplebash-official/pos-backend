@@ -145,9 +145,7 @@ async fn seed_product(
             "name": name,
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
-            "costPriceCents": price_cents / 2,
-            "sellingPriceCents": price_cents,
-            "stockQuantity": stock,
+            "openingStock": { "quantity": stock, "unitCostCents": price_cents / 2, "sellingPriceCents": price_cents },
             "minStockThreshold": 2,
         })),
         &token,
@@ -157,7 +155,9 @@ async fn seed_product(
     (
         body["data"]["id"].as_str().unwrap().to_string(),
         body["data"]["key"].as_str().unwrap().to_string(),
-        body["data"]["sellingPriceCents"].as_i64().unwrap(),
+        body["data"]["priceTiers"][0]["sellingPriceCents"]
+            .as_i64()
+            .unwrap(),
     )
 }
 
@@ -244,6 +244,7 @@ async fn complete_simple_sale(
         "staff": { "cashierName": "Cashier Alice" },
         "items": [{
             "productKey": product_key,
+            "sellingPriceCents": unit_price_cents,
             "quantity": quantity,
             "discountCents": 0,
             "sourceType": "retail"
@@ -461,7 +462,7 @@ async fn credit_note_with_exchange_items_customer_pays_extra() {
     let token = staff_token(&app.config);
 
     let (prod_a_id, prod_a_key, prod_a_price) = seed_product(&app, "Product A", 1000, 10).await;
-    let (prod_b_id, prod_b_key, _prod_b_price) = seed_product(&app, "Product B", 2500, 10).await;
+    let (prod_b_id, prod_b_key, prod_b_price) = seed_product(&app, "Product B", 2500, 10).await;
 
     let invoice_key = complete_simple_sale(&app, &token, &prod_a_key, 1, prod_a_price, None).await;
 
@@ -480,6 +481,7 @@ async fn credit_note_with_exchange_items_customer_pays_extra() {
             }],
             "exchangeItems": [{
                 "productKey": prod_b_key,
+                "sellingPriceCents": prod_b_price,
                 "quantity": 1,
                 "discountCents": 0,
                 "sourceType": "retail"
@@ -513,7 +515,7 @@ async fn credit_note_with_exchange_items_customer_gets_cashback() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);
 
-    let (prod_a_id, prod_a_key, _prod_a_price) = seed_product(&app, "Cheap Item", 1000, 10).await;
+    let (prod_a_id, prod_a_key, prod_a_price) = seed_product(&app, "Cheap Item", 1000, 10).await;
     let (prod_b_id, prod_b_key, prod_b_price) =
         seed_product(&app, "Expensive Item", 3000, 10).await;
 
@@ -533,6 +535,7 @@ async fn credit_note_with_exchange_items_customer_gets_cashback() {
             }],
             "exchangeItems": [{
                 "productKey": prod_a_key,
+                "sellingPriceCents": prod_a_price,
                 "quantity": 1,
                 "discountCents": 0,
                 "sourceType": "retail"
@@ -570,6 +573,7 @@ async fn credit_note_refund_is_capped_at_amount_actually_paid_on_partially_paid_
             "staff": { "cashierName": "Cashier Alice" },
             "items": [{
                 "productKey": prod_key,
+                "sellingPriceCents": price_cents,
                 "quantity": 1,
                 "discountCents": 0,
                 "sourceType": "retail"
@@ -637,7 +641,7 @@ async fn credit_note_refund_breakdown_defaults_proportionally_for_split_paid_inv
     let token = staff_token(&app.config);
 
     // Rs. 100.00 total, split 60/40 cash/card.
-    let (_prod_id, prod_key, _price_cents) = seed_product(&app, "Split Pay Item", 10000, 10).await;
+    let (_prod_id, prod_key, price_cents) = seed_product(&app, "Split Pay Item", 10000, 10).await;
     let (sale_status, sale_body) = send_authed(
         &app.router,
         "POST",
@@ -646,6 +650,7 @@ async fn credit_note_refund_breakdown_defaults_proportionally_for_split_paid_inv
             "staff": { "cashierName": "Cashier Alice" },
             "items": [{
                 "productKey": prod_key,
+                "sellingPriceCents": price_cents,
                 "quantity": 1,
                 "discountCents": 0,
                 "sourceType": "retail"
@@ -715,6 +720,7 @@ async fn credit_note_no_receipt_requires_admin_and_override_reason_priced_at_cur
             "overrideReason": "Customer insists item was bought here",
             "returnedItems": [{
                 "productKey": prod_key,
+                "sellingPriceCents": current_price,
                 "quantity": 1,
                 "condition": "resalable"
             }]
@@ -734,6 +740,7 @@ async fn credit_note_no_receipt_requires_admin_and_override_reason_priced_at_cur
             "noReceipt": true,
             "returnedItems": [{
                 "productKey": prod_key,
+                "sellingPriceCents": current_price,
                 "quantity": 1,
                 "condition": "resalable"
             }]
@@ -753,6 +760,7 @@ async fn credit_note_no_receipt_requires_admin_and_override_reason_priced_at_cur
             "overrideReason": "Manager verified purchase from receipt-less walk-in",
             "returnedItems": [{
                 "productKey": prod_key,
+                "sellingPriceCents": current_price,
                 "quantity": 1,
                 "condition": "resalable"
             }],

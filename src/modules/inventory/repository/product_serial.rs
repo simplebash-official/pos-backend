@@ -38,6 +38,7 @@ fn row_to_serial_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<ProductSerialDo
         key: row.get("key"),
         product_key: row.get("product_key"),
         serial_number: row.get("serial_number"),
+        batch_key: row.get("batch_key"),
         status,
         invoice_key: row.get("invoice_key"),
         sold_at: sold_at_str.map(|s| to_bson_datetime(&s)),
@@ -74,16 +75,17 @@ pub(crate) async fn insert_product_serial(
             sqlx::query(
                 r#"
                 INSERT INTO product_serials (
-                    key, id, product_key, serial_number, status, invoice_key,
+                    key, id, product_key, serial_number, batch_key, status, invoice_key,
                     sold_at, warranty_months, warranty_expires_at, credit_note_key,
                     version, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(&serial.key)
             .bind(&id)
             .bind(&serial.product_key)
             .bind(&serial.serial_number)
+            .bind(&serial.batch_key)
             .bind(serial.status.as_str())
             .bind(&serial.invoice_key)
             .bind(&sold_at_iso)

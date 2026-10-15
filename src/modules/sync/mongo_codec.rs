@@ -28,12 +28,13 @@ const DATETIME_FIELDS: &[&str] = &[
     "recorded_at",
     "sold_at",
     "warranty_expires_at",
+    "received_at",
 ];
 
 /// DTO fields that are computed on read (never stored), per wire resource name.
 fn enrichment_fields(resource: &str) -> &'static [&'static str] {
     match resource {
-        "products" => &["category", "subcategory"],
+        "products" => &["category", "subcategory", "priceTiers"],
         "purchases" => &["product", "supplier", "totalCostCents"],
         "employees" => &["login"],
         "invoices" | "repairs" | "printJobs" => &["isOverdue"],

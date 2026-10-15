@@ -1,9 +1,9 @@
 // Business rules for recording and listing supplier purchases: the
-// quantity/cost invariants, resolving both sides of a purchase (supplier,
-// product) before it's ever written, and the fact that recording a
-// purchase always also bumps the product's stock and writes a
-// `PurchaseReceipt` movement — those two writes never happen independently
-// (see `inventory::service::stock::apply_stock_delta`, which this reuses).
+// quantity/cost/price invariants, resolving both sides of a purchase
+// (supplier, product) before it's ever written, and the fact that recording
+// a purchase always brings its units in as a new stock batch (own cost, own
+// selling price) with a `PurchaseReceipt` movement — see
+// `inventory::service::stock_batch::create_batch`, which this reuses.
 
 use std::collections::HashMap;
 
@@ -17,7 +17,7 @@ use crate::{
         id::generate_id,
     },
     domain::{
-        inventory::{PaginationMeta, StockMovementType},
+        inventory::{BatchSource, PaginationMeta, StockMovementType},
         purchases::{
             CreatePurchaseRequest, ProductSummary, Purchase, PurchaseListQuery,
             PurchaseListResponse, SupplierSummary,
@@ -26,7 +26,7 @@ use crate::{
     modules::{
         inventory::service::{
             product as inventory_product, product_serial as inventory_product_serial,
-            stock as inventory_stock,
+            stock_batch as inventory_stock_batch,
         },
         purchases::{model::PurchaseDocument, repository},
         suppliers::service as supplier_service,
@@ -34,18 +34,19 @@ use crate::{
 };
 
 /// Validates the purchase, resolves the supplier/product it references,
-/// records it, then applies the stock increment + `PurchaseReceipt`
-/// movement in the same call inventory's own manual adjustment uses —
-/// reusing the one place stock is ever mutated rather than duplicating that
-/// invariant here.
+/// records it, then brings its units in as a new stock batch at the
+/// purchase's cost and selling price (with its `PurchaseReceipt` movement) —
+/// reusing the one place stock is ever created rather than duplicating that
+/// invariant here. A serialized product's units are tied to that batch.
 pub async fn record_purchase(db: &Db, body: CreatePurchaseRequest) -> AppResult<Purchase> {
     crate::core::logging::domain::tracked("purchases.recorded", async move {
         if body.quantity < 1 {
             return Err(AppError::validation("Quantity must be at least 1"));
         }
-        if body.unit_cost_cents < 0 {
-            return Err(AppError::validation("Unit cost cannot be negative"));
-        }
+        inventory_stock_batch::validate_batch_prices(
+            body.unit_cost_cents,
+            body.selling_price_cents,
+        )?;
 
         let supplier = supplier_service::get_supplier_by_key(db, &body.supplier_key).await?;
         let product = inventory_product::get_product_by_key(db, &body.product_key).await?;
@@ -58,6 +59,7 @@ pub async fn record_purchase(db: &Db, body: CreatePurchaseRequest) -> AppResult<
                 serial_numbers.len()
             )));
         }
+        inventory_product_serial::ensure_serials_untracked(db, &serial_numbers).await?;
 
         let now = BsonDateTime::now();
         let key = generate_id(prefixes::PURCHASE);
@@ -68,6 +70,7 @@ pub async fn record_purchase(db: &Db, body: CreatePurchaseRequest) -> AppResult<
             product_key: body.product_key,
             quantity: body.quantity,
             unit_cost_cents: body.unit_cost_cents,
+            selling_price_cents: body.selling_price_cents,
             date: BsonDateTime::from_chrono(body.date),
             reference_no: body.reference_no.clone(),
             notes: body.notes,
@@ -83,13 +86,22 @@ pub async fn record_purchase(db: &Db, body: CreatePurchaseRequest) -> AppResult<
         let product_object_id = ObjectId::parse_str(&product.id).expect(
             "Product.id returned from get_product_by_key is always a valid ObjectId hex string",
         );
-        inventory_stock::apply_stock_delta(
+        let batch = inventory_stock_batch::create_batch(
             db,
-            product_object_id,
-            body.quantity,
-            StockMovementType::PurchaseReceipt,
-            Some(key),
-            body.reference_no,
+            inventory_stock_batch::NewBatch {
+                product_id: product_object_id,
+                product_key: product.key.clone(),
+                source: BatchSource::Purchase,
+                purchase_key: Some(key.clone()),
+                supplier_key: Some(supplier.key.clone()),
+                quantity: body.quantity,
+                unit_cost_cents: body.unit_cost_cents,
+                selling_price_cents: body.selling_price_cents,
+                received_at: BsonDateTime::from_chrono(body.date),
+                movement_type: StockMovementType::PurchaseReceipt,
+                reference_id: Some(key),
+                note: body.reference_no,
+            },
         )
         .await?;
 
@@ -97,6 +109,7 @@ pub async fn record_purchase(db: &Db, body: CreatePurchaseRequest) -> AppResult<
             inventory_product_serial::create_serials_for_purchase(
                 db,
                 &product.key,
+                &batch.key,
                 &serial_numbers,
             )
             .await?;

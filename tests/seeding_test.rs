@@ -185,7 +185,8 @@ async fn test_seeded_data_works_in_sale_transaction() {
     )
     .await;
     let product_key = prod_res["data"]["items"][0]["key"].as_str().unwrap();
-    let unit_price_cents = prod_res["data"]["items"][0]["sellingPriceCents"]
+    // A seeded product's units sit in one opening batch, at one price.
+    let unit_price_cents = prod_res["data"]["items"][0]["priceTiers"][0]["sellingPriceCents"]
         .as_i64()
         .unwrap();
 
@@ -211,6 +212,7 @@ async fn test_seeded_data_works_in_sale_transaction() {
         "items": [
             {
                 "productKey": product_key,
+                "sellingPriceCents": unit_price_cents,
                 "quantity": 2,
                 "discountCents": 0,
                 "sourceType": "retail"

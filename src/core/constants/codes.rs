@@ -19,6 +19,9 @@ pub const PRODUCT_NOT_FOUND: &str = "PRODUCT_NOT_FOUND";
 pub const SKU_ALREADY_EXISTS: &str = "SKU_ALREADY_EXISTS";
 pub const BARCODE_ALREADY_EXISTS: &str = "BARCODE_ALREADY_EXISTS";
 pub const INSUFFICIENT_STOCK: &str = "INSUFFICIENT_STOCK";
+pub const STOCK_BATCH_NOT_FOUND: &str = "STOCK_BATCH_NOT_FOUND";
+/// A product line named a price no in-stock batch of the product sells at.
+pub const PRICE_TIER_UNAVAILABLE: &str = "PRICE_TIER_UNAVAILABLE";
 
 // Categories & Subcategories Status Codes
 pub const CATEGORY_NOT_FOUND: &str = "CATEGORY_NOT_FOUND";

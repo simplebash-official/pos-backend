@@ -173,7 +173,8 @@ async fn shop(dev: &Device) -> Value {
             "/api/inventory/products",
             Some(json!({
                 "name": "Phone", "categoryKey": category_key, "subcategoryKey": subcategory_key,
-                "sellingPriceCents": 50000, "costPriceCents": 30000, "stockQuantity": 10, "minStockThreshold": 2
+                "minStockThreshold": 2,
+                "openingStock": { "quantity": 10, "unitCostCents": 30000, "sellingPriceCents": 50000 }
             })),
         )
         .await;
@@ -202,7 +203,7 @@ async fn shop(dev: &Device) -> Value {
     dev.api(
         "POST",
         "/api/purchases",
-        Some(json!({ "supplierKey": supplier_key, "productKey": product_key, "quantity": 5, "unitCostCents": 29000, "date": "2026-09-06T00:00:00Z" })),
+        Some(json!({ "supplierKey": supplier_key, "productKey": product_key, "quantity": 5, "unitCostCents": 29000, "sellingPriceCents": 50000, "date": "2026-09-06T00:00:00Z" })),
     )
     .await;
 
@@ -213,7 +214,7 @@ async fn shop(dev: &Device) -> Value {
             Some(json!({
                 "staff": { "cashierName": "Admin" },
                 "customer": { "customerKey": customer_key },
-                "items": [{ "productKey": product_key, "quantity": 2, "discountCents": 0, "sourceType": "retail" }],
+                "items": [{ "productKey": product_key, "sellingPriceCents": 50000, "quantity": 2, "discountCents": 0, "sourceType": "retail" }],
                 "payment": { "paymentMethod": "cash", "isCredit": false, "amountReceivedCents": 200000 },
                 "shopProfileSnapshot": { "name": "Shop", "address": "Colombo" }
             })),
@@ -426,7 +427,7 @@ async fn a_sale_moves_stock_without_resending_the_product_row() {
         "/api/billing/sales",
         Some(json!({
             "staff": { "cashierName": "Admin" },
-            "items": [{ "productKey": keys["productKey"], "quantity": 1, "discountCents": 0, "sourceType": "retail" }],
+            "items": [{ "productKey": keys["productKey"], "sellingPriceCents": 50000, "quantity": 1, "discountCents": 0, "sourceType": "retail" }],
             "payment": { "paymentMethod": "cash", "isCredit": false, "amountReceivedCents": 100000 },
             "shopProfileSnapshot": { "name": "Shop", "address": "Colombo" }
         })),
@@ -451,6 +452,12 @@ async fn a_sale_moves_stock_without_resending_the_product_row() {
         !resources.contains(&"products".to_string()),
         "{resources:?}"
     );
+    // Same for the batch the units came out of: its remaining quantity is
+    // derived from the same ledger.
+    assert!(
+        !resources.contains(&"stockBatches".to_string()),
+        "{resources:?}"
+    );
 
     // A real edit of the product is still captured.
     dev.api(
@@ -459,7 +466,7 @@ async fn a_sale_moves_stock_without_resending_the_product_row() {
             "/api/inventory/products/{}",
             keys["productId"].as_str().unwrap()
         ),
-        Some(json!({ "sellingPriceCents": 51000 })),
+        Some(json!({ "minStockThreshold": 3 })),
     )
     .await;
     let resources: Vec<String> = dev
@@ -469,6 +476,35 @@ async fn a_sale_moves_stock_without_resending_the_product_row() {
         .map(|i| i["record"]["resource"].as_str().unwrap().to_string())
         .collect();
     assert!(resources.contains(&"products".to_string()), "{resources:?}");
+
+    // And so is re-pricing a batch.
+    let batches = dev
+        .api(
+            "GET",
+            &format!(
+                "/api/inventory/products/{}/batches",
+                keys["productKey"].as_str().unwrap()
+            ),
+            None,
+        )
+        .await;
+    let batch_key = batches["data"]["items"][0]["key"].as_str().unwrap();
+    dev.api(
+        "PATCH",
+        &format!("/api/inventory/batches/{batch_key}"),
+        Some(json!({ "sellingPriceCents": 51000 })),
+    )
+    .await;
+    let resources: Vec<String> = dev
+        .drain_outbox()
+        .await
+        .iter()
+        .map(|i| i["record"]["resource"].as_str().unwrap().to_string())
+        .collect();
+    assert!(
+        resources.contains(&"stockBatches".to_string()),
+        "{resources:?}"
+    );
 }
 
 #[tokio::test]
@@ -586,9 +622,9 @@ async fn opening_balance_migration_turns_stock_into_a_ledger_and_is_idempotent()
     let dev = Device::new().await;
     // A legacy row: stock with no movement behind it.
     sqlx::query(
-        "INSERT INTO products (key, id, sku, name, category_key, subcategory_key, cost_price_cents, selling_price_cents, \
+        "INSERT INTO products (key, id, sku, name, category_key, subcategory_key, \
          stock_quantity, min_stock_threshold, version, created_at, updated_at) \
-         VALUES ('prod_legacy', '64b000000000000000000001', 'LEG-001', 'Legacy', 'cat_x', 'sub_x', 1, 2, 7, 0, 1, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')",
+         VALUES ('prod_legacy', '64b000000000000000000001', 'LEG-001', 'Legacy', 'cat_x', 'sub_x', 7, 0, 1, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')",
     )
     .execute(dev.pool())
     .await
@@ -603,6 +639,14 @@ async fn opening_balance_migration_turns_stock_into_a_ledger_and_is_idempotent()
         .await
         .unwrap();
     assert_eq!(ledger, 7);
+    // Stock from before the ledger is the product's opening batch.
+    let batch_key: String = sqlx::query_scalar(
+        "SELECT batch_key FROM stock_movements WHERE key = 'sm_open_prod_legacy'",
+    )
+    .fetch_one(dev.pool())
+    .await
+    .unwrap();
+    assert_eq!(batch_key, "stb_open_prod_legacy");
     let kind: String = sqlx::query_scalar(
         "SELECT movement_type FROM stock_movements WHERE key = 'sm_open_prod_legacy'",
     )
@@ -644,11 +688,11 @@ async fn creating_and_editing_stock_always_leaves_a_movement_behind() {
         "created + purchased + sold + returned all explained by movements"
     );
 
-    // Editing the quantity on the product records a movement instead of overwriting.
+    // Bringing stock in records a movement (into a new batch) instead of overwriting.
     dev.api(
-        "PUT",
-        &format!("/api/inventory/products/{id}"),
-        Some(json!({ "stockQuantity": stock + 5 })),
+        "PATCH",
+        &format!("/api/inventory/products/{id}/stock"),
+        Some(json!({ "delta": 5, "unitCostCents": 30000, "sellingPriceCents": 50000 })),
     )
     .await;
     let (stock_after, sum_after) = ledger(dev.pool().clone(), id.to_string()).await;
@@ -1319,7 +1363,7 @@ async fn linked_devices_draw_skus_and_barcodes_from_blocks_then_a_unique_fallbac
     let new_product = |name: &str| {
         json!({
             "name": name, "categoryKey": &category_key, "subcategoryKey": &subcategory_key,
-            "sellingPriceCents": 1000, "costPriceCents": 500, "stockQuantity": 0, "minStockThreshold": 1,
+            "minStockThreshold": 1,
             "autoGenerateBarcode": true
         })
     };

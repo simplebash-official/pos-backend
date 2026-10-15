@@ -163,6 +163,7 @@ mod tests {
                 assigned_employee_name: None,
                 returned_quantity: 0,
                 serial_numbers: vec![],
+                batch_allocations: vec![],
             },
             InvoiceItem {
                 product_key: None,
@@ -179,6 +180,7 @@ mod tests {
                 assigned_employee_name: None,
                 returned_quantity: 0,
                 serial_numbers: vec![],
+                batch_allocations: vec![],
             },
         ];
 

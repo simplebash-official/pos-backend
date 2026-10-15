@@ -49,6 +49,7 @@ const SYNCABLE: &[(&str, &str)] = &[
     ("supplierProducts", "supplier_products"),
     ("purchases", "purchases"),
     ("stockMovements", "stock_movements"),
+    ("stockBatches", "stock_batches"),
     ("customers", "customers"),
     ("employees", "employees"),
     ("repairs", "repairs"),
@@ -73,6 +74,7 @@ fn collection_for(resource: &str) -> Option<&'static str> {
             *name == resource
                 || (resource == "supplier_products" && *collection == "supplier_products")
                 || (resource == "stock_movements" && *collection == "stock_movements")
+                || (resource == "stock_batches" && *collection == "stock_batches")
                 || (resource == "print_jobs" && *collection == "print_jobs")
         })
         .map(|(_, collection)| *collection)
@@ -137,6 +139,9 @@ pub(crate) async fn hydrate(
         "stockMovements" | "stock_movements" => {
             to_values(inventory_stock::hydrate_sync_documents(documents)?)?
         }
+        "stockBatches" | "stock_batches" => to_values(
+            crate::modules::inventory::service::stock_batch::hydrate_sync_documents(documents)?,
+        )?,
         "customers" => to_values(customers_service::hydrate_sync_documents(documents)?)?,
         // Unlike every other arm here, `employees::hydrate_sync_documents` is
         // async and takes `db` — it enriches each row with a live-resolved

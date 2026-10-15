@@ -47,15 +47,10 @@ pub(crate) async fn list_serials_for_product(
         .collect())
 }
 
-/// Mints `ProductSerialDocument`s for units received on a purchase receipt.
-/// Verifies no serial is already known (across ANY product — serials are
-/// globally unique); fails fast with `SERIAL_ALREADY_EXISTS` before
-/// inserting anything so a duplicate stops the whole purchase.
-pub(crate) async fn create_serials_for_purchase(
-    db: &Db,
-    product_key: &str,
-    serial_numbers: &[String],
-) -> AppResult<()> {
+/// Fails with `SERIAL_ALREADY_EXISTS` if any of `serial_numbers` is already
+/// tracked (across ANY product — serials are globally unique). A purchase
+/// calls this before writing anything, so a duplicate stops it cleanly.
+pub(crate) async fn ensure_serials_untracked(db: &Db, serial_numbers: &[String]) -> AppResult<()> {
     for serial_number in serial_numbers {
         if repository::product_serial::find_serial_by_number(db, serial_number)
             .await?
@@ -68,6 +63,19 @@ pub(crate) async fn create_serials_for_purchase(
             ));
         }
     }
+    Ok(())
+}
+
+/// Mints `ProductSerialDocument`s for units received on a purchase receipt,
+/// each tied to the stock batch the purchase created (a unit sells at its
+/// batch's price). Re-checks uniqueness first (`ensure_serials_untracked`).
+pub(crate) async fn create_serials_for_purchase(
+    db: &Db,
+    product_key: &str,
+    batch_key: &str,
+    serial_numbers: &[String],
+) -> AppResult<()> {
+    ensure_serials_untracked(db, serial_numbers).await?;
 
     let now = BsonDateTime::now();
     for serial_number in serial_numbers {
@@ -76,6 +84,7 @@ pub(crate) async fn create_serials_for_purchase(
             key: generate_id(prefixes::PRODUCT_SERIAL),
             product_key: product_key.to_string(),
             serial_number: serial_number.clone(),
+            batch_key: batch_key.to_string(),
             status: SerialStatus::InStock,
             invoice_key: None,
             sold_at: None,

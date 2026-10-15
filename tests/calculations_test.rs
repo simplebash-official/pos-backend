@@ -74,6 +74,7 @@ fn test_sale_totals_consistency() {
             assigned_employee_name: None,
             returned_quantity: 0,
             serial_numbers: vec![],
+            batch_allocations: vec![],
         },
         InvoiceItem {
             product_key: Some("prod_2".to_string()),
@@ -90,6 +91,7 @@ fn test_sale_totals_consistency() {
             assigned_employee_name: None,
             returned_quantity: 0,
             serial_numbers: vec![],
+            batch_allocations: vec![],
         },
     ];
 

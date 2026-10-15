@@ -19,7 +19,7 @@ use crate::{
         billing::{InvoiceItem, InvoiceStatus},
         sync_v2::{ConflictKind, DerivedScope, NewConflict},
     },
-    modules::billing::service::credit_notes::line_match,
+    modules::billing::service::credit_notes::{LineHint, line_match},
 };
 
 /// Recomputes every derived field touched by `scope` and returns the
@@ -41,6 +41,9 @@ pub async fn recompute(
     }
     for product_id in &scope.product_ids {
         recompute_product(conn, product_id, &mut conflicts).await?;
+    }
+    for batch_key in &scope.batch_keys {
+        recompute_batch(conn, batch_key, &mut conflicts).await?;
     }
     Ok(conflicts)
 }
@@ -110,7 +113,18 @@ async fn recompute_invoice(
             let product_key = line.get("productKey").and_then(|v| v.as_str());
             let ticket_key = line.get("sourceTicketKey").and_then(|v| v.as_str());
             let name = line.get("name").and_then(|v| v.as_str());
-            if let Some(idx) = line_match(&items, product_key, ticket_key, name, sole) {
+            let batch_keys: Vec<&str> = line
+                .get("batchAllocations")
+                .and_then(|v| v.as_array())
+                .into_iter()
+                .flatten()
+                .filter_map(|a| a.get("batchKey").and_then(|k| k.as_str()))
+                .collect();
+            let hint = LineHint {
+                unit_price_cents: None,
+                batch_keys: &batch_keys,
+            };
+            if let Some(idx) = line_match(&items, product_key, ticket_key, name, hint, sole) {
                 items[idx].returned_quantity += quantity;
             }
         }
@@ -214,6 +228,57 @@ async fn recompute_customer(conn: &mut SqliteConnection, key: &str) -> AppResult
         .bind(key)
         .execute(&mut *conn)
         .await?;
+    }
+    Ok(())
+}
+
+/// `remaining_quantity` = the sum of the movements carrying the batch's key.
+/// Only the derived column is written (no `version`/`updated_at` bump), so a
+/// recompute never competes last-writer-wins with a real price edit. A
+/// negative result (two offline sales of the batch's last unit) is kept and
+/// reported once per negative episode, like a product's stock.
+async fn recompute_batch(
+    conn: &mut SqliteConnection,
+    batch_key: &str,
+    conflicts: &mut Vec<NewConflict>,
+) -> AppResult<()> {
+    let Some(old) = sqlx::query_scalar::<_, i64>(
+        "SELECT remaining_quantity FROM stock_batches WHERE key = ? AND deleted_at IS NULL",
+    )
+    .bind(batch_key)
+    .fetch_optional(&mut *conn)
+    .await?
+    else {
+        return Ok(());
+    };
+    let ledger: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(quantity_delta), 0) FROM stock_movements WHERE batch_key = ? AND deleted_at IS NULL",
+    )
+    .bind(batch_key)
+    .fetch_one(&mut *conn)
+    .await?;
+    if ledger != old {
+        sqlx::query("UPDATE stock_batches SET remaining_quantity = ? WHERE key = ?")
+            .bind(ledger)
+            .bind(batch_key)
+            .execute(&mut *conn)
+            .await?;
+    }
+    if ledger < 0 {
+        let already_open: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sync_conflicts WHERE kind = 'NEGATIVE_STOCK' AND entity_key = ? AND resolved_at IS NULL",
+        )
+        .bind(batch_key)
+        .fetch_one(&mut *conn)
+        .await?;
+        if already_open == 0 {
+            conflicts.push(NewConflict {
+                kind: ConflictKind::NegativeStock,
+                resource: "stockBatches".to_string(),
+                entity_key: batch_key.to_string(),
+                detail: serde_json::json!({ "batchKey": batch_key, "quantity": ledger }),
+            });
+        }
     }
     Ok(())
 }

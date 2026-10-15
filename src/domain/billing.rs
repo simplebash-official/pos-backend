@@ -14,6 +14,8 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
+use crate::domain::inventory::BatchAllocation;
+
 /// One line of a sale, embedded in both the complete-sale request and the
 /// persisted/returned `Invoice`. `source_ticket_key` (the repair/print-job's
 /// Mongo-independent `key`, e.g. `rep_...`) is what `complete_sale` uses to
@@ -39,7 +41,8 @@ pub struct InvoiceItem {
     /// Total price for this line item in cents after discount.
     pub total_cents: i64,
     /// Snapshot of the unit cost at sale time, in cents. For a retail line
-    /// this is the product's `cost_price_cents` when the sale was completed;
+    /// this is the weighted cost of the stock batches the units came from
+    /// (see `batch_allocations`);
     /// for a repair/print line it is the linked ticket's `material_cost_cents`
     /// divided across the line quantity. `None` on an ad-hoc line with no
     /// product/ticket to resolve against, and on every invoice created before
@@ -67,6 +70,12 @@ pub struct InvoiceItem {
     /// repair/print lines.
     #[serde(default)]
     pub serial_numbers: Vec<String>,
+    /// Which stock batches a retail product line's units came out of (one
+    /// line at one price can span several batches, oldest first). A void or
+    /// a return puts units back into exactly these batches. Empty for
+    /// repair/print and ad-hoc lines, which move no stock.
+    #[serde(default)]
+    pub batch_allocations: Vec<BatchAllocation>,
 }
 
 /// One line of a `POST /billing/sales` request. Deliberately leaner than
@@ -90,6 +99,13 @@ pub struct CreateSaleItemRequest {
     /// Unit price in cents for ad-hoc/custom items.
     #[serde(default)]
     pub unit_price_cents: Option<i64>,
+    /// The price tier the cashier picked for a non-serialized product line:
+    /// the selling price, in cents, of the stock batches the units come from
+    /// (see `Product.price_tiers`). Required for such a line, rejected when
+    /// no in-stock batch sells at it. A serialized line's price comes from
+    /// its serials' batch instead, and an ad-hoc line uses `unitPriceCents`.
+    #[serde(default)]
+    pub selling_price_cents: Option<i64>,
     /// Quantity of items being purchased.
     pub quantity: i64,
     /// Discount allocated directly to this line item in cents.
@@ -744,6 +760,13 @@ pub struct CreditNoteItem {
     /// Formatted ticket number of linked repair or print job.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_ticket_number: Option<String>,
+    /// The stock batches a product line's units belong back in: the sold
+    /// line's own batches (newest first) for a receipt return, the newest
+    /// batch at the picked price for a no-receipt return. Units are only put
+    /// back for a restockable condition; voiding the credit note takes them
+    /// out of these same batches again.
+    #[serde(default)]
+    pub batch_allocations: Vec<BatchAllocation>,
 }
 
 /// One item in a `POST /billing/credit-notes` request.
@@ -782,6 +805,11 @@ pub struct CreateCreditNoteItemRequest {
     /// Unit price in cents for custom/ad-hoc lines.
     #[serde(default, alias = "unit_price_cents")]
     pub unit_price_cents: Option<i64>,
+    /// For a no-receipt product line: the price the item was sold at, picked
+    /// from the product's prices. The return is valued at it and restocked
+    /// into the newest batch sold at it.
+    #[serde(default)]
+    pub selling_price_cents: Option<i64>,
     /// Source ticket key if returning a repair/print line.
     #[serde(default, alias = "source_ticket_key")]
     pub source_ticket_key: Option<String>,

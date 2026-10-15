@@ -487,6 +487,28 @@ pub fn mint_device_token(config: &Config, tid: &str, device_id: &str) -> String 
     .unwrap()
 }
 
+/// A device token for `device_id` of `tid`, registered with the cloud as an
+/// app new enough to sync (`POST /sync/devices/register`), the way every desktop
+/// agent starts. Push, pull and snapshot refuse a device that never registered.
+#[allow(dead_code)]
+pub async fn registered_device_token(app: &TestApp, tid: &str, device_id: &str) -> String {
+    use tower::ServiceExt;
+    let token = mint_device_token(&app.config, tid, device_id);
+    let body = json!({ "deviceId": device_id, "deviceName": "Test PC", "appVersion": "1.13.0" });
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/api/sync/devices/register")
+        .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {token}"))
+        .body(axum::body::Body::from(body.to_string()))
+        .unwrap();
+    // Not asserted: a revoked device is refused here too, and a test of that
+    // checks the refusal of its own push/pull. A failed registration shows up
+    // there as APP_UPDATE_REQUIRED.
+    app.router.clone().oneshot(request).await.unwrap();
+    token
+}
+
 /// Builds the real router in `TENANT_MODE=multi` against a uniquely named
 /// throwaway Atlas database (`jtroute_<uuid24>`, well under Atlas's 38-byte
 /// database-name cap). `TestApp.db` is the raw handle so the caller can inspect

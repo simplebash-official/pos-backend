@@ -233,9 +233,7 @@ async fn test_sqlite_complete_pos_lifecycle() {
             "name": "iPhone 15 Pro",
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
-            "sellingPriceCents": 99900,
-            "costPriceCents": 75000,
-            "stockQuantity": 10,
+            "openingStock": { "quantity": 10, "unitCostCents": 75000, "sellingPriceCents": 99900 },
             "minStockThreshold": 3
         })),
         &token,
@@ -263,9 +261,7 @@ async fn test_sqlite_complete_pos_lifecycle() {
             "name": "USB Ring Light 10-inch with Phone Holder",
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
-            "sellingPriceCents": 2499,
-            "costPriceCents": 1500,
-            "stockQuantity": 20,
+            "openingStock": { "quantity": 20, "unitCostCents": 1500, "sellingPriceCents": 2499 },
             "minStockThreshold": 5
         })),
         &token,
@@ -283,9 +279,7 @@ async fn test_sqlite_complete_pos_lifecycle() {
             "name": "Silicone Sport Band 20mm (Black)",
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
-            "sellingPriceCents": 799,
-            "costPriceCents": 300,
-            "stockQuantity": 15,
+            "openingStock": { "quantity": 15, "unitCostCents": 300, "sellingPriceCents": 799 },
             "minStockThreshold": 2
         })),
         &token,
@@ -302,7 +296,9 @@ async fn test_sqlite_complete_pos_lifecycle() {
         &format!("/api/inventory/products/{product_id}/stock"),
         Some(json!({
             "delta": 15,
-            "reason": "Restock test batch"
+            "reason": "Restock test batch",
+            "unitCostCents": 75000,
+            "sellingPriceCents": 99900
         })),
         &token,
     )
@@ -381,6 +377,7 @@ async fn test_sqlite_complete_pos_lifecycle() {
             "productKey": product_key,
             "quantity": 5,
             "unitCostCents": 72000,
+            "sellingPriceCents": 99900,
             "date": "2026-09-06T00:00:00Z"
         })),
         &token,
@@ -419,18 +416,21 @@ async fn test_sqlite_complete_pos_lifecycle() {
             "items": [
                 {
                     "productKey": product_key,
+                    "sellingPriceCents": 99900,
                     "quantity": 2,
                     "discountCents": 0,
                     "sourceType": "retail"
                 },
                 {
                     "productKey": product_key_2,
+                    "sellingPriceCents": 2499,
                     "quantity": 1,
                     "discountCents": 0,
                     "sourceType": "retail"
                 },
                 {
                     "productKey": product_key_3,
+                    "sellingPriceCents": 799,
                     "quantity": 3,
                     "discountCents": 0,
                     "sourceType": "retail"
@@ -945,9 +945,7 @@ async fn test_sqlite_product_sort_is_stable_and_preferences_are_per_login() {
                 "name": name,
                 "categoryKey": category_key,
                 "subcategoryKey": subcategory_key,
-                "sellingPriceCents": price,
-                "costPriceCents": 100,
-                "stockQuantity": 5,
+                "openingStock": { "quantity": 5, "unitCostCents": 100, "sellingPriceCents": price },
                 "minStockThreshold": 1
             })),
             &admin,
@@ -971,7 +969,7 @@ async fn test_sqlite_product_sort_is_stable_and_preferences_are_per_login() {
         &ctx.router,
         "PUT",
         &format!("/api/inventory/products/{}", ids["cherry"]),
-        Some(json!({ "sellingPriceCents": 250 })),
+        Some(json!({ "minStockThreshold": 2 })),
         &admin,
     )
     .await;

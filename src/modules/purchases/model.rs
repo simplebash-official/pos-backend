@@ -27,6 +27,8 @@ pub struct PurchaseDocument {
     pub quantity: i64,
     /// Cost price per unit in cents.
     pub unit_cost_cents: i64,
+    /// Selling price per unit set at receipt, in cents.
+    pub selling_price_cents: i64,
     /// Date when the stock purchase occurred.
     pub date: BsonDateTime,
     /// Supplier invoice or purchase order reference number.
@@ -77,6 +79,7 @@ impl PurchaseDocument {
             product_key: self.product_key,
             quantity: self.quantity,
             unit_cost_cents: self.unit_cost_cents,
+            selling_price_cents: self.selling_price_cents,
             total_cost_cents: self.quantity * self.unit_cost_cents,
             date: self.date.to_chrono(),
             reference_no: self.reference_no,

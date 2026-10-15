@@ -38,6 +38,7 @@ const SYNCED_COLLECTIONS: &[&str] = &[
     "supplier_products",
     "purchases",
     "stock_movements",
+    "stock_batches",
     "customers",
     "employees",
     "repairs",
@@ -204,6 +205,15 @@ pub fn index_specs(multi_tenant: bool) -> Vec<IndexSpec> {
         false,
     );
 
+    // Backs every product read's price tiers and a sale's batch plan
+    // (`inventory::repository::stock_batch`), both keyed by product.
+    specs.add(
+        "stock_batches",
+        "stock_batches_product_key_remaining",
+        doc! { "product_key": 1, "remaining_quantity": 1 },
+        false,
+    );
+
     specs.add(
         "shop_profiles",
         "shop_profiles_key_unique",
@@ -356,10 +366,10 @@ mod tests {
     #[test]
     fn single_tenant_specs_are_the_historical_set() {
         let specs = index_specs(false);
-        // 16 sync + 4 created_at + 2 invoice analytics + 3 reminders + products_key
-        // + idempotency unique/ttl + serial unique + serial status + shop_profiles
-        // + document_template_settings.
-        assert_eq!(specs.len(), 32);
+        // 17 sync + 4 created_at + 2 invoice analytics + 3 reminders + products_key
+        // + idempotency unique/ttl + serial unique + serial status
+        // + stock_batches product_key + shop_profiles + document_template_settings.
+        assert_eq!(specs.len(), 34);
         assert!(specs.iter().all(|s| s.keys.get(TENANT_FIELD).is_none()));
         assert!(names(&specs).contains(&"products.sync_updated_at_key".to_string()));
         assert!(names(&specs).contains(&"idempotency_keys.idempotency_ttl".to_string()));

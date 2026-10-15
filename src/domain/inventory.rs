@@ -43,14 +43,14 @@ pub struct Product {
     pub subcategory_key: String,
     /// Resolved display name of subcategory.
     pub subcategory: String,
-    /// Cost/wholesale price in cents. Present only for an Admin caller — the
-    /// routes call `Product::without_cost` for everyone else, so the field is
-    /// absent from their responses rather than zeroed.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cost_price_cents: Option<i64>,
-    /// Retail sales price in cents.
-    pub selling_price_cents: i64,
-    /// Current count of items in stock.
+    /// The prices this product can currently be sold at: one entry per
+    /// distinct selling price among its stock batches that still hold units,
+    /// cheapest first. Computed at read time from `stock_batches` (never
+    /// stored), so it is a read-time enrichment on the sync wire as well.
+    /// Empty when nothing is in stock.
+    pub price_tiers: Vec<PriceTier>,
+    /// Current count of items in stock (the sum of every batch's remaining
+    /// quantity — derived from the stock-movement ledger).
     pub stock_quantity: i64,
     /// Threshold count for low stock warnings.
     pub min_stock_threshold: i64,
@@ -83,13 +83,182 @@ pub struct Product {
 impl Product {
     /// The product as a caller who may not see what the shop paid for it gets it.
     pub fn without_cost(mut self) -> Self {
-        self.cost_price_cents = None;
+        for tier in &mut self.price_tiers {
+            tier.min_unit_cost_cents = None;
+            tier.max_unit_cost_cents = None;
+        }
         self
     }
 }
 
 fn default_version() -> i64 {
     1
+}
+
+/// One sellable price of a product: every in-stock batch sharing this
+/// `selling_price_cents`, merged. The cashier picks a tier, and the server
+/// consumes that tier's batches oldest-first (see
+/// `inventory::service::stock_batch::plan_tier_allocation`), so two
+/// deliveries sold at the same price read as one option while each keeps its
+/// own cost.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PriceTier {
+    /// Selling price of every unit in this tier, in cents.
+    pub selling_price_cents: i64,
+    /// Units left across the tier's batches.
+    pub quantity: i64,
+    /// Cheapest batch cost in the tier. Admin only (see `Product::without_cost`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_unit_cost_cents: Option<i64>,
+    /// Dearest batch cost in the tier. Admin only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_unit_cost_cents: Option<i64>,
+    /// When the oldest batch in the tier was received — the one a sale from
+    /// this tier draws on first.
+    pub oldest_received_at: DateTime<Utc>,
+}
+
+/// Where a stock batch's units came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BatchSource {
+    /// A supplier purchase receipt (`purchase_key` is set).
+    Purchase,
+    /// Stock a product was created with, or held before batches existed.
+    Opening,
+    /// A spreadsheet import row.
+    Import,
+    /// A manual stock-in adjustment.
+    Adjustment,
+}
+
+impl BatchSource {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Purchase => "purchase",
+            Self::Opening => "opening",
+            Self::Import => "import",
+            Self::Adjustment => "adjustment",
+        }
+    }
+}
+
+impl std::str::FromStr for BatchSource {
+    type Err = AppError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "purchase" => Ok(Self::Purchase),
+            "opening" => Ok(Self::Opening),
+            "import" => Ok(Self::Import),
+            "adjustment" => Ok(Self::Adjustment),
+            _ => Err(AppError::validation(format!("Invalid batch source: {s}"))),
+        }
+    }
+}
+
+/// One delivery of a product: its own cost, its own selling price and the
+/// units of it still on the shelf. Every unit of stock belongs to exactly one
+/// batch, and `remaining_quantity` is derived from the stock-movement ledger
+/// (the sum of movements carrying this batch's key), exactly like
+/// `Product.stock_quantity`, so concurrent offline sales from one batch
+/// converge instead of overwriting each other.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct StockBatch {
+    /// MongoDB internal hex ID.
+    pub id: String,
+    /// Unique business key (e.g. stb_...).
+    pub key: String,
+    /// The product this batch belongs to.
+    pub product_key: String,
+    /// Where the units came from.
+    pub source: BatchSource,
+    /// The purchase that received this batch, when `source` is `purchase`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub purchase_key: Option<String>,
+    /// The supplier the units came from, when known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supplier_key: Option<String>,
+    /// Units received into this batch.
+    pub received_quantity: i64,
+    /// Units still in stock (derived from the movement ledger).
+    pub remaining_quantity: i64,
+    /// Cost of one unit in cents. Admin only (see `StockBatch::without_cost`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unit_cost_cents: Option<i64>,
+    /// Price one unit of this batch sells at, in cents.
+    pub selling_price_cents: i64,
+    /// When the batch was received; sales from a tier draw on the oldest first.
+    pub received_at: DateTime<Utc>,
+    /// Timestamp when the batch was created.
+    pub created_at: DateTime<Utc>,
+    /// Timestamp when the batch was last modified.
+    pub updated_at: DateTime<Utc>,
+    /// Optimistic locking version.
+    #[serde(default = "default_version")]
+    pub version: i64,
+    /// Deletion timestamp if soft-deleted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<DateTime<Utc>>,
+    /// ID of client device that last updated this batch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_by_device: Option<String>,
+}
+
+impl StockBatch {
+    /// The batch as a caller who may not see what the shop paid for it gets it.
+    pub fn without_cost(mut self) -> Self {
+        self.unit_cost_cents = None;
+        self
+    }
+}
+
+/// How many units of one sale/return line came out of (or went back into)
+/// one stock batch, and what each of those units cost. A line at one price
+/// tier can span several batches (oldest first), so an invoice line carries
+/// a list of these.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchAllocation {
+    /// The batch the units came from.
+    pub batch_key: String,
+    /// Units taken from that batch.
+    pub quantity: i64,
+    /// Cost of one of those units, in cents (the batch's cost at sale time).
+    pub unit_cost_cents: i64,
+}
+
+/// Response for `GET /products/{key}/batches`.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct StockBatchListResponse {
+    /// Every batch of the product, newest first (empty ones included, so the
+    /// intake history stays visible).
+    pub items: Vec<StockBatch>,
+}
+
+/// Body for `PATCH /batches/{key}`. Either field may be sent alone. Changing
+/// the cost is Admin-only (the handler checks it).
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateStockBatchRequest {
+    /// New selling price for the batch's remaining units, in cents.
+    pub selling_price_cents: Option<i64>,
+    /// Corrected unit cost, in cents (Admin only).
+    pub unit_cost_cents: Option<i64>,
+}
+
+/// Units a product is created with when they are not a supplier purchase.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OpeningStockRequest {
+    /// Units on hand.
+    pub quantity: i64,
+    /// Cost of one unit in cents.
+    pub unit_cost_cents: i64,
+    /// Price one unit sells at, in cents.
+    pub selling_price_cents: i64,
 }
 
 /// An individual supplier intake batch submitted during product creation.
@@ -102,6 +271,8 @@ pub struct ProductSupplierIntake {
     pub quantity: i64,
     /// Purchase unit cost in cents.
     pub cost_price_cents: i64,
+    /// Price the units of this intake sell at, in cents.
+    pub selling_price_cents: i64,
     /// Supplier invoice or shipment reference number.
     #[serde(default)]
     pub reference_no: Option<String>,
@@ -116,11 +287,10 @@ pub struct ProductSupplierIntake {
 /// client-supplied. `category_key`/`subcategory_key` must be the system-
 /// generated `key` of an existing category/subcategory (see `GET
 /// /categories` or `GET /categories/valid`) — never the display name.
-/// Prices are integer cents (never float) to avoid rounding drift;
-/// `stock_quantity`/`min_stock_threshold` default to `0` via
-/// `#[serde(default)]` so a minimal request still deserializes.
-/// `suppliers`, if provided, atomically links each supplier, records purchase
-/// history receipts, and computes the initial `stock_quantity`.
+/// A product carries no price of its own: every unit it starts with comes in
+/// as a stock batch with its own cost and selling price — `openingStock` for
+/// units on hand, or one purchase per `suppliers` entry. A product created
+/// with neither has no stock and no price until its first purchase.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateProductRequest {
@@ -136,14 +306,9 @@ pub struct CreateProductRequest {
     pub category_key: String,
     /// Subcategory key under which the product belongs.
     pub subcategory_key: String,
-    /// Cost price in cents.
+    /// Units on hand that did not come from a supplier purchase.
     #[serde(default)]
-    pub cost_price_cents: i64,
-    /// Selling price in cents.
-    pub selling_price_cents: i64,
-    /// Initial stock count (computed from suppliers if supplied).
-    #[serde(default)]
-    pub stock_quantity: i64,
+    pub opening_stock: Option<OpeningStockRequest>,
     /// Minimum stock alert threshold.
     #[serde(default)]
     pub min_stock_threshold: i64,
@@ -181,12 +346,6 @@ pub struct UpdateProductRequest {
     pub category_key: Option<String>,
     /// Updated subcategory key.
     pub subcategory_key: Option<String>,
-    /// Updated cost price in cents.
-    pub cost_price_cents: Option<i64>,
-    /// Updated selling price in cents.
-    pub selling_price_cents: Option<i64>,
-    /// Updated stock quantity.
-    pub stock_quantity: Option<i64>,
     /// Updated low-stock warning threshold.
     pub min_stock_threshold: Option<i64>,
     /// Updated serialized-tracking flag.
@@ -350,17 +509,29 @@ pub struct DeleteProductsResponse {
     pub deleted_count: u64,
 }
 
-/// Body for `PATCH /products/{id}/stock`. `delta` is signed (positive =
-/// receipt, negative = consumption/sale) rather than an absolute target
-/// quantity, so concurrent adjustments compose instead of racing to
-/// overwrite each other's target value.
+/// Body for `PATCH /products/{id}/stock`. `delta` is signed rather than an
+/// absolute target quantity, so concurrent adjustments compose instead of
+/// racing to overwrite each other's target value. Stock always lives in a
+/// batch, so a negative delta names the batch it is taken from (`batchKey`),
+/// and a positive delta brings in a new `adjustment` batch, which needs its
+/// own cost and selling price.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct StockAdjustmentRequest {
     /// Signed integer change in stock quantity (+/-).
     pub delta: i64,
     /// Reason or note for manual stock adjustment.
     #[serde(default)]
     pub reason: Option<String>,
+    /// The batch a negative delta is taken from.
+    #[serde(default)]
+    pub batch_key: Option<String>,
+    /// Unit cost of the units a positive delta brings in, in cents.
+    #[serde(default)]
+    pub unit_cost_cents: Option<i64>,
+    /// Selling price of the units a positive delta brings in, in cents.
+    #[serde(default)]
+    pub selling_price_cents: Option<i64>,
 }
 
 /// Response for a stock adjustment — includes both the before/after
@@ -526,6 +697,11 @@ pub struct StockMovement {
     pub key: String,
     /// Product ID referencing the affected inventory item.
     pub product_id: String,
+    /// The stock batch whose units moved. Absent only on the audit-only
+    /// return movements (`ReturnWriteOff`/`ReturnSupplierRma`), which move no
+    /// quantity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub batch_key: Option<String>,
     /// Number of items added or deducted (+/-).
     pub quantity_delta: i64,
     /// Classification type for the stock movement.
@@ -793,6 +969,9 @@ pub struct ProductSerial {
     pub product_key: String,
     /// The manufacturer/shop serial number, unique across all products.
     pub serial_number: String,
+    /// The stock batch this unit was received in — it sells at that batch's
+    /// price and its cost is that batch's cost.
+    pub batch_key: String,
     /// Current lifecycle status of this unit.
     pub status: SerialStatus,
     /// Key of the invoice this unit was sold on, once `Sold`.

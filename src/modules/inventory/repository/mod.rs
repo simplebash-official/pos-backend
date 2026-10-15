@@ -11,4 +11,5 @@ pub(crate) mod product;
 pub(crate) mod product_serial;
 pub(crate) mod sku_counter;
 pub(crate) mod stock;
+pub(crate) mod stock_batch;
 pub(crate) mod subcategory;

@@ -490,7 +490,13 @@ fn add_scope(spec: &ResourceSpec, rec: &ChangeRecord, scope: &mut DerivedScope) 
     };
     match spec.name {
         "products" => scope.product_ids.extend(text("id")),
-        "stockMovements" => scope.product_ids.extend(text("productId")),
+        "stockMovements" => {
+            scope.product_ids.extend(text("productId"));
+            scope.batch_keys.extend(text("batchKey"));
+        }
+        "stockBatches" => {
+            scope.batch_keys.insert(rec.key.clone());
+        }
         "customers" => {
             scope.customer_keys.insert(rec.key.clone());
         }

@@ -10,3 +10,5 @@ pub mod product_serial;
 pub mod sku;
 pub mod stats;
 pub mod stock;
+pub mod stock_batch;
+pub mod stock_batch_migration;

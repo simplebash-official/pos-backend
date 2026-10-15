@@ -145,9 +145,7 @@ async fn seed_product(app: &common::TestApp) -> (String, String, i64) {
             "name": "Test Widget",
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
-            "costPriceCents": 1000,
-            "sellingPriceCents": 2000,
-            "stockQuantity": 10,
+            "openingStock": { "quantity": 10, "unitCostCents": 1000, "sellingPriceCents": 2000 },
             "minStockThreshold": 2,
         })),
         &token,
@@ -157,7 +155,9 @@ async fn seed_product(app: &common::TestApp) -> (String, String, i64) {
     (
         body["data"]["id"].as_str().unwrap().to_string(),
         body["data"]["key"].as_str().unwrap().to_string(),
-        body["data"]["sellingPriceCents"].as_i64().unwrap(),
+        body["data"]["priceTiers"][0]["sellingPriceCents"]
+            .as_i64()
+            .unwrap(),
     )
 }
 
@@ -292,6 +292,7 @@ async fn complete_sale_retail_cash_decrements_stock_and_marks_paid() {
     let mut payload = base_sale_payload();
     payload["items"] = json!([{
         "productKey": product_key,
+        "sellingPriceCents": price,
         "quantity": 2,
         "discountCents": 0,
         "sourceType": "retail",
@@ -364,6 +365,7 @@ async fn complete_sale_invoice_is_immediately_visible_via_sync_changes() {
     let mut payload = base_sale_payload();
     payload["items"] = json!([{
         "productKey": product_key,
+        "sellingPriceCents": price,
         "quantity": 1,
         "discountCents": 0,
         "sourceType": "retail",
@@ -414,6 +416,7 @@ async fn complete_sale_retail_item_ignores_client_supplied_name_and_price() {
     let mut payload = base_sale_payload();
     payload["items"] = json!([{
         "productKey": product_key,
+        "sellingPriceCents": price,
         "name": "Totally Wrong Name",
         "unitPriceCents": 1,
         "quantity": 1,
@@ -1112,11 +1115,12 @@ async fn void_invoice_reverses_stock_requires_admin_and_is_idempotent_guarded() 
     let app = common::spawn_app().await;
     let staff = staff_token(&app.config);
     let admin = admin_token(&app.config);
-    let (product_id, product_key, _price) = seed_product(&app).await;
+    let (product_id, product_key, price) = seed_product(&app).await;
 
     let mut payload = base_sale_payload();
     payload["items"] = json!([{
         "productKey": product_key,
+        "sellingPriceCents": price,
         "quantity": 3,
         "discountCents": 0,
         "sourceType": "retail",

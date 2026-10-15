@@ -186,8 +186,16 @@ async fn export_and_restore_backup_roundtrip() {
     .unwrap();
 
     sqlx::query(
-        "INSERT INTO products (key, id, sku, name, category_key, subcategory_key, cost_price_cents, selling_price_cents, stock_quantity, version, created_at, updated_at) \
-         VALUES ('prod_1', '65f1a1a1a1a1a1a1a1a1a1a3', 'LAP-GAM-0001', 'Asus ROG', 'cat_1', 'subcat_1', 150000, 200000, 5, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        "INSERT INTO products (key, id, sku, name, category_key, subcategory_key, stock_quantity, version, created_at, updated_at) \
+         VALUES ('prod_1', '65f1a1a1a1a1a1a1a1a1a1a3', 'LAP-GAM-0001', 'Asus ROG', 'cat_1', 'subcat_1', 5, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+    )
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO stock_batches (key, id, product_key, source, received_quantity, remaining_quantity, unit_cost_cents, selling_price_cents, received_at, version, created_at, updated_at) \
+         VALUES ('stb_1', '65f1a1a1a1a1a1a1a1a1a1a4', 'prod_1', 'opening', 5, 5, 150000, 200000, '2026-01-01T00:00:00Z', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
     )
     .execute(&ctx.pool)
     .await
@@ -292,6 +300,96 @@ async fn export_and_restore_backup_roundtrip() {
             .await
             .unwrap();
     assert_eq!(restored_prod.1, "Asus ROG");
+    let restored_batch: (i64, i64) = sqlx::query_as(
+        "SELECT remaining_quantity, selling_price_cents FROM stock_batches WHERE key = 'stb_1'",
+    )
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(restored_batch, (5, 200000));
+}
+
+/// A backup taken before stock batches existed (prices on the product row,
+/// no `stock_batches` table) restores into an opening batch per product, so
+/// the restored stock is still sellable at its old price and cost.
+#[tokio::test]
+async fn restoring_a_pre_batch_backup_creates_opening_batches() {
+    let ctx = setup_sqlite_app().await;
+    let admin_token = common::mint_token(
+        &ctx.config,
+        Some(Role::Admin),
+        roles::default_permissions(Role::Admin),
+    );
+
+    let backup = json!({
+        "version": 1,
+        "exportedAt": "2026-01-02T00:00:00Z",
+        "appVersion": "0.13.0",
+        "environment": "desktop",
+        "totalTables": 3,
+        "totalRecords": 4,
+        "tables": {
+            "products": [{
+                "key": "prod_old", "id": "65f1a1a1a1a1a1a1a1a1a1b1", "sku": "OLD-0001",
+                "name": "Old Case", "category_key": "cat_1", "subcategory_key": "subcat_1",
+                "cost_price_cents": 1000, "selling_price_cents": 1200, "stock_quantity": 5,
+                "min_stock_threshold": 0, "is_serialized": 0, "version": 1,
+                "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"
+            }],
+            "stock_movements": [{
+                "key": "sm_old", "id": "65f1a1a1a1a1a1a1a1a1a1b2", "product_id": "65f1a1a1a1a1a1a1a1a1a1b1",
+                "quantity_delta": 5, "movement_type": "opening_balance", "version": 1,
+                "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"
+            }],
+            "purchases": [{
+                "key": "pur_old", "id": "65f1a1a1a1a1a1a1a1a1a1b3", "supplier_key": "sup_1",
+                "product_key": "prod_old", "quantity": 5, "unit_cost_cents": 1000,
+                "date": "2026-01-01T00:00:00Z", "version": 1,
+                "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"
+            }],
+            "invoices": []
+        }
+    });
+
+    let res = ctx
+        .router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/backup/import")
+                .header(AUTHORIZATION, format!("Bearer {admin_token}"))
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "backup": backup }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = res.status();
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+
+    let batch: (String, i64, i64, i64) = sqlx::query_as(
+        "SELECT key, remaining_quantity, unit_cost_cents, selling_price_cents FROM stock_batches WHERE product_key = 'prod_old'",
+    )
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(batch, ("stb_open_prod_old".to_string(), 5, 1000, 1200));
+    let movement_batch: (Option<String>,) =
+        sqlx::query_as("SELECT batch_key FROM stock_movements WHERE key = 'sm_old'")
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
+    assert_eq!(movement_batch.0.as_deref(), Some("stb_open_prod_old"));
+    let purchase_price: (i64,) =
+        sqlx::query_as("SELECT selling_price_cents FROM purchases WHERE key = 'pur_old'")
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
+    assert_eq!(purchase_price.0, 1200);
 }
 
 #[tokio::test]

@@ -418,8 +418,8 @@ async fn catalog_lines_use_the_catalog_and_do_not_touch_stock_or_invoices() {
         "/api/inventory/products",
         Some(json!({
             "name": "Galaxy A15", "categoryKey": category_key,
-            "subcategoryKey": subcategory_key, "sellingPriceCents": 65000,
-            "costPriceCents": 50000, "stockQuantity": 10, "minStockThreshold": 2
+            "subcategoryKey": subcategory_key, "minStockThreshold": 2,
+            "openingStock": { "quantity": 10, "unitCostCents": 50000, "sellingPriceCents": 65000 }
         })),
         &tok,
     )
@@ -444,14 +444,35 @@ async fn catalog_lines_use_the_catalog_and_do_not_touch_stock_or_invoices() {
 
     let (_, invoices_before) = call(&ctx.router, "GET", "/api/billing/invoices", None, &tok).await;
 
-    // The client lies about name and price; the catalog wins. The registered
-    // customer's record wins over the typed name.
+    // A product line must quote one of the product's current prices.
+    for (line, code) in [
+        (
+            json!({ "productKey": product_key, "quantity": 1 }),
+            "VALIDATION_ERROR",
+        ),
+        (
+            json!({ "productKey": product_key, "sellingPriceCents": 70000, "quantity": 1 }),
+            "PRICE_TIER_UNAVAILABLE",
+        ),
+    ] {
+        let (status, res) = create(
+            &ctx.router,
+            &tok,
+            json!({ "customer": { "customerName": "Walk-in" }, "items": [line], "validUntil": date_in(7) }),
+        )
+        .await;
+        assert!(status.is_client_error(), "{res}");
+        assert_eq!(res["code"], code, "{res}");
+    }
+
+    // The client lies about name and unit price; the catalog and the picked
+    // price win. The registered customer's record wins over the typed name.
     let (status, res) = create(
         &ctx.router,
         &tok,
         json!({
             "customer": { "customerKey": customer_key, "customerName": "Somebody Else" },
-            "items": [{ "productKey": product_key, "name": "Fake", "unitPriceCents": 1, "quantity": 3 }],
+            "items": [{ "productKey": product_key, "name": "Fake", "unitPriceCents": 1, "sellingPriceCents": 65000, "quantity": 3 }],
             "validUntil": date_in(7)
         }),
     )

@@ -101,12 +101,26 @@ async fn resolve_item(db: &Db, line: CreateQuotationItem) -> AppResult<Quotation
     let (product_key, name, sku, unit_price_cents) = match line.product_key {
         Some(key) => {
             let product = inventory::service::product::get_product_by_key(db, &key).await?;
-            (
-                Some(product.key),
-                product.name,
-                Some(product.sku),
-                product.selling_price_cents,
-            )
+            let price = line.selling_price_cents.ok_or_else(|| {
+                AppError::validation(format!(
+                    "Pick the price to quote '{}' at — sellingPriceCents is required",
+                    product.name
+                ))
+            })?;
+            // A quotation never touches stock, but it may only offer a price
+            // the product is actually in stock at right now.
+            if !product
+                .price_tiers
+                .iter()
+                .any(|tier| tier.selling_price_cents == price)
+            {
+                return Err(AppError::conflict_with_details(
+                    codes::PRICE_TIER_UNAVAILABLE,
+                    format!("{} is not in stock at this price.", product.name),
+                    serde_json::json!({ "sellingPriceCents": price }),
+                ));
+            }
+            (Some(product.key), product.name, Some(product.sku), price)
         }
         None => {
             let name = line.name.map(|n| n.trim().to_string()).unwrap_or_default();

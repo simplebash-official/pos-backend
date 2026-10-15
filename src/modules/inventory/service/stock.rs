@@ -1,7 +1,8 @@
-// Business rules for stock changes: the adjustment invariant (never let
-// stock go negative), and the fact that every adjustment must also produce
-// a `StockMovement` audit record — the two collections are always written
-// together from here, never independently.
+// Business rules for stock changes: the adjustment invariant (never let a
+// batch's or a product's stock go negative), and the fact that every
+// adjustment must also produce a `StockMovement` audit record — the batch,
+// the product total and the movement are always written together from here,
+// never independently.
 
 use mongodb::bson::{DateTime as BsonDateTime, doc, oid::ObjectId};
 
@@ -13,77 +14,103 @@ use crate::{
         id::generate_id,
     },
     domain::inventory::{
-        LowStockItem, LowStockResponse, StockAdjustmentRequest, StockAdjustmentResponse,
-        StockMovementListQuery, StockMovementListResponse, StockMovementType,
-        StockMovementsResponse,
+        BatchSource, LowStockItem, LowStockResponse, StockAdjustmentRequest,
+        StockAdjustmentResponse, StockMovementListQuery, StockMovementListResponse,
+        StockMovementType, StockMovementsResponse,
     },
     modules::inventory::{model::ProductDocument, model::StockMovementDocument, repository},
 };
 
-/// Applies a signed `delta` to a product's stock and records the change as
-/// a `StockMovement` in the same write — the two collections are always
-/// written together, never independently (see the module banner). Rejects
-/// with `INSUFFICIENT_STOCK` rather than clamping to zero, since a caller
-/// requesting a delta larger than available stock is almost always a bug
-/// (e.g. double-submitted sale) that should surface as an error, not
-/// silently produce a wrong quantity. Shared by `adjust_stock` (manual,
-/// tagged `ManualAdjustment`) and, cross-module, by
-/// `purchases::service::purchase::record_purchase` (tagged
-/// `PurchaseReceipt`, `reference_id` = the purchase's key) — the one place
-/// stock is ever mutated, so every caller gets the same guard and audit
-/// trail for free.
+/// Applies a signed `delta` to one batch of a product and to the product's
+/// total, and records the change as a `StockMovement` carrying the batch key
+/// — the three are always written together, never independently (see the
+/// module banner). Every unit of stock lives in a batch, so a quantity change
+/// always names one; only the audit-only return movements (`delta == 0`)
+/// carry no batch. Rejects with `INSUFFICIENT_STOCK` rather than clamping to
+/// zero, since a delta larger than what the batch holds is almost always a
+/// bug (e.g. a double-submitted sale) that should surface as an error. The
+/// batch is moved first because its guard is the stricter one; if the
+/// product write then fails, the batch move is undone so the two never
+/// disagree. This is the one place stock is ever mutated, so every caller
+/// gets the same guard and audit trail for free.
 pub(crate) async fn apply_stock_delta(
     db: &Db,
     id: ObjectId,
+    batch_key: Option<&str>,
     delta: i64,
     movement_type: StockMovementType,
     reference_id: Option<String>,
     note: Option<String>,
 ) -> AppResult<(i64, ProductDocument)> {
-    let now = BsonDateTime::now();
-    let (previous_stock_quantity, updated) =
-        match repository::product::adjust_product_stock_pipeline(db, id, delta).await? {
-            Some(res) => res,
-            None => {
-                let existing = repository::product::find_product_by_id(db, id)
-                    .await?
-                    .ok_or_else(|| {
-                        AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
-                    })?;
-                let requested_qty = -delta;
-                let message = format!(
-                    "Only {} unit{} of {} {} left in stock.",
-                    existing.stock_quantity,
-                    if existing.stock_quantity == 1 {
-                        ""
-                    } else {
-                        "s"
-                    },
-                    existing.name,
-                    if existing.stock_quantity == 1 {
-                        "is"
-                    } else {
-                        "are"
-                    }
-                );
-                return Err(AppError::conflict_with_details(
-                    codes::INSUFFICIENT_STOCK,
-                    message,
-                    serde_json::json!({
-                        "available": existing.stock_quantity,
-                        "requested": requested_qty,
-                        "productId": existing.id.map(|i| i.to_hex()).unwrap_or_default(),
-                    }),
-                ));
-            }
-        };
+    if delta != 0 && batch_key.is_none() {
+        return Err(AppError::internal(
+            "A stock quantity change must name the batch it moves",
+        ));
+    }
 
+    if let Some(batch_key) = batch_key
+        && delta != 0
+        && repository::stock_batch::adjust_batch_remaining(db, batch_key, delta)
+            .await?
+            .is_none()
+    {
+        let batch = repository::stock_batch::find_batch_by_key(db, batch_key)
+            .await?
+            .ok_or_else(|| super::stock_batch::batch_not_found(batch_key))?;
+        let name = repository::product::find_product_by_id(db, id)
+            .await?
+            .map(|product| product.name)
+            .unwrap_or_default();
+        return Err(insufficient_stock(
+            batch.remaining_quantity,
+            -delta,
+            &name,
+            serde_json::json!({
+                "available": batch.remaining_quantity,
+                "requested": -delta,
+                "productId": id.to_hex(),
+                "batchKey": batch_key,
+                "sellingPriceCents": batch.selling_price_cents,
+            }),
+        ));
+    }
+
+    let adjusted = repository::product::adjust_product_stock_pipeline(db, id, delta).await;
+    let (previous_stock_quantity, updated) = match adjusted {
+        Ok(Some(result)) => result,
+        failed => {
+            if let Some(batch_key) = batch_key
+                && delta != 0
+            {
+                repository::stock_batch::adjust_batch_remaining(db, batch_key, -delta).await?;
+            }
+            failed?;
+            let existing = repository::product::find_product_by_id(db, id)
+                .await?
+                .ok_or_else(|| {
+                    AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
+                })?;
+            return Err(insufficient_stock(
+                existing.stock_quantity,
+                -delta,
+                &existing.name,
+                serde_json::json!({
+                    "available": existing.stock_quantity,
+                    "requested": -delta,
+                    "productId": id.to_hex(),
+                }),
+            ));
+        }
+    };
+
+    let now = BsonDateTime::now();
     repository::stock::insert_stock_movement(
         db,
         StockMovementDocument {
             id: None,
             key: generate_id(prefixes::STOCK_MOVEMENT),
             product_id: id,
+            batch_key: batch_key.map(str::to_string),
             quantity_delta: delta,
             movement_type,
             reference_id,
@@ -100,26 +127,91 @@ pub(crate) async fn apply_stock_delta(
     Ok((previous_stock_quantity, updated))
 }
 
-/// Manual stock adjustment via `PATCH /products/{id}/stock` — thin wrapper
-/// around `apply_stock_delta` tagging the movement `ManualAdjustment`, then
-/// reshaping the result into the API response (which also echoes back the
-/// pre-adjustment quantity so a client can display the change without a
-/// second request).
+fn insufficient_stock(
+    available: i64,
+    requested: i64,
+    name: &str,
+    details: serde_json::Value,
+) -> AppError {
+    let message = format!(
+        "Only {available} unit{} of {name} {} left in stock (asked for {requested}).",
+        if available == 1 { "" } else { "s" },
+        if available == 1 { "is" } else { "are" },
+    );
+    AppError::conflict_with_details(codes::INSUFFICIENT_STOCK, message, details)
+}
+
+/// Manual stock adjustment via `PATCH /products/{id}/stock`. A negative
+/// delta takes units out of the named batch; a positive delta brings units
+/// in as a new `adjustment` batch with its own cost and selling price (stock
+/// never exists outside a batch). Echoes back the pre-adjustment quantity so
+/// a client can display the change without a second request.
 pub(crate) async fn adjust_stock(
     db: &Db,
     id: ObjectId,
     body: StockAdjustmentRequest,
 ) -> AppResult<StockAdjustmentResponse> {
     crate::core::logging::domain::tracked("inventory.stock_adjusted", async move {
-        let (previous_stock_quantity, updated) = apply_stock_delta(
-            db,
-            id,
-            body.delta,
-            StockMovementType::ManualAdjustment,
-            None,
-            body.reason,
-        )
-        .await?;
+        let product = repository::product::find_product_by_id(db, id)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
+            })?;
+
+        let (previous_stock_quantity, updated) = match body.delta {
+            0 => return Err(AppError::validation("Adjustment delta cannot be 0")),
+            delta if delta < 0 => {
+                let batch_key = body.batch_key.as_deref().ok_or_else(|| {
+                    AppError::validation("Taking stock out needs the batchKey it comes from")
+                })?;
+                let batch = repository::stock_batch::find_batch_by_key(db, batch_key)
+                    .await?
+                    .filter(|batch| batch.product_key == product.key)
+                    .ok_or_else(|| super::stock_batch::batch_not_found(batch_key))?;
+                apply_stock_delta(
+                    db,
+                    id,
+                    Some(&batch.key),
+                    delta,
+                    StockMovementType::ManualAdjustment,
+                    None,
+                    body.reason,
+                )
+                .await?
+            }
+            delta => {
+                let (Some(unit_cost_cents), Some(selling_price_cents)) =
+                    (body.unit_cost_cents, body.selling_price_cents)
+                else {
+                    return Err(AppError::validation(
+                        "Adding stock needs the unitCostCents and sellingPriceCents of the new units",
+                    ));
+                };
+                let previous = product.stock_quantity;
+                super::stock_batch::create_batch(
+                    db,
+                    super::stock_batch::NewBatch {
+                        product_id: id,
+                        product_key: product.key.clone(),
+                        source: BatchSource::Adjustment,
+                        purchase_key: None,
+                        supplier_key: None,
+                        quantity: delta,
+                        unit_cost_cents,
+                        selling_price_cents,
+                        received_at: BsonDateTime::now(),
+                        movement_type: StockMovementType::ManualAdjustment,
+                        reference_id: None,
+                        note: body.reason,
+                    },
+                )
+                .await?;
+                let updated = repository::product::find_product_by_id(db, id)
+                    .await?
+                    .expect("product was just adjusted and must exist");
+                (previous, updated)
+            }
+        };
 
         Ok(StockAdjustmentResponse {
             id: updated

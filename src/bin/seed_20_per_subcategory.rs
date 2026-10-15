@@ -1,7 +1,7 @@
 use simplebash_pos_backend::{
     clients,
     core::config::Config,
-    domain::inventory::{CreateProductRequest, ProductListQuery},
+    domain::inventory::{CreateProductRequest, OpeningStockRequest, ProductListQuery},
     modules::inventory::service::{category, product},
 };
 
@@ -5215,9 +5215,11 @@ async fn main() {
                     name: tmpl.name.to_string(),
                     category_key: cat.key.clone(),
                     subcategory_key: subcat.key.clone(),
-                    cost_price_cents: tmpl.cost_price_cents,
-                    selling_price_cents: tmpl.selling_price_cents,
-                    stock_quantity: tmpl.stock_quantity,
+                    opening_stock: (tmpl.stock_quantity > 0).then_some(OpeningStockRequest {
+                        quantity: tmpl.stock_quantity,
+                        unit_cost_cents: tmpl.cost_price_cents,
+                        selling_price_cents: tmpl.selling_price_cents,
+                    }),
                     min_stock_threshold: tmpl.min_stock_threshold,
                     barcode: None,
                     auto_generate_barcode: true,
@@ -5235,7 +5237,7 @@ async fn main() {
                             created.sku,
                             created.barcode,
                             created.stock_quantity,
-                            created.selling_price_cents as f64 / 100.0
+                            tmpl.selling_price_cents as f64 / 100.0
                         );
                         created_for_subcat += 1;
                         total_created += 1;

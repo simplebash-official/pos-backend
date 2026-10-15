@@ -143,6 +143,66 @@ pub(crate) async fn ensure_device_active(db: &Db, device_id: &str) -> AppResult<
         .unwrap_or(false))
 }
 
+/// The oldest desktop app that may sync with this cloud: 1.13.0 is the first
+/// release whose data has stock batches (prices per delivery). An older app
+/// would push stock moves tied to no delivery and pull products it has no
+/// price for, so it is held back until it updates.
+pub(crate) const MIN_DESKTOP_APP_VERSION: (u64, u64, u64) = (1, 13, 0);
+
+/// Refusal for a desktop older than [`MIN_DESKTOP_APP_VERSION`]. A 503 on
+/// purpose: older apps retry a 5xx later and keep their waiting changes,
+/// whereas any other 4xx makes them drop the refused change for good.
+fn update_required() -> AppError {
+    AppError::custom(
+        axum::http::StatusCode::SERVICE_UNAVAILABLE,
+        "APP_UPDATE_REQUIRED",
+        "This SimpleBash app is too old to sync. Update it under Settings > Updates. \
+         Everything you do on this computer is kept and syncs after the update.",
+    )
+}
+
+/// `"1.13.0"` (a `-suffix` such as `-dev` is ignored) as comparable numbers;
+/// `None` for anything that is not three dot-separated numbers.
+fn parse_app_version(version: &str) -> Option<(u64, u64, u64)> {
+    let core = version.trim().split('-').next()?;
+    let mut parts = core.split('.').map(|p| p.parse::<u64>().ok());
+    let parsed = (parts.next()??, parts.next()??, parts.next()??);
+    parts.next().is_none().then_some(parsed)
+}
+
+/// Records the app version a device registered with, refusing one too old
+/// to sync (see [`MIN_DESKTOP_APP_VERSION`]).
+pub(crate) async fn record_device_app_version(
+    db: &Db,
+    device_id: &str,
+    app_version: &str,
+) -> AppResult<()> {
+    if parse_app_version(app_version).is_none_or(|v| v < MIN_DESKTOP_APP_VERSION) {
+        return Err(update_required());
+    }
+    coll(db, DEVICES)?
+        .update_one(
+            doc! { "device_id": device_id },
+            doc! { "$set": { "app_version": app_version } },
+        )
+        .await?;
+    Ok(())
+}
+
+/// Refuses a device whose registered app is older than
+/// [`MIN_DESKTOP_APP_VERSION`], or that never registered a version at all
+/// (every app older than the cloud's version check).
+pub(crate) async fn ensure_device_app_current(db: &Db, device_id: &str) -> AppResult<()> {
+    let version = coll(db, DEVICES)?
+        .find_one(doc! { "device_id": device_id })
+        .await?
+        .and_then(|d| d.get_str("app_version").ok().and_then(parse_app_version));
+    match version {
+        Some(v) if v >= MIN_DESKTOP_APP_VERSION => Ok(()),
+        _ => Err(update_required()),
+    }
+}
+
 pub(crate) async fn touch_device(
     db: &Db,
     device_id: &str,
@@ -238,4 +298,21 @@ pub(crate) async fn record_conflicts(
             .await?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn app_versions_parse_and_compare_numerically() {
+        assert_eq!(parse_app_version("1.13.0"), Some((1, 13, 0)));
+        assert_eq!(parse_app_version("1.13.2-dev"), Some((1, 13, 2)));
+        assert!(parse_app_version("1.9.0").unwrap() < MIN_DESKTOP_APP_VERSION);
+        assert!(parse_app_version("1.12.0").unwrap() < MIN_DESKTOP_APP_VERSION);
+        assert!(parse_app_version("2.0.0").unwrap() > MIN_DESKTOP_APP_VERSION);
+        for bad in ["", "1.13", "1.13.0.1", "v1.13.0", "one.two.three"] {
+            assert_eq!(parse_app_version(bad), None, "{bad}");
+        }
+    }
 }

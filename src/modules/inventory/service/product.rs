@@ -15,8 +15,8 @@ use crate::{
         utils::{build_bson_regex, calculate_pagination},
     },
     domain::inventory::{
-        BarcodeSource, CreateProductRequest, PaginationMeta, Product, ProductListQuery,
-        ProductListResponse, UpdateProductRequest,
+        BarcodeSource, BatchSource, CreateProductRequest, PaginationMeta, Product,
+        ProductListQuery, ProductListResponse, StockMovementType, UpdateProductRequest,
     },
     modules::inventory::{model::ProductDocument, repository},
 };
@@ -30,8 +30,9 @@ pub(crate) fn sort_field_for(sort_by: Option<&str>) -> &'static str {
         Some("sku") => "sku",
         Some("category") => "category_key",
         Some("subcategory") => "subcategory_key",
-        Some("costPriceCents") => "cost_price_cents",
-        Some("sellingPriceCents") => "selling_price_cents",
+        // Computed per row from the in-stock batches (see
+        // `repository::product::list_products_with_display_names`).
+        Some("sellingPriceCents") => repository::product::MIN_SELLING_PRICE,
         Some("stockQuantity") => "stock_quantity",
         Some("minStockThreshold") => "min_stock_threshold",
         Some("createdAt") => "created_at",
@@ -59,21 +60,7 @@ pub(crate) fn list_sort_for(sort_by: Option<&str>, sort_order: Option<&str>) -> 
     sort
 }
 
-fn validate_product_numbers(
-    selling_price_cents: i64,
-    cost_price_cents: i64,
-    stock_quantity: i64,
-    min_stock_threshold: i64,
-) -> AppResult<()> {
-    if selling_price_cents <= 0 {
-        return Err(AppError::validation("Selling price must be greater than 0"));
-    }
-    if cost_price_cents < 0 {
-        return Err(AppError::validation("Cost price cannot be negative"));
-    }
-    if stock_quantity < 0 {
-        return Err(AppError::validation("Stock quantity cannot be negative"));
-    }
+fn validate_min_stock_threshold(min_stock_threshold: i64) -> AppResult<()> {
     if min_stock_threshold < 0 {
         return Err(AppError::validation(
             "Minimum stock threshold cannot be negative",
@@ -150,6 +137,8 @@ pub(crate) async fn get_products_by_keys(db: &Db, keys: &[String]) -> AppResult<
         keys.len() as i64,
     )
     .await?;
+    let mut items = items;
+    super::stock_batch::attach_price_tiers(db, &mut items).await?;
     Ok(items)
 }
 
@@ -202,9 +191,10 @@ pub async fn list_products(db: &Db, query: ProductListQuery) -> AppResult<Produc
 
     let sort = list_sort_for(query.sort_by.as_deref(), query.sort_order.as_deref());
 
-    let (items, total) =
+    let (mut items, total) =
         repository::product::list_products_with_display_names(db, filter, sort, skip, limit as i64)
             .await?;
+    super::stock_batch::attach_price_tiers(db, &mut items).await?;
 
     let pagination = PaginationMeta {
         page,
@@ -228,7 +218,8 @@ pub(crate) async fn get_product(db: &Db, id: ObjectId) -> AppResult<Product> {
     let (category_name, subcategory_name) =
         resolve_display_names(db, &document.category_key, &document.subcategory_key).await?;
 
-    Ok(document.into_product(category_name, subcategory_name))
+    super::stock_batch::with_price_tiers(db, document.into_product(category_name, subcategory_name))
+        .await
 }
 
 /// Same as `get_product`, looked up by `key` instead of `ObjectId` — the
@@ -246,7 +237,8 @@ pub(crate) async fn get_product_by_key(db: &Db, key: &str) -> AppResult<Product>
     let (category_name, subcategory_name) =
         resolve_display_names(db, &document.category_key, &document.subcategory_key).await?;
 
-    Ok(document.into_product(category_name, subcategory_name))
+    super::stock_batch::with_price_tiers(db, document.into_product(category_name, subcategory_name))
+        .await
 }
 
 /// Exact barcode lookup for a scan — resolves the one product carrying
@@ -263,7 +255,8 @@ pub(crate) async fn get_product_by_barcode(db: &Db, barcode: &str) -> AppResult<
     let (category_name, subcategory_name) =
         resolve_display_names(db, &document.category_key, &document.subcategory_key).await?;
 
-    Ok(document.into_product(category_name, subcategory_name))
+    super::stock_batch::with_price_tiers(db, document.into_product(category_name, subcategory_name))
+        .await
 }
 
 /// Loose validation for a staff-entered manual barcode: numeric digits
@@ -344,12 +337,18 @@ pub async fn create_product(db: &Db, body: CreateProductRequest) -> AppResult<Pr
         if body.name.trim().is_empty() {
             return Err(AppError::validation("Product name is required"));
         }
-        validate_product_numbers(
-            body.selling_price_cents,
-            body.cost_price_cents,
-            body.stock_quantity,
-            body.min_stock_threshold,
-        )?;
+        validate_min_stock_threshold(body.min_stock_threshold)?;
+        if let Some(opening) = &body.opening_stock {
+            if opening.quantity < 1 {
+                return Err(AppError::validation(
+                    "Opening stock quantity must be at least 1",
+                ));
+            }
+            super::stock_batch::validate_batch_prices(
+                opening.unit_cost_cents,
+                opening.selling_price_cents,
+            )?;
+        }
         let (category_name, subcategory_name) =
             ensure_valid_category(db, &body.category_key, &body.subcategory_key).await?;
 
@@ -368,11 +367,10 @@ pub async fn create_product(db: &Db, body: CreateProductRequest) -> AppResult<Pr
                         "Supplier intake quantity must be at least 1",
                     ));
                 }
-                if intake.cost_price_cents < 0 {
-                    return Err(AppError::validation(
-                        "Supplier intake cost price cannot be negative",
-                    ));
-                }
+                super::stock_batch::validate_batch_prices(
+                    intake.cost_price_cents,
+                    intake.selling_price_cents,
+                )?;
                 crate::modules::suppliers::service::get_supplier_by_key(db, &intake.supplier_key)
                     .await?;
             }
@@ -396,18 +394,6 @@ pub async fn create_product(db: &Db, body: CreateProductRequest) -> AppResult<Pr
             ));
         }
 
-        let initial_stock = if body.suppliers.is_empty() {
-            body.stock_quantity
-        } else {
-            0
-        };
-
-        let default_cost_price = if body.cost_price_cents == 0 && !body.suppliers.is_empty() {
-            body.suppliers[0].cost_price_cents
-        } else {
-            body.cost_price_cents
-        };
-
         let now = BsonDateTime::now();
         let document = ProductDocument {
             id: None,
@@ -418,9 +404,7 @@ pub async fn create_product(db: &Db, body: CreateProductRequest) -> AppResult<Pr
             name: body.name,
             category_key: body.category_key,
             subcategory_key: body.subcategory_key,
-            cost_price_cents: default_cost_price,
-            selling_price_cents: body.selling_price_cents,
-            stock_quantity: initial_stock,
+            stock_quantity: 0,
             min_stock_threshold: body.min_stock_threshold,
             is_serialized: body.is_serialized,
             warranty_months: body.warranty_months,
@@ -434,24 +418,24 @@ pub async fn create_product(db: &Db, body: CreateProductRequest) -> AppResult<Pr
         let inserted = repository::product::insert_product(db, document).await?;
         let product_object_id = inserted.id.expect("inserted product must have an id");
 
-        // Stock is a ledger (sync recomputes it from movements), so the units a
-        // product is created with need a movement behind them.
-        if initial_stock > 0 {
-            repository::stock::insert_stock_movement(
+        // Units on hand come in as an `opening` batch with their own prices;
+        // supplier intakes below each become a purchase batch.
+        if let Some(opening) = body.opening_stock {
+            super::stock_batch::create_batch(
                 db,
-                crate::modules::inventory::model::StockMovementDocument {
-                    id: None,
-                    key: generate_id(prefixes::STOCK_MOVEMENT),
+                super::stock_batch::NewBatch {
                     product_id: product_object_id,
-                    quantity_delta: initial_stock,
-                    movement_type: crate::domain::inventory::StockMovementType::OpeningBalance,
+                    product_key: inserted.key.clone(),
+                    source: BatchSource::Opening,
+                    purchase_key: None,
+                    supplier_key: None,
+                    quantity: opening.quantity,
+                    unit_cost_cents: opening.unit_cost_cents,
+                    selling_price_cents: opening.selling_price_cents,
+                    received_at: now,
+                    movement_type: StockMovementType::OpeningBalance,
                     reference_id: Some(inserted.key.clone()),
                     note: Some("Opening balance".to_string()),
-                    version: 1,
-                    created_at: now,
-                    updated_at: now,
-                    deleted_at: None,
-                    updated_by_device: None,
                 },
             )
             .await?;
@@ -477,6 +461,7 @@ pub async fn create_product(db: &Db, body: CreateProductRequest) -> AppResult<Pr
                     product_key: inserted.key.clone(),
                     quantity: intake.quantity,
                     unit_cost_cents: intake.cost_price_cents,
+                    selling_price_cents: intake.selling_price_cents,
                     date: chrono::Utc::now(),
                     reference_no: intake.reference_no,
                     notes: intake.notes,
@@ -495,7 +480,11 @@ pub async fn create_product(db: &Db, body: CreateProductRequest) -> AppResult<Pr
             .await?
             .expect("product was just created and must exist");
 
-        Ok(final_product.into_product(category_name, subcategory_name))
+        super::stock_batch::with_price_tiers(
+            db,
+            final_product.into_product(category_name, subcategory_name),
+        )
+        .await
     })
     .await
 }
@@ -526,16 +515,6 @@ pub(crate) async fn update_product(
             {
                 conflicting.push("name");
             }
-            if let Some(price) = body.selling_price_cents
-                && price != existing.selling_price_cents
-            {
-                conflicting.push("sellingPriceCents");
-            }
-            if let Some(cost) = body.cost_price_cents
-                && cost != existing.cost_price_cents
-            {
-                conflicting.push("costPriceCents");
-            }
             if let Some(ref cat) = body.category_key
                 && cat != &existing.category_key
             {
@@ -545,11 +524,6 @@ pub(crate) async fn update_product(
                 && subcat != &existing.subcategory_key
             {
                 conflicting.push("subcategoryKey");
-            }
-            if let Some(qty) = body.stock_quantity
-                && qty != existing.stock_quantity
-            {
-                conflicting.push("stockQuantity");
             }
             if let Some(min) = body.min_stock_threshold
                 && min != existing.min_stock_threshold
@@ -565,9 +539,13 @@ pub(crate) async fn update_product(
             let (category_name, subcategory_name) =
                 resolve_display_names(db, &existing.category_key, &existing.subcategory_key)
                     .await?;
-            let server_doc = existing
-                .clone()
-                .into_product(category_name, subcategory_name);
+            let server_doc = super::stock_batch::with_price_tiers(
+                db,
+                existing
+                    .clone()
+                    .into_product(category_name, subcategory_name),
+            )
+            .await?;
 
             return Err(AppError::conflict_with_details(
                 codes::VERSION_CONFLICT,
@@ -611,38 +589,22 @@ pub(crate) async fn update_product(
             None => None,
         };
 
-        let existing_stock = existing.stock_quantity;
         let category_key = body.category_key.unwrap_or(existing.category_key);
         let subcategory_key = body.subcategory_key.unwrap_or(existing.subcategory_key);
-        let selling_price_cents = body
-            .selling_price_cents
-            .unwrap_or(existing.selling_price_cents);
-        let cost_price_cents = body.cost_price_cents.unwrap_or(existing.cost_price_cents);
-        let stock_quantity = body.stock_quantity.unwrap_or(existing.stock_quantity);
         let min_stock_threshold = body
             .min_stock_threshold
             .unwrap_or(existing.min_stock_threshold);
 
-        validate_product_numbers(
-            selling_price_cents,
-            cost_price_cents,
-            stock_quantity,
-            min_stock_threshold,
-        )?;
+        validate_min_stock_threshold(min_stock_threshold)?;
         let (category_name, subcategory_name) =
             ensure_valid_category(db, &category_key, &subcategory_key).await?;
 
         let mut set_doc = doc! {
             "category_key": &category_key,
             "subcategory_key": &subcategory_key,
-            "selling_price_cents": selling_price_cents,
-            "cost_price_cents": cost_price_cents,
             "min_stock_threshold": min_stock_threshold,
             "updated_at": BsonDateTime::now(),
         };
-        // A stock edit is recorded as a movement (below) rather than written to
-        // the column, so the ledger always explains the quantity.
-        let stock_delta = stock_quantity - existing_stock;
         if let Some(name) = body.name {
             set_doc.insert("name", name);
         }
@@ -665,26 +627,17 @@ pub(crate) async fn update_product(
             set_doc.insert("updated_by_device", device);
         }
 
-        let mut updated = repository::product::update_product(db, id, set_doc)
+        let updated = repository::product::update_product(db, id, set_doc)
             .await?
             .ok_or_else(|| {
                 AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
             })?;
 
-        if stock_delta != 0 {
-            let (_, adjusted) = super::stock::apply_stock_delta(
-                db,
-                id,
-                stock_delta,
-                crate::domain::inventory::StockMovementType::ManualAdjustment,
-                None,
-                Some("Stock edited on the product".to_string()),
-            )
-            .await?;
-            updated = adjusted;
-        }
-
-        Ok(updated.into_product(category_name, subcategory_name))
+        super::stock_batch::with_price_tiers(
+            db,
+            updated.into_product(category_name, subcategory_name),
+        )
+        .await
     })
     .await
 }
@@ -713,9 +666,13 @@ pub(crate) async fn delete_product(
             let (category_name, subcategory_name) =
                 resolve_display_names(db, &existing.category_key, &existing.subcategory_key)
                     .await?;
-            let server_doc = existing
-                .clone()
-                .into_product(category_name, subcategory_name);
+            let server_doc = super::stock_batch::with_price_tiers(
+                db,
+                existing
+                    .clone()
+                    .into_product(category_name, subcategory_name),
+            )
+            .await?;
 
             return Err(AppError::conflict_with_details(
                 codes::VERSION_CONFLICT,
@@ -745,7 +702,11 @@ pub(crate) async fn delete_product(
         let (category_name, subcategory_name) =
             resolve_display_names(db, &deleted.category_key, &deleted.subcategory_key).await?;
 
-        Ok(deleted.into_product(category_name, subcategory_name))
+        super::stock_batch::with_price_tiers(
+            db,
+            deleted.into_product(category_name, subcategory_name),
+        )
+        .await
     })
     .await
 }
@@ -834,5 +795,6 @@ pub(crate) async fn hydrate_sync_documents(
         products.push(product.into_product(category_name, subcategory_name));
     }
 
+    super::stock_batch::attach_price_tiers(db, &mut products).await?;
     Ok(products)
 }

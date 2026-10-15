@@ -12,10 +12,10 @@ use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
 use serde_json::{Value, json};
 use simplebash_pos_backend::{
     core::{constants::roles, id::generate_id},
-    domain::{billing::InvoiceStatus, users::Role},
+    domain::{billing::InvoiceStatus, inventory::BatchSource, users::Role},
     modules::{
         billing::model::{InvoiceDocument, PaymentDocument},
-        inventory::model::ProductDocument,
+        inventory::model::{ProductDocument, StockBatchDocument},
         print_jobs::model::PrintJobDocument,
         repairs::model::RepairDocument,
     },
@@ -233,6 +233,7 @@ async fn dashboard_overview_and_daily_sales_aggregate_data() {
                 assigned_employee_name: None,
                 returned_quantity: 0,
                 serial_numbers: vec![],
+                batch_allocations: vec![],
             },
             simplebash_pos_backend::domain::billing::InvoiceItem {
                 product_key: None,
@@ -249,6 +250,7 @@ async fn dashboard_overview_and_daily_sales_aggregate_data() {
                 assigned_employee_name: Some("Tech Nimal".to_string()),
                 returned_quantity: 0,
                 serial_numbers: vec![],
+                batch_allocations: vec![],
             },
         ],
         subtotal_cents: 800000,
@@ -309,6 +311,7 @@ async fn dashboard_overview_and_daily_sales_aggregate_data() {
             assigned_employee_name: Some("Printer Suneth".to_string()),
             returned_quantity: 0,
             serial_numbers: vec![],
+            batch_allocations: vec![],
         }],
         subtotal_cents: 200000,
         discount_type: "fixed".to_string(),
@@ -369,6 +372,7 @@ async fn dashboard_overview_and_daily_sales_aggregate_data() {
             assigned_employee_name: None,
             returned_quantity: 0,
             serial_numbers: vec![],
+            batch_allocations: vec![],
         }],
         subtotal_cents: 1000000,
         discount_type: "fixed".to_string(),
@@ -608,8 +612,6 @@ async fn inventory_valuation_and_top_products_report() {
         name: "Silicone Phone Case".to_string(),
         category_key: "cat_accessories".to_string(),
         subcategory_key: "subcat_cases".to_string(),
-        cost_price_cents: 50000,
-        selling_price_cents: 150000,
         stock_quantity: 20,
         min_stock_threshold: 5,
         is_serialized: false,
@@ -630,8 +632,6 @@ async fn inventory_valuation_and_top_products_report() {
         name: "OLED Replacement Screen".to_string(),
         category_key: "cat_parts".to_string(),
         subcategory_key: "subcat_screens".to_string(),
-        cost_price_cents: 400000,
-        selling_price_cents: 800000,
         stock_quantity: 3, // Low stock (<= 5)
         min_stock_threshold: 5,
         is_serialized: true,
@@ -643,9 +643,35 @@ async fn inventory_valuation_and_top_products_report() {
         updated_by_device: None,
     };
 
+    // Stock is valued per batch: each product's units sit in one batch here.
+    let batch = |product: &ProductDocument, cost: i64, price: i64| StockBatchDocument {
+        id: None,
+        key: generate_id("stb"),
+        product_key: product.key.clone(),
+        source: BatchSource::Opening,
+        purchase_key: None,
+        supplier_key: None,
+        received_quantity: product.stock_quantity,
+        remaining_quantity: product.stock_quantity,
+        unit_cost_cents: cost,
+        selling_price_cents: price,
+        received_at: BsonDateTime::from_chrono(now),
+        version: 1,
+        created_at: BsonDateTime::from_chrono(now),
+        updated_at: BsonDateTime::from_chrono(now),
+        deleted_at: None,
+        updated_by_device: None,
+    };
+    let batches = vec![batch(&prod1, 50000, 150000), batch(&prod2, 400000, 800000)];
+
     app.db
         .collection::<ProductDocument>("products")
         .insert_many(vec![prod1, prod2])
+        .await
+        .unwrap();
+    app.db
+        .collection::<StockBatchDocument>("stock_batches")
+        .insert_many(batches)
         .await
         .unwrap();
 
@@ -828,6 +854,7 @@ fn analytics_seed_invoice(
             assigned_employee_name: None,
             returned_quantity: 0,
             serial_numbers: vec![],
+            batch_allocations: vec![],
         }],
         subtotal_cents: line_total_cents,
         discount_type: "fixed".to_string(),
@@ -931,8 +958,6 @@ async fn analytics_summary_and_timeseries_use_cost_snapshot_and_shop_local_bucke
                 "key": prd_key,
                 "category_key": cat_key,
                 "subcategory_key": "sub_ax",
-                "cost_price_cents": 40_000_i64,
-                "selling_price_cents": 100_000_i64,
             } },
         )
         .upsert(true)

@@ -106,6 +106,7 @@ fn seed_invoice(
             assigned_employee_name: None,
             returned_quantity: 0,
             serial_numbers: vec![],
+            batch_allocations: vec![],
         }],
         subtotal_cents: line_total_cents,
         discount_type: "fixed".to_string(),
