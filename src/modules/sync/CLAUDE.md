@@ -52,7 +52,7 @@ Rules that keep it correct:
 - **Outdated desktop apps are held back, never refused with a 4xx.** `POST /devices/register`
   records the `appVersion` every agent sends; push, pull and snapshot answer
   `503 APP_UPDATE_REQUIRED` while a device's recorded version is missing or below
-  `cloud_store::MIN_DESKTOP_APP_VERSION` (1.13.0, the first app with stock batches). A 503 on
+  `cloud_store::MIN_DESKTOP_APP_VERSION` (1.14.0, the first app with stock batches). A 503 on
   purpose: shipped agents retry a 5xx and keep the change, but bisect a 4xx batch down to the
   refused change and drop it. Raise the minimum whenever the synced data shape changes in a way
   an older app would corrupt, and release that desktop version right after the cloud deploy.
