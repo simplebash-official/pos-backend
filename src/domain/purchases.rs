@@ -65,6 +65,9 @@ pub struct Purchase {
     pub quantity: i64,
     /// Unit cost in cents.
     pub unit_cost_cents: i64,
+    /// Price each received unit was set to sell at, in cents (the stock
+    /// batch this purchase created starts at it; see `StockBatch`).
+    pub selling_price_cents: i64,
     /// Calculated total cost in cents (quantity * unit_cost_cents).
     pub total_cost_cents: i64,
     /// Purchase receipt date.
@@ -100,9 +103,9 @@ fn default_version() -> i64 {
     1
 }
 
-/// Body for `POST /purchases`. Recording a purchase also increments the
-/// referenced product's `stockQuantity` and writes a `PurchaseReceipt`
-/// stock movement (see `service::purchase::record_purchase`).
+/// Body for `POST /purchases`. Recording a purchase brings its units into
+/// stock as a new stock batch with this cost and selling price, writing a
+/// `PurchaseReceipt` stock movement (see `service::purchase::record_purchase`).
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatePurchaseRequest {
@@ -114,6 +117,8 @@ pub struct CreatePurchaseRequest {
     pub quantity: i64,
     /// Cost price per item in cents.
     pub unit_cost_cents: i64,
+    /// Price each received unit sells at, in cents.
+    pub selling_price_cents: i64,
     /// Date when the purchase was received.
     pub date: DateTime<Utc>,
     /// Optional shipment or invoice reference number.

@@ -29,10 +29,10 @@ use crate::{
             CreateProductRequest, DeleteProductsRequest, DeleteProductsResponse, InventoryMetrics,
             InventoryOverviewQuery, InventoryOverviewResponse, LowStockResponse, Product,
             ProductListQuery, ProductListResponse, ProductSerialListQuery,
-            ProductSerialListResponse, StockAdjustmentRequest, StockAdjustmentResponse,
-            StockMovementListQuery, StockMovementListResponse, StockMovementsResponse,
-            SubcategoriesResponse, UpdateCategoryRequest, UpdateProductRequest,
-            ValidCategoriesResponse,
+            ProductSerialListResponse, StockAdjustmentRequest, StockAdjustmentResponse, StockBatch,
+            StockBatchListResponse, StockMovementListQuery, StockMovementListResponse,
+            StockMovementsResponse, SubcategoriesResponse, UpdateCategoryRequest,
+            UpdateProductRequest, UpdateStockBatchRequest, ValidCategoriesResponse,
         },
         users::Role,
     },
@@ -66,6 +66,8 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(low_stock))
         .routes(routes!(product_movements))
         .routes(routes!(product_serials))
+        .routes(routes!(product_batches))
+        .routes(routes!(update_stock_batch))
         // Categories
         .routes(routes!(list_categories, create_category))
         .routes(routes!(update_category, delete_category))
@@ -94,6 +96,15 @@ fn product_for(user: &CurrentUser, product: Product) -> Product {
         product
     } else {
         product.without_cost()
+    }
+}
+
+/// A batch's cost is Admin-only, like a product's (see `product_for`).
+fn batch_for(user: &CurrentUser, batch: StockBatch) -> StockBatch {
+    if user.role == Some(Role::Admin) {
+        batch
+    } else {
+        batch.without_cost()
     }
 }
 
@@ -420,6 +431,64 @@ async fn low_stock(
     Ok(Json(ApiResponse::success(
         response,
         "Low stock products retrieved successfully",
+    )))
+}
+
+#[utoipa::path(get, path = "/products/{key}/batches", tag = modules::INVENTORY,
+    params(("key" = String, Path, description = "Product key")),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Every stock batch of the product, newest first (unitCostCents only for Admin)", body = ApiResponse<StockBatchListResponse>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+        (status = 404, description = "Product not found", body = ErrorResponse),
+    )
+)]
+async fn product_batches(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> AppResult<Json<ApiResponse<StockBatchListResponse>>> {
+    user.require_permission(perm::INVENTORY_READ)?;
+    let mut response = service::stock_batch::list_batches(&state.db, &key).await?;
+    response.items = response
+        .items
+        .into_iter()
+        .map(|batch| batch_for(&user, batch))
+        .collect();
+
+    Ok(Json(ApiResponse::success(
+        response,
+        "Stock batches retrieved successfully",
+    )))
+}
+
+#[utoipa::path(patch, path = "/batches/{key}", tag = modules::INVENTORY,
+    params(("key" = String, Path, description = "Stock batch key")),
+    request_body = UpdateStockBatchRequest,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Batch price/cost updated", body = ApiResponse<StockBatch>),
+        (status = 400, description = "Invalid price or cost", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied, or a non-Admin changing the cost", body = ErrorResponse),
+        (status = 404, description = "Batch not found", body = ErrorResponse),
+    )
+)]
+async fn update_stock_batch(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(body): Json<UpdateStockBatchRequest>,
+) -> AppResult<Json<ApiResponse<StockBatch>>> {
+    user.require_permission(perm::INVENTORY_WRITE)?;
+    let batch =
+        service::stock_batch::update_batch(&state.db, &key, body, user.role == Some(Role::Admin))
+            .await?;
+
+    Ok(Json(ApiResponse::success(
+        batch_for(&user, batch),
+        "Stock batch updated successfully",
     )))
 }
 

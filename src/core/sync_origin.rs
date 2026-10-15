@@ -38,6 +38,7 @@ pub const SYNCED_COLLECTIONS: &[&str] = &[
     "subcategories",
     "suppliers",
     "products",
+    "stock_batches",
     "supplier_products",
     "employees",
     "customers",

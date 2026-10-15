@@ -113,7 +113,7 @@ impl Device {
         )
         .unwrap();
         let id = format!("dev_conv{n}aaaa{n}bbbb");
-        let cloud_token = common::mint_device_token(&cloud.config, TENANT, &id);
+        let cloud_token = common::registered_device_token(cloud, TENANT, &id).await;
         Device {
             app,
             admin,
@@ -294,7 +294,7 @@ async fn reserve_blocks(cloud: &common::TestApp, d: &Device) {
 
 /// Every change the cloud holds, read as a device that never wrote anything.
 async fn cloud_changes(cloud: &common::TestApp) -> Vec<Value> {
-    let observer = common::mint_device_token(&cloud.config, TENANT, "dev_observer");
+    let observer = common::registered_device_token(cloud, TENANT, "dev_observer").await;
     let mut since = 0i64;
     let mut all = Vec::new();
     loop {
@@ -369,7 +369,7 @@ async fn start_consumer(cloud: &common::TestApp) {
         roles::default_permissions(Role::Admin),
         Some("tnt_canary"),
     );
-    let observer = common::mint_device_token(&cloud.config, "tnt_canary", "dev_canary");
+    let observer = common::registered_device_token(cloud, "tnt_canary", "dev_canary").await;
     for attempt in 0..60 {
         let (status, body) = call(
             &cloud.router,
@@ -436,7 +436,8 @@ async fn create_shop(d: &Device) -> Catalog {
                 "/api/inventory/products",
                 Some(json!({
                     "name": name, "categoryKey": category_key, "subcategoryKey": subcategory_key,
-                    "sellingPriceCents": 50000, "costPriceCents": 30000, "stockQuantity": 500, "minStockThreshold": 2
+                    "minStockThreshold": 2,
+                    "openingStock": { "quantity": 500, "unitCostCents": 30000, "sellingPriceCents": 50000 }
                 })),
             )
             .await;
@@ -454,17 +455,64 @@ async fn create_shop(d: &Device) -> Catalog {
     Catalog { products }
 }
 
+/// `(selling price, quantity)` of each price tier of a product on `d`.
+async fn tiers(d: &Device, id: &str) -> Vec<(i64, i64)> {
+    d.api("GET", &format!("/api/inventory/products/{id}"), None)
+        .await["data"]["priceTiers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| {
+            (
+                t["sellingPriceCents"].as_i64().unwrap(),
+                t["quantity"].as_i64().unwrap(),
+            )
+        })
+        .collect()
+}
+
+/// `(key, remaining)` of each batch of a product on `d`.
+async fn batches(d: &Device, key: &str) -> Vec<(String, i64)> {
+    d.api(
+        "GET",
+        &format!("/api/inventory/products/{key}/batches"),
+        None,
+    )
+    .await["data"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| {
+            (
+                b["key"].as_str().unwrap().to_string(),
+                b["remainingQuantity"].as_i64().unwrap(),
+            )
+        })
+        .collect()
+}
+
 async fn random_op(d: &Device, catalog: &Catalog, rng: &mut Rng, step: usize) {
     let (key, id) = &catalog.products[rng.below(catalog.products.len())];
     match rng.below(6) {
         0 | 1 => {
-            let quantity = 1 + rng.below(3);
+            // A sale at one of the prices the product is in stock at here.
+            let quantity = 1 + rng.below(3) as i64;
+            let in_stock: Vec<i64> = tiers(d, id)
+                .await
+                .into_iter()
+                .filter(|(_, left)| *left >= quantity)
+                .map(|(price, _)| price)
+                .collect();
+            if in_stock.is_empty() {
+                return;
+            }
+            let price = in_stock[rng.below(in_stock.len())];
             d.api(
                 "POST",
                 "/api/billing/sales",
                 Some(json!({
                     "staff": { "cashierName": "Admin" },
-                    "items": [{ "productKey": key, "quantity": quantity, "discountCents": 0, "sourceType": "retail" }],
+                    "items": [{ "productKey": key, "sellingPriceCents": price, "quantity": quantity, "discountCents": 0, "sourceType": "retail" }],
                     "payment": { "paymentMethod": "cash", "isCredit": false, "amountReceivedCents": 1_000_000 },
                     "shopProfileSnapshot": { "name": "Shop", "address": "Colombo" }
                 })),
@@ -472,10 +520,13 @@ async fn random_op(d: &Device, catalog: &Catalog, rng: &mut Rng, step: usize) {
             .await;
         }
         2 => {
+            // Re-pricing a delivery: concurrent edits of one batch resolve last-writer-wins.
+            let all = batches(d, key).await;
+            let (batch_key, _) = &all[rng.below(all.len())];
             let price = 40_000 + 100 * rng.below(200) as i64;
             d.api(
-                "PUT",
-                &format!("/api/inventory/products/{id}"),
+                "PATCH",
+                &format!("/api/inventory/batches/{batch_key}"),
                 Some(json!({ "sellingPriceCents": price })),
             )
             .await;
@@ -503,17 +554,18 @@ async fn random_op(d: &Device, catalog: &Catalog, rng: &mut Rng, step: usize) {
                 .iter()
                 .map(|q| q["key"].as_str().unwrap().to_string())
                 .collect();
-            if !open.is_empty() && rng.below(3) == 0 {
+            let prices = tiers(d, id).await;
+            if !open.is_empty() && (rng.below(3) == 0 || prices.is_empty()) {
                 let key = &open[rng.below(open.len())];
                 d.api("POST", &format!("/api/quotations/{key}/cancel"), None)
                     .await;
-            } else {
+            } else if !prices.is_empty() {
                 d.api(
                     "POST",
                     "/api/quotations",
                     Some(json!({
                         "customer": { "customerName": format!("Prospect {} {step}", d.id) },
-                        "items": [{ "productKey": key, "quantity": 1 + rng.below(3), "discountCents": 0 }],
+                        "items": [{ "productKey": key, "sellingPriceCents": prices[0].0, "quantity": 1 + rng.below(3), "discountCents": 0 }],
                         "validUntil": "2099-12-31",
                         "terms": "Prices held until the date above."
                     })),
@@ -523,18 +575,31 @@ async fn random_op(d: &Device, catalog: &Catalog, rng: &mut Rng, step: usize) {
         }
         _ => {
             if rng.below(2) == 0 {
-                let current = d
-                    .api("GET", &format!("/api/inventory/products/{id}"), None)
-                    .await["data"]["stockQuantity"]
-                    .as_i64()
-                    .unwrap();
+                // Stock in comes as a new batch; stock out leaves a batch that holds it.
                 let delta = rng.below(7) as i64 - 3;
-                d.api(
-                    "PUT",
-                    &format!("/api/inventory/products/{id}"),
-                    Some(json!({ "stockQuantity": current + delta })),
-                )
-                .await;
+                if delta > 0 {
+                    d.api(
+                        "PATCH",
+                        &format!("/api/inventory/products/{id}/stock"),
+                        Some(json!({
+                            "delta": delta, "unitCostCents": 30000,
+                            "sellingPriceCents": 40_000 + 100 * rng.below(200) as i64,
+                        })),
+                    )
+                    .await;
+                } else if delta < 0
+                    && let Some((batch_key, _)) = batches(d, key)
+                        .await
+                        .into_iter()
+                        .find(|(_, left)| *left >= -delta)
+                {
+                    d.api(
+                        "PATCH",
+                        &format!("/api/inventory/products/{id}/stock"),
+                        Some(json!({ "delta": delta, "batchKey": batch_key })),
+                    )
+                    .await;
+                }
             } else {
                 d.api(
                     "POST",
@@ -556,6 +621,7 @@ const SYNCED: &[&str] = &[
     "subcategories",
     "suppliers",
     "products",
+    "stock_batches",
     "supplier_products",
     "customers",
     "purchases",
@@ -928,8 +994,7 @@ async fn concurrent_serial_sale_is_flagged_and_both_invoices_survive() {
             "/api/inventory/products",
             Some(json!({
                 "name": "Serial Phone", "categoryKey": category_key, "subcategoryKey": subcategory_key,
-                "sellingPriceCents": 80000, "costPriceCents": 50000, "stockQuantity": 0, "minStockThreshold": 1,
-                "isSerialized": true
+                "minStockThreshold": 1, "isSerialized": true
             })),
         )
         .await;
@@ -952,7 +1017,7 @@ async fn concurrent_serial_sale_is_flagged_and_both_invoices_survive() {
             "/api/purchases",
             Some(json!({
                 "supplierKey": supplier_key, "productKey": product_key, "quantity": 1, "unitCostCents": 50000,
-                "date": chrono::Utc::now().to_rfc3339(), "serialNumbers": [serial]
+                "sellingPriceCents": 80000, "date": chrono::Utc::now().to_rfc3339(), "serialNumbers": [serial]
             })),
         )
         .await;
@@ -1092,7 +1157,7 @@ async fn concurrent_full_refunds_raise_over_refund_not_silent_corruption() {
             "/api/billing/sales",
             Some(json!({
                 "staff": { "cashierName": "Admin" },
-                "items": [{ "productKey": product_key, "quantity": 2, "discountCents": 0, "sourceType": "retail" }],
+                "items": [{ "productKey": product_key, "sellingPriceCents": 50000, "quantity": 2, "discountCents": 0, "sourceType": "retail" }],
                 "payment": { "paymentMethod": "cash", "isCredit": false, "amountReceivedCents": 100_000_000 },
                 "shopProfileSnapshot": { "name": "Shop", "address": "Colombo" }
             })),

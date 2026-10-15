@@ -4,7 +4,7 @@
 
 use std::collections::HashSet;
 
-use mongodb::bson::oid::ObjectId;
+use mongodb::bson::{DateTime as BsonDateTime, oid::ObjectId};
 use serde_json::Value;
 
 use crate::{
@@ -12,7 +12,10 @@ use crate::{
     core::error::AppResult,
     domain::{
         imports::{ImportOptions, ImportRowError},
-        inventory::{CategoryInfo, CreateCategoryRequest, CreateProductRequest, StockMovementType},
+        inventory::{
+            BatchSource, CategoryInfo, CreateCategoryRequest, CreateProductRequest,
+            StockMovementType,
+        },
     },
     modules::inventory::service,
 };
@@ -407,7 +410,7 @@ pub(crate) async fn process_inventory_import(
                 failed_count += 1;
                 continue;
             }
-            Ok(None) => 0,
+            Ok(None) => -1,
             Err(msg) => {
                 errors.push(ImportRowError {
                     row_number,
@@ -456,6 +459,19 @@ pub(crate) async fn process_inventory_import(
                 continue;
             }
         };
+
+        // Units on hand come in as a stock batch, which needs its real cost —
+        // a missing cost would read as free stock in every profit figure.
+        if stock_quantity > 0 && cost_price_cents < 0 {
+            errors.push(ImportRowError {
+                row_number,
+                field: Some("costPrice".to_string()),
+                message: "Cost price is required for a row with stock".to_string(),
+                raw_value: None,
+            });
+            failed_count += 1;
+            continue;
+        }
 
         let min_stock_threshold = match get_i64(
             row,
@@ -576,17 +592,15 @@ pub(crate) async fn process_inventory_import(
                 _ => None,
             };
 
-        // Build CreateProductRequest with stock_quantity = 0 initially so apply_stock_delta
-        // can apply the delta and record the StockMovement in one atomic operation.
+        // The product is created empty; the row's units then come in as an
+        // `import` batch at the row's cost and selling price.
         let create_req = CreateProductRequest {
             barcode: barcode_to_use,
             auto_generate_barcode: auto_gen_barcode,
             name,
             category_key: cat_info.key.clone(),
             subcategory_key: subcat_info.key.clone(),
-            cost_price_cents,
-            selling_price_cents,
-            stock_quantity: 0,
+            opening_stock: None,
             min_stock_threshold,
             suppliers: Vec::new(),
             is_serialized,
@@ -595,17 +609,37 @@ pub(crate) async fn process_inventory_import(
 
         match service::product::create_product(db, create_req).await {
             Ok(product) => {
-                // If initial stock quantity was positive, apply delta and record StockMovement
-                if let (true, Ok(oid)) = (stock_quantity > 0, ObjectId::parse_str(&product.id)) {
-                    let _ = service::stock::apply_stock_delta(
+                if stock_quantity > 0 {
+                    let product_id = ObjectId::parse_str(&product.id)
+                        .expect("Product.id returned from create_product is a valid ObjectId hex");
+                    if let Err(e) = service::stock_batch::create_batch(
                         db,
-                        oid,
-                        stock_quantity,
-                        StockMovementType::ManualAdjustment,
-                        Some(batch_key.to_string()),
-                        Some(format!("Initial batch import from {file_name}")),
+                        service::stock_batch::NewBatch {
+                            product_id,
+                            product_key: product.key.clone(),
+                            source: BatchSource::Import,
+                            purchase_key: None,
+                            supplier_key: None,
+                            quantity: stock_quantity,
+                            unit_cost_cents: cost_price_cents,
+                            selling_price_cents,
+                            received_at: BsonDateTime::now(),
+                            movement_type: StockMovementType::OpeningBalance,
+                            reference_id: Some(batch_key.to_string()),
+                            note: Some(format!("Initial batch import from {file_name}")),
+                        },
                     )
-                    .await;
+                    .await
+                    {
+                        errors.push(ImportRowError {
+                            row_number,
+                            field: Some("stockQuantity".to_string()),
+                            message: format!("Product created but its stock was not: {e}"),
+                            raw_value: None,
+                        });
+                        failed_count += 1;
+                        continue;
+                    }
                 }
                 successful_count += 1;
             }

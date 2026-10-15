@@ -24,3 +24,12 @@ pub const EMPLOYEE: &str = "emp";
 pub const IMPORT_BATCH: &str = "imp";
 pub const TENANT: &str = "tnt";
 pub const QUOTATION: &str = "quo";
+pub const STOCK_BATCH: &str = "stb";
+
+/// Key of the batch the migration to stock batches gives every product for the
+/// stock (and price) it held before batches existed. Deterministic, so the
+/// desktop's SQLite migration and the cloud's Mongo migration create the same
+/// row and sync merges them instead of duplicating the stock.
+pub fn opening_batch_key(product_key: &str) -> String {
+    format!("{STOCK_BATCH}_open_{product_key}")
+}

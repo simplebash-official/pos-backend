@@ -1,4 +1,6 @@
-// MongoDB aggregation queries for stock asset and inventory valuation.
+// MongoDB aggregation queries for stock asset and inventory valuation. Stock
+// is valued per batch — each delivery at its own cost and selling price — so
+// a product's value is the sum over its in-stock `stock_batches`.
 
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use futures_util::TryStreamExt;
@@ -20,8 +22,16 @@ fn categories_coll(db: &TenantDatabase) -> ScopedCollection<Document> {
     db.collection("categories")
 }
 
-/// Runs a `$facet` pipeline across `products` to compute total stock valuation at cost vs retail,
-/// low-stock counts, and per-category aggregates.
+/// Per-product cost/retail value of the in-stock batches (SQLite).
+const BATCH_VALUES: &str = "SELECT product_key, \
+     SUM(remaining_quantity * unit_cost_cents) AS cost_val, \
+     SUM(remaining_quantity * selling_price_cents) AS retail_val \
+     FROM stock_batches WHERE deleted_at IS NULL AND remaining_quantity > 0 \
+     GROUP BY product_key";
+
+/// Runs a `$facet` pipeline across `products` (each joined to its in-stock
+/// batches for its cost/retail value) to compute total stock valuation at
+/// cost vs retail, low-stock counts, and per-category aggregates.
 pub(crate) async fn aggregate_inventory_valuation(
     db: &Db,
 ) -> AppResult<InventoryValuationResponse> {
@@ -41,6 +51,29 @@ pub(crate) async fn aggregate_inventory_valuation(
         Db::Mongo(db) => {
             let pipeline = vec![
                 doc! { "$match": { "deleted_at": null } },
+                doc! { "$lookup": {
+                    "from": "stock_batches",
+                    "localField": "key",
+                    "foreignField": "product_key",
+                    "as": "batches",
+                } },
+                doc! { "$set": { "batches": { "$filter": {
+                    "input": "$batches",
+                    "cond": { "$and": [
+                        { "$gt": ["$$this.remaining_quantity", 0] },
+                        { "$not": ["$$this.deleted_at"] },
+                    ] },
+                } } } },
+                doc! { "$set": {
+                    "cost_value": { "$sum": { "$map": {
+                        "input": "$batches",
+                        "in": { "$multiply": ["$$this.remaining_quantity", "$$this.unit_cost_cents"] },
+                    } } },
+                    "retail_value": { "$sum": { "$map": {
+                        "input": "$batches",
+                        "in": { "$multiply": ["$$this.remaining_quantity", "$$this.selling_price_cents"] },
+                    } } },
+                } },
                 doc! {
                     "$facet": {
                         "totals": [
@@ -49,12 +82,8 @@ pub(crate) async fn aggregate_inventory_valuation(
                                     "_id": null,
                                     "product_count": { "$sum": 1 },
                                     "total_units": { "$sum": "$stock_quantity" },
-                                    "cost_valuation": {
-                                        "$sum": { "$multiply": ["$stock_quantity", "$cost_price_cents"] }
-                                    },
-                                    "retail_valuation": {
-                                        "$sum": { "$multiply": ["$stock_quantity", "$selling_price_cents"] }
-                                    },
+                                    "cost_valuation": { "$sum": "$cost_value" },
+                                    "retail_valuation": { "$sum": "$retail_value" },
                                 }
                             }
                         ],
@@ -78,12 +107,8 @@ pub(crate) async fn aggregate_inventory_valuation(
                                     "_id": "$category_key",
                                     "product_count": { "$sum": 1 },
                                     "total_units": { "$sum": "$stock_quantity" },
-                                    "cost_val": {
-                                        "$sum": { "$multiply": ["$stock_quantity", "$cost_price_cents"] }
-                                    },
-                                    "retail_val": {
-                                        "$sum": { "$multiply": ["$stock_quantity", "$selling_price_cents"] }
-                                    },
+                                    "cost_val": { "$sum": "$cost_value" },
+                                    "retail_val": { "$sum": "$retail_value" },
                                 }
                             }
                         ]
@@ -174,16 +199,18 @@ pub(crate) async fn aggregate_inventory_valuation(
             }
         }
         Db::Sqlite(pool) => {
-            let row = sqlx::query(
+            let row = sqlx::query(&format!(
                 r#"SELECT 
                     COUNT(*) as product_count,
                     COALESCE(SUM(stock_quantity), 0) as total_units,
-                    COALESCE(SUM(stock_quantity * cost_price_cents), 0) as cost_val,
-                    COALESCE(SUM(stock_quantity * selling_price_cents), 0) as retail_val,
+                    COALESCE(SUM(b.cost_val), 0) as cost_val,
+                    COALESCE(SUM(b.retail_val), 0) as retail_val,
                     COALESCE(SUM(CASE WHEN stock_quantity <= min_stock_threshold THEN 1 ELSE 0 END), 0) as low_stock_count,
                     COALESCE(SUM(CASE WHEN stock_quantity <= 0 THEN 1 ELSE 0 END), 0) as out_of_stock_count
-                FROM products WHERE deleted_at IS NULL"#,
-            )
+                FROM products p
+                LEFT JOIN ({BATCH_VALUES}) b ON b.product_key = p.key
+                WHERE p.deleted_at IS NULL"#,
+            ))
             .fetch_one(pool)
             .await?;
 
@@ -206,19 +233,20 @@ pub(crate) async fn aggregate_inventory_valuation(
             response.low_stock_products_count = low_stock_count as u64;
             response.out_of_stock_products_count = out_of_stock_count as u64;
 
-            let cat_rows = sqlx::query(
+            let cat_rows = sqlx::query(&format!(
                 r#"SELECT 
                     p.category_key,
                     COALESCE(c.name, p.category_key) as category_name,
                     COUNT(*) as product_count,
                     COALESCE(SUM(p.stock_quantity), 0) as total_units,
-                    COALESCE(SUM(p.stock_quantity * p.cost_price_cents), 0) as cost_val,
-                    COALESCE(SUM(p.stock_quantity * p.selling_price_cents), 0) as retail_val
+                    COALESCE(SUM(b.cost_val), 0) as cost_val,
+                    COALESCE(SUM(b.retail_val), 0) as retail_val
                 FROM products p
                 LEFT JOIN categories c ON p.category_key = c.key
+                LEFT JOIN ({BATCH_VALUES}) b ON b.product_key = p.key
                 WHERE p.deleted_at IS NULL
                 GROUP BY p.category_key"#,
-            )
+            ))
             .fetch_all(pool)
             .await?;
 

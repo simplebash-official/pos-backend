@@ -8,7 +8,6 @@
 
 use std::collections::HashMap;
 
-use futures_util::future::try_join_all;
 use mongodb::bson::{DateTime as BsonDateTime, Document, doc, oid::ObjectId};
 
 use crate::{
@@ -27,7 +26,7 @@ use crate::{
             CreditNoteStatus, InvoiceItem, InvoiceStatus, ItemCondition, ItemDisposition,
             RefundBreakdownLeg, VoidCreditNoteRequest,
         },
-        inventory::{Product, StockMovementType},
+        inventory::{BatchAllocation, Product, StockMovementType},
         sequences::ReserveSequenceRequest,
         users::Role,
     },
@@ -36,177 +35,9 @@ use crate::{
             model::{CreditNoteDocument, PaymentDocument},
             repository,
         },
-        customers, inventory, print_jobs, repairs, sequences,
+        customers, inventory, sequences,
     },
 };
-
-/// Resolves exchange sale items from catalog / tickets — unchanged from the
-/// pre-Credit-Note `returns` module: an exchange replacement item is
-/// resolved exactly like a normal sale line.
-async fn resolve_exchange_items(
-    db: &Db,
-    items: &[CreateSaleItemRequest],
-) -> AppResult<(Vec<InvoiceItem>, HashMap<String, Product>)> {
-    let retail_product_keys: Vec<String> = items
-        .iter()
-        .filter(|item| item.source_type == "retail")
-        .filter_map(|item| item.product_key.clone())
-        .collect();
-    let products: HashMap<String, Product> =
-        inventory::service::product::get_products_by_keys(db, &retail_product_keys)
-            .await?
-            .into_iter()
-            .map(|product| (product.key.clone(), product))
-            .collect();
-
-    let resolved: Vec<InvoiceItem> = try_join_all(
-        items
-            .iter()
-            .map(|item| resolve_exchange_item(db, item, &products)),
-    )
-    .await?;
-
-    Ok((resolved, products))
-}
-
-async fn resolve_exchange_item(
-    db: &Db,
-    item: &CreateSaleItemRequest,
-    products: &HashMap<String, Product>,
-) -> AppResult<InvoiceItem> {
-    let (
-        name,
-        sku,
-        unit_price_cents,
-        source_ticket_number,
-        assigned_employee_name,
-        unit_cost_cents,
-    ) = match item.source_type.as_str() {
-        "retail" => match &item.product_key {
-            Some(product_key) => {
-                let product = products.get(product_key).ok_or_else(|| {
-                    AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
-                })?;
-                (
-                    product.name.clone(),
-                    Some(product.sku.clone()),
-                    product.selling_price_cents,
-                    None,
-                    None,
-                    product.cost_price_cents,
-                )
-            }
-            None => (
-                item.name.clone().ok_or_else(|| {
-                    AppError::validation("An item with no productKey must include a name")
-                })?,
-                None,
-                item.unit_price_cents.ok_or_else(|| {
-                    AppError::validation("An item with no productKey must include unitPriceCents")
-                })?,
-                None,
-                None,
-                None,
-            ),
-        },
-        "repair" => match &item.source_ticket_key {
-            Some(ticket_key) => {
-                let ticket = repairs::service::get_repair(db, ticket_key).await?;
-                let estimated_cost_cents = ticket.estimated_cost_cents.ok_or_else(|| {
-                    AppError::validation_with_code(
-                        format!(
-                            "Repair ticket {} has no price yet, set a repair price before billing it",
-                            ticket.ticket_number
-                        ),
-                        codes::REPAIR_PRICE_REQUIRED,
-                    )
-                })?;
-                (
-                    item.name
-                        .clone()
-                        .unwrap_or_else(|| ticket.device_model.clone()),
-                    None,
-                    estimated_cost_cents + ticket.material_cost_cents.unwrap_or(0),
-                    Some(ticket.ticket_number),
-                    ticket.assigned_employee_name,
-                    Some(ticket.material_cost_cents.unwrap_or(0) / item.quantity.max(1)),
-                )
-            }
-            None => (
-                item.name.clone().ok_or_else(|| {
-                    AppError::validation(
-                        "A repair item with no sourceTicketKey must include a name",
-                    )
-                })?,
-                None,
-                item.unit_price_cents.ok_or_else(|| {
-                    AppError::validation(
-                        "A repair item with no sourceTicketKey must include unitPriceCents",
-                    )
-                })?,
-                None,
-                item.assigned_employee_name.clone(),
-                None,
-            ),
-        },
-        "print" => match &item.source_ticket_key {
-            Some(ticket_key) => {
-                let ticket = print_jobs::service::get_print_job(db, ticket_key).await?;
-                (
-                    item.name.clone().unwrap_or_else(|| ticket.job_type.clone()),
-                    None,
-                    ticket.estimated_cost_cents + ticket.material_cost_cents.unwrap_or(0),
-                    Some(ticket.ticket_number),
-                    ticket.assigned_employee_name,
-                    Some(ticket.material_cost_cents.unwrap_or(0) / item.quantity.max(1)),
-                )
-            }
-            None => (
-                item.name.clone().ok_or_else(|| {
-                    AppError::validation("A print item with no sourceTicketKey must include a name")
-                })?,
-                None,
-                item.unit_price_cents.ok_or_else(|| {
-                    AppError::validation(
-                        "A print item with no sourceTicketKey must include unitPriceCents",
-                    )
-                })?,
-                None,
-                item.assigned_employee_name.clone(),
-                None,
-            ),
-        },
-        other => {
-            return Err(AppError::validation(format!(
-                "Invalid item sourceType '{other}'"
-            )));
-        }
-    };
-
-    let total_cents = (unit_price_cents * item.quantity - item.discount_cents).max(0);
-
-    Ok(InvoiceItem {
-        product_key: item.product_key.clone(),
-        name,
-        sku,
-        unit_price_cents,
-        quantity: item.quantity,
-        discount_cents: item.discount_cents,
-        total_cents,
-        unit_cost_cents,
-        source_type: item.source_type.clone(),
-        source_ticket_key: item.source_ticket_key.clone(),
-        source_ticket_number,
-        assigned_employee_name,
-        returned_quantity: 0,
-        // Exchange replacement items don't support serialized-unit
-        // selection in this pass — a serialized product taken as a
-        // replacement in an exchange is out of scope; add it here if a
-        // future change extends `CreateSaleItemRequest`-shaped exchange
-        // items with `serial_numbers` the same way a plain sale line has.
-        serial_numbers: Vec::new(),
-    })
-}
 
 /// Enforces the `disposition` iff `condition == Damaged` rule from
 /// `domain::billing::ItemDisposition`'s doc comment.
@@ -226,24 +57,52 @@ fn validate_condition_disposition(
     }
 }
 
-/// Resolves a no-receipt line: valued at the product's *current* selling
-/// price (there is no invoice line to read an original price from), or a
-/// client-supplied name/price for a line with no `productKey` at all.
+/// Resolves a no-receipt line. With no invoice line to read the original
+/// price from, a product line is valued at the price the cashier picked
+/// (`sellingPriceCents`) and its units belong back in the newest batch of the
+/// product ever sold at that price; a price no batch has ever had is refused
+/// (`PRICE_TIER_UNAVAILABLE`) rather than valued or costed by guesswork. A
+/// line with no `productKey` at all takes a client-supplied name/price.
 async fn resolve_no_receipt_item(
     db: &Db,
     item_req: &CreateCreditNoteItemRequest,
 ) -> AppResult<CreditNoteItem> {
     validate_condition_disposition(item_req.condition, item_req.disposition)?;
 
-    let (product_key, name, sku, unit_price_cents, source_type) = match &item_req.product_key {
+    let (product_key, name, sku, unit_price_cents, source_type, batch_allocations) = match &item_req
+        .product_key
+    {
         Some(product_key) => {
             let product = inventory::service::product::get_product_by_key(db, product_key).await?;
+            let price = item_req.selling_price_cents.ok_or_else(|| {
+                AppError::validation(format!(
+                    "Pick the price '{}' was sold at — sellingPriceCents is required",
+                    product.name
+                ))
+            })?;
+            let batch =
+                inventory::service::stock_batch::newest_batch_at_price(db, &product.key, price)
+                    .await?
+                    .ok_or_else(|| {
+                        AppError::conflict_with_details(
+                            codes::PRICE_TIER_UNAVAILABLE,
+                            format!("{} has never been sold at this price.", product.name),
+                            serde_json::json!({ "sellingPriceCents": price }),
+                        )
+                    })?;
             (
                 Some(product.key.clone()),
                 product.name.clone(),
                 Some(product.sku.clone()),
-                product.selling_price_cents,
+                price,
                 Some("retail".to_string()),
+                vec![BatchAllocation {
+                    batch_key: batch.key,
+                    quantity: item_req.quantity,
+                    unit_cost_cents: batch
+                        .unit_cost_cents
+                        .expect("a batch read from the store carries its cost"),
+                }],
             )
         }
         None => (
@@ -258,6 +117,7 @@ async fn resolve_no_receipt_item(
                 )
             })?,
             None,
+            Vec::new(),
         ),
     };
 
@@ -279,6 +139,7 @@ async fn resolve_no_receipt_item(
         source_type,
         source_ticket_key: None,
         source_ticket_number: None,
+        batch_allocations,
     })
 }
 
@@ -338,7 +199,9 @@ async fn compute_refund_shape(
             if exchange_reqs.is_empty() {
                 (Vec::new(), HashMap::new())
             } else {
-                resolve_exchange_items(db, exchange_reqs).await?
+                // An exchange replacement is resolved exactly like a sale line:
+                // priced from the picked tier, units planned from its batches.
+                super::sale::resolve_sale_items(db, exchange_reqs).await?
             }
         } else {
             (Vec::new(), HashMap::new())
@@ -461,26 +324,40 @@ async fn apply_return_stock_movement(
     let Some((movement_type, delta)) = movement_type else {
         return;
     };
-    let Ok(product) = inventory::service::product::get_product_by_key(db, product_key).await else {
-        tracing::warn!(
+    let note = format!("Credit note {credit_note_number}");
+    let result = if delta == 0 {
+        // Audit-only: the unit leaves sellable stock for good (written off or
+        // sent back to the supplier), so no batch is touched.
+        match inventory::service::product::get_product_by_key(db, product_key).await {
+            Ok(product) => match ObjectId::parse_str(&product.id) {
+                Ok(product_object_id) => inventory::service::stock::apply_stock_delta(
+                    db,
+                    product_object_id,
+                    None,
+                    0,
+                    movement_type,
+                    Some(credit_note_key.to_string()),
+                    Some(note),
+                )
+                .await
+                .map(|_| ()),
+                Err(_) => return,
+            },
+            Err(err) => Err(err),
+        }
+    } else {
+        inventory::service::stock_batch::move_allocations(
+            db,
             product_key,
-            "could not resolve product for credit note stock movement"
-        );
-        return;
+            &item.batch_allocations,
+            1,
+            movement_type,
+            credit_note_key,
+            &note,
+        )
+        .await
     };
-    let Ok(product_object_id) = ObjectId::parse_str(&product.id) else {
-        return;
-    };
-    if let Err(err) = inventory::service::stock::apply_stock_delta(
-        db,
-        product_object_id,
-        delta,
-        movement_type,
-        Some(credit_note_key.to_string()),
-        Some(format!("Credit note {credit_note_number}")),
-    )
-    .await
-    {
+    if let Err(err) = result {
         tracing::warn!(product_key, error = %err, "could not apply credit note stock movement");
     }
 }
@@ -712,6 +589,10 @@ pub async fn create_credit_note(
                     item_req.product_key.as_deref(),
                     item_req.source_ticket_key.as_deref(),
                     item_req.name.as_deref(),
+                    LineHint {
+                        unit_price_cents: item_req.selling_price_cents,
+                        batch_keys: &[],
+                    },
                     updated_invoice_items.len() == 1 && body.returned_items.len() == 1,
                 )
                     .ok_or_else(|| {
@@ -746,6 +627,14 @@ pub async fn create_credit_note(
                 };
                 let line_total_cents = unit_price_cents * item_req.quantity;
                 return_subtotal_cents += line_total_cents;
+                // Units go back into the batches this line sold them from,
+                // continuing past what earlier returns already put back.
+                let mut batch_allocations =
+                    inventory::service::stock_batch::allocations_for_return(
+                        &inv_item.batch_allocations,
+                        inv_item.returned_quantity,
+                        item_req.quantity,
+                    );
                 inv_item.returned_quantity += item_req.quantity;
 
                 // A serialized invoice line must return a specific unit — resolve
@@ -772,6 +661,22 @@ pub async fn create_credit_note(
                         &invoice.key,
                     )
                     .await?;
+                    // A specific unit goes back into its own batch.
+                    let unit_cost_cents = inv_item
+                        .batch_allocations
+                        .iter()
+                        .find(|a| a.batch_key == serial.batch_key)
+                        .map(|a| a.unit_cost_cents)
+                        .ok_or_else(|| {
+                            AppError::validation(format!(
+                                "Serial '{serial_number}' was not sold from this invoice line"
+                            ))
+                        })?;
+                    batch_allocations = vec![BatchAllocation {
+                        batch_key: serial.batch_key.clone(),
+                        quantity: item_req.quantity,
+                        unit_cost_cents,
+                    }];
                     inventory::service::product_serial::is_within_warranty(&serial)
                 } else {
                     None
@@ -793,6 +698,7 @@ pub async fn create_credit_note(
                     source_type: Some(inv_item.source_type.clone()),
                     source_ticket_key: inv_item.source_ticket_key.clone(),
                     source_ticket_number: inv_item.source_ticket_number.clone(),
+                    batch_allocations,
                 });
             }
 
@@ -980,17 +886,15 @@ async fn finish_create_credit_note(
     for ex_item in &resolved_exchange_items {
         if ex_item.source_type == "retail"
             && let Some(product_key) = &ex_item.product_key
-            && let Some(product) = resolved_exchange_products.get(product_key)
-            && let Ok(product_object_id) = ObjectId::parse_str(&product.id)
-            && let Err(err) = inventory::service::stock::apply_stock_delta(
+            && resolved_exchange_products.contains_key(product_key)
+            && let Err(err) = inventory::service::stock_batch::move_allocations(
                 db,
-                product_object_id,
-                -ex_item.quantity,
+                product_key,
+                &ex_item.batch_allocations,
+                -1,
                 StockMovementType::Sale,
-                Some(credit_note_key.clone()),
-                Some(format!(
-                    "Exchange replacement on credit note {credit_note_number}"
-                )),
+                &credit_note_key,
+                &format!("Exchange replacement on credit note {credit_note_number}"),
             )
             .await
         {
@@ -1120,20 +1024,16 @@ pub async fn void_credit_note(
             let Some(product_key) = &item.product_key else {
                 continue;
             };
-            if let Ok(product) = inventory::service::product::get_product_by_key(db, product_key).await
-                && let Ok(product_object_id) = ObjectId::parse_str(&product.id)
-                && let Err(err) = inventory::service::stock::apply_stock_delta(
-                    db,
-                    product_object_id,
-                    -item.quantity,
-                    StockMovementType::ReturnRestock,
-                    Some(existing.key.clone()),
-                    Some(format!(
-                        "Void of credit note {}",
-                        existing.credit_note_number
-                    )),
-                )
-                .await
+            if let Err(err) = inventory::service::stock_batch::move_allocations(
+                db,
+                product_key,
+                &item.batch_allocations,
+                -1,
+                StockMovementType::ReturnRestock,
+                &existing.key,
+                &format!("Void of credit note {}", existing.credit_note_number),
+            )
+            .await
             {
                 tracing::warn!(product_key, error = %err, "could not reverse credit note restock");
             }
@@ -1170,21 +1070,31 @@ pub async fn void_credit_note(
             && let Some(invoice_id) = invoice.id
         {
             let invoice_version = invoice.version;
-            let restored_items: Vec<InvoiceItem> = invoice
-                .items
-                .into_iter()
-                .map(|mut inv_item| {
-                    if let Some(returned) = existing.returned_items.iter().find(|ri| {
-                        ri.product_key == inv_item.product_key
-                            && ri.source_ticket_key == inv_item.source_ticket_key
-                            && ri.name.eq_ignore_ascii_case(&inv_item.name)
-                    }) {
-                        inv_item.returned_quantity =
-                            (inv_item.returned_quantity - returned.quantity).max(0);
-                    }
-                    inv_item
-                })
-                .collect();
+            // Each returned line gives its quantity back to the one invoice
+            // line it came from (a product sold at two prices is on two lines).
+            let mut restored_items: Vec<InvoiceItem> = invoice.items;
+            let sole = restored_items.len() == 1 && existing.returned_items.len() == 1;
+            for returned in &existing.returned_items {
+                let batch_keys: Vec<&str> = returned
+                    .batch_allocations
+                    .iter()
+                    .map(|a| a.batch_key.as_str())
+                    .collect();
+                if let Some(idx) = line_match(
+                    &restored_items,
+                    returned.product_key.as_deref(),
+                    returned.source_ticket_key.as_deref(),
+                    Some(&returned.name),
+                    LineHint {
+                        unit_price_cents: None,
+                        batch_keys: &batch_keys,
+                    },
+                    sole,
+                ) {
+                    let line = &mut restored_items[idx];
+                    line.returned_quantity = (line.returned_quantity - returned.quantity).max(0);
+                }
+            }
             let refunded_delta =
                 -(existing.refund_cash_cents.max(0) + existing.balance_reduction_cents.max(0));
             // A version mismatch here (`Ok(None)`) is treated as a best-effort
@@ -1312,22 +1222,43 @@ pub(crate) fn hydrate_sync_documents(documents: Vec<Document>) -> AppResult<Vec<
         .collect()
 }
 
-/// Finds the invoice line a returned item refers to: product key, then source
-/// ticket key, then case-insensitive name; a sole line with a sole returned
-/// item always matches. Shared with sync's derived-field recompute so a
-/// replicated credit note updates the same line a local one would.
+/// Which of several lines of the same product a returned item means — a
+/// product is on one line per price it was sold at.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct LineHint<'a> {
+    /// The price the returned unit was sold at (what a new return names).
+    pub unit_price_cents: Option<i64>,
+    /// The batches the returned units went back into (what a stored credit
+    /// note carries); always a subset of the sold line's own batches.
+    pub batch_keys: &'a [&'a str],
+}
+
+/// Finds the invoice line a returned item refers to: product key (narrowed by
+/// `hint` when the product is on more than one line), then source ticket key,
+/// then case-insensitive name; a sole line with a sole returned item always
+/// matches. Shared with sync's derived-field recompute so a replicated credit
+/// note updates the same line a local one would.
 pub(crate) fn line_match(
     items: &[InvoiceItem],
     product_key: Option<&str>,
     source_ticket_key: Option<&str>,
     name: Option<&str>,
+    hint: LineHint,
     sole_line_and_sole_return: bool,
 ) -> Option<usize> {
     items.iter().position(|item| {
         if let (Some(req_pk), Some(item_pk)) = (product_key, item.product_key.as_deref())
             && req_pk == item_pk
         {
-            return true;
+            let price_matches = hint
+                .unit_price_cents
+                .is_none_or(|price| price == item.unit_price_cents);
+            let batches_match = hint.batch_keys.iter().all(|key| {
+                item.batch_allocations
+                    .iter()
+                    .any(|allocation| allocation.batch_key == *key)
+            });
+            return price_matches && batches_match;
         }
         if let (Some(req_stk), Some(item_stk)) =
             (source_ticket_key, item.source_ticket_key.as_deref())

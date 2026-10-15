@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use crate::{
     core::{constants::prefixes, id::generate_id},
     domain::inventory::{
-        BarcodeSource, CategoryInfo, Product, ProductSerial, SerialStatus, StockMovement,
-        StockMovementType, SubcategoryInfo,
+        BarcodeSource, BatchSource, CategoryInfo, Product, ProductSerial, SerialStatus, StockBatch,
+        StockMovement, StockMovementType, SubcategoryInfo,
     },
 };
 
@@ -40,13 +40,8 @@ pub struct ProductDocument {
     /// Foreign key referencing the subcategory.
     #[serde(default)]
     pub subcategory_key: String,
-    /// Cost/wholesale price in cents.
-    #[serde(default)]
-    pub cost_price_cents: i64,
-    /// Retail selling price in cents.
-    #[serde(default)]
-    pub selling_price_cents: i64,
-    /// Current number of units in inventory stock.
+    /// Current number of units in inventory stock — the sum of the product's
+    /// stock movements (a derived column; see `sync::derived_*`).
     #[serde(default)]
     pub stock_quantity: i64,
     /// Minimum threshold count for low-stock warning alerts.
@@ -83,7 +78,10 @@ impl ProductDocument {
     /// `category_name`/`subcategory_name` are resolved by the service layer
     /// (a lookup by `category_key`/`subcategory_key`) before calling this —
     /// this conversion stays a pure/sync mapping with no DB access, matching
-    /// every other `into_*` conversion in this file.
+    /// every other `into_*` conversion in this file. `price_tiers` start empty
+    /// and are filled from `stock_batches` by
+    /// `service::stock_batch::attach_price_tiers`, which every product read
+    /// path calls before answering.
     pub fn into_product(self, category_name: String, subcategory_name: String) -> Product {
         let key = if self.key.is_empty() {
             generate_id(prefixes::PRODUCT)
@@ -104,8 +102,7 @@ impl ProductDocument {
             category: category_name,
             subcategory_key: self.subcategory_key,
             subcategory: subcategory_name,
-            cost_price_cents: Some(self.cost_price_cents),
-            selling_price_cents: self.selling_price_cents,
+            price_tiers: Vec::new(),
             stock_quantity: self.stock_quantity,
             min_stock_threshold: self.min_stock_threshold,
             is_serialized: self.is_serialized,
@@ -130,6 +127,10 @@ pub struct StockMovementDocument {
     pub key: String,
     /// MongoDB ObjectId of the affected product.
     pub product_id: ObjectId,
+    /// Key of the stock batch whose units moved; absent only on the
+    /// audit-only return movements that move no quantity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub batch_key: Option<String>,
     /// Quantity change (positive for additions, negative for reductions).
     pub quantity_delta: i64,
     /// Reason or classification for this movement (e.g. sale, intake, manual adjustment).
@@ -170,6 +171,7 @@ impl StockMovementDocument {
                 .to_hex(),
             key,
             product_id: self.product_id.to_hex(),
+            batch_key: self.batch_key,
             quantity_delta: self.quantity_delta,
             movement_type: self.movement_type,
             reference_id: self.reference_id,
@@ -320,6 +322,8 @@ pub struct ProductSerialDocument {
     /// The physical serial number, unique across all products (enforced by
     /// a unique Mongo index — see `clients::indexes`).
     pub serial_number: String,
+    /// Key of the stock batch this unit was received in.
+    pub batch_key: String,
     /// Current lifecycle status of this unit.
     pub status: SerialStatus,
     /// Key of the invoice this unit was sold on, once `Sold`.
@@ -363,6 +367,7 @@ impl ProductSerialDocument {
             key,
             product_key: self.product_key,
             serial_number: self.serial_number,
+            batch_key: self.batch_key,
             status: self.status,
             invoice_key: self.invoice_key,
             sold_at: self.sold_at.map(|d| d.to_chrono()),
@@ -372,6 +377,82 @@ impl ProductSerialDocument {
             created_at: self.created_at.to_chrono(),
             updated_at: self.updated_at.to_chrono(),
             version: self.version,
+        }
+    }
+}
+
+/// Mongo document shape for one delivery of a product (`stock_batches`):
+/// its own unit cost and selling price, and how many of its units are left.
+/// `remaining_quantity` is a derived column — the sum of the stock movements
+/// carrying this batch's key — so it is only ever moved together with a
+/// movement (`service::stock::apply_stock_delta`) or recomputed from the
+/// ledger by sync, never edited directly.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StockBatchDocument {
+    /// MongoDB internal document identifier.
+    #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
+    pub id: Option<ObjectId>,
+    /// Unique business key identifying this batch (e.g. stb_...).
+    pub key: String,
+    /// Foreign key referencing the product.
+    pub product_key: String,
+    /// Where the units came from.
+    pub source: BatchSource,
+    /// The purchase that received this batch, when `source` is `purchase`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub purchase_key: Option<String>,
+    /// The supplier the units came from, when known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supplier_key: Option<String>,
+    /// Units received into this batch.
+    pub received_quantity: i64,
+    /// Units still in stock (derived from the movement ledger).
+    pub remaining_quantity: i64,
+    /// Cost of one unit in cents.
+    pub unit_cost_cents: i64,
+    /// Price one unit sells at, in cents.
+    pub selling_price_cents: i64,
+    /// When the batch was received.
+    pub received_at: BsonDateTime,
+    /// Concurrency version counter for optimistic locking.
+    #[serde(default = "default_version")]
+    pub version: i64,
+    /// Timestamp when the batch was created.
+    #[serde(default = "BsonDateTime::now")]
+    pub created_at: BsonDateTime,
+    /// Timestamp when the batch was last updated.
+    #[serde(default = "BsonDateTime::now")]
+    pub updated_at: BsonDateTime,
+    /// Soft-delete timestamp, if deleted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<BsonDateTime>,
+    /// Device identifier that last updated this batch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_by_device: Option<String>,
+}
+
+impl StockBatchDocument {
+    pub fn into_stock_batch(self) -> StockBatch {
+        StockBatch {
+            id: self
+                .id
+                .expect("persisted stock batch document must have an id")
+                .to_hex(),
+            key: self.key,
+            product_key: self.product_key,
+            source: self.source,
+            purchase_key: self.purchase_key,
+            supplier_key: self.supplier_key,
+            received_quantity: self.received_quantity,
+            remaining_quantity: self.remaining_quantity,
+            unit_cost_cents: Some(self.unit_cost_cents),
+            selling_price_cents: self.selling_price_cents,
+            received_at: self.received_at.to_chrono(),
+            created_at: self.created_at.to_chrono(),
+            updated_at: self.updated_at.to_chrono(),
+            version: self.version,
+            deleted_at: self.deleted_at.map(|d| d.to_chrono()),
+            updated_by_device: self.updated_by_device,
         }
     }
 }

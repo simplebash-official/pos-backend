@@ -10,8 +10,6 @@ CREATE TABLE IF NOT EXISTS products (
     name TEXT NOT NULL,
     category_key TEXT NOT NULL,
     subcategory_key TEXT NOT NULL,
-    cost_price_cents INTEGER NOT NULL,
-    selling_price_cents INTEGER NOT NULL,
     stock_quantity INTEGER NOT NULL DEFAULT 0,
     min_stock_threshold INTEGER NOT NULL DEFAULT 0,
     is_serialized INTEGER NOT NULL DEFAULT 0,
@@ -103,6 +101,7 @@ CREATE TABLE IF NOT EXISTS purchases (
     product_key TEXT NOT NULL,
     quantity INTEGER NOT NULL,
     unit_cost_cents INTEGER NOT NULL,
+    selling_price_cents INTEGER NOT NULL,
     date TEXT NOT NULL,
     reference_no TEXT,
     notes TEXT,
@@ -121,6 +120,7 @@ CREATE TABLE IF NOT EXISTS stock_movements (
     key TEXT PRIMARY KEY,
     id TEXT NOT NULL,
     product_id TEXT NOT NULL,
+    batch_key TEXT,
     quantity_delta INTEGER NOT NULL,
     movement_type TEXT NOT NULL,
     reference_id TEXT,
@@ -134,6 +134,30 @@ CREATE TABLE IF NOT EXISTS stock_movements (
 
 CREATE INDEX IF NOT EXISTS idx_stock_movements_product_id ON stock_movements(product_id);
 CREATE INDEX IF NOT EXISTS idx_stock_movements_sync ON stock_movements(updated_at, key);
+
+-- One delivery of a product: its own cost and selling price. `remaining_quantity`
+-- is derived from the stock movements carrying the batch's key.
+CREATE TABLE IF NOT EXISTS stock_batches (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    product_key TEXT NOT NULL,
+    source TEXT NOT NULL,
+    purchase_key TEXT,
+    supplier_key TEXT,
+    received_quantity INTEGER NOT NULL,
+    remaining_quantity INTEGER NOT NULL DEFAULT 0,
+    unit_cost_cents INTEGER NOT NULL,
+    selling_price_cents INTEGER NOT NULL,
+    received_at TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT,
+    updated_by_device TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_stock_batches_product_key ON stock_batches(product_key);
+CREATE INDEX IF NOT EXISTS idx_stock_batches_sync ON stock_batches(updated_at, key);
 
 CREATE TABLE IF NOT EXISTS customers (
     key TEXT PRIMARY KEY,
@@ -351,6 +375,7 @@ CREATE TABLE IF NOT EXISTS product_serials (
     id TEXT NOT NULL,
     product_key TEXT NOT NULL,
     serial_number TEXT NOT NULL UNIQUE,
+    batch_key TEXT NOT NULL,
     status TEXT NOT NULL,
     invoice_key TEXT,
     sold_at TEXT,

@@ -201,9 +201,7 @@ async fn create_named_product(
             "name": name,
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
-            "costPriceCents": 100,
-            "sellingPriceCents": selling_price_cents,
-            "stockQuantity": 5,
+            "openingStock": { "quantity": 5, "unitCostCents": 100, "sellingPriceCents": selling_price_cents },
             "minStockThreshold": 1,
         })),
     )
@@ -331,8 +329,8 @@ async fn product_list_honours_explicit_sort_and_breaks_ties_by_name() {
 }
 
 /// What the shop paid for a product is Admin-only: every product-returning
-/// route omits `costPriceCents` for Manager and Staff, and a write by a
-/// Manager still stores the cost it was given.
+/// route omits the price tiers' cost range for Manager and Staff, and a write
+/// by a Manager still stores the cost it was given.
 #[tokio::test]
 async fn cost_price_is_returned_to_admin_only() {
     let app = common::spawn_app().await;
@@ -345,15 +343,17 @@ async fn cost_price_is_returned_to_admin_only() {
         "categoryKey": category_key,
         "subcategoryKey": subcategory_key,
         "barcode": barcode,
-        "costPriceCents": 1234,
-        "sellingPriceCents": 2000,
-        "stockQuantity": 4,
+        "openingStock": { "quantity": 4, "unitCostCents": 1234, "sellingPriceCents": 2000 },
         "minStockThreshold": 1,
     });
     // Created by a Manager: the response hides cost, the stored value is kept.
     let (status, created) = send(&app, "POST", "/api/inventory/products", Some(create_body)).await;
     assert_eq!(status, StatusCode::CREATED, "{created}");
-    assert!(created["data"].get("costPriceCents").is_none());
+    assert!(
+        created["data"]["priceTiers"][0]
+            .get("minUnitCostCents")
+            .is_none()
+    );
     let id = created["data"]["id"].as_str().unwrap().to_string();
 
     let by_id = format!("/api/inventory/products/{id}");
@@ -365,41 +365,64 @@ async fn cost_price_is_returned_to_admin_only() {
         for uri in [by_id.as_str(), by_barcode.as_str()] {
             let (status, body) = send_authed(&app.router, "GET", uri, None, &token).await;
             assert_eq!(status, StatusCode::OK, "{role:?} {uri}: {body}");
-            assert!(
-                body["data"].get("costPriceCents").is_none(),
-                "{role:?} {uri}"
-            );
-            assert_eq!(body["data"]["sellingPriceCents"], 2000);
+            let tier = &body["data"]["priceTiers"][0];
+            assert!(tier.get("minUnitCostCents").is_none(), "{role:?} {uri}");
+            assert!(tier.get("maxUnitCostCents").is_none(), "{role:?} {uri}");
+            assert_eq!(tier["sellingPriceCents"], 2000);
         }
         let (status, body) = send_authed(&app.router, "GET", &list, None, &token).await;
         assert_eq!(status, StatusCode::OK, "{body}");
         let items = body["data"]["items"].as_array().unwrap();
         assert_eq!(items.len(), 1);
-        assert!(items[0].get("costPriceCents").is_none(), "{role:?} list");
+        assert!(
+            items[0]["priceTiers"][0].get("minUnitCostCents").is_none(),
+            "{role:?} list"
+        );
     }
 
     for uri in [by_id.as_str(), by_barcode.as_str()] {
         let (status, body) = send_authed(&app.router, "GET", uri, None, &admin).await;
         assert_eq!(status, StatusCode::OK, "{body}");
-        assert_eq!(body["data"]["costPriceCents"], 1234, "{uri}");
+        assert_eq!(
+            body["data"]["priceTiers"][0]["minUnitCostCents"], 1234,
+            "{uri}"
+        );
     }
     let (status, body) = send_authed(&app.router, "GET", &list, None, &admin).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["data"]["items"][0]["costPriceCents"], 1234);
+    assert_eq!(
+        body["data"]["items"][0]["priceTiers"][0]["maxUnitCostCents"],
+        1234
+    );
 
-    // A Manager's edit that does not mention cost leaves the stored cost alone.
+    // A Manager re-pricing the batch leaves its stored cost alone.
+    let (_, batches) = send(
+        &app,
+        "GET",
+        &format!(
+            "/api/inventory/products/{}/batches",
+            created["data"]["key"].as_str().unwrap()
+        ),
+        None,
+    )
+    .await;
+    let batch_key = batches["data"]["items"][0]["key"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(batches["data"]["items"][0].get("unitCostCents").is_none());
     let (status, updated) = send(
         &app,
-        "PUT",
-        &by_id,
+        "PATCH",
+        &format!("/api/inventory/batches/{batch_key}"),
         Some(json!({ "sellingPriceCents": 2500 })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{updated}");
-    assert!(updated["data"].get("costPriceCents").is_none());
+    assert!(updated["data"].get("unitCostCents").is_none());
     let (_, body) = send_authed(&app.router, "GET", &by_id, None, &admin).await;
-    assert_eq!(body["data"]["costPriceCents"], 1234);
-    assert_eq!(body["data"]["sellingPriceCents"], 2500);
+    assert_eq!(body["data"]["priceTiers"][0]["minUnitCostCents"], 1234);
+    assert_eq!(body["data"]["priceTiers"][0]["sellingPriceCents"], 2500);
 }
 
 #[tokio::test]
@@ -415,9 +438,7 @@ async fn product_lifecycle_create_get_update_stock_and_delete() {
             "name": "Test Widget",
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
-            "costPriceCents": 1000,
-            "sellingPriceCents": 2000,
-            "stockQuantity": 10,
+            "openingStock": { "quantity": 10, "unitCostCents": 1000, "sellingPriceCents": 2000 },
             "minStockThreshold": 3,
         })),
     )
@@ -442,19 +463,42 @@ async fn product_lifecycle_create_get_update_stock_and_delete() {
         &app,
         "PUT",
         &format!("/api/inventory/products/{id}"),
-        Some(json!({ "name": "Updated Widget", "sellingPriceCents": 2500 })),
+        Some(json!({ "name": "Updated Widget" })),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(updated["data"]["name"], "Updated Widget");
-    assert_eq!(updated["data"]["sellingPriceCents"], 2500);
+    assert_eq!(updated["data"]["priceTiers"][0]["sellingPriceCents"], 2000);
     assert_eq!(updated["data"]["sku"], sku);
 
-    let (status, adjusted) = send(
+    // Taking stock out names the batch it comes from.
+    let (_, batches) = send(
+        &app,
+        "GET",
+        &format!(
+            "/api/inventory/products/{}/batches",
+            created["data"]["key"].as_str().unwrap()
+        ),
+        None,
+    )
+    .await;
+    let batch_key = batches["data"]["items"][0]["key"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (status, missing_batch) = send(
         &app,
         "PATCH",
         &format!("/api/inventory/products/{id}/stock"),
         Some(json!({ "delta": -4, "reason": "test sale" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{missing_batch}");
+    let (status, adjusted) = send(
+        &app,
+        "PATCH",
+        &format!("/api/inventory/products/{id}/stock"),
+        Some(json!({ "delta": -4, "reason": "test sale", "batchKey": batch_key })),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -466,7 +510,7 @@ async fn product_lifecycle_create_get_update_stock_and_delete() {
         &app,
         "PATCH",
         &format!("/api/inventory/products/{id}/stock"),
-        Some(json!({ "delta": -100 })),
+        Some(json!({ "delta": -100, "batchKey": batch_key })),
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
@@ -484,10 +528,13 @@ async fn product_lifecycle_create_get_update_stock_and_delete() {
     assert_eq!(status, StatusCode::OK);
     let list = movements["data"]["movements"].as_array().unwrap();
     // Oldest first: the opening balance that creating the product with
-    // `stockQuantity: 10` recorded, then the manual adjustment.
+    // `openingStock.quantity: 10` recorded, then the manual adjustment —
+    // both against the same batch.
     assert_eq!(list.len(), 2, "{list:?}");
     assert_eq!(list[0]["quantityDelta"], 10);
     assert_eq!(list[0]["type"], "opening_balance");
+    assert_eq!(list[0]["batchKey"], batch_key);
+    assert_eq!(list[1]["batchKey"], batch_key);
     assert_eq!(list[1]["quantityDelta"], -4);
     assert_eq!(list[1]["type"], "manual_adjustment");
 
@@ -519,9 +566,7 @@ async fn create_product_validates_category_and_pricing_and_auto_generates_sequen
             "name": "Bad Category Widget",
             "categoryKey": category_key,
             "subcategoryKey": "subcat_does_not_exist",
-            "costPriceCents": 1000,
-            "sellingPriceCents": 2000,
-            "stockQuantity": 1,
+            "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 2000 },
             "minStockThreshold": 1,
         })),
     )
@@ -542,9 +587,7 @@ async fn create_product_validates_category_and_pricing_and_auto_generates_sequen
             "name": "Mismatched Widget",
             "categoryKey": category_key,
             "subcategoryKey": other_subcategory_key,
-            "costPriceCents": 1000,
-            "sellingPriceCents": 2000,
-            "stockQuantity": 1,
+            "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 2000 },
             "minStockThreshold": 1,
         })),
     )
@@ -561,9 +604,7 @@ async fn create_product_validates_category_and_pricing_and_auto_generates_sequen
             "name": "Free Widget",
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
-            "costPriceCents": 1000,
-            "sellingPriceCents": 0,
-            "stockQuantity": 1,
+            "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 0 },
             "minStockThreshold": 1,
         })),
     )
@@ -577,9 +618,7 @@ async fn create_product_validates_category_and_pricing_and_auto_generates_sequen
         "name": "Sequential Widget",
         "categoryKey": category_key,
         "subcategoryKey": subcategory_key,
-        "costPriceCents": 1000,
-        "sellingPriceCents": 2000,
-        "stockQuantity": 1,
+        "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 2000 },
         "minStockThreshold": 1,
     });
     let (status, first) = send(&app, "POST", "/api/inventory/products", Some(body.clone())).await;
@@ -619,9 +658,7 @@ async fn create_product_auto_generates_sequential_ean13_barcodes() {
         "name": "Auto Barcode Widget",
         "categoryKey": category_key,
         "subcategoryKey": subcategory_key,
-        "costPriceCents": 1000,
-        "sellingPriceCents": 2000,
-        "stockQuantity": 1,
+        "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 2000 },
         "minStockThreshold": 1,
         "autoGenerateBarcode": true,
     });
@@ -658,9 +695,7 @@ async fn create_product_accepts_manual_barcode() {
             "name": "Manual Barcode Widget",
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
-            "costPriceCents": 1000,
-            "sellingPriceCents": 2000,
-            "stockQuantity": 1,
+            "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 2000 },
             "minStockThreshold": 1,
             "barcode": barcode,
         })),
@@ -686,9 +721,7 @@ async fn create_product_rejects_invalid_manual_barcode() {
                 "name": "Invalid Barcode Widget",
                 "categoryKey": category_key,
                 "subcategoryKey": subcategory_key,
-                "costPriceCents": 1000,
-                "sellingPriceCents": 2000,
-                "stockQuantity": 1,
+                "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 2000 },
                 "minStockThreshold": 1,
                 "barcode": bad_barcode,
             })),
@@ -713,9 +746,7 @@ async fn create_product_rejects_duplicate_manual_barcode() {
             "name": "First Widget",
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
-            "costPriceCents": 1000,
-            "sellingPriceCents": 2000,
-            "stockQuantity": 1,
+            "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 2000 },
             "minStockThreshold": 1,
             "barcode": barcode,
         })),
@@ -731,9 +762,7 @@ async fn create_product_rejects_duplicate_manual_barcode() {
             "name": "Second Widget",
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
-            "costPriceCents": 1000,
-            "sellingPriceCents": 2000,
-            "stockQuantity": 1,
+            "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 2000 },
             "minStockThreshold": 1,
             "barcode": barcode,
         })),
@@ -756,9 +785,7 @@ async fn create_product_rejects_barcode_and_auto_generate_together() {
             "name": "Conflicting Barcode Widget",
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
-            "costPriceCents": 1000,
-            "sellingPriceCents": 2000,
-            "stockQuantity": 1,
+            "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 2000 },
             "minStockThreshold": 1,
             "barcode": "12345678",
             "autoGenerateBarcode": true,
@@ -801,9 +828,7 @@ async fn create_product_without_barcode_persists_null() {
             "name": "Barcode-Free Widget",
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
-            "costPriceCents": 1000,
-            "sellingPriceCents": 2000,
-            "stockQuantity": 1,
+            "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 2000 },
             "minStockThreshold": 1,
         })),
     )
@@ -829,13 +854,13 @@ async fn create_product_with_multiple_suppliers_links_and_records_intake_atomica
             "name": "iPhone 15 Pro Screen (Multi-Supplier)",
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
-            "sellingPriceCents": 1500,
             "minStockThreshold": 5,
             "suppliers": [
                 {
                     "supplierKey": supplier_a_key,
                     "quantity": 30,
                     "costPriceCents": 450,
+                    "sellingPriceCents": 1500,
                     "referenceNo": "INV-SUP-A-001",
                     "notes": "Batch A OEM"
                 },
@@ -843,6 +868,7 @@ async fn create_product_with_multiple_suppliers_links_and_records_intake_atomica
                     "supplierKey": supplier_b_key,
                     "quantity": 20,
                     "costPriceCents": 480,
+                    "sellingPriceCents": 1500,
                     "referenceNo": "INV-SUP-B-002",
                     "notes": "Batch B Premium"
                 }
@@ -864,7 +890,12 @@ async fn create_product_with_multiple_suppliers_links_and_records_intake_atomica
         &token_for_role(&app.config, Role::Admin),
     )
     .await;
-    assert_eq!(as_admin["data"]["costPriceCents"], 450);
+    // Both intakes sell at Rs.15: one price tier spanning both deliveries' costs.
+    let tier = &as_admin["data"]["priceTiers"][0];
+    assert_eq!(tier["sellingPriceCents"], 1500);
+    assert_eq!(tier["quantity"], 50);
+    assert_eq!(tier["minUnitCostCents"], 450);
+    assert_eq!(tier["maxUnitCostCents"], 480);
 
     let product_key = created["data"]["key"].as_str().unwrap();
     let product_id = created["data"]["id"].as_str().unwrap();
@@ -935,17 +966,18 @@ async fn create_product_rejects_duplicate_suppliers_in_same_request() {
             "name": "Duplicate Supplier Widget",
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
-            "sellingPriceCents": 2000,
             "suppliers": [
                 {
                     "supplierKey": supplier_key,
                     "quantity": 10,
-                    "costPriceCents": 1000
+                    "costPriceCents": 1000,
+                    "sellingPriceCents": 2000
                 },
                 {
                     "supplierKey": supplier_key,
                     "quantity": 5,
-                    "costPriceCents": 1100
+                    "costPriceCents": 1100,
+                    "sellingPriceCents": 2000
                 }
             ]
         })),
@@ -970,17 +1002,18 @@ async fn create_product_rejects_nonexistent_supplier_in_intake_list() {
             "name": "Nonexistent Supplier Widget",
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
-            "sellingPriceCents": 2000,
             "suppliers": [
                 {
                     "supplierKey": valid_supplier_key,
                     "quantity": 10,
-                    "costPriceCents": 1000
+                    "costPriceCents": 1000,
+                    "sellingPriceCents": 2000
                 },
                 {
                     "supplierKey": "sup_nonexistent_999",
                     "quantity": 5,
-                    "costPriceCents": 1100
+                    "costPriceCents": 1100,
+                    "sellingPriceCents": 2000
                 }
             ]
         })),
@@ -1005,12 +1038,12 @@ async fn create_product_rejects_zero_or_negative_supplier_quantity() {
             "name": "Zero Qty Supplier Widget",
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
-            "sellingPriceCents": 2000,
             "suppliers": [
                 {
                     "supplierKey": supplier_key,
                     "quantity": 0,
-                    "costPriceCents": 1000
+                    "costPriceCents": 1000,
+                    "sellingPriceCents": 2000
                 }
             ]
         })),
@@ -1036,9 +1069,7 @@ async fn update_product_can_set_barcode() {
             "name": "Rebarcoded Widget",
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
-            "costPriceCents": 1000,
-            "sellingPriceCents": 2000,
-            "stockQuantity": 1,
+            "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 2000 },
             "minStockThreshold": 1,
             "autoGenerateBarcode": true,
         })),
@@ -1089,9 +1120,7 @@ async fn update_product_barcode_collision_returns_409() {
                 "name": name,
                 "categoryKey": category_key,
                 "subcategoryKey": subcategory_key,
-                "costPriceCents": 1000,
-                "sellingPriceCents": 2000,
-                "stockQuantity": 1,
+                "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 2000 },
                 "minStockThreshold": 1,
                 "barcode": if name == "Owner Widget" { taken.clone() } else { unique_manual_barcode() },
             })),
@@ -1137,9 +1166,7 @@ async fn update_product_re_saving_own_barcode_is_not_a_collision() {
             "name": "Self Widget",
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
-            "costPriceCents": 1000,
-            "sellingPriceCents": 2000,
-            "stockQuantity": 1,
+            "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 2000 },
             "minStockThreshold": 1,
             "barcode": barcode,
         })),
@@ -1172,9 +1199,7 @@ async fn update_product_rejects_invalid_barcode() {
             "name": "Validated Widget",
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
-            "costPriceCents": 1000,
-            "sellingPriceCents": 2000,
-            "stockQuantity": 1,
+            "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 2000 },
             "minStockThreshold": 1,
         })),
     )
@@ -1209,9 +1234,7 @@ async fn get_product_by_barcode_returns_the_matching_product() {
             "name": "Scannable Widget",
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
-            "costPriceCents": 1000,
-            "sellingPriceCents": 2000,
-            "stockQuantity": 1,
+            "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 2000 },
             "minStockThreshold": 1,
             "barcode": barcode,
         })),
@@ -1258,9 +1281,7 @@ async fn list_products_filters_by_category_and_search() {
             "name": "Findable Gadget",
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
-            "costPriceCents": 500,
-            "sellingPriceCents": 1200,
-            "stockQuantity": 5,
+            "openingStock": { "quantity": 5, "unitCostCents": 500, "sellingPriceCents": 1200 },
             "minStockThreshold": 1,
         })),
     )
@@ -1274,9 +1295,7 @@ async fn list_products_filters_by_category_and_search() {
             "name": "Unrelated Item",
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
-            "costPriceCents": 500,
-            "sellingPriceCents": 1200,
-            "stockQuantity": 5,
+            "openingStock": { "quantity": 5, "unitCostCents": 500, "sellingPriceCents": 1200 },
             "minStockThreshold": 1,
         })),
     )
@@ -1310,9 +1329,7 @@ async fn list_products_search_matches_barcode() {
             "name": "Barcoded Gadget",
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
-            "costPriceCents": 500,
-            "sellingPriceCents": 1200,
-            "stockQuantity": 5,
+            "openingStock": { "quantity": 5, "unitCostCents": 500, "sellingPriceCents": 1200 },
             "minStockThreshold": 1,
             "barcode": barcode,
         })),
@@ -1349,9 +1366,7 @@ async fn delete_products_batch_removes_multiple() {
                 "name": "Batch Widget",
                 "categoryKey": category_key,
                 "subcategoryKey": subcategory_key,
-                "costPriceCents": 500,
-                "sellingPriceCents": 1200,
-                "stockQuantity": 5,
+                "openingStock": { "quantity": 5, "unitCostCents": 500, "sellingPriceCents": 1200 },
                 "minStockThreshold": 1,
             })),
         )
@@ -1388,9 +1403,7 @@ async fn low_stock_lists_products_at_or_below_threshold() {
             "name": "Low Stock Widget",
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
-            "costPriceCents": 500,
-            "sellingPriceCents": 1200,
-            "stockQuantity": 2,
+            "openingStock": { "quantity": 2, "unitCostCents": 500, "sellingPriceCents": 1200 },
             "minStockThreshold": 5,
         })),
     )
@@ -1541,9 +1554,7 @@ async fn category_admin_crud_lifecycle_and_in_use_guards() {
             "name": "Cascade Widget",
             "categoryKey": category_key,
             "subcategoryKey": alpha_key,
-            "costPriceCents": 500,
-            "sellingPriceCents": 1000,
-            "stockQuantity": 1,
+            "openingStock": { "quantity": 1, "unitCostCents": 500, "sellingPriceCents": 1000 },
             "minStockThreshold": 1,
         })),
     )
@@ -1784,9 +1795,7 @@ async fn inventory_overview_endpoint_returns_metrics_hierarchical_data_and_filte
             "name": "RGB LED Strip Light",
             "categoryKey": cat1_key,
             "subcategoryKey": subcat1_key,
-            "costPriceCents": 1000,
-            "sellingPriceCents": 1800,
-            "stockQuantity": 50,
+            "openingStock": { "quantity": 50, "unitCostCents": 1000, "sellingPriceCents": 1800 },
             "minStockThreshold": 10
         })),
     )
@@ -1802,9 +1811,7 @@ async fn inventory_overview_endpoint_returns_metrics_hierarchical_data_and_filte
             "name": "Smart RGB Corner Floor Lamp",
             "categoryKey": cat1_key,
             "subcategoryKey": subcat1_key,
-            "costPriceCents": 3000,
-            "sellingPriceCents": 6000,
-            "stockQuantity": 5,
+            "openingStock": { "quantity": 5, "unitCostCents": 3000, "sellingPriceCents": 6000 },
             "minStockThreshold": 10
         })),
     )
@@ -1820,9 +1827,7 @@ async fn inventory_overview_endpoint_returns_metrics_hierarchical_data_and_filte
             "name": "Ultra Smartwatch Screen Protector",
             "categoryKey": cat1_key,
             "subcategoryKey": subcat2_key,
-            "costPriceCents": 200,
-            "sellingPriceCents": 500,
-            "stockQuantity": 20,
+            "openingStock": { "quantity": 20, "unitCostCents": 200, "sellingPriceCents": 500 },
             "minStockThreshold": 5
         })),
     )
@@ -1994,15 +1999,27 @@ async fn staff_may_read_inventory_but_not_write_it() {
             "name": format!("Staff Guard Product {}", Uuid::new_v4()),
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
-            "costPriceCents": 1000,
-            "sellingPriceCents": 2000,
-            "stockQuantity": 5,
+            "openingStock": { "quantity": 5, "unitCostCents": 1000, "sellingPriceCents": 2000 },
             "minStockThreshold": 1,
         })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "fixture product: {product}");
     let product_id = product["data"]["id"].as_str().unwrap().to_string();
+    let (_, batches) = send(
+        &app,
+        "GET",
+        &format!(
+            "/api/inventory/products/{}/batches",
+            product["data"]["key"].as_str().unwrap()
+        ),
+        None,
+    )
+    .await;
+    let batch_key = batches["data"]["items"][0]["key"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let forbidden_writes: Vec<(&str, String, Option<Value>)> = vec![
         (
@@ -2012,15 +2029,18 @@ async fn staff_may_read_inventory_but_not_write_it() {
                 "name": "Nope",
                 "categoryKey": category_key,
                 "subcategoryKey": subcategory_key,
-                "costPriceCents": 100,
-                "sellingPriceCents": 200,
-                "stockQuantity": 1,
+                "openingStock": { "quantity": 1, "unitCostCents": 100, "sellingPriceCents": 200 },
                 "minStockThreshold": 1,
             })),
         ),
         (
             "PUT",
             format!("/api/inventory/products/{product_id}"),
+            Some(json!({ "minStockThreshold": 9 })),
+        ),
+        (
+            "PATCH",
+            format!("/api/inventory/batches/{batch_key}"),
             Some(json!({ "sellingPriceCents": 100 })),
         ),
         (
@@ -2036,7 +2056,9 @@ async fn staff_may_read_inventory_but_not_write_it() {
         (
             "PATCH",
             format!("/api/inventory/products/{product_id}/stock"),
-            Some(json!({ "delta": 5, "reason": "test" })),
+            Some(
+                json!({ "delta": 5, "reason": "test", "unitCostCents": 1000, "sellingPriceCents": 2000 }),
+            ),
         ),
     ];
 
@@ -2050,7 +2072,7 @@ async fn staff_may_read_inventory_but_not_write_it() {
         assert_eq!(json["code"], codes::PERMISSION_DENIED, "{method} {uri}");
     }
 
-    // The product is untouched by the five refused writes.
+    // The product is untouched by the six refused writes.
     let (status, still_there) = send(
         &app,
         "GET",
@@ -2106,8 +2128,6 @@ async fn seed_product_with(
             name: "Stats Test Product".to_string(),
             category_key: category_key.to_string(),
             subcategory_key: subcategory_key.to_string(),
-            cost_price_cents: 500,
-            selling_price_cents: 1000,
             stock_quantity,
             min_stock_threshold,
             is_serialized: false,

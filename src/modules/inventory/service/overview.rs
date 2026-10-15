@@ -159,6 +159,15 @@ pub async fn get_inventory_overview(
         });
     }
 
+    super::stock_batch::attach_price_tiers(
+        db,
+        category_overviews
+            .iter_mut()
+            .flat_map(|category| category.subcategories.iter_mut())
+            .flat_map(|subcategory| subcategory.products.iter_mut()),
+    )
+    .await?;
+
     Ok(InventoryOverviewResponse {
         metrics,
         categories: category_overviews,

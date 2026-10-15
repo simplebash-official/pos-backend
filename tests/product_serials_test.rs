@@ -106,6 +106,9 @@ async fn seed_category_with_subcategory(app: &common::TestApp) -> (String, Strin
     (category_key, subcategory_key)
 }
 
+/// Price every serialized unit in these tests is received (and so sold) at.
+const SERIAL_PRICE_CENTS: i64 = 50000;
+
 /// Creates a serialized product (no initial stock — a serialized product's
 /// bundled-supplier-intake path is out of scope, see
 /// `service::product::create_product`'s comment) with a warranty period.
@@ -123,9 +126,6 @@ async fn seed_serialized_product(
             "name": "Serialized Test Phone",
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
-            "costPriceCents": 30000,
-            "sellingPriceCents": 50000,
-            "stockQuantity": 0,
             "minStockThreshold": 1,
             "isSerialized": true,
             "warrantyMonths": warranty_months,
@@ -137,7 +137,7 @@ async fn seed_serialized_product(
     (
         body["data"]["id"].as_str().unwrap().to_string(),
         body["data"]["key"].as_str().unwrap().to_string(),
-        body["data"]["sellingPriceCents"].as_i64().unwrap(),
+        SERIAL_PRICE_CENTS,
     )
 }
 
@@ -175,6 +175,7 @@ async fn record_purchase(
         "productKey": product_key,
         "quantity": quantity,
         "unitCostCents": unit_cost_cents,
+        "sellingPriceCents": SERIAL_PRICE_CENTS,
         "date": chrono::Utc::now().to_rfc3339(),
     });
     if let Some(serials) = serial_numbers {
@@ -422,6 +423,13 @@ async fn sale_of_serialized_product_flips_serial_to_sold_with_warranty_expiry() 
     assert_eq!(sold[0]["serialNumber"], serials[0]);
     assert!(sold[0]["warrantyExpiresAt"].is_string());
     assert_eq!(sold[0]["invoiceKey"], sale_body["data"]["invoice"]["key"]);
+
+    // The unit sells at, and is costed from, the batch it was received in.
+    let line = &sale_body["data"]["invoice"]["items"][0];
+    assert_eq!(line["unitPriceCents"], SERIAL_PRICE_CENTS);
+    assert_eq!(line["unitCostCents"], 30000);
+    assert_eq!(line["batchAllocations"][0]["batchKey"], sold[0]["batchKey"]);
+    assert_eq!(line["batchAllocations"][0]["quantity"], 1);
 
     let in_stock = list_serials(&app, &prod_key, Some("in_stock")).await;
     assert!(in_stock.is_empty());

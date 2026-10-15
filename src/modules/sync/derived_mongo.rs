@@ -22,7 +22,7 @@ use crate::{
         sync_v2::{ConflictKind, DerivedScope, NewConflict},
     },
     modules::{
-        billing::service::credit_notes::line_match,
+        billing::service::credit_notes::{LineHint, line_match},
         sync::{apply_mongo::num_i64, cloud_store::coll},
     },
 };
@@ -46,6 +46,9 @@ pub(crate) async fn recompute_derived(
     }
     for product_id in &scope.product_ids {
         recompute_product(db, product_id, &mut conflicts).await?;
+    }
+    for batch_key in &scope.batch_keys {
+        recompute_batch(db, batch_key, &mut conflicts).await?;
     }
     Ok(conflicts)
 }
@@ -118,11 +121,21 @@ async fn recompute_invoice(
         let sole = items.len() == 1 && lines.len() == 1;
         for line in &lines {
             let quantity = num_i64(line, "quantity").unwrap_or(0);
+            let batch_keys: Vec<&str> = line
+                .get_array("batchAllocations")
+                .into_iter()
+                .flatten()
+                .filter_map(|a| a.as_document()?.get_str("batchKey").ok())
+                .collect();
             if let Some(idx) = line_match(
                 &items,
                 line.get_str("productKey").ok(),
                 line.get_str("sourceTicketKey").ok(),
                 line.get_str("name").ok(),
+                LineHint {
+                    unit_price_cents: None,
+                    batch_keys: &batch_keys,
+                },
                 sole,
             ) {
                 items[idx].returned_quantity += quantity;
@@ -223,6 +236,45 @@ async fn recompute_customer(db: &Db, key: &str) -> AppResult<()> {
                 }},
             )
             .await?;
+    }
+    Ok(())
+}
+
+/// `remaining_quantity` = SUM of the movements carrying the batch's key. A
+/// batch that becomes negative raises `NEGATIVE_STOCK` once, at the transition.
+async fn recompute_batch(
+    db: &Db,
+    batch_key: &str,
+    conflicts: &mut Vec<NewConflict>,
+) -> AppResult<()> {
+    let batches = coll(db, "stock_batches")?.preserve_origin();
+    let Some(batch) = batches.find_one(doc! { "key": batch_key }).await? else {
+        return Ok(());
+    };
+    let old = num_i64(&batch, "remaining_quantity").unwrap_or(0);
+    let total = sum_field(
+        db,
+        "stock_movements",
+        doc! { "batch_key": batch_key },
+        "quantity_delta",
+    )
+    .await?;
+    if total == old {
+        return Ok(());
+    }
+    batches
+        .update_one(
+            doc! { "key": batch_key },
+            doc! { "$set": { "remaining_quantity": total } },
+        )
+        .await?;
+    if total < 0 && old >= 0 {
+        conflicts.push(NewConflict {
+            kind: ConflictKind::NegativeStock,
+            resource: "stockBatches".to_string(),
+            entity_key: batch_key.to_string(),
+            detail: serde_json::json!({ "batchKey": batch_key, "quantity": total }),
+        });
     }
     Ok(())
 }

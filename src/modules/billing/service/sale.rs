@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 
-use mongodb::bson::{DateTime as BsonDateTime, doc, oid::ObjectId};
+use mongodb::bson::{DateTime as BsonDateTime, doc};
 
 use crate::{
     clients::db::Db,
@@ -174,6 +174,19 @@ pub(crate) async fn resolve_sale_items(
     db: &Db,
     items: &[CreateSaleItemRequest],
 ) -> AppResult<(Vec<InvoiceItem>, HashMap<String, Product>)> {
+    // Each line's batches are planned against current stock independently,
+    // so two lines at the same product+price would both plan on the same
+    // units. The cart keeps one line per price; refuse anything else.
+    let mut seen_tiers = std::collections::HashSet::new();
+    for item in items {
+        if let (Some(product_key), Some(price)) = (&item.product_key, item.selling_price_cents)
+            && !seen_tiers.insert((product_key.as_str(), price))
+        {
+            return Err(AppError::validation(
+                "The same product at the same price appears on two lines — combine them into one",
+            ));
+        }
+    }
     let retail_product_keys: Vec<String> = items
         .iter()
         .filter(|item| item.source_type == "retail")
@@ -208,6 +221,7 @@ pub(crate) async fn resolve_sale_item(
         source_ticket_number,
         assigned_employee_name,
         unit_cost_cents,
+        batch_allocations,
     ) = match item.source_type.as_str() {
         "retail" => match &item.product_key {
             Some(product_key) => {
@@ -215,7 +229,12 @@ pub(crate) async fn resolve_sale_item(
                     AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
                 })?;
 
-                if product.is_serialized {
+                // Every unit comes out of a stock batch, and the line is priced
+                // at the batches it draws on: a serialized line at its chosen
+                // units' batch, any other line at the tier the cashier picked
+                // (consumed oldest batch first). Planned here, before any
+                // write; applied in `apply_line_item_side_effects`.
+                let (unit_price_cents, allocations) = if product.is_serialized {
                     let serial_numbers = item.serial_numbers.clone().unwrap_or_default();
                     if serial_numbers.len() as i64 != item.quantity {
                         return Err(AppError::validation(format!(
@@ -230,23 +249,51 @@ pub(crate) async fn resolve_sale_item(
                     // the actual `Sold` transition happens post-commit in
                     // `apply_line_item_side_effects`, same as the stock
                     // decrement it accompanies.
+                    let mut batch_keys = Vec::with_capacity(serial_numbers.len());
                     for serial_number in &serial_numbers {
-                        inventory::service::product_serial::resolve_in_stock_serial(
+                        let serial = inventory::service::product_serial::resolve_in_stock_serial(
                             db,
                             &product.key,
                             serial_number,
                         )
                         .await?;
+                        batch_keys.push(serial.batch_key);
                     }
-                }
+                    inventory::service::stock_batch::allocations_for_serials(
+                        db,
+                        &product.key,
+                        &product.name,
+                        &batch_keys,
+                    )
+                    .await?
+                } else {
+                    let price = item.selling_price_cents.ok_or_else(|| {
+                        AppError::validation(format!(
+                            "Pick the price '{}' is sold at — sellingPriceCents is required",
+                            product.name
+                        ))
+                    })?;
+                    let allocations = inventory::service::stock_batch::plan_tier_allocation(
+                        db,
+                        &product.key,
+                        &product.name,
+                        price,
+                        item.quantity,
+                    )
+                    .await?;
+                    (price, allocations)
+                };
 
                 (
                     product.name.clone(),
                     Some(product.sku.clone()),
-                    product.selling_price_cents,
+                    unit_price_cents,
                     None,
                     None,
-                    product.cost_price_cents,
+                    Some(inventory::service::stock_batch::weighted_unit_cost(
+                        &allocations,
+                    )),
+                    allocations,
                 )
             }
             None => (
@@ -260,6 +307,7 @@ pub(crate) async fn resolve_sale_item(
                 None,
                 None,
                 None,
+                Vec::new(),
             ),
         },
         "repair" => match &item.source_ticket_key {
@@ -283,6 +331,7 @@ pub(crate) async fn resolve_sale_item(
                     Some(ticket.ticket_number),
                     ticket.assigned_employee_name,
                     Some(ticket.material_cost_cents.unwrap_or(0) / item.quantity.max(1)),
+                    Vec::new(),
                 )
             }
             None => (
@@ -300,6 +349,7 @@ pub(crate) async fn resolve_sale_item(
                 None,
                 item.assigned_employee_name.clone(),
                 None,
+                Vec::new(),
             ),
         },
         "print" => match &item.source_ticket_key {
@@ -312,6 +362,7 @@ pub(crate) async fn resolve_sale_item(
                     Some(ticket.ticket_number),
                     ticket.assigned_employee_name,
                     Some(ticket.material_cost_cents.unwrap_or(0) / item.quantity.max(1)),
+                    Vec::new(),
                 )
             }
             None => (
@@ -327,6 +378,7 @@ pub(crate) async fn resolve_sale_item(
                 None,
                 item.assigned_employee_name.clone(),
                 None,
+                Vec::new(),
             ),
         },
         other => {
@@ -354,6 +406,7 @@ pub(crate) async fn resolve_sale_item(
         assigned_employee_name,
         returned_quantity: 0,
         serial_numbers: item.serial_numbers.clone().unwrap_or_default(),
+        batch_allocations,
     })
 }
 
@@ -376,25 +429,14 @@ async fn apply_line_item_side_effects(
             // missing here if the item had no productKey, which the early
             // return above already excluded.
             let product = resolved_products.get(product_key)?;
-            let object_id = match ObjectId::parse_str(&product.id) {
-                Ok(id) => id,
-                Err(_) => {
-                    return Some(format!(
-                        "Product '{}' has an invalid id and its stock was not adjusted",
-                        item.name
-                    ));
-                }
-            };
-            if let Err(err) = inventory::service::stock::apply_stock_delta(
+            if let Err(err) = inventory::service::stock_batch::move_allocations(
                 db,
-                object_id,
-                -item.quantity,
+                &product.key,
+                &item.batch_allocations,
+                -1,
                 StockMovementType::Sale,
-                Some(inserted_invoice.key.clone()),
-                Some(format!(
-                    "Sale on invoice {}",
-                    inserted_invoice.invoice_number
-                )),
+                &inserted_invoice.key,
+                &format!("Sale on invoice {}", inserted_invoice.invoice_number),
             )
             .await
             {
@@ -820,35 +862,21 @@ pub async fn void_invoice(
             let Some(product_key) = item.product_key.as_deref() else {
                 continue;
             };
-            match inventory::service::product::get_product_by_key(db, product_key).await {
-                Ok(product) => {
-                    let Ok(product_object_id) = ObjectId::parse_str(&product.id) else {
-                        warnings.push(format!(
-                            "Product '{}' has an invalid id and its stock was not restored",
-                            item.name
-                        ));
-                        continue;
-                    };
-                    if let Err(err) = inventory::service::stock::apply_stock_delta(
-                        db,
-                        product_object_id,
-                        item.quantity,
-                        StockMovementType::InvoiceVoidReversal,
-                        Some(existing.key.clone()),
-                        Some(format!("Void of invoice {}", existing.invoice_number)),
-                    )
-                    .await
-                    {
-                        warnings.push(format!(
-                            "Stock for '{}' could not be restored: {err}",
-                            item.name
-                        ));
-                    }
-                }
-                Err(err) => warnings.push(format!(
-                    "Product '{}' (key {product_key}) was not found; its stock was not restored: {err}",
+            if let Err(err) = inventory::service::stock_batch::move_allocations(
+                db,
+                product_key,
+                &item.batch_allocations,
+                1,
+                StockMovementType::InvoiceVoidReversal,
+                &existing.key,
+                &format!("Void of invoice {}", existing.invoice_number),
+            )
+            .await
+            {
+                warnings.push(format!(
+                    "Stock for '{}' could not be restored: {err}",
                     item.name
-                )),
+                ));
             }
         }
 

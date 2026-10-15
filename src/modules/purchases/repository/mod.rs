@@ -38,6 +38,7 @@ fn row_to_purchase_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<PurchaseDocum
         product_key: row.get("product_key"),
         quantity: row.get("quantity"),
         unit_cost_cents: row.get("unit_cost_cents"),
+        selling_price_cents: row.get("selling_price_cents"),
         date: to_bson_datetime(&date_str),
         reference_no: row.get("reference_no"),
         notes: row.get("notes"),
@@ -80,9 +81,9 @@ pub(crate) async fn insert_purchase(
                 r#"
                 INSERT INTO purchases (
                     key, id, supplier_key, product_key, quantity, unit_cost_cents,
-                    date, reference_no, notes, version, created_at, updated_at,
-                    deleted_at, updated_by_device
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    selling_price_cents, date, reference_no, notes, version, created_at,
+                    updated_at, deleted_at, updated_by_device
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(&document.key)
@@ -91,6 +92,7 @@ pub(crate) async fn insert_purchase(
             .bind(&document.product_key)
             .bind(document.quantity)
             .bind(document.unit_cost_cents)
+            .bind(document.selling_price_cents)
             .bind(&date_iso)
             .bind(&document.reference_no)
             .bind(&document.notes)

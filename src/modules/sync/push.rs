@@ -233,6 +233,8 @@ pub async fn push(db: &Db, device_id: &str, req: PushRequest) -> AppResult<PushR
         ));
     }
 
+    cloud_store::ensure_device_app_current(db, device_id).await?;
+
     // A retried batch gets the same answer without touching any data.
     if let Some(acks) = cloud_store::find_batch_acks(db, device_id, &req.batch_id).await? {
         return Ok(PushResponse {

@@ -130,6 +130,12 @@ fn note_scope(
             if let Some(id) = text("productId") {
                 scope.product_ids.insert(id.to_string());
             }
+            if let Some(batch) = text("batchKey") {
+                scope.batch_keys.insert(batch.to_string());
+            }
+        }
+        "stockBatches" => {
+            scope.batch_keys.insert(key.to_string());
         }
         "customers" => {
             scope.customer_keys.insert(key.to_string());

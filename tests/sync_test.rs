@@ -14,14 +14,16 @@ use simplebash_pos_backend::{
     },
     domain::{
         billing::{Invoice, InvoiceStatus, PaymentRecord},
-        inventory::Product,
+        inventory::{BatchSource, Product},
         sequences::SequenceReservationResponse,
         sync::SyncChangesResponse,
         users::Role,
     },
     modules::{
         billing::model::{InvoiceDocument, PaymentDocument},
-        inventory::model::{CategoryDocument, ProductDocument, SubcategoryDocument},
+        inventory::model::{
+            CategoryDocument, ProductDocument, StockBatchDocument, SubcategoryDocument,
+        },
         sync::cursor::encode_cursor,
     },
 };
@@ -192,17 +194,16 @@ async fn negative_stock_rejection_returns_409_insufficient_stock() {
         .unwrap();
 
     // Create product with stock 5
+    let product_key = generate_id(prefixes::PRODUCT);
     let prod_doc = ProductDocument {
         id: None,
-        key: generate_id(prefixes::PRODUCT),
+        key: product_key.clone(),
         sku: format!("STK-{}", Uuid::new_v4().simple()),
         barcode: None,
         barcode_source: None,
         name: "Stock Test Product".to_string(),
         category_key: cat_key,
         subcategory_key: subcat_key,
-        cost_price_cents: 1000,
-        selling_price_cents: 1500,
         stock_quantity: 5,
         min_stock_threshold: 2,
         is_serialized: false,
@@ -220,14 +221,37 @@ async fn negative_stock_rejection_returns_409_insufficient_stock() {
         .await
         .unwrap();
     let prod_id = insert_res.inserted_id.as_object_id().unwrap().to_hex();
+    let batch_key = generate_id(prefixes::STOCK_BATCH);
+    app.db
+        .collection::<StockBatchDocument>("stock_batches")
+        .insert_one(StockBatchDocument {
+            id: None,
+            key: batch_key.clone(),
+            product_key: product_key.clone(),
+            source: BatchSource::Opening,
+            purchase_key: None,
+            supplier_key: None,
+            received_quantity: 5,
+            remaining_quantity: 5,
+            unit_cost_cents: 1000,
+            selling_price_cents: 1500,
+            received_at: now,
+            version: 1,
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+            updated_by_device: None,
+        })
+        .await
+        .unwrap();
 
-    // Adjust by -10 (which would yield -5 stock)
+    // Take 10 out of a batch holding 5 (which would yield -5 stock)
     let (status, _, json) = send_authed(
         &app.router,
         &token,
         "PATCH",
         &format!("/api/inventory/products/{prod_id}/stock"),
-        Some(serde_json::json!({ "delta": -10, "note": "oversell test" })),
+        Some(serde_json::json!({ "delta": -10, "reason": "oversell test", "batchKey": batch_key })),
         vec![],
     )
     .await;
@@ -237,6 +261,7 @@ async fn negative_stock_rejection_returns_409_insufficient_stock() {
     assert_eq!(json["details"]["available"], 5);
     assert_eq!(json["details"]["requested"], 10);
     assert_eq!(json["details"]["productId"], prod_id);
+    assert_eq!(json["details"]["batchKey"], batch_key);
 }
 
 #[tokio::test]
@@ -289,8 +314,6 @@ async fn optimistic_concurrency_product_version_conflict() {
         name: "Opt Concurrency Product".to_string(),
         category_key: cat_key,
         subcategory_key: subcat_key,
-        cost_price_cents: 1000,
-        selling_price_cents: 2000,
         stock_quantity: 10,
         min_stock_threshold: 2,
         is_serialized: false,
@@ -317,9 +340,6 @@ async fn optimistic_concurrency_product_version_conflict() {
         &format!("/api/inventory/products/{prod_id}"),
         Some(serde_json::json!({
             "name": "Updated Product Name",
-            "sellingPriceCents": 2500,
-            "costPriceCents": 1200,
-            "stockQuantity": 10,
             "minStockThreshold": 2
         })),
         vec![("if-match", "2"), ("x-device-id", "pos-terminal-2")],
@@ -340,9 +360,6 @@ async fn optimistic_concurrency_product_version_conflict() {
         &format!("/api/inventory/products/{prod_id}"),
         Some(serde_json::json!({
             "name": "Updated Product Name",
-            "sellingPriceCents": 2500,
-            "costPriceCents": 1200,
-            "stockQuantity": 10,
             "minStockThreshold": 2
         })),
         vec![("if-match", "1"), ("x-device-id", "pos-terminal-2")],
@@ -559,8 +576,6 @@ async fn sync_changes_items_match_the_rest_dto_shape() {
             name: "Shape Probe Product".to_string(),
             category_key: cat_key.clone(),
             subcategory_key: sub_key.clone(),
-            cost_price_cents: 1000,
-            selling_price_cents: 1500,
             stock_quantity: 7,
             min_stock_threshold: 2,
             is_serialized: false,
@@ -605,8 +620,8 @@ async fn sync_changes_items_match_the_rest_dto_shape() {
     assert_eq!(typed.subcategory, subcategory_name);
 
     // camelCase, and no BSON wrappers leaking through.
-    assert!(product["costPriceCents"].is_number());
-    assert!(product.get("cost_price_cents").is_none());
+    assert!(product["priceTiers"].is_array());
+    assert!(product.get("price_tiers").is_none());
     assert!(product["id"].is_string(), "_id must be a hex string");
     assert!(product.get("_id").is_none());
     assert!(

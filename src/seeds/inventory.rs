@@ -4,7 +4,8 @@ use crate::{
     clients::db::Db,
     core::error::AppError,
     domain::inventory::{
-        CreateCategoryRequest, CreateProductRequest, ProductListQuery, UpdateCategoryRequest,
+        CreateCategoryRequest, CreateProductRequest, OpeningStockRequest, ProductListQuery,
+        UpdateCategoryRequest,
     },
     modules::inventory::service::{category, product},
 };
@@ -155,9 +156,11 @@ async fn seed_category(db: &Db, cat: SeedCategory) -> Result<CategoryOutcome, Ap
                 name: p.name.to_string(),
                 category_key: category_info.key.clone(),
                 subcategory_key: subcat_key.clone(),
-                cost_price_cents: p.cost_price_cents,
-                selling_price_cents: p.selling_price_cents,
-                stock_quantity: p.stock_quantity,
+                opening_stock: (p.stock_quantity > 0).then_some(OpeningStockRequest {
+                    quantity: p.stock_quantity,
+                    unit_cost_cents: p.cost_price_cents,
+                    selling_price_cents: p.selling_price_cents,
+                }),
                 min_stock_threshold: p.min_stock_threshold,
                 suppliers: Vec::new(),
                 is_serialized: false,

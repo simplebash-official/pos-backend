@@ -23,6 +23,39 @@ fn products(db: &TenantDatabase) -> ScopedCollection<ProductDocument> {
     db.collection("products")
 }
 
+/// Sort field standing for "a product's cheapest in-stock price". A product
+/// stores no price (its batches do), so this is computed per row while
+/// sorting: `min_price_stages` (Mongo) / `MIN_PRICE_SQL` (SQLite).
+pub(crate) const MIN_SELLING_PRICE: &str = "min_selling_price_cents";
+
+/// Same-module `$lookup` adding `min_selling_price_cents` (the lowest
+/// selling price among the product's in-stock batches) so a `$sort` on it
+/// works. Product keys are globally unique, so the join can't cross tenants.
+fn min_price_stages() -> Vec<Document> {
+    vec![
+        doc! { "$lookup": {
+            "from": "stock_batches",
+            "localField": "key",
+            "foreignField": "product_key",
+            "as": "_price_batches",
+        } },
+        doc! { "$addFields": { MIN_SELLING_PRICE: { "$min": { "$map": {
+            "input": { "$filter": {
+                "input": "$_price_batches",
+                "cond": { "$and": [
+                    { "$gt": ["$$this.remaining_quantity", 0] },
+                    { "$not": ["$$this.deleted_at"] },
+                ] },
+            } },
+            "in": "$$this.selling_price_cents",
+        } } } } },
+        doc! { "$project": { "_price_batches": 0 } },
+    ]
+}
+
+const MIN_PRICE_SQL: &str = "(SELECT MIN(b.selling_price_cents) FROM stock_batches b \
+     WHERE b.product_key = p.key AND b.remaining_quantity > 0 AND b.deleted_at IS NULL)";
+
 fn row_to_product_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<ProductDocument> {
     let id_str: String = row.get("id");
     let object_id = ObjectId::parse_str(&id_str).ok();
@@ -42,8 +75,6 @@ fn row_to_product_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<ProductDocumen
         name: row.get("name"),
         category_key: row.get("category_key"),
         subcategory_key: row.get("subcategory_key"),
-        cost_price_cents: row.get("cost_price_cents"),
-        selling_price_cents: row.get("selling_price_cents"),
         stock_quantity: row.get("stock_quantity"),
         min_stock_threshold: row.get("min_stock_threshold"),
         is_serialized: is_serialized_int != 0,
@@ -312,10 +343,9 @@ pub(crate) async fn insert_product(
                 r#"
                 INSERT INTO products (
                     key, id, sku, barcode, barcode_source, name, category_key, subcategory_key,
-                    cost_price_cents, selling_price_cents, stock_quantity, min_stock_threshold,
-                    is_serialized, warranty_months, version, created_at, updated_at, deleted_at,
-                    updated_by_device
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    stock_quantity, min_stock_threshold, is_serialized, warranty_months, version,
+                    created_at, updated_at, deleted_at, updated_by_device
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(&document.key)
@@ -326,8 +356,6 @@ pub(crate) async fn insert_product(
             .bind(&document.name)
             .bind(&document.category_key)
             .bind(&document.subcategory_key)
-            .bind(document.cost_price_cents)
-            .bind(document.selling_price_cents)
             .bind(document.stock_quantity)
             .bind(document.min_stock_threshold)
             .bind(if document.is_serialized { 1 } else { 0 })
@@ -390,12 +418,6 @@ pub(crate) async fn update_product(
             if let Ok(subcategory_key) = set_doc.get_str("subcategory_key") {
                 doc.subcategory_key = subcategory_key.to_string();
             }
-            if let Ok(cost) = set_doc.get_i64("cost_price_cents") {
-                doc.cost_price_cents = cost;
-            }
-            if let Ok(selling) = set_doc.get_i64("selling_price_cents") {
-                doc.selling_price_cents = selling;
-            }
             if let Ok(min_stock) = set_doc.get_i64("min_stock_threshold") {
                 doc.min_stock_threshold = min_stock;
             }
@@ -419,9 +441,8 @@ pub(crate) async fn update_product(
                 r#"
                 UPDATE products SET
                     name = ?, sku = ?, barcode = ?, barcode_source = ?,
-                    category_key = ?, subcategory_key = ?, cost_price_cents = ?,
-                    selling_price_cents = ?, min_stock_threshold = ?, is_serialized = ?,
-                    warranty_months = ?, version = ?, updated_at = ?
+                    category_key = ?, subcategory_key = ?, min_stock_threshold = ?,
+                    is_serialized = ?, warranty_months = ?, version = ?, updated_at = ?
                 WHERE id = ?
                 "#,
             )
@@ -431,8 +452,6 @@ pub(crate) async fn update_product(
             .bind(&barcode_source_str)
             .bind(&doc.category_key)
             .bind(&doc.subcategory_key)
-            .bind(doc.cost_price_cents)
-            .bind(doc.selling_price_cents)
             .bind(doc.min_stock_threshold)
             .bind(if doc.is_serialized { 1 } else { 0 })
             .bind(doc.warranty_months)
@@ -660,6 +679,14 @@ fn sqlite_order_by(sort: &Document) -> String {
     let mut parts: Vec<String> = sort
         .iter()
         .map(|(field, order)| {
+            if field == MIN_SELLING_PRICE {
+                let dir = if order.as_i32() == Some(-1) {
+                    "DESC"
+                } else {
+                    "ASC"
+                };
+                return format!("{MIN_PRICE_SQL} {dir}");
+            }
             let column = if field == "_id" { "id" } else { field.as_str() };
             let dir = if order.as_i32() == Some(-1) {
                 "DESC"
@@ -700,6 +727,9 @@ pub(crate) async fn list_products_with_display_names(
             let mut pipeline = Vec::new();
             if !effective_filter.is_empty() {
                 pipeline.push(doc! { "$match": effective_filter });
+            }
+            if sort.contains_key(MIN_SELLING_PRICE) {
+                pipeline.extend(min_price_stages());
             }
             if !sort.is_empty() {
                 pipeline.push(doc! { "$sort": sort });
@@ -926,6 +956,9 @@ pub(crate) async fn aggregate_overview(
             by_category.push(doc! {
                 "$group": { "_id": "$category_key", "count": { "$sum": 1 } }
             });
+            if sort.contains_key(MIN_SELLING_PRICE) {
+                by_subcategory.extend(min_price_stages());
+            }
             by_subcategory.push(doc! { "$sort": sort });
             by_subcategory.push(doc! {
                 "$group": {

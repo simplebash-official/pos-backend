@@ -38,6 +38,7 @@ fn row_to_stock_movement_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<StockMo
         id: object_id,
         key: row.get("key"),
         product_id,
+        batch_key: row.get("batch_key"),
         quantity_delta: row.get("quantity_delta"),
         movement_type,
         reference_id: row.get("reference_id"),
@@ -71,14 +72,16 @@ pub(crate) async fn insert_stock_movement(
             sqlx::query(
                 r#"
                 INSERT INTO stock_movements (
-                    key, id, product_id, quantity_delta, movement_type, reference_id,
-                    note, version, created_at, updated_at, deleted_at, updated_by_device
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    key, id, product_id, batch_key, quantity_delta, movement_type,
+                    reference_id, note, version, created_at, updated_at, deleted_at,
+                    updated_by_device
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(&movement.key)
             .bind(&id)
             .bind(movement.product_id.to_hex())
+            .bind(&movement.batch_key)
             .bind(movement.quantity_delta)
             .bind(movement.movement_type.as_str())
             .bind(&movement.reference_id)
