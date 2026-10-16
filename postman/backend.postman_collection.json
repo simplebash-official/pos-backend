@@ -2313,7 +2313,7 @@
                     "render"
                   ]
                 },
-                "description": "Returns a PDF with **one page per sticker** (`copies` repeats a sticker), each page exactly the label size. Items are `product` (`productKey`, `copies`, `priceCents` = one of the product's current selling prices, required when the design has a price element) or `serial` (`serialNumber`, `copies`; prints that unit's serial at its own batch's price, in-stock units only). Everything else comes from the stored records. Limits: 200 items, 500 copies per item, 500 stickers per print (400). 422 codes: `LABEL_PRODUCT_WITHOUT_BARCODE`, `LABEL_PRICE_REQUIRED`, `PRICE_TIER_UNAVAILABLE`, `LABEL_BARCODE_TOO_NARROW`, `LABEL_QR_TOO_SMALL`. **Requires the `inventory:read` permission** — held by all three roles.",
+                "description": "Returns a PDF with **one page per sticker** (`copies` repeats a sticker), each page exactly the label size. Items are `product` (`productKey`, `copies`, `priceCents` = one of the product's current selling prices, required when the design has a price element) or `serial` (`serialNumber`, `copies`; prints that unit's serial at its own batch's price, in-stock units only). Everything else comes from the stored records. Limits: 200 items, 500 copies per item, 500 stickers per print (400). 422 codes: `LABEL_PRODUCT_WITHOUT_BARCODE`, `LABEL_PRICE_REQUIRED`, `PRICE_TIER_UNAVAILABLE`, `LABEL_BARCODE_TOO_NARROW`, `LABEL_QR_TOO_SMALL`. The print window's **preview**: nothing is recorded (real prints go through *Create Label Print Job*). **Requires the `inventory:write` permission** — Admin and Manager only.",
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"templateKey\": \"starter_price_tag_50x30\",\n  \"items\": [\n    {\n      \"kind\": \"product\",\n      \"productKey\": \"{{productKey}}\",\n      \"copies\": 3,\n      \"priceCents\": 150000\n    },\n    {\n      \"kind\": \"serial\",\n      \"serialNumber\": \"{{serialNumber}}\",\n      \"copies\": 1\n    }\n  ]\n}",
@@ -2357,6 +2357,207 @@
                     }
                   }
                 }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Print jobs",
+          "item": [
+            {
+              "name": "List Label Print Jobs",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{backendBaseUrl}}/api/labels/jobs?page=1&limit=20&from=2026-10-01T00:00:00Z&to=2026-11-01T00:00:00Z&productKey={{productKey}}&action=print",
+                  "host": [
+                    "{{backendBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "labels",
+                    "jobs"
+                  ],
+                  "query": [
+                    {
+                      "key": "page",
+                      "value": "1",
+                      "description": "Page number (1-based)."
+                    },
+                    {
+                      "key": "limit",
+                      "value": "20",
+                      "description": "Jobs per page (max 100)."
+                    },
+                    {
+                      "key": "from",
+                      "value": "2026-10-01T00:00:00Z",
+                      "description": "Only jobs from this instant (RFC 3339).",
+                      "disabled": true
+                    },
+                    {
+                      "key": "to",
+                      "value": "2026-11-01T00:00:00Z",
+                      "description": "Only jobs before this instant (RFC 3339, exclusive).",
+                      "disabled": true
+                    },
+                    {
+                      "key": "productKey",
+                      "value": "{{productKey}}",
+                      "description": "Only jobs that printed this product.",
+                      "disabled": true
+                    },
+                    {
+                      "key": "action",
+                      "value": "print",
+                      "description": "`print` or `download`.",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "The print history, newest first: every print and download with its design, method (`system` print window or `direct` printer), printer, dpi, outcome (`rendered` until reported, `sent`, `failed`), who printed and the items as printed. **Requires the `inventory:write` permission** — Admin and Manager only."
+              },
+              "response": []
+            },
+            {
+              "name": "Create Label Print Job",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{backendBaseUrl}}/api/labels/jobs",
+                  "host": [
+                    "{{backendBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "labels",
+                    "jobs"
+                  ]
+                },
+                "description": "Prints like *Render Labels* and **records the job**. Answers with the PDF; the job key is in the `X-Label-Job-Key` response header. `action` `print` needs `method` (`system` | `direct`) and `dpi` (203/300/600), `printerName` exactly for `direct`; `download` sends all three as `null` and is recorded as `sent`. Nothing is recorded when the items cannot be printed. **Requires the `inventory:write` permission** — Admin and Manager only.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"templateKey\": \"starter_price_tag_50x30\",\n  \"items\": [\n    {\n      \"kind\": \"product\",\n      \"productKey\": \"{{productKey}}\",\n      \"copies\": 3,\n      \"priceCents\": 150000\n    }\n  ],\n  \"action\": \"print\",\n  \"method\": \"direct\",\n  \"printerName\": \"Zebra ZD220\",\n  \"dpi\": 203\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Get Label Print Job",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{backendBaseUrl}}/api/labels/jobs/{{labelJobKey}}",
+                  "host": [
+                    "{{backendBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "labels",
+                    "jobs",
+                    "{{labelJobKey}}"
+                  ]
+                },
+                "description": "One recorded print (404 `LABEL_JOB_NOT_FOUND`). **Requires the `inventory:write` permission** — Admin and Manager only."
+              },
+              "response": []
+            },
+            {
+              "name": "Report Label Print Job",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{backendBaseUrl}}/api/labels/jobs/{{labelJobKey}}",
+                  "host": [
+                    "{{backendBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "labels",
+                    "jobs",
+                    "{{labelJobKey}}"
+                  ]
+                },
+                "description": "What the computer's printer step did with a job that is still `rendered`: `sent`, or `failed` with an `error` reason (1-500 characters). 409 `LABEL_JOB_ALREADY_REPORTED` for a download or a second report. **Requires the `inventory:write` permission** — Admin and Manager only.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"outcome\": \"failed\",\n  \"error\": \"The printer is offline.\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Label Coverage",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{backendBaseUrl}}/api/labels/coverage?page=1&limit=20&status=needed&search=cable&productKeys={{productKey}}",
+                  "host": [
+                    "{{backendBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "labels",
+                    "coverage"
+                  ],
+                  "query": [
+                    {
+                      "key": "page",
+                      "value": "1",
+                      "description": "Page number (1-based)."
+                    },
+                    {
+                      "key": "limit",
+                      "value": "20",
+                      "description": "Products per page (max 100)."
+                    },
+                    {
+                      "key": "status",
+                      "value": "needed",
+                      "description": "Only products in this state: `never`, `needed` or `labelled`.",
+                      "disabled": true
+                    },
+                    {
+                      "key": "search",
+                      "value": "cable",
+                      "description": "Matches name, SKU, barcode or category.",
+                      "disabled": true
+                    },
+                    {
+                      "key": "productKeys",
+                      "value": "{{productKey}}",
+                      "description": "Comma-separated product keys (max 200): only these products, e.g. to print a past job again. Ignores `search`.",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "Every product with its label state: `never` (in stock, never labelled), `needed` (labelled before, but units entered since are still in stock: `receivedSinceLabel`), `labelled`, or `null` (never labelled, nothing in stock). Ordered never → needed → labelled, then by name; `counts` gives each state's total for the search. Failed prints do not count. **Requires the `inventory:write` permission** — Admin and Manager only. A Manager never sees cost prices (Admin only), as on the inventory routes."
               },
               "response": []
             }
@@ -5294,6 +5495,11 @@
     {
       "key": "serialNumber",
       "value": "356938035643809"
+    },
+    {
+      "key": "labelJobKey",
+      "value": "lpj_example",
+      "type": "string"
     }
   ]
 }

@@ -186,6 +186,35 @@ pub(crate) async fn with_price_tiers(db: &Db, product: Product) -> AppResult<Pro
     Ok(product)
 }
 
+/// Units still on the shelf from one batch, and when that batch was entered.
+/// What `labels` needs to tell which units arrived after a product's last label.
+#[derive(Debug, Clone)]
+pub(crate) struct InStockUnits {
+    pub product_key: String,
+    pub remaining_quantity: i64,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// The in-stock units of the given products, one entry per batch. Uses the
+/// batch's `created_at` (when it was entered), not its `received_at`, which a
+/// person may backdate.
+pub(crate) async fn in_stock_units(
+    db: &Db,
+    product_keys: &[String],
+) -> AppResult<Vec<InStockUnits>> {
+    Ok(
+        repository::stock_batch::list_in_stock_batches_for_products(db, product_keys)
+            .await?
+            .into_iter()
+            .map(|batch| InStockUnits {
+                product_key: batch.product_key,
+                remaining_quantity: batch.remaining_quantity,
+                created_at: batch.created_at.to_chrono(),
+            })
+            .collect(),
+    )
+}
+
 /// Splits a sale of `quantity` units at `selling_price_cents` across the
 /// in-stock batches of that price, oldest first. Pure, so the rule is tested
 /// without a database. Errors when the tier doesn't exist

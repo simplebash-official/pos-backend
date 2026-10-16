@@ -16,6 +16,13 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Sticker {
+    /// Which product this sticker is for; kept for the print history, never
+    /// sent to document-server.
+    #[serde(skip)]
+    pub product_key: String,
+    /// The unit's serial number on a serial label (history only, not sent).
+    #[serde(skip)]
+    pub serial_number: Option<String>,
     pub name: String,
     pub sku: String,
     pub category: String,
@@ -97,6 +104,8 @@ mod schema_drift_tests {
 
     fn sticker(price: Option<i64>) -> Sticker {
         Sticker {
+            product_key: "prod_sample".to_string(),
+            serial_number: None,
             name: "USB-C Cable".into(),
             sku: "CAB-USB-0042".into(),
             category: "Cables".into(),

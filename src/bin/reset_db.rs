@@ -67,6 +67,7 @@ async fn main() {
             "generated_documents",
             "document_template_settings",
             "label_templates",
+            "label_print_jobs",
             "login_sessions",
             "users",
             "api_keys",

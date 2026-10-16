@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use futures_util::TryStreamExt;
 use mongodb::{
-    bson::{DateTime as BsonDateTime, Document, doc, oid::ObjectId},
+    bson::{Bson, DateTime as BsonDateTime, Document, doc, oid::ObjectId},
     options::ReturnDocument,
 };
 use sqlx::Row;
@@ -87,6 +87,34 @@ fn row_to_product_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<ProductDocumen
     })
 }
 
+/// The SQLite `LIKE` pattern (`%text%`, with `%`, `_` and `\` escaped for
+/// `ESCAPE '\'`) for a `{ "$regex": … }` search clause. `service::product`
+/// sends a BSON regex built by `build_bson_regex`, whose text is regex-escaped,
+/// so the escaping is undone first; a plain string is taken as it is.
+fn like_pattern(clause: &Document) -> Option<String> {
+    let regex = match clause.get("$regex")? {
+        Bson::RegularExpression(regex) => regex.pattern.to_string(),
+        Bson::String(text) => text.clone(),
+        _ => return None,
+    };
+    let mut text = String::with_capacity(regex.len() + 2);
+    text.push('%');
+    let mut chars = regex.chars();
+    while let Some(c) = chars.next() {
+        // `regex_escape` puts a backslash before each special character.
+        let literal = match c {
+            '\\' => chars.next().unwrap_or('\\'),
+            other => other,
+        };
+        if matches!(literal, '%' | '_' | '\\') {
+            text.push('\\');
+        }
+        text.push(literal);
+    }
+    text.push('%');
+    Some(text)
+}
+
 fn build_product_where_clause(filter: &Document) -> (String, Vec<String>) {
     let mut conditions = vec!["p.deleted_at IS NULL".to_string()];
     let mut bindings = Vec::new();
@@ -132,19 +160,19 @@ fn build_product_where_clause(filter: &Document) -> (String, Vec<String>) {
                     for or_item in or_arr {
                         if let Some(or_doc) = or_item.as_document() {
                             if let Ok(pat) = or_doc.get_document("name") {
-                                if let Ok(s) = pat.get_str("$regex") {
-                                    or_parts.push("p.name LIKE ?".to_string());
-                                    bindings.push(format!("%{}%", s));
+                                if let Some(like) = like_pattern(pat) {
+                                    or_parts.push("p.name LIKE ? ESCAPE '\\'".to_string());
+                                    bindings.push(like);
                                 }
                             } else if let Ok(pat) = or_doc.get_document("sku") {
-                                if let Ok(s) = pat.get_str("$regex") {
-                                    or_parts.push("p.sku LIKE ?".to_string());
-                                    bindings.push(format!("%{}%", s));
+                                if let Some(like) = like_pattern(pat) {
+                                    or_parts.push("p.sku LIKE ? ESCAPE '\\'".to_string());
+                                    bindings.push(like);
                                 }
                             } else if let Ok(pat) = or_doc.get_document("barcode") {
-                                if let Ok(s) = pat.get_str("$regex") {
-                                    or_parts.push("p.barcode LIKE ?".to_string());
-                                    bindings.push(format!("%{}%", s));
+                                if let Some(like) = like_pattern(pat) {
+                                    or_parts.push("p.barcode LIKE ? ESCAPE '\\'".to_string());
+                                    bindings.push(like);
                                 }
                             } else if let Ok(cat_in) = or_doc.get_document("category_key") {
                                 if let Ok(arr) = cat_in.get_array("$in") {
@@ -1131,5 +1159,48 @@ pub(crate) async fn aggregate_overview(
                 subcategory_data,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::utils::build_bson_regex;
+
+    #[test]
+    fn a_search_becomes_an_escaped_like_pattern() {
+        let clause = |term: &str| doc! { "$regex": build_bson_regex(term) };
+        assert_eq!(like_pattern(&clause("Mug")).as_deref(), Some("%Mug%"));
+        // Regex escaping is undone; LIKE's own wildcards are escaped.
+        assert_eq!(
+            like_pattern(&clause("2.5-inch (Black)")).as_deref(),
+            Some("%2.5-inch (Black)%")
+        );
+        assert_eq!(
+            like_pattern(&clause("50%_off")).as_deref(),
+            Some("%50\\%\\_off%")
+        );
+        assert_eq!(like_pattern(&clause("a\\b")).as_deref(), Some("%a\\\\b%"));
+        assert_eq!(
+            like_pattern(&doc! { "$regex": "plain" }).as_deref(),
+            Some("%plain%")
+        );
+        assert_eq!(like_pattern(&doc! { "$regex": 5 }), None);
+    }
+
+    #[test]
+    fn a_search_filters_name_sku_and_barcode_on_sqlite() {
+        let pattern = build_bson_regex("Mug");
+        let filter = doc! { "$and": [ { "$or": [
+            { "name": { "$regex": pattern.clone() } },
+            { "sku": { "$regex": pattern.clone() } },
+            { "barcode": { "$regex": pattern } },
+        ] } ] };
+        let (clause, bindings) = build_product_where_clause(&filter);
+        assert!(
+            clause.contains("(p.name LIKE ? ESCAPE '\\' OR p.sku LIKE ? ESCAPE '\\' OR p.barcode LIKE ? ESCAPE '\\')"),
+            "{clause}"
+        );
+        assert_eq!(bindings, ["%Mug%", "%Mug%", "%Mug%"]);
     }
 }

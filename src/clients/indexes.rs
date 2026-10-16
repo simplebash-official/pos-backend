@@ -236,6 +236,19 @@ pub fn index_specs(multi_tenant: bool) -> Vec<IndexSpec> {
         doc! { "key": 1 },
         true,
     );
+    // Label print history (`modules::labels`): looked up by key, listed newest first.
+    specs.add(
+        "label_print_jobs",
+        "label_print_jobs_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    specs.add(
+        "label_print_jobs",
+        "label_print_jobs_created_at",
+        doc! { "created_at": -1 },
+        false,
+    );
 
     // Platform directory (`modules::tenants`): shop codes are globally unique
     // and the collection is not tenant-owned, so it is never tenant-prefixed.
@@ -377,8 +390,8 @@ mod tests {
         // 17 sync + 4 created_at + 2 invoice analytics + 3 reminders + products_key
         // + idempotency unique/ttl + serial unique + serial status
         // + stock_batches product_key + shop_profiles + document_template_settings
-        // + label_templates.
-        assert_eq!(specs.len(), 35);
+        // + label_templates + label_print_jobs key/created_at.
+        assert_eq!(specs.len(), 37);
         assert!(specs.iter().all(|s| s.keys.get(TENANT_FIELD).is_none()));
         assert!(names(&specs).contains(&"products.sync_updated_at_key".to_string()));
         assert!(names(&specs).contains(&"idempotency_keys.idempotency_ttl".to_string()));
@@ -396,6 +409,7 @@ mod tests {
                 "shop_profiles_key_unique",
                 "document_template_settings_key_unique",
                 "label_templates_key_unique",
+                "label_print_jobs_key_unique",
             ]
         );
         let sync = specs

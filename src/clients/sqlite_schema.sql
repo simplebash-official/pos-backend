@@ -639,6 +639,29 @@ CREATE TABLE IF NOT EXISTS label_templates (
     updated_at TEXT NOT NULL
 );
 
+-- Label print history (`modules::labels`): one row per print or download,
+-- `items` is a JSON array of the sticker groups as printed. Not synced.
+CREATE TABLE IF NOT EXISTS label_print_jobs (
+    key TEXT PRIMARY KEY,
+    template_key TEXT NOT NULL,
+    template_name TEXT NOT NULL,
+    width_mm REAL NOT NULL,
+    height_mm REAL NOT NULL,
+    action TEXT NOT NULL,
+    method TEXT,
+    printer_name TEXT,
+    dpi INTEGER,
+    outcome TEXT NOT NULL,
+    error TEXT,
+    printed_by_user_id TEXT NOT NULL,
+    printed_by_name TEXT NOT NULL,
+    items TEXT NOT NULL,
+    total_labels INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_label_print_jobs_created_at ON label_print_jobs (created_at);
+
 CREATE TABLE IF NOT EXISTS shop_profiles (
     key TEXT PRIMARY KEY,
     id TEXT NOT NULL,

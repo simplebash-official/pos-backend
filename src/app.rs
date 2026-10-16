@@ -90,7 +90,12 @@ pub fn build_router(state: AppState) -> Router {
             Method::PATCH,
             Method::DELETE,
         ])
-        .allow_headers(tower_http::cors::Any);
+        .allow_headers(tower_http::cors::Any)
+        // A recorded label print answers with its PDF, so the job's key rides in a
+        // header the browser must be allowed to read across origins (desktop app).
+        .expose_headers([axum::http::HeaderName::from_static(
+            crate::modules::labels::routes::LABEL_JOB_KEY_HEADER,
+        )]);
 
     // Logs every request/response to the terminal (method, path, status,
     // latency) at INFO level, so nothing extra needs to be set (e.g.

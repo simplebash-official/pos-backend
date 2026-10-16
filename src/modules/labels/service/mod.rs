@@ -5,6 +5,7 @@
 // as one PDF page per sticker. This module is the only caller of
 // `documents::service::render_uncached` for labels.
 
+pub(crate) mod jobs;
 pub(crate) mod payload;
 pub(crate) mod starters;
 pub(crate) mod validate;
@@ -246,6 +247,8 @@ async fn resolve_stickers(
                     None => None,
                 };
                 Sticker {
+                    product_key: product.key,
+                    serial_number: None,
                     name: product.name,
                     sku: product.sku,
                     category: product.category,
@@ -263,6 +266,8 @@ async fn resolve_stickers(
                     inventory::service::product_serial::lookup_in_stock_serial(db, serial_number)
                         .await?;
                 Sticker {
+                    product_key: lookup.product.key,
+                    serial_number: Some(lookup.serial.serial_number.clone()),
                     name: lookup.product.name,
                     sku: lookup.product.sku,
                     category: lookup.product.category,
@@ -345,7 +350,10 @@ pub(crate) async fn preview_label(
             "The sample code must be 1 to 64 characters.",
         ));
     }
+    // A preview is a sample, never recorded, so it belongs to no product.
     let sticker = Sticker {
+        product_key: String::new(),
+        serial_number: None,
         name,
         sku,
         category,
