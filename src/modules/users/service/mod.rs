@@ -728,11 +728,10 @@ pub async fn verify_user_pin(
                         continue;
                     }
                 }
-                "manager" => {
-                    if user_doc.role != Role::Admin && user_doc.role != Role::Manager {
+                "manager"
+                    if user_doc.role != Role::Admin && user_doc.role != Role::Manager => {
                         continue;
                     }
-                }
                 _ => {}
             }
         }

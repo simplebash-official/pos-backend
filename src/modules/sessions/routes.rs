@@ -56,6 +56,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         (status = 400, description = "Validation failed", body = ErrorResponse),
         (status = 409, description = "Active session already exists", body = ErrorResponse)
     ),
+    security(("bearerAuth" = [])),
     tag = "Register Sessions"
 )]
 async fn open_session(
@@ -64,7 +65,7 @@ async fn open_session(
     device_id: DeviceId,
     Json(body): Json<OpenSessionRequest>,
 ) -> AppResult<(StatusCode, Json<ApiResponse<RegisterSession>>)> {
-    current_user.require_permission(perm::SESSIONS_MANAGE)?;
+    current_user.require_permission(perm::REGISTER_SESSIONS_MANAGE)?;
     let session = service::open_session(
         &state.db,
         current_user.user_id,
@@ -86,6 +87,7 @@ async fn open_session(
     responses(
         (status = 200, description = "Current active session for terminal or cashier", body = ApiResponse<Option<RegisterSession>>)
     ),
+    security(("bearerAuth" = [])),
     tag = "Register Sessions"
 )]
 async fn get_current_session(
@@ -93,7 +95,7 @@ async fn get_current_session(
     current_user: CurrentUser,
     Query(query): Query<CurrentSessionQuery>,
 ) -> AppResult<Json<ApiResponse<Option<RegisterSession>>>> {
-    current_user.require_permission(perm::SESSIONS_VIEW)?;
+    current_user.require_permission(perm::REGISTER_SESSIONS_VIEW)?;
 
     let session = if let Some(terminal_id) = query.terminal_id.filter(|t| !t.trim().is_empty()) {
         service::get_active_session_for_terminal(&state.db, &terminal_id).await?
@@ -114,6 +116,7 @@ async fn get_current_session(
         (status = 200, description = "Register session details", body = ApiResponse<RegisterSession>),
         (status = 404, description = "Session not found", body = ErrorResponse)
     ),
+    security(("bearerAuth" = [])),
     tag = "Register Sessions"
 )]
 async fn get_session(
@@ -121,7 +124,7 @@ async fn get_session(
     current_user: CurrentUser,
     Path(key): Path<String>,
 ) -> AppResult<Json<ApiResponse<RegisterSession>>> {
-    current_user.require_permission(perm::SESSIONS_VIEW)?;
+    current_user.require_permission(perm::REGISTER_SESSIONS_VIEW)?;
     let session = service::get_session(&state.db, &key).await?;
     Ok(Json(ApiResponse::success(session, "Register session details retrieved successfully")))
 }
@@ -133,6 +136,7 @@ async fn get_session(
     responses(
         (status = 200, description = "List of register sessions", body = ApiResponse<SessionListResponse>)
     ),
+    security(("bearerAuth" = [])),
     tag = "Register Sessions"
 )]
 async fn list_sessions(
@@ -140,7 +144,7 @@ async fn list_sessions(
     current_user: CurrentUser,
     Query(query): Query<SessionListQuery>,
 ) -> AppResult<Json<ApiResponse<SessionListResponse>>> {
-    current_user.require_permission(perm::SESSIONS_VIEW)?;
+    current_user.require_permission(perm::REGISTER_SESSIONS_VIEW)?;
     let response = service::list_sessions(&state.db, query).await?;
     Ok(Json(ApiResponse::success(response, "Register sessions retrieved successfully")))
 }
@@ -156,6 +160,7 @@ async fn list_sessions(
         (status = 200, description = "Blind count recorded", body = ApiResponse<RegisterSession>),
         (status = 404, description = "Session not found", body = ErrorResponse)
     ),
+    security(("bearerAuth" = [])),
     tag = "Register Sessions"
 )]
 async fn submit_blind_count(
@@ -164,7 +169,7 @@ async fn submit_blind_count(
     Path(key): Path<String>,
     Json(body): Json<SubmitBlindCountRequest>,
 ) -> AppResult<Json<ApiResponse<RegisterSession>>> {
-    current_user.require_permission(perm::SESSIONS_MANAGE)?;
+    current_user.require_permission(perm::REGISTER_SESSIONS_MANAGE)?;
     let session = service::submit_blind_count(&state.db, &key, body).await?;
     Ok(Json(ApiResponse::success(session, "Blind count recorded successfully")))
 }
@@ -180,6 +185,7 @@ async fn submit_blind_count(
         (status = 200, description = "Register session closed", body = ApiResponse<RegisterSession>),
         (status = 400, description = "Validation failed", body = ErrorResponse)
     ),
+    security(("bearerAuth" = [])),
     tag = "Register Sessions"
 )]
 async fn close_session(
@@ -188,7 +194,7 @@ async fn close_session(
     Path(key): Path<String>,
     Json(body): Json<CloseSessionRequest>,
 ) -> AppResult<Json<ApiResponse<RegisterSession>>> {
-    current_user.require_permission(perm::SESSIONS_MANAGE)?;
+    current_user.require_permission(perm::REGISTER_SESSIONS_MANAGE)?;
     let session = service::close_session(
         &state.db,
         &key,
@@ -212,6 +218,7 @@ async fn close_session(
         (status = 200, description = "Register session reopened", body = ApiResponse<RegisterSession>),
         (status = 403, description = "Forbidden: requires manager/admin", body = ErrorResponse)
     ),
+    security(("bearerAuth" = [])),
     tag = "Register Sessions"
 )]
 async fn reopen_session(
@@ -220,7 +227,7 @@ async fn reopen_session(
     Path(key): Path<String>,
     Json(body): Json<ReopenSessionRequest>,
 ) -> AppResult<Json<ApiResponse<RegisterSession>>> {
-    current_user.require_permission(perm::SESSIONS_MANAGE)?;
+    current_user.require_permission(perm::REGISTER_SESSIONS_MANAGE)?;
     let session = service::reopen_session(
         &state.db,
         &key,
@@ -245,6 +252,7 @@ async fn reopen_session(
         (status = 201, description = "Variance converted to late owner withdrawal", body = ApiResponse<CashMovement>),
         (status = 400, description = "Validation failed", body = ErrorResponse)
     ),
+    security(("bearerAuth" = [])),
     tag = "Register Sessions"
 )]
 async fn convert_variance(
@@ -254,7 +262,7 @@ async fn convert_variance(
     Path(key): Path<String>,
     Json(body): Json<ConvertVarianceRequest>,
 ) -> AppResult<(StatusCode, Json<ApiResponse<CashMovement>>)> {
-    current_user.require_permission(perm::SESSIONS_MANAGE)?;
+    current_user.require_permission(perm::REGISTER_SESSIONS_MANAGE)?;
     let movement = service::convert_variance(
         &state.db,
         &key,
@@ -278,6 +286,7 @@ async fn convert_variance(
         (status = 200, description = "Z-Report end of session summary", body = ApiResponse<ZReportResponse>),
         (status = 404, description = "Session not found", body = ErrorResponse)
     ),
+    security(("bearerAuth" = [])),
     tag = "Register Sessions"
 )]
 async fn get_z_report(
@@ -285,7 +294,7 @@ async fn get_z_report(
     current_user: CurrentUser,
     Path(key): Path<String>,
 ) -> AppResult<Json<ApiResponse<ZReportResponse>>> {
-    current_user.require_permission(perm::SESSIONS_VIEW)?;
+    current_user.require_permission(perm::REGISTER_SESSIONS_VIEW)?;
     let report = service::generate_z_report(&state.db, &key).await?;
     Ok(Json(ApiResponse::success(report, "Z-Report generated successfully")))
 }
@@ -298,6 +307,7 @@ async fn get_z_report(
         (status = 201, description = "Cash movement recorded", body = ApiResponse<CashMovement>),
         (status = 400, description = "Validation failed", body = ErrorResponse)
     ),
+    security(("bearerAuth" = [])),
     tag = "Cash Movements"
 )]
 async fn create_cash_movement(
@@ -326,6 +336,7 @@ async fn create_cash_movement(
     responses(
         (status = 200, description = "List of cash movements", body = ApiResponse<CashMovementListResponse>)
     ),
+    security(("bearerAuth" = [])),
     tag = "Cash Movements"
 )]
 async fn list_cash_movements(
@@ -348,6 +359,7 @@ async fn list_cash_movements(
         (status = 200, description = "Cash movement details", body = ApiResponse<CashMovement>),
         (status = 404, description = "Movement not found", body = ErrorResponse)
     ),
+    security(("bearerAuth" = [])),
     tag = "Cash Movements"
 )]
 async fn get_cash_movement(
@@ -369,6 +381,7 @@ async fn get_cash_movement(
     responses(
         (status = 200, description = "Current drawer ledger state", body = ApiResponse<Option<DrawerState>>)
     ),
+    security(("bearerAuth" = [])),
     tag = "Register Sessions"
 )]
 async fn get_drawer_state(
@@ -376,7 +389,7 @@ async fn get_drawer_state(
     current_user: CurrentUser,
     Path(terminal_id): Path<String>,
 ) -> AppResult<Json<ApiResponse<Option<DrawerState>>>> {
-    current_user.require_permission(perm::SESSIONS_VIEW)?;
+    current_user.require_permission(perm::REGISTER_SESSIONS_VIEW)?;
     let drawer_state = drawer::get_drawer_state(&state.db, &terminal_id).await?;
     Ok(Json(ApiResponse::success(drawer_state.map(|s| s.into_drawer_state()), "Drawer state retrieved successfully")))
 }

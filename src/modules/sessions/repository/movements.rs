@@ -22,7 +22,7 @@ fn cash_movements_col(db: &TenantDatabase) -> ScopedCollection<CashMovementDocum
 pub(crate) fn movement_from_sqlite_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<CashMovementDocument> {
     let id_str: String = row.get("id");
     let movement_type_str: String = row.get("movement_type");
-    let movement_type = CashMovementType::from_str(&movement_type_str)
+    let movement_type = CashMovementType::parse(&movement_type_str)
         .unwrap_or(CashMovementType::PayIn);
     let recorded_late_int: i64 = row.get("recorded_late");
     let created_at_str: String = row.get("created_at");
@@ -196,7 +196,7 @@ pub async fn list_cash_movements(
             }
             if let Some(to) = &query.to {
                 filter.entry("created_at".to_string()).or_insert_with(|| doc! {}.into());
-                if let Some(d) = filter.get_document_mut("created_at").ok() {
+                if let Ok(d) = filter.get_document_mut("created_at") {
                     d.insert("$lte", to);
                 }
             }

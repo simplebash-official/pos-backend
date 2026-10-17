@@ -15,7 +15,8 @@ pub const ADMIN_USERNAME: &str = "admin";
 const ADMIN_PERMISSIONS: &[&str] = &[
     perm::USERS_MANAGE,
     perm::SESSIONS_VIEW,
-    perm::SESSIONS_MANAGE,
+    perm::REGISTER_SESSIONS_VIEW,
+    perm::REGISTER_SESSIONS_MANAGE,
     perm::CASH_MOVEMENTS_VIEW,
     perm::CASH_MOVEMENTS_CREATE,
     perm::INVENTORY_READ,
@@ -38,7 +39,8 @@ const ADMIN_PERMISSIONS: &[&str] = &[
 const MANAGER_PERMISSIONS: &[&str] = &[
     perm::USERS_MANAGE_STAFF,
     perm::SESSIONS_VIEW,
-    perm::SESSIONS_MANAGE,
+    perm::REGISTER_SESSIONS_VIEW,
+    perm::REGISTER_SESSIONS_MANAGE,
     perm::CASH_MOVEMENTS_VIEW,
     perm::CASH_MOVEMENTS_CREATE,
     perm::INVENTORY_READ,
@@ -63,8 +65,8 @@ const STAFF_PERMISSIONS: &[&str] = &[
     perm::PRINT_JOBS_WRITE,
     perm::CUSTOMERS_WRITE,
     perm::EMPLOYEES_READ,
-    perm::SESSIONS_VIEW,
-    perm::SESSIONS_MANAGE,
+    perm::REGISTER_SESSIONS_VIEW,
+    perm::REGISTER_SESSIONS_MANAGE,
     perm::CASH_MOVEMENTS_VIEW,
     perm::CASH_MOVEMENTS_CREATE,
 ];

@@ -499,7 +499,7 @@ pub async fn list_sessions(
     let page = query.page.unwrap_or(1).max(1);
     let limit = query.limit.unwrap_or(20).min(100);
     let (docs, total) = sessions::list_sessions(db, &query).await?;
-    let total_pages = (total + limit - 1) / limit;
+    let total_pages = total.div_ceil(limit);
 
     Ok(SessionListResponse {
         sessions: docs.into_iter().map(|d| d.into_register_session()).collect(),

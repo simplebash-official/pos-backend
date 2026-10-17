@@ -807,8 +807,8 @@ pub async fn complete_sale(
                 warnings.push(format!("Register session sales counters failed to update: {err}"));
             }
 
-            if cash_delta != 0 {
-                if let Err(err) = crate::modules::sessions::repository::drawer::update_drawer_balance(
+            if cash_delta != 0
+                && let Err(err) = crate::modules::sessions::repository::drawer::update_drawer_balance(
                     db,
                     term_id,
                     cash_delta,
@@ -817,7 +817,6 @@ pub async fn complete_sale(
                 {
                     warnings.push(format!("Cash drawer balance failed to update: {err}"));
                 }
-            }
         }
 
         // Run every line item's stock/ticket side effect concurrently instead of

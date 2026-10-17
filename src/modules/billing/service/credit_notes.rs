@@ -963,8 +963,8 @@ async fn finish_create_credit_note(
                 .filter(|l| l.method == "cash")
                 .map(|l| l.amount_cents)
                 .sum();
-            if cash_refunded > 0 {
-                if let Some(ref s_key) = resolved_session_key {
+            if cash_refunded > 0
+                && let Some(ref s_key) = resolved_session_key {
                     let _ = crate::modules::sessions::repository::sessions::increment_session_refunds(
                         db,
                         s_key,
@@ -980,7 +980,6 @@ async fn finish_create_credit_note(
                         .await;
                     }
                 }
-            }
         }
     }
 

@@ -26,7 +26,7 @@ impl SessionStatus {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "open" => Some(SessionStatus::Open),
             "closing" => Some(SessionStatus::Closing),
@@ -67,7 +67,7 @@ impl CashMovementType {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "pay_in" => Some(CashMovementType::PayIn),
             "pay_out_expense" => Some(CashMovementType::PayOutExpense),

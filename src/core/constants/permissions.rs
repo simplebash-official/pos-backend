@@ -12,8 +12,12 @@ pub const USERS_MANAGE: &str = "users:manage";
 /// Staff-account-only management — granted to Manager, who may create/edit/
 /// delete Staff accounts but not Manager or Admin accounts.
 pub const USERS_MANAGE_STAFF: &str = "users:manage:staff";
+/// Lists the shop's login sessions (`/api/auth/sessions`). Admin and Manager only.
 pub const SESSIONS_VIEW: &str = "sessions:view";
-pub const SESSIONS_MANAGE: &str = "sessions:manage";
+/// Opening, counting and closing a cashier's register shift. Not the login
+/// sessions above: every role that takes payments needs this one.
+pub const REGISTER_SESSIONS_VIEW: &str = "register_sessions:view";
+pub const REGISTER_SESSIONS_MANAGE: &str = "register_sessions:manage";
 pub const CASH_MOVEMENTS_CREATE: &str = "cash_movements:create";
 pub const CASH_MOVEMENTS_VIEW: &str = "cash_movements:view";
 

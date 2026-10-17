@@ -157,7 +157,7 @@ pub async fn list_movements(
     let page = query.page.unwrap_or(1).max(1);
     let limit = query.limit.unwrap_or(50).min(200);
     let (docs, total) = movements::list_cash_movements(db, &query).await?;
-    let total_pages = (total + limit - 1) / limit;
+    let total_pages = total.div_ceil(limit);
 
     Ok(CashMovementListResponse {
         movements: docs.into_iter().map(|d| d.into_cash_movement()).collect(),

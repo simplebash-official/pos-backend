@@ -113,8 +113,8 @@ pub async fn record_payment(
             )
             .await;
 
-            if cash_delta != 0 {
-                if let Ok(Some(sess)) = crate::modules::sessions::repository::sessions::find_session_by_key(db, s_key).await {
+            if cash_delta != 0
+                && let Ok(Some(sess)) = crate::modules::sessions::repository::sessions::find_session_by_key(db, s_key).await {
                     let _ = crate::modules::sessions::repository::drawer::update_drawer_balance(
                         db,
                         &sess.terminal_id,
@@ -122,7 +122,6 @@ pub async fn record_payment(
                     )
                     .await;
                 }
-            }
         }
 
         let new_total_paid = already_paid + inserted.amount_cents;

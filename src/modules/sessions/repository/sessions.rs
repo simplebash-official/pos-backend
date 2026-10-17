@@ -22,7 +22,7 @@ fn sessions_col(db: &TenantDatabase) -> ScopedCollection<RegisterSessionDocument
 pub(crate) fn session_from_sqlite_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<RegisterSessionDocument> {
     let id_str: String = row.get("id");
     let status_str: String = row.get("status");
-    let status = SessionStatus::from_str(&status_str).unwrap_or(SessionStatus::Open);
+    let status = SessionStatus::parse(&status_str).unwrap_or(SessionStatus::Open);
 
     let opening_denominations_str: Option<String> = row.get("opening_denominations");
     let opening_denominations = opening_denominations_str
@@ -224,13 +224,11 @@ pub async fn find_session_by_id_or_key(
     db: &Db,
     id_or_key: &str,
 ) -> AppResult<Option<RegisterSessionDocument>> {
-    if let Ok(object_id) = ObjectId::parse_str(id_or_key) {
-        if let Db::Mongo(mongo_db) = db {
-            if let Some(doc) = sessions_col(mongo_db).find_one(doc! { "_id": object_id }).await? {
+    if let Ok(object_id) = ObjectId::parse_str(id_or_key)
+        && let Db::Mongo(mongo_db) = db
+            && let Some(doc) = sessions_col(mongo_db).find_one(doc! { "_id": object_id }).await? {
                 return Ok(Some(doc));
             }
-        }
-    }
     match db {
         Db::Mongo(mongo_db) => {
             let doc = sessions_col(mongo_db)
@@ -615,7 +613,7 @@ pub async fn list_sessions(
             }
             if let Some(to) = &query.to {
                 filter.entry("opened_at".to_string()).or_insert_with(|| doc! {}.into());
-                if let Some(d) = filter.get_document_mut("opened_at").ok() {
+                if let Ok(d) = filter.get_document_mut("opened_at") {
                     d.insert("$lte", to);
                 }
             }
