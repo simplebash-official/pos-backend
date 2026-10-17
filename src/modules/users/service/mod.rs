@@ -331,6 +331,7 @@ pub async fn create_user(db: &Db, body: CreateUserRequest) -> AppResult<User> {
         is_active: true,
         employee_key: employee_key.clone(),
         preferences: None,
+        pin_hash: None,
         created_at: now,
         updated_at: now,
     };
@@ -417,6 +418,7 @@ pub async fn create_owner_admin_if_absent(
         is_active: true,
         employee_key: None,
         preferences: None,
+        pin_hash: None,
         created_at: now,
         updated_at: now,
     };
@@ -706,3 +708,69 @@ pub(crate) async fn find_user_summaries_by_employee_keys(
         })
         .collect())
 }
+
+/// Verifies a numeric PIN against active users with the required role.
+pub async fn verify_user_pin(
+    db: &Db,
+    pin: &str,
+    required_role: Option<&str>,
+) -> AppResult<Option<User>> {
+    let filter = doc! { "is_active": true };
+    let users = repository::list_users(db, filter).await?;
+    for user_doc in users {
+        let Some(pin_hash) = &user_doc.pin_hash else {
+            continue;
+        };
+        if let Some(req_role) = required_role {
+            match req_role.to_lowercase().as_str() {
+                "owner" | "admin" => {
+                    if user_doc.role != Role::Admin {
+                        continue;
+                    }
+                }
+                "manager" => {
+                    if user_doc.role != Role::Admin && user_doc.role != Role::Manager {
+                        continue;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if verify_password(pin, pin_hash).unwrap_or(false) {
+            return Ok(Some(user_doc.into_user()));
+        }
+    }
+    Ok(None)
+}
+
+/// Sets or updates a numeric PIN for a user account.
+pub async fn set_user_pin(
+    db: &Db,
+    user_id_or_key: &str,
+    pin: &str,
+) -> AppResult<()> {
+    if pin.len() < 4 || pin.len() > 8 || !pin.chars().all(|c| c.is_ascii_digit()) {
+        return Err(AppError::validation("PIN must be 4 to 8 numeric digits"));
+    }
+    let user_doc = if let Ok(oid) = ObjectId::parse_str(user_id_or_key) {
+        repository::find_user_by_id(db, oid).await?
+    } else {
+        None
+    };
+    let user_doc = match user_doc {
+        Some(u) => u,
+        None => repository::find_user_by_username(db, user_id_or_key).await?
+            .ok_or_else(|| AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND))?,
+    };
+
+    let hashed = hash_password(pin)?;
+    let oid = user_doc.id.expect("persisted user must have id");
+    repository::update_user(
+        db,
+        oid,
+        doc! { "pin_hash": hashed, "updated_at": BsonDateTime::now() },
+    )
+    .await?;
+    Ok(())
+}
+

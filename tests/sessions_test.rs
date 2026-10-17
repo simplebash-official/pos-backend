@@ -1,0 +1,658 @@
+mod common;
+
+use axum::{
+    body::Body,
+    http::{
+        Request, StatusCode,
+        header::{AUTHORIZATION, CONTENT_TYPE},
+    },
+};
+use serde_json::{Value, json};
+use simplebash_pos_backend::{
+    core::constants::roles,
+    domain::users::Role,
+};
+use tower::ServiceExt;
+
+async fn execute(router: &axum::Router, request: Request<Body>) -> (StatusCode, Value) {
+    let response = router.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes).unwrap()
+    };
+    (status, json)
+}
+
+async fn send_authed(
+    router: &axum::Router,
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+    token: &str,
+) -> (StatusCode, Value) {
+    let mut builder = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(AUTHORIZATION, format!("Bearer {token}"));
+    let req = if let Some(value) = body {
+        builder = builder.header(CONTENT_TYPE, "application/json");
+        builder.body(Body::from(value.to_string())).unwrap()
+    } else {
+        builder.body(Body::empty()).unwrap()
+    };
+    execute(router, req).await
+}
+
+fn mint_token_for(
+    config: &simplebash_pos_backend::core::config::Config,
+    user_id_or_username: &str,
+    role: Option<Role>,
+    permissions: &[&str],
+) -> String {
+    let claims = simplebash_pos_backend::core::middleware::auth::Claims {
+        sub: user_id_or_username.to_string(),
+        exp: 9_999_999_999,
+        role,
+        permissions: permissions.iter().map(|p| p.to_string()).collect(),
+        tid: None,
+        scope: None,
+        did: None,
+    };
+    jsonwebtoken::encode(
+        &jsonwebtoken::Header::default(),
+        &claims,
+        &jsonwebtoken::EncodingKey::from_secret(config.jwt_secret.as_bytes()),
+    )
+    .unwrap()
+}
+
+#[tokio::test]
+async fn session_full_lifecycle_and_z_report() {
+    let app = common::spawn_app().await;
+
+    // Seed Admin
+    simplebash_pos_backend::seeds::admin::seed_admin(&app.db_handle, None, None)
+        .await
+        .unwrap();
+
+    let admin_token = mint_token_for(
+        &app.config,
+        "admin",
+        Some(Role::Admin),
+        roles::default_permissions(Role::Admin),
+    );
+
+    let mgr_username = format!("mgr_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+    let staff_username = format!("stf_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+
+    // Create Manager
+    let (status, mgr_res) = send_authed(
+        &app.router,
+        "POST",
+        "/api/users",
+        Some(json!({
+            "name": "Manager Bob",
+            "username": mgr_username,
+            "password": "Password123!",
+            "role": "manager",
+        })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "Mgr body: {mgr_res}");
+    let manager_id = mgr_res["data"]["id"].as_str().unwrap();
+
+    let manager_token = mint_token_for(
+        &app.config,
+        manager_id,
+        Some(Role::Manager),
+        roles::default_permissions(Role::Manager),
+    );
+
+    // Create Staff
+    let (status, staff_res) = send_authed(
+        &app.router,
+        "POST",
+        "/api/users",
+        Some(json!({
+            "name": "Staff Alice",
+            "username": staff_username,
+            "password": "Password123!",
+            "role": "staff",
+        })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "Staff body: {staff_res}");
+    let staff_id = staff_res["data"]["id"].as_str().unwrap();
+
+    let staff_token = mint_token_for(
+        &app.config,
+        staff_id,
+        Some(Role::Staff),
+        roles::default_permissions(Role::Staff),
+    );
+
+    // 1. Set PINs for Admin and Manager
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/auth/set-pin",
+        Some(json!({ "pin": "9999" })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/auth/set-pin",
+        Some(json!({ "pin": "5555" })),
+        &manager_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+
+    // Verify PIN works
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/auth/verify-pin",
+        Some(json!({ "pin": "9999", "requiredRole": "admin" })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    assert_eq!(body["data"]["valid"], true);
+
+    // 2. Open session on unique terminal with float 10,000 cents (Rs 100)
+    let terminal_id = format!("term_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/sessions/open",
+        Some(json!({
+            "terminalId": terminal_id,
+            "openingFloatCents": 10000,
+            "openingDenominations": { "note_100": 1 },
+            "openingNote": "Morning Shift"
+        })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "Body: {body}");
+    let session_key = body["data"]["key"].as_str().unwrap().to_string();
+    assert_eq!(body["data"]["status"], "open");
+    assert_eq!(body["data"]["openingFloatCents"], 10000);
+
+    // Guard: Opening another session on same terminal should conflict
+    let (status, _) = send_authed(
+        &app.router,
+        "POST",
+        "/api/sessions/open",
+        Some(json!({
+            "terminalId": terminal_id,
+            "openingFloatCents": 10000
+        })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    // Check Drawer State
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/sessions/drawer-state/{terminal_id}"),
+        None,
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    assert_eq!(body["data"]["currentBalanceCents"], 10000);
+
+    // 3. Record Pay-in: 5,000 cents (Rs 50 change)
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/sessions/movements",
+        Some(json!({
+            "movementType": "pay_in",
+            "amountCents": 5000,
+            "sessionKey": session_key,
+            "terminalId": terminal_id,
+            "reason": "Change float top-up"
+        })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "Body: {body}");
+
+    // 4. Record Pay-out: 2,000 cents (tea/coffee)
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/sessions/movements",
+        Some(json!({
+            "movementType": "pay_out_expense",
+            "amountCents": 2000,
+            "sessionKey": session_key,
+            "terminalId": terminal_id,
+            "reason": "Refreshments"
+        })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "Body: {body}");
+
+    // 5. Record Owner Withdrawal:
+    // a) Over threshold (> 50,000 cents) without PIN fails
+    let (status, _) = send_authed(
+        &app.router,
+        "POST",
+        "/api/sessions/movements",
+        Some(json!({
+            "movementType": "owner_withdrawal",
+            "amountCents": 60000,
+            "sessionKey": session_key,
+            "terminalId": terminal_id,
+            "recipientOrSource": "Mr. Silva (Owner)",
+            "reason": "Personal Drawings"
+        })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // b) Over threshold with Manager PIN (5555) fails because admin is required
+    let (status, _) = send_authed(
+        &app.router,
+        "POST",
+        "/api/sessions/movements",
+        Some(json!({
+            "movementType": "owner_withdrawal",
+            "amountCents": 60000,
+            "sessionKey": session_key,
+            "terminalId": terminal_id,
+            "recipientOrSource": "Mr. Silva (Owner)",
+            "reason": "Personal Drawings",
+            "managerPin": "5555"
+        })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // c) Over threshold with Admin PIN (9999) succeeds
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/sessions/movements",
+        Some(json!({
+            "movementType": "owner_withdrawal",
+            "amountCents": 60000,
+            "sessionKey": session_key,
+            "terminalId": terminal_id,
+            "recipientOrSource": "Mr. Silva (Owner)",
+            "reason": "Personal Drawings",
+            "managerPin": "9999"
+        })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "Body: {body}");
+
+    // 6. Complete a Sale linked to this session
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/billing/sales",
+        Some(json!({
+            "sessionKey": session_key,
+            "staff": { "cashierName": "Alice" },
+            "items": [{
+                "sourceType": "retail",
+                "name": "Quick Item",
+                "unitPriceCents": 80000,
+                "quantity": 1,
+                "discountCents": 0
+            }],
+            "payment": { "paymentMethod": "cash", "isCredit": false },
+            "shopProfileSnapshot": { "tradingName": "Test Shop" }
+        })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    assert_eq!(body["data"]["invoice"]["sessionKey"], session_key);
+
+    // Verify session sales and drawer balance:
+    // opening: 10,000 + pay_in: 5,000 - pay_out: 2,000 - owner: 60,000 + sale: 80,000 = 33,000 cents
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/sessions/{session_key}"),
+        None,
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    assert_eq!(body["data"]["totalCashSalesCents"], 80000);
+    assert_eq!(body["data"]["totalPayInCents"], 5000);
+    assert_eq!(body["data"]["totalPayOutCents"], 2000);
+    assert_eq!(body["data"]["totalOwnerWithdrawalsCents"], 60000);
+
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/sessions/drawer-state/{terminal_id}"),
+        None,
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    assert_eq!(body["data"]["currentBalanceCents"], 33000);
+
+    // 7. Submit Blind Count: 33,000 cents
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/sessions/{session_key}/blind-count"),
+        Some(json!({
+            "countedCashCents": 33000,
+            "closingDenominations": { "note_1000": 33 }
+        })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    assert_eq!(body["data"]["status"], "closing");
+
+    // 8. Close session: closing float 10,000, safe deposit 23,000 (total = 33,000)
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/sessions/{session_key}/close"),
+        Some(json!({
+            "countedCashCents": 33000,
+            "closingFloatCents": 10000,
+            "cashDropToSafeCents": 23000,
+            "closingNote": "Shift reconciled perfectly"
+        })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    assert_eq!(body["data"]["status"], "closed");
+    assert_eq!(body["data"]["cashVarianceCents"], 0);
+
+    // Drawer state now has closing float 10,000 for next shift
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/sessions/drawer-state/{terminal_id}"),
+        None,
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    assert_eq!(body["data"]["currentBalanceCents"], 10000);
+    assert_eq!(body["data"]["lastClosingFloatCents"], 10000);
+
+    // 9. Generate Z-Report
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/sessions/{session_key}/z-report"),
+        None,
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    assert_eq!(body["data"]["grossSalesCents"], 80000);
+    assert_eq!(body["data"]["netSalesCents"], 80000);
+    assert_eq!(body["data"]["cashReconciliation"]["expectedCashCents"], 33000);
+    assert_eq!(body["data"]["cashReconciliation"]["countedCashCents"], 33000);
+    assert_eq!(body["data"]["cashReconciliation"]["varianceCents"], 0);
+    assert_eq!(body["data"]["cashReconciliation"]["closingFloatCents"], 10000);
+    assert_eq!(body["data"]["cashReconciliation"]["safeDepositCents"], 23000);
+
+    // 10. Reopen session by Admin
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/sessions/{session_key}/reopen"),
+        Some(json!({ "reason": "Manager audit recount" })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    assert_eq!(body["data"]["status"], "reopened");
+}
+
+#[tokio::test]
+async fn session_discrepancy_outside_movement_and_variance_conversion() {
+    let app = common::spawn_app().await;
+
+    // Seed Admin
+    simplebash_pos_backend::seeds::admin::seed_admin(&app.db_handle, None, None)
+        .await
+        .unwrap();
+
+    let admin_token = mint_token_for(
+        &app.config,
+        "admin",
+        Some(Role::Admin),
+        roles::default_permissions(Role::Admin),
+    );
+
+    let staff_username = format!("stf_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+    let (status, staff_res) = send_authed(
+        &app.router,
+        "POST",
+        "/api/users",
+        Some(json!({
+            "name": "Staff Cashier",
+            "username": staff_username,
+            "password": "Password123!",
+            "role": "staff",
+        })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let staff_id = staff_res["data"]["id"].as_str().unwrap();
+
+    let staff_token = mint_token_for(
+        &app.config,
+        staff_id,
+        Some(Role::Staff),
+        roles::default_permissions(Role::Staff),
+    );
+
+    let mgr_username = format!("mgr_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+    let (status, mgr_res) = send_authed(
+        &app.router,
+        "POST",
+        "/api/users",
+        Some(json!({
+            "name": "Manager Charlie",
+            "username": mgr_username,
+            "password": "Password123!",
+            "role": "manager",
+        })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let manager_id = mgr_res["data"]["id"].as_str().unwrap();
+
+    let manager_token = mint_token_for(
+        &app.config,
+        manager_id,
+        Some(Role::Manager),
+        roles::default_permissions(Role::Manager),
+    );
+
+    // Set Manager PIN
+    let (pin_status, pin_body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/auth/set-pin",
+        Some(json!({ "pin": "1234" })),
+        &manager_token,
+    )
+    .await;
+    assert_eq!(pin_status, StatusCode::OK, "Set pin failed: {pin_body}");
+
+    let terminal_id = format!("term_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+
+    // 1. Shift 1 opens with 5,000 float and closes leaving 5,000 in drawer
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/sessions/open",
+        Some(json!({
+            "terminalId": terminal_id,
+            "openingFloatCents": 5000
+        })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let session1_key = body["data"]["key"].as_str().unwrap().to_string();
+
+    // Close shift 1 with float 5,000
+    let (status, _) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/sessions/{session1_key}/close"),
+        Some(json!({
+            "countedCashCents": 5000,
+            "closingFloatCents": 5000,
+            "cashDropToSafeCents": 0
+        })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // 2. Outside-session movement: Owner takes 1,000 cents from drawer between shifts (Option A ledger)
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/sessions/movements",
+        Some(json!({
+            "movementType": "owner_withdrawal",
+            "amountCents": 1000,
+            "terminalId": terminal_id,
+            "recipientOrSource": "Owner Outside Shift",
+            "reason": "Emergency petty cash",
+            "managerPin": "1234"
+        })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "Body: {body}");
+
+    // Drawer state should now show 4,000 cents
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/sessions/drawer-state/{terminal_id}"),
+        None,
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["currentBalanceCents"], 4000);
+
+    // 3. Shift 2 Opening: Cashier counts 3,500 cents (500 discrepancy from expected 4,000)
+    // a) Opening without reason / PIN fails
+    let (status, _) = send_authed(
+        &app.router,
+        "POST",
+        "/api/sessions/open",
+        Some(json!({
+            "terminalId": terminal_id,
+            "openingFloatCents": 3500
+        })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // b) Opening with reason and Manager PIN succeeds
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/sessions/open",
+        Some(json!({
+            "terminalId": terminal_id,
+            "openingFloatCents": 3500,
+            "discrepancyReason": "Missing small change coins",
+            "managerPin": "1234"
+        })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "Body: {body}");
+    let session2_key = body["data"]["key"].as_str().unwrap().to_string();
+    assert_eq!(body["data"]["openingDiscrepancyCents"], -500);
+
+    // 4. Close Shift 2 with a cash shortage: expected 3,500, counted 2,500 (1,000 shortage)
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/sessions/{session2_key}/close"),
+        Some(json!({
+            "countedCashCents": 2500,
+            "closingFloatCents": 2500,
+            "cashDropToSafeCents": 0,
+            "varianceReason": "Unknown shortage at close",
+            "managerPin": "1234"
+        })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    assert_eq!(body["data"]["cashVarianceCents"], -1000);
+
+    // 5. Owner realizes they took 1,000 cents during the shift without recording it.
+    // Convert the 1,000 shortage variance into a late owner withdrawal!
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/sessions/{session2_key}/convert-variance"),
+        Some(json!({
+            "reason": "Owner took money for urgent personal purchase",
+            "recipient": "Shop Owner",
+            "managerPin": "1234"
+        })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "Body: {body}");
+    assert_eq!(body["data"]["amountCents"], 1000);
+    assert_eq!(body["data"]["recordedLate"], true);
+    assert_eq!(body["data"]["movementType"], "owner_withdrawal");
+
+    // Session reflects late movement
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/sessions/{session2_key}"),
+        None,
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["hasLateMovements"], true);
+}

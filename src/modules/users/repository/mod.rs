@@ -37,6 +37,7 @@ fn user_from_sqlite_row(r: &sqlx::sqlite::SqliteRow) -> UserDocument {
         name: r.get("name"),
         username: r.get("username"),
         password_hash: r.get("password_hash"),
+        pin_hash: r.try_get::<Option<String>, _>("pin_hash").ok().flatten(),
         role: Role::from_str(&role_str).unwrap_or(Role::Staff),
         is_active: is_active_int != 0,
         employee_key: r.get("employee_key"),
@@ -174,8 +175,8 @@ pub(crate) async fn insert_user(db: &Db, mut document: UserDocument) -> AppResul
 
             sqlx::query(
                 r#"
-                INSERT INTO users (key, id, name, username, password_hash, role, employee_key, is_active, version, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, $9, $10)
+                INSERT INTO users (key, id, name, username, password_hash, pin_hash, role, employee_key, is_active, version, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10, $11)
                 "#,
             )
             .bind(&document.key)
@@ -183,6 +184,7 @@ pub(crate) async fn insert_user(db: &Db, mut document: UserDocument) -> AppResul
             .bind(&document.name)
             .bind(&document.username)
             .bind(&document.password_hash)
+            .bind(&document.pin_hash)
             .bind(document.role.as_str())
             .bind(&document.employee_key)
             .bind(if document.is_active { 1i64 } else { 0i64 })
@@ -228,6 +230,10 @@ pub(crate) async fn update_user(
             if let Ok(password_hash) = set_doc.get_str("password_hash") {
                 updates.push(format!("password_hash = ${}", updates.len() + 1));
                 params.push(password_hash.to_string());
+            }
+            if let Ok(pin_hash) = set_doc.get_str("pin_hash") {
+                updates.push(format!("pin_hash = ${}", updates.len() + 1));
+                params.push(pin_hash.to_string());
             }
             if let Ok(role) = set_doc.get_str("role") {
                 updates.push(format!("role = ${}", updates.len() + 1));

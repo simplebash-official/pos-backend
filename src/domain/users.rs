@@ -77,6 +77,9 @@ pub struct User {
     pub permissions: Vec<String>,
     /// Whether user account is active.
     pub is_active: bool,
+    /// Whether this user account has a security PIN configured for register overrides.
+    #[serde(default)]
+    pub has_pin: bool,
     /// This login's own UI preferences (e.g. the billing catalog sort).
     /// Always present in responses; unset values are omitted inside.
     #[serde(default)]

@@ -93,6 +93,7 @@ pub(crate) fn invoice_from_sqlite_row(row: &sqlx::sqlite::SqliteRow) -> AppResul
         closed_by: row.get("closed_by"),
         refunded_cents: row.get("refunded_cents"),
         credit_note_count: row.get("credit_note_count"),
+        session_key: row.get("session_key"),
         version: row.get("version"),
         created_at: to_bson_datetime(&created_at_str),
         updated_at: to_bson_datetime(&updated_at_str),
@@ -113,6 +114,7 @@ pub(crate) fn payment_from_sqlite_row(row: &sqlx::sqlite::SqliteRow) -> AppResul
         amount_cents: row.get("amount_cents"),
         payment_method: row.get("payment_method"),
         notes: row.get("notes"),
+        session_key: row.get("session_key"),
         recorded_by_user_id: row.get("recorded_by_user_id"),
         recorded_by_name_snapshot: row.get("recorded_by_name_snapshot"),
         recorded_at: to_bson_datetime(&recorded_at_str),
@@ -175,6 +177,7 @@ pub(crate) fn credit_note_from_sqlite_row(
         override_approved_by: row.get("override_approved_by"),
         override_reason: row.get("override_reason"),
         notes: row.get("notes"),
+        session_key: row.get("session_key"),
         voided_at: voided_at_str.map(|s| to_bson_datetime(&s)),
         voided_by: row.get("voided_by"),
         voided_reason: row.get("voided_reason"),
@@ -332,10 +335,10 @@ pub(crate) async fn insert_invoice(
                     due_date, card_last4, card_ref, online_ref, online_note, status,
                     notes, shop_profile_snapshot, warranty_terms_snapshot, document_selection,
                     voided_at, voided_by, voided_reason, closed_at, closed_by,
-                    refunded_cents, credit_note_count, version, created_at, updated_at
+                    refunded_cents, credit_note_count, session_key, version, created_at, updated_at
                 ) VALUES (
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 "#,
             )
@@ -376,6 +379,7 @@ pub(crate) async fn insert_invoice(
             .bind(&document.closed_by)
             .bind(document.refunded_cents)
             .bind(document.credit_note_count)
+            .bind(&document.session_key)
             .bind(document.version)
             .bind(&created_at_iso)
             .bind(&updated_at_iso)
@@ -601,15 +605,16 @@ pub(crate) async fn insert_payment(
             sqlx::query(
                 r#"
                 INSERT INTO payments (
-                    key, id, invoice_key, amount_cents, payment_method, notes,
+                    key, id, invoice_key, session_key, amount_cents, payment_method, notes,
                     recorded_by_user_id, recorded_by_name_snapshot, recorded_at,
                     version, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(&document.key)
             .bind(&id)
             .bind(&document.invoice_key)
+            .bind(&document.session_key)
             .bind(document.amount_cents)
             .bind(&document.payment_method)
             .bind(&document.notes)

@@ -158,9 +158,9 @@ pub(crate) async fn insert_credit_note(
                     exchange_subtotal_cents, net_refund_cents, refund_cash_cents,
                     balance_reduction_cents, refund_breakdown, refund_payment_keys, status,
                     is_manager_override, override_approved_by, override_reason, notes,
-                    voided_at, voided_by, voided_reason, version, created_at, updated_at
+                    session_key, voided_at, voided_by, voided_reason, version, created_at, updated_at
                 ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 "#,
             )
@@ -189,6 +189,7 @@ pub(crate) async fn insert_credit_note(
             .bind(&document.override_approved_by)
             .bind(&document.override_reason)
             .bind(&document.notes)
+            .bind(&document.session_key)
             .bind(&voided_at_iso)
             .bind(&document.voided_by)
             .bind(&document.voided_reason)

@@ -66,14 +66,29 @@ pub async fn record_payment(
             ));
         }
 
+        let resolved_session_key = match body.session_key {
+            Some(k) => Some(k),
+            None => {
+                crate::modules::sessions::repository::sessions::find_active_session_for_cashier(
+                    db,
+                    &recorded_by_user_id,
+                )
+                .await
+                .ok()
+                .flatten()
+                .map(|s| s.key)
+            }
+        };
+
         let now = BsonDateTime::now();
         let payment_document = PaymentDocument {
             id: None,
             key: generate_id(prefixes::PAYMENT),
             invoice_key: invoice_key.to_string(),
             amount_cents: body.amount_cents,
-            payment_method: body.payment_method,
+            payment_method: body.payment_method.clone(),
             notes: body.notes,
+            session_key: resolved_session_key.clone(),
             recorded_by_user_id,
             recorded_by_name_snapshot: recorded_by_name,
             recorded_at: now,
@@ -82,6 +97,33 @@ pub async fn record_payment(
             updated_at: now,
         };
         let inserted = repository::insert_payment(db, payment_document).await?;
+
+        if let Some(ref s_key) = resolved_session_key {
+            let cash_delta = if body.payment_method == "cash" { inserted.amount_cents } else { 0 };
+            let card_delta = if body.payment_method == "card" { inserted.amount_cents } else { 0 };
+            let online_delta = if body.payment_method == "online" { inserted.amount_cents } else { 0 };
+
+            let _ = crate::modules::sessions::repository::sessions::increment_session_sales(
+                db,
+                s_key,
+                cash_delta,
+                card_delta,
+                online_delta,
+                0,
+            )
+            .await;
+
+            if cash_delta != 0 {
+                if let Ok(Some(sess)) = crate::modules::sessions::repository::sessions::find_session_by_key(db, s_key).await {
+                    let _ = crate::modules::sessions::repository::drawer::update_drawer_balance(
+                        db,
+                        &sess.terminal_id,
+                        cash_delta,
+                    )
+                    .await;
+                }
+            }
+        }
 
         let new_total_paid = already_paid + inserted.amount_cents;
         let new_status = InvoiceStatus::from_payment_progress(invoice.total_cents, new_total_paid);

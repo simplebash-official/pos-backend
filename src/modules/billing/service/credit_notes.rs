@@ -515,6 +515,7 @@ pub async fn create_credit_note(
                 Some(cashier_id.clone()),
                 body.override_reason,
                 body.notes,
+                body.session_key,
                 cashier_id,
                 cashier_name,
                 device_id,
@@ -787,6 +788,7 @@ pub async fn create_credit_note(
             },
             body.override_reason,
             body.notes,
+            body.session_key,
             cashier_id,
             cashier_name,
             device_id,
@@ -847,6 +849,7 @@ async fn finish_create_credit_note(
     override_approved_by: Option<String>,
     override_reason: Option<String>,
     notes: Option<String>,
+    session_key: Option<String>,
     cashier_id: String,
     cashier_name: String,
     device_id: Option<String>,
@@ -867,7 +870,7 @@ async fn finish_create_credit_note(
         "creditNote".to_string(),
         ReserveSequenceRequest {
             block_size: Some(1),
-            device_id,
+            device_id: device_id.clone(),
         },
     )
     .await?;
@@ -902,6 +905,25 @@ async fn finish_create_credit_note(
         }
     }
 
+    let resolved_session_key = match &session_key {
+        Some(k) => Some(k.clone()),
+        None => {
+            if let Some(ref term) = device_id {
+                crate::modules::sessions::repository::sessions::find_active_session_for_terminal(db, term)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|s| s.key)
+            } else {
+                crate::modules::sessions::repository::sessions::find_active_session_for_cashier(db, &cashier_id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|s| s.key)
+            }
+        }
+    };
+
     let now = BsonDateTime::now();
     let mut refund_payment_keys = Vec::new();
     if refund_cash_cents != 0 {
@@ -920,6 +942,7 @@ async fn finish_create_credit_note(
                 } else {
                     format!("Payment for exchange/credit note difference {credit_note_number}")
                 }),
+                session_key: resolved_session_key.clone(),
                 recorded_by_user_id: cashier_id.clone(),
                 recorded_by_name_snapshot: cashier_name.clone(),
                 recorded_at: now,
@@ -931,6 +954,32 @@ async fn finish_create_credit_note(
                 && let Ok(inserted) = repository::insert_payment(db, payment_doc).await
             {
                 refund_payment_keys.push(inserted.key);
+            }
+        }
+
+        if refund_cash_cents > 0 {
+            let cash_refunded: i64 = refund_breakdown
+                .iter()
+                .filter(|l| l.method == "cash")
+                .map(|l| l.amount_cents)
+                .sum();
+            if cash_refunded > 0 {
+                if let Some(ref s_key) = resolved_session_key {
+                    let _ = crate::modules::sessions::repository::sessions::increment_session_refunds(
+                        db,
+                        s_key,
+                        cash_refunded,
+                    )
+                    .await;
+                    if let Ok(Some(sess)) = crate::modules::sessions::repository::sessions::find_session_by_key(db, s_key).await {
+                        let _ = crate::modules::sessions::repository::drawer::update_drawer_balance(
+                            db,
+                            &sess.terminal_id,
+                            -cash_refunded,
+                        )
+                        .await;
+                    }
+                }
             }
         }
     }
@@ -970,6 +1019,7 @@ async fn finish_create_credit_note(
         override_approved_by,
         override_reason,
         notes,
+        session_key: resolved_session_key,
         voided_at: None,
         voided_by: None,
         voided_reason: None,
@@ -1052,6 +1102,7 @@ pub async fn void_credit_note(
                         "Reversal of credit note {} (voided)",
                         existing.credit_note_number
                     )),
+                    session_key: original.session_key.clone(),
                     recorded_by_user_id: voided_by.clone(),
                     recorded_by_name_snapshot: voided_by.clone(),
                     recorded_at: now,

@@ -13,6 +13,9 @@ pub const USERS_MANAGE: &str = "users:manage";
 /// delete Staff accounts but not Manager or Admin accounts.
 pub const USERS_MANAGE_STAFF: &str = "users:manage:staff";
 pub const SESSIONS_VIEW: &str = "sessions:view";
+pub const SESSIONS_MANAGE: &str = "sessions:manage";
+pub const CASH_MOVEMENTS_CREATE: &str = "cash_movements:create";
+pub const CASH_MOVEMENTS_VIEW: &str = "cash_movements:view";
 
 /// Read access to the catalog, stock levels, the stock-movement audit trail
 /// and the category tree — every `GET` under `/api/inventory` except the

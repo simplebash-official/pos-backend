@@ -126,6 +126,9 @@ pub struct InvoiceDocument {
     /// Count of credit notes (any status) recorded against this invoice.
     #[serde(default)]
     pub credit_note_count: i64,
+    /// Register session key this invoice was billed in, if during an open cashier shift.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_key: Option<String>,
     /// Concurrency version number for optimistic locking.
     #[serde(default = "default_version")]
     pub version: i64,
@@ -195,6 +198,7 @@ impl InvoiceDocument {
             closed_by: self.closed_by,
             refunded_cents: self.refunded_cents,
             credit_note_count: self.credit_note_count,
+            session_key: self.session_key,
             created_at: self.created_at.to_chrono(),
             updated_at: self.updated_at.to_chrono(),
             version: self.version,
@@ -220,6 +224,9 @@ pub struct PaymentDocument {
     /// Optional remarks or reference note for this payment.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    /// Register session key this payment belongs to, if collected during an open session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_key: Option<String>,
     /// User ID of the staff member who collected this payment.
     pub recorded_by_user_id: String,
     /// Name snapshot of the staff member who collected this payment.
@@ -254,6 +261,7 @@ impl PaymentDocument {
             amount_cents: self.amount_cents,
             payment_method: self.payment_method,
             notes: self.notes,
+            session_key: self.session_key,
             recorded_by_user_id: self.recorded_by_user_id,
             recorded_by_name_snapshot: self.recorded_by_name_snapshot,
             recorded_at: self.recorded_at.to_chrono(),
@@ -339,6 +347,9 @@ pub struct CreditNoteDocument {
     /// General notes or remarks for this credit note.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    /// Register session key this credit note belongs to, if during an open session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_key: Option<String>,
     /// Time when this credit note was voided, if voided.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub voided_at: Option<BsonDateTime>,
@@ -395,6 +406,7 @@ impl CreditNoteDocument {
             override_approved_by: self.override_approved_by,
             override_reason: self.override_reason,
             notes: self.notes,
+            session_key: self.session_key,
             voided_at: self.voided_at.map(|d| d.to_chrono()),
             voided_by: self.voided_by,
             voided_reason: self.voided_reason,

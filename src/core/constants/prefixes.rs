@@ -27,6 +27,8 @@ pub const QUOTATION: &str = "quo";
 pub const STOCK_BATCH: &str = "stb";
 pub const LABEL_TEMPLATE: &str = "ltpl";
 pub const LABEL_PRINT_JOB: &str = "lpj";
+pub const REGISTER_SESSION: &str = "sess";
+pub const CASH_MOVEMENT: &str = "cshm";
 
 /// Key of the batch the migration to stock batches gives every product for the
 /// stock (and price) it held before batches existed. Deterministic, so the

@@ -298,6 +298,7 @@ CREATE TABLE IF NOT EXISTS invoices (
     closed_by TEXT,
     refunded_cents INTEGER NOT NULL DEFAULT 0,
     credit_note_count INTEGER NOT NULL DEFAULT 0,
+    session_key TEXT,
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -308,6 +309,7 @@ CREATE TABLE IF NOT EXISTS invoices (
 CREATE INDEX IF NOT EXISTS idx_invoices_customer_key ON invoices(customer_key);
 CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices(status);
 CREATE INDEX IF NOT EXISTS idx_invoices_created_at ON invoices(created_at);
+CREATE INDEX IF NOT EXISTS idx_invoices_session_key ON invoices(session_key);
 CREATE INDEX IF NOT EXISTS idx_invoices_sync ON invoices(updated_at, key);
 
 CREATE TABLE IF NOT EXISTS payments (
@@ -317,6 +319,7 @@ CREATE TABLE IF NOT EXISTS payments (
     amount_cents INTEGER NOT NULL,
     payment_method TEXT NOT NULL,
     notes TEXT,
+    session_key TEXT,
     recorded_by_user_id TEXT NOT NULL,
     recorded_by_name_snapshot TEXT NOT NULL,
     recorded_at TEXT NOT NULL,
@@ -328,6 +331,7 @@ CREATE TABLE IF NOT EXISTS payments (
 );
 
 CREATE INDEX IF NOT EXISTS idx_payments_invoice_key ON payments(invoice_key);
+CREATE INDEX IF NOT EXISTS idx_payments_session_key ON payments(session_key);
 CREATE INDEX IF NOT EXISTS idx_payments_created_at ON payments(created_at);
 CREATE INDEX IF NOT EXISTS idx_payments_sync ON payments(updated_at, key);
 
@@ -360,6 +364,7 @@ CREATE TABLE IF NOT EXISTS credit_notes (
     voided_at TEXT,
     voided_by TEXT,
     voided_reason TEXT,
+    session_key TEXT,
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -368,6 +373,7 @@ CREATE TABLE IF NOT EXISTS credit_notes (
 );
 
 CREATE INDEX IF NOT EXISTS idx_credit_notes_invoice_key ON credit_notes(invoice_key);
+CREATE INDEX IF NOT EXISTS idx_credit_notes_session_key ON credit_notes(session_key);
 CREATE INDEX IF NOT EXISTS idx_credit_notes_sync ON credit_notes(updated_at, key);
 
 CREATE TABLE IF NOT EXISTS product_serials (
@@ -396,6 +402,7 @@ CREATE TABLE IF NOT EXISTS users (
     name TEXT NOT NULL,
     username TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
+    pin_hash TEXT,
     role TEXT NOT NULL,
     employee_key TEXT,
     preferences_json TEXT,
@@ -687,4 +694,100 @@ CREATE TABLE IF NOT EXISTS shop_profiles (
     deleted_at TEXT,
     updated_by_device TEXT
 );
+
+CREATE TABLE IF NOT EXISTS register_sessions (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    session_number TEXT NOT NULL UNIQUE,
+    terminal_id TEXT NOT NULL,
+    cashier_id TEXT NOT NULL,
+    cashier_name_snapshot TEXT NOT NULL,
+    status TEXT NOT NULL,
+    opened_at TEXT NOT NULL,
+    opening_float_cents INTEGER NOT NULL,
+    opening_denominations JSON,
+    opening_note TEXT,
+    expected_opening_float_cents INTEGER,
+    opening_discrepancy_cents INTEGER NOT NULL DEFAULT 0,
+    opening_discrepancy_reason TEXT,
+    opening_approved_by_id TEXT,
+    opening_approved_by_name TEXT,
+    closed_at TEXT,
+    closing_cashier_id TEXT,
+    closing_cashier_name_snapshot TEXT,
+    expected_cash_cents INTEGER,
+    counted_cash_cents INTEGER,
+    cash_variance_cents INTEGER,
+    closing_denominations JSON,
+    closing_note TEXT,
+    closing_float_cents INTEGER,
+    cash_drop_to_safe_cents INTEGER,
+    variance_reason TEXT,
+    variance_approved_by_id TEXT,
+    variance_approved_by_name TEXT,
+    reopened_at TEXT,
+    reopened_by_id TEXT,
+    reopened_by_name TEXT,
+    reopened_reason TEXT,
+    total_cash_sales_cents INTEGER NOT NULL DEFAULT 0,
+    total_card_sales_cents INTEGER NOT NULL DEFAULT 0,
+    total_online_sales_cents INTEGER NOT NULL DEFAULT 0,
+    total_credit_sales_cents INTEGER NOT NULL DEFAULT 0,
+    total_cash_refunds_cents INTEGER NOT NULL DEFAULT 0,
+    total_pay_in_cents INTEGER NOT NULL DEFAULT 0,
+    total_pay_out_cents INTEGER NOT NULL DEFAULT 0,
+    total_owner_withdrawals_cents INTEGER NOT NULL DEFAULT 0,
+    total_cash_drops_cents INTEGER NOT NULL DEFAULT 0,
+    has_late_movements INTEGER NOT NULL DEFAULT 0,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT,
+    updated_by_device TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_register_sessions_terminal_status ON register_sessions(terminal_id, status);
+CREATE INDEX IF NOT EXISTS idx_register_sessions_cashier_id ON register_sessions(cashier_id);
+CREATE INDEX IF NOT EXISTS idx_register_sessions_created_at ON register_sessions(created_at);
+CREATE INDEX IF NOT EXISTS idx_register_sessions_sync ON register_sessions(updated_at, key);
+
+CREATE TABLE IF NOT EXISTS cash_movements (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    movement_number TEXT NOT NULL UNIQUE,
+    movement_type TEXT NOT NULL,
+    amount_cents INTEGER NOT NULL,
+    session_key TEXT,
+    terminal_id TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    recipient_or_source TEXT,
+    supplier_key TEXT,
+    recorded_by_user_id TEXT NOT NULL,
+    recorded_by_name_snapshot TEXT NOT NULL,
+    approved_by_user_id TEXT,
+    approved_by_name_snapshot TEXT,
+    recorded_late INTEGER NOT NULL DEFAULT 0,
+    original_variance_session_key TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT,
+    updated_by_device TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_cash_movements_session_key ON cash_movements(session_key);
+CREATE INDEX IF NOT EXISTS idx_cash_movements_terminal_id ON cash_movements(terminal_id);
+CREATE INDEX IF NOT EXISTS idx_cash_movements_movement_type ON cash_movements(movement_type);
+CREATE INDEX IF NOT EXISTS idx_cash_movements_created_at ON cash_movements(created_at);
+CREATE INDEX IF NOT EXISTS idx_cash_movements_sync ON cash_movements(updated_at, key);
+
+CREATE TABLE IF NOT EXISTS drawer_state (
+    terminal_id TEXT PRIMARY KEY,
+    current_balance_cents INTEGER NOT NULL DEFAULT 0,
+    last_session_key TEXT,
+    last_closing_float_cents INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL
+);
+
+
 

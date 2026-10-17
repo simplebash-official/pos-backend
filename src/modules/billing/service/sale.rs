@@ -558,6 +558,40 @@ pub async fn complete_sale(
             calculations::validate_split_payments(total_cents, legs)?;
         }
 
+        // Resolve the register session: if specified, validate it; otherwise detect active session for terminal/cashier
+        let session_doc = match &body.session_key {
+            Some(key) => {
+                let sess = crate::modules::sessions::repository::sessions::find_session_by_key(db, key)
+                    .await?
+                    .ok_or_else(|| {
+                        AppError::not_found_with_code("Register session not found", codes::SESSION_NOT_FOUND)
+                    })?;
+                if sess.status == crate::domain::sessions::SessionStatus::Closed {
+                    return Err(AppError::conflict(
+                        codes::SESSION_ALREADY_CLOSED,
+                        "The specified register session is already closed",
+                    ));
+                }
+                Some(sess)
+            }
+            None => {
+                let active = if let Some(ref term) = device_id {
+                    crate::modules::sessions::repository::sessions::find_active_session_for_terminal(db, term).await?
+                } else {
+                    None
+                };
+                match active {
+                    Some(s) => Some(s),
+                    None => {
+                        crate::modules::sessions::repository::sessions::find_active_session_for_cashier(db, &cashier_id)
+                            .await?
+                    }
+                }
+            }
+        };
+        let active_session_key = session_doc.as_ref().map(|s| s.key.clone());
+        let active_session_terminal_id = session_doc.as_ref().map(|s| s.terminal_id.clone());
+
         let reservation = sequences::service::reserve_sequence(
             db,
             "invoice".to_string(),
@@ -629,6 +663,7 @@ pub async fn complete_sale(
             closed_by: None,
             refunded_cents: 0,
             credit_note_count: 0,
+            session_key: active_session_key.clone(),
             version: 1,
             created_at: now,
             updated_at: now,
@@ -665,6 +700,7 @@ pub async fn complete_sale(
                     amount_cents,
                     payment_method: method,
                     notes: card_last4.map(|last4| format!("Card ending {last4}")),
+                    session_key: active_session_key.clone(),
                     recorded_by_user_id: cashier_id.clone(),
                     recorded_by_name_snapshot: body.staff.cashier_name.clone(),
                     recorded_at: now,
@@ -702,6 +738,7 @@ pub async fn complete_sale(
                         _ => "Deposit at checkout".to_string(),
                     },
                 ),
+                session_key: active_session_key.clone(),
                 recorded_by_user_id: cashier_id.clone(),
                 recorded_by_name_snapshot: body.staff.cashier_name.clone(),
                 recorded_at: now,
@@ -715,6 +752,71 @@ pub async fn complete_sale(
                     "Invoice {} was created but the deposit payment record failed to save: {err}",
                     inserted_invoice.invoice_number
                 )),
+            }
+        }
+
+        // Track payment breakdown against register session and cash drawer
+        let (cash_delta, card_delta, online_delta, credit_delta) = if !body.payment.is_credit {
+            let mut cash = 0i64;
+            let mut card = 0i64;
+            let mut online = 0i64;
+            match &body.payment.split_payments {
+                Some(split) if body.payment.payment_method == "split" => {
+                    for leg in split {
+                        match leg.method.as_str() {
+                            "cash" => cash += leg.amount_cents,
+                            "card" => card += leg.amount_cents,
+                            "online" => online += leg.amount_cents,
+                            _ => {}
+                        }
+                    }
+                }
+                _ => match body.payment.payment_method.as_str() {
+                    "cash" => cash += total_cents,
+                    "card" => card += total_cents,
+                    "online" => online += total_cents,
+                    _ => {}
+                },
+            }
+            (cash, card, online, 0i64)
+        } else {
+            let unpaid = total_cents - credit_deposit_cents;
+            let (cash, card) = if credit_deposit_cents > 0 {
+                if deposit_method == "card" {
+                    (0i64, credit_deposit_cents)
+                } else {
+                    (credit_deposit_cents, 0i64)
+                }
+            } else {
+                (0i64, 0i64)
+            };
+            (cash, card, 0i64, unpaid)
+        };
+
+        if let (Some(sess_key), Some(term_id)) = (&active_session_key, &active_session_terminal_id) {
+            if let Err(err) = crate::modules::sessions::repository::sessions::increment_session_sales(
+                db,
+                sess_key,
+                cash_delta,
+                card_delta,
+                online_delta,
+                credit_delta,
+            )
+            .await
+            {
+                warnings.push(format!("Register session sales counters failed to update: {err}"));
+            }
+
+            if cash_delta != 0 {
+                if let Err(err) = crate::modules::sessions::repository::drawer::update_drawer_balance(
+                    db,
+                    term_id,
+                    cash_delta,
+                )
+                .await
+                {
+                    warnings.push(format!("Cash drawer balance failed to update: {err}"));
+                }
             }
         }
 

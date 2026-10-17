@@ -126,6 +126,45 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .execute("ALTER TABLE users ADD COLUMN preferences_json TEXT")
             .await;
     }
+    if !user_cols.is_empty() && !user_cols.iter().any(|(_, n)| n == "pin_hash") {
+        tracing::info!("Migrating 'users' table: adding 'pin_hash' column");
+        let _ = pool
+            .execute("ALTER TABLE users ADD COLUMN pin_hash TEXT")
+            .await;
+    }
+
+    let invoice_cols = table_columns(pool, "invoices").await.unwrap_or_default();
+    if !invoice_cols.is_empty() && !invoice_cols.iter().any(|n| n == "session_key") {
+        tracing::info!("Migrating 'invoices' table: adding 'session_key' column");
+        let _ = pool
+            .execute("ALTER TABLE invoices ADD COLUMN session_key TEXT")
+            .await;
+        let _ = pool
+            .execute("CREATE INDEX IF NOT EXISTS idx_invoices_session_key ON invoices(session_key)")
+            .await;
+    }
+
+    let payment_cols = table_columns(pool, "payments").await.unwrap_or_default();
+    if !payment_cols.is_empty() && !payment_cols.iter().any(|n| n == "session_key") {
+        tracing::info!("Migrating 'payments' table: adding 'session_key' column");
+        let _ = pool
+            .execute("ALTER TABLE payments ADD COLUMN session_key TEXT")
+            .await;
+        let _ = pool
+            .execute("CREATE INDEX IF NOT EXISTS idx_payments_session_key ON payments(session_key)")
+            .await;
+    }
+
+    let credit_note_cols = table_columns(pool, "credit_notes").await.unwrap_or_default();
+    if !credit_note_cols.is_empty() && !credit_note_cols.iter().any(|n| n == "session_key") {
+        tracing::info!("Migrating 'credit_notes' table: adding 'session_key' column");
+        let _ = pool
+            .execute("ALTER TABLE credit_notes ADD COLUMN session_key TEXT")
+            .await;
+        let _ = pool
+            .execute("CREATE INDEX IF NOT EXISTS idx_credit_notes_session_key ON credit_notes(session_key)")
+            .await;
+    }
 
     // Check if 'generated_documents' table is missing required columns from earlier schema versions
     let gen_doc_cols: Vec<(i32, String)> =

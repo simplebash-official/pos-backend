@@ -18,8 +18,8 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 use crate::{
     app::AppState,
     core::{
-        constants::{modules, permissions},
-        error::AppResult,
+        constants::{codes, modules, permissions},
+        error::{AppError, AppResult},
         middleware::auth::CurrentUser,
         response::{ApiResponse, ErrorResponse},
     },
@@ -28,7 +28,8 @@ use crate::{
             LoginRequest, LoginResponse, LoginSessionListQuery, LoginSessionsResponse,
             ShopLookupResponse,
         },
-        users::{UpdateMyPreferencesRequest, User},
+        sessions::{SetPinRequest, VerifyPinRequest, VerifyPinResponse},
+        users::{Role, UpdateMyPreferencesRequest, User},
     },
     modules::auth::service,
 };
@@ -44,6 +45,8 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(me))
         .routes(routes!(update_my_preferences))
         .routes(routes!(list_sessions))
+        .routes(routes!(verify_pin))
+        .routes(routes!(set_pin))
 }
 
 // ============================================================================
@@ -190,3 +193,72 @@ async fn list_sessions(
         "Login sessions retrieved successfully",
     )))
 }
+
+// ============================================================================
+// PIN Management and Verification
+// ============================================================================
+
+#[utoipa::path(post, path = "/verify-pin", tag = modules::AUTH, request_body = VerifyPinRequest,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "PIN verification successful", body = ApiResponse<VerifyPinResponse>),
+        (status = 401, description = "Invalid PIN or insufficient permissions", body = ErrorResponse),
+    )
+)]
+async fn verify_pin(
+    _user: CurrentUser,
+    State(state): State<AppState>,
+    Json(body): Json<VerifyPinRequest>,
+) -> AppResult<Json<ApiResponse<VerifyPinResponse>>> {
+    let verified_user = crate::modules::users::service::verify_user_pin(
+        &state.db,
+        &body.pin,
+        body.required_role.as_deref(),
+    )
+    .await?;
+
+    match verified_user {
+        Some(user) => Ok(Json(ApiResponse::success(
+            VerifyPinResponse {
+                valid: true,
+                user_id: Some(user.id),
+                user_name: Some(user.name),
+                role: Some(user.role.as_str().to_string()),
+            },
+            "PIN verified successfully",
+        ))),
+        None => Err(AppError::unauthorized_with_code(
+            codes::INVALID_PIN,
+            "Invalid PIN or insufficient role permissions",
+        )),
+    }
+}
+
+#[utoipa::path(post, path = "/set-pin", tag = modules::AUTH, request_body = SetPinRequest,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "PIN set successfully", body = ApiResponse<bool>),
+        (status = 400, description = "Validation error", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden: only admins can set PIN for other users", body = ErrorResponse),
+    )
+)]
+async fn set_pin(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Json(body): Json<SetPinRequest>,
+) -> AppResult<Json<ApiResponse<bool>>> {
+    let target_user_id = match &body.target_user_id {
+        Some(id) if !id.trim().is_empty() => {
+            if id != &user.user_id && user.role != Some(Role::Admin) {
+                return Err(AppError::forbidden("Only admins can set PIN for other users"));
+            }
+            id.as_str()
+        }
+        _ => &user.user_id,
+    };
+
+    crate::modules::users::service::set_user_pin(&state.db, target_user_id, &body.pin).await?;
+    Ok(Json(ApiResponse::success(true, "PIN set successfully")))
+}
+

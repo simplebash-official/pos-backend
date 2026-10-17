@@ -14,6 +14,7 @@ pub mod quotations;
 pub mod repairs;
 pub mod reports;
 pub mod sequences;
+pub mod sessions;
 pub mod settings;
 pub mod supplier_products;
 pub mod suppliers;

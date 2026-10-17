@@ -221,6 +221,26 @@ pub const SYNC_RESOURCES: &[ResourceSpec] = &[
         order: 140,
         phase: Phase::P3a,
     },
+    ResourceSpec {
+        name: "registerSessions",
+        table: "register_sessions",
+        class: MergeClass::Lww,
+        soft_delete: true,
+        derived: &[],
+        local_only: &[],
+        order: 145,
+        phase: Phase::P3a,
+    },
+    ResourceSpec {
+        name: "cashMovements",
+        table: "cash_movements",
+        class: MergeClass::AppendOnly,
+        soft_delete: false,
+        derived: &[],
+        local_only: &[],
+        order: 150,
+        phase: Phase::P3a,
+    },
 ];
 
 /// Payload fields that travel between a device and the cloud but must never be
@@ -229,7 +249,7 @@ pub const SYNC_RESOURCES: &[ResourceSpec] = &[
 /// on every other device and on the cloud.
 pub fn secret_fields(resource: &str) -> &'static [&'static str] {
     match resource {
-        "users" => &["passwordHash"],
+        "users" => &["passwordHash", "pinHash"],
         _ => &[],
     }
 }
@@ -267,6 +287,8 @@ pub fn label_column(table: &str) -> Option<&'static str> {
             Some("name")
         }
         "product_serials" => Some("serial_number"),
+        "register_sessions" => Some("session_number"),
+        "cash_movements" => Some("movement_number"),
         _ => None,
     }
 }

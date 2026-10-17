@@ -340,6 +340,9 @@ pub struct Invoice {
     pub cashier_id: String,
     /// Cashier's display name at the time of sale.
     pub cashier_name_snapshot: String,
+    /// Key of the active register session when invoice was issued.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_key: Option<String>,
     /// Purchased line items and services.
     pub items: Vec<InvoiceItem>,
     /// Subtotal price before discounts in cents.
@@ -463,6 +466,9 @@ fn default_version() -> i64 {
 pub struct CreateSaleRequest {
     /// Cashier staff details.
     pub staff: StaffRef,
+    /// Key of the active register session on this terminal.
+    #[serde(default)]
+    pub session_key: Option<String>,
     /// Customer information or reference key.
     #[serde(default)]
     pub customer: Option<CustomerRef>,
@@ -520,6 +526,9 @@ pub struct PaymentRecord {
     /// Optional notes or remarks.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    /// Register session key this payment belongs to, if recorded during an open session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_key: Option<String>,
     /// User ID of employee who accepted the payment.
     pub recorded_by_user_id: String,
     /// Display name snapshot of employee who accepted payment.
@@ -546,6 +555,9 @@ pub struct RecordPaymentRequest {
     /// Optional reference note or description.
     #[serde(default)]
     pub notes: Option<String>,
+    /// Register session key if taken during an open cashier shift.
+    #[serde(default)]
+    pub session_key: Option<String>,
 }
 
 /// Response payload containing all payments recorded against an invoice.
@@ -864,6 +876,9 @@ pub struct CreateCreditNoteRequest {
     /// General notes or remarks for this credit note.
     #[serde(default)]
     pub notes: Option<String>,
+    /// Register session key if processed during an active cashier shift.
+    #[serde(default)]
+    pub session_key: Option<String>,
 }
 
 /// A return/refund/exchange transaction record.
@@ -942,6 +957,9 @@ pub struct CreditNote {
     /// General notes or remarks for this credit note.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    /// Register session key this credit note belongs to, if processed during an open session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_key: Option<String>,
     /// Time when this credit note was voided, if voided.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub voided_at: Option<DateTime<Utc>>,

@@ -167,6 +167,12 @@ pub(crate) async fn hydrate(
         "users" => to_values(crate::modules::users::sync_payload::hydrate_sync_documents(
             documents,
         )?)?,
+        "registerSessions" | "register_sessions" => to_values(
+            crate::modules::sessions::service::hydrate_session_sync_documents(documents)?,
+        )?,
+        "cashMovements" | "cash_movements" => to_values(
+            crate::modules::sessions::service::hydrate_movement_sync_documents(documents)?,
+        )?,
         _ => Vec::new(),
     };
     Ok(values)

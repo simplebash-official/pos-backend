@@ -135,6 +135,7 @@ fn seed_invoice(
         notes: None,
         warranty_terms_snapshot: None,
         document_selection: None,
+        session_key: None,
         version: 1,
         created_at: BsonDateTime::from_chrono(created_at),
         updated_at: BsonDateTime::from_chrono(created_at),

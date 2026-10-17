@@ -33,6 +33,9 @@ pub struct UserDocument {
     pub username: String,
     /// Argon2id hashed password string.
     pub password_hash: String,
+    /// Argon2id hashed PIN string for register overrides.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin_hash: Option<String>,
     /// System role assigned to this account (Admin, Manager, or Staff).
     pub role: Role,
     /// Whether the user account is enabled and allowed to log in.
@@ -74,6 +77,7 @@ impl UserDocument {
                 .map(|p| p.to_string())
                 .collect(),
             is_active: self.is_active,
+            has_pin: self.pin_hash.is_some(),
             preferences: self.preferences.unwrap_or_default(),
             employee_key: self.employee_key,
             created_at: self.created_at.to_chrono(),
