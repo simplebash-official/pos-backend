@@ -37,6 +37,15 @@ A task is not done until everything in this codebase that *can* be tested, and e
 
 **This repo's gate:** `make check` (`cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test`). The Mongo-backed suites (`sync_cloud_test`, `sync_convergence_test`, `scenarios_test` and the other `spawn_app()` files) must actually run against Atlas via `MONGODB_URI` (never a Docker Mongo). For sync work also run `sync_device_test` and the desktop shell's `cargo test` in `pos/desktop/src-tauri`.
 
+**Run all of these before you say a backend task is finished** (a feature once reached CI with 12 clippy errors, a Staff token able to list login sessions, and undocumented routes, none of which a partial run would have caught):
+
+1. `cargo clippy --all-targets --all-features -- -D warnings` on the current stable Rust (`rustup update` first). This is exactly what CI runs; `cargo clippy --fix --allow-dirty` clears most of it. Do not rely on `cargo build` or `cargo test` alone: clippy has its own errors.
+2. The **whole** `cargo test` (use `--no-fail-fast` so one failing binary does not hide the rest), against Atlas, on a **fresh throwaway database**: `MONGODB_DB_NAME=jt<area>_<20 hex> MONGODB_TEST_DB_NAME=<same>`. The shared `simplebash_pos_test` database accumulates data, and tests such as the reminders ones then fail for reasons that have nothing to do with your change.
+3. For every new or changed route: a `security(("bearerAuth" = []))` entry in its `#[utoipa::path]` when it needs a token (`authorization_test` checks it), and its permission checks tested for each role.
+4. A new permission gets its own constant in `core/constants/permissions.rs`; never reuse an existing permission string for a different feature (`sessions:view` guards the login-session list, register shifts use `register_sessions:*`). Re-check what `ADMIN`/`MANAGER`/`STAFF_PERMISSIONS` now grant.
+5. `cargo fmt --check` is not enforced in CI yet (the tree is not formatted); still do not make it worse in the files you touch.
+6. After pushing, watch the run (`gh run list --limit 3`, `gh run view <id> --log-failed`) until it is green. Pushing is a separate, deliberate step, so ask first.
+
 # Where the rest of the guidance lives
 
 Architecture, code-writing conventions, and module-specific rules are split into directory-scoped
