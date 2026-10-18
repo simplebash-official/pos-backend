@@ -33,10 +33,11 @@ use crate::{
             InvoiceListResponse, PaymentListResponse, PaymentRecord, RecordPaymentRequest,
             VoidCreditNoteRequest, VoidInvoiceRequest,
         },
+        settings::{DocumentDesignChoice, DocumentDesignStatus},
     },
     modules::{
         billing::service::{self, sale},
-        documents, settings, users,
+        documents, users,
     },
 };
 
@@ -50,11 +51,13 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(void_invoice))
         .routes(routes!(close_invoice))
         .routes(routes!(get_invoice_document))
+        .routes(routes!(get_invoice_document_design))
         .routes(routes!(record_payment, list_payments))
         .routes(routes!(create_credit_note, list_credit_notes))
         .routes(routes!(get_credit_note))
         .routes(routes!(void_credit_note))
         .routes(routes!(get_credit_note_document))
+        .routes(routes!(get_credit_note_document_design))
 }
 
 #[utoipa::path(get, path = "/", tag = modules::BILLING, responses(
@@ -203,9 +206,12 @@ async fn close_invoice(
 struct DocumentQueryParams {
     #[serde(rename = "paperWidthMm")]
     paper_width_mm: Option<u32>,
-    /// A specific design (a template `name`) for this one print. Omitted →
-    /// the shop's chosen design for the document kind.
+    /// A specific design family for this one print. Omitted → the shop's
+    /// chosen design for the document kind.
     template: Option<String>,
+    /// `original` serves the PDF exactly as first printed; `current` prints
+    /// with the design in force now. Required: the caller decides.
+    design: DocumentDesignChoice,
 }
 
 #[utoipa::path(get, path = "/invoices/{id}/documents/{documentType}", tag = modules::BILLING,
@@ -213,15 +219,16 @@ struct DocumentQueryParams {
         ("id" = String, Path, description = "Invoice ID or prefixed key"),
         ("documentType" = String, Path, description = "'a4-invoice' or 'thermal-receipt'"),
         ("paperWidthMm" = Option<u32>, Query, description = "58 or 80 — thermal-receipt only, defaults to 80 (D9)"),
-        ("template" = Option<String>, Query, description = "A design (template name) for this print only; defaults to the shop's choice for the document kind"),
+        ("template" = Option<String>, Query, description = "A design family for this print only; defaults to the shop's choice for the document kind"),
+        ("design" = DocumentDesignChoice, Query, description = "'original' = the stored PDF as first printed, 'current' = the design in force now"),
     ),
     security(("bearerAuth" = [])),
     responses(
         (status = 200, description = "Rendered (or cached) PDF", content_type = "application/pdf", body = Vec<u8>),
-        (status = 400, description = "Unknown documentType", body = ErrorResponse),
+        (status = 400, description = "Unknown documentType, or `design` missing", body = ErrorResponse),
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
-        (status = 404, description = "Invoice not found", body = ErrorResponse),
-        (status = 422, description = "TEMPLATE_UNAVAILABLE: the requested design does not exist or is not for this document", body = ErrorResponse),
+        (status = 404, description = "Invoice not found, or NO_ORIGINAL_DOCUMENT: nothing was printed before", body = ErrorResponse),
+        (status = 422, description = "TEMPLATE_UNAVAILABLE: the requested or chosen design is not available; TEMPLATE_OPTIONS_INVALID: saved design settings no longer fit", body = ErrorResponse),
     )
 )]
 async fn get_invoice_document(
@@ -230,6 +237,7 @@ async fn get_invoice_document(
     Path((id, document_type)): Path<(String, String)>,
     Query(params): Query<DocumentQueryParams>,
 ) -> AppResult<Response> {
+    let (kind, legacy_cache_key) = invoice_variant(&document_type, params.paper_width_mm)?;
     let invoice = service::get_invoice(&state.db, &id).await?;
     // Sum of every payment against this invoice (checkout deposit + any
     // installments) so a partial-credit slip prints the right "Amount Paid"
@@ -240,53 +248,29 @@ async fn get_invoice_document(
         .map(|p| p.amount_cents)
         .sum();
 
-    // `kind` is the document type; which *design* prints it is decided below.
-    let (kind, legacy_cache_key, data) = match document_type.as_str() {
-        "a4-invoice" => (
-            "a4-invoice",
-            "a4-invoice".to_string(),
-            service::print_payload::build_a4_invoice_data(
-                &invoice,
-                "ORIGINAL — CUSTOMER COPY",
-                false,
-                paid_so_far_cents,
-            ),
+    let data = match kind {
+        "a4-invoice" => service::print_payload::build_a4_invoice_data(
+            &invoice,
+            "ORIGINAL — CUSTOMER COPY",
+            false,
+            paid_so_far_cents,
         ),
-        "thermal-receipt" => {
-            let width = params.paper_width_mm.unwrap_or(80);
-            (
-                "thermal-receipt",
-                format!("thermal-receipt-{width}mm"),
-                service::print_payload::build_thermal_receipt_data(
-                    &invoice,
-                    width,
-                    paid_so_far_cents,
-                ),
-            )
-        }
-        other => {
-            return Err(AppError::validation(format!(
-                "Unknown documentType '{other}'. Must be 'a4-invoice' or 'thermal-receipt'"
-            )));
-        }
+        _ => service::print_payload::build_thermal_receipt_data(
+            &invoice,
+            params.paper_width_mm.unwrap_or(80),
+            paid_so_far_cents,
+        ),
     };
 
-    let selections = settings::service::get_document_template_selections(&state.db).await?;
-    let resolved = documents::service::templates::resolve(
-        &state.document_server,
-        kind,
-        params.template.as_deref(),
-        &selections,
-    )
-    .await?;
-
-    let pdf_bytes = documents::service::get_or_render(
+    let pdf_bytes = documents::service::print(
         &state.db,
         &state.document_server,
         &state.config.generated_documents_dir,
+        kind,
+        params.template.as_deref(),
+        params.design,
         &invoice.key,
         &legacy_cache_key,
-        &resolved,
         data,
     )
     .await?;
@@ -297,6 +281,70 @@ async fn get_invoice_document(
         Body::from(pdf_bytes),
     )
         .into_response())
+}
+
+/// The document kind and print-variant cache key of an invoice document:
+/// `a4-invoice`, or `thermal-receipt` per paper width (default 80 mm).
+fn invoice_variant(
+    document_type: &str,
+    paper_width_mm: Option<u32>,
+) -> AppResult<(&'static str, String)> {
+    match document_type {
+        "a4-invoice" => Ok(("a4-invoice", "a4-invoice".to_string())),
+        "thermal-receipt" => {
+            let width = paper_width_mm.unwrap_or(80);
+            Ok(("thermal-receipt", format!("thermal-receipt-{width}mm")))
+        }
+        other => Err(AppError::validation(format!(
+            "Unknown documentType '{other}'. Must be 'a4-invoice' or 'thermal-receipt'"
+        ))),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct DesignStatusParams {
+    #[serde(rename = "paperWidthMm")]
+    paper_width_mm: Option<u32>,
+    template: Option<String>,
+}
+
+#[utoipa::path(get, path = "/invoices/{id}/documents/{documentType}/design", tag = modules::BILLING,
+    params(
+        ("id" = String, Path, description = "Invoice ID or prefixed key"),
+        ("documentType" = String, Path, description = "'a4-invoice' or 'thermal-receipt'"),
+        ("paperWidthMm" = Option<u32>, Query, description = "58 or 80 — thermal-receipt only, defaults to 80"),
+        ("template" = Option<String>, Query, description = "A design family for this print only"),
+    ),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "What the stored PDF was printed with versus what would print now", body = ApiResponse<DocumentDesignStatus>),
+        (status = 400, description = "Unknown documentType", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 404, description = "Invoice not found", body = ErrorResponse),
+        (status = 422, description = "TEMPLATE_UNAVAILABLE: the requested or chosen design is not available", body = ErrorResponse),
+    )
+)]
+async fn get_invoice_document_design(
+    _user: CurrentUser,
+    State(state): State<AppState>,
+    Path((id, document_type)): Path<(String, String)>,
+    Query(params): Query<DesignStatusParams>,
+) -> AppResult<Json<ApiResponse<DocumentDesignStatus>>> {
+    let (kind, legacy_cache_key) = invoice_variant(&document_type, params.paper_width_mm)?;
+    let invoice = service::get_invoice(&state.db, &id).await?;
+    let status = documents::service::print_design_status(
+        &state.db,
+        &state.document_server,
+        kind,
+        params.template.as_deref(),
+        &invoice.key,
+        &legacy_cache_key,
+    )
+    .await?;
+    Ok(Json(ApiResponse::success(
+        status,
+        "Document design status retrieved successfully",
+    )))
 }
 
 #[utoipa::path(post, path = "/invoices/{id}/payments", tag = modules::BILLING,
@@ -478,15 +526,16 @@ async fn void_credit_note(
     params(
         ("id" = String, Path, description = "Credit note ID or prefixed key"),
         ("documentType" = String, Path, description = "'credit-note' — the only supported value"),
-        ("template" = Option<String>, Query, description = "A design (template name) for this print only; defaults to the shop's choice"),
+        ("template" = Option<String>, Query, description = "A design family for this print only; defaults to the shop's choice"),
+        ("design" = DocumentDesignChoice, Query, description = "'original' = the stored PDF as first printed, 'current' = the design in force now"),
     ),
     security(("bearerAuth" = [])),
     responses(
         (status = 200, description = "Rendered (or cached) PDF", content_type = "application/pdf", body = Vec<u8>),
-        (status = 400, description = "Unknown documentType", body = ErrorResponse),
+        (status = 400, description = "Unknown documentType, or `design` missing", body = ErrorResponse),
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
-        (status = 404, description = "Credit note not found", body = ErrorResponse),
-        (status = 422, description = "TEMPLATE_UNAVAILABLE: the requested design does not exist or is not for this document", body = ErrorResponse),
+        (status = 404, description = "Credit note not found, or NO_ORIGINAL_DOCUMENT: nothing was printed before", body = ErrorResponse),
+        (status = 422, description = "TEMPLATE_UNAVAILABLE: the requested or chosen design is not available; TEMPLATE_OPTIONS_INVALID: saved design settings no longer fit", body = ErrorResponse),
     )
 )]
 async fn get_credit_note_document(
@@ -495,11 +544,7 @@ async fn get_credit_note_document(
     Path((id, document_type)): Path<(String, String)>,
     Query(params): Query<DocumentQueryParams>,
 ) -> AppResult<Response> {
-    if document_type != "credit-note" {
-        return Err(AppError::validation(format!(
-            "Unknown documentType '{document_type}'. Must be 'credit-note'"
-        )));
-    }
+    require_credit_note_type(&document_type)?;
 
     let credit_note = service::credit_notes::get_credit_note(&state.db, &id).await?;
     let invoice = match &credit_note.invoice_key {
@@ -508,22 +553,15 @@ async fn get_credit_note_document(
     };
     let data = service::print_payload::build_credit_note_data(&credit_note, invoice.as_ref());
 
-    let selections = settings::service::get_document_template_selections(&state.db).await?;
-    let resolved = documents::service::templates::resolve(
-        &state.document_server,
-        "credit-note",
-        params.template.as_deref(),
-        &selections,
-    )
-    .await?;
-
-    let pdf_bytes = documents::service::get_or_render(
+    let pdf_bytes = documents::service::print(
         &state.db,
         &state.document_server,
         &state.config.generated_documents_dir,
+        "credit-note",
+        params.template.as_deref(),
+        params.design,
         &credit_note.key,
         "credit-note",
-        &resolved,
         data,
     )
     .await?;
@@ -534,4 +572,51 @@ async fn get_credit_note_document(
         Body::from(pdf_bytes),
     )
         .into_response())
+}
+
+fn require_credit_note_type(document_type: &str) -> AppResult<()> {
+    if document_type != "credit-note" {
+        return Err(AppError::validation(format!(
+            "Unknown documentType '{document_type}'. Must be 'credit-note'"
+        )));
+    }
+    Ok(())
+}
+
+#[utoipa::path(get, path = "/credit-notes/{id}/documents/{documentType}/design", tag = modules::BILLING,
+    params(
+        ("id" = String, Path, description = "Credit note ID or prefixed key"),
+        ("documentType" = String, Path, description = "'credit-note' — the only supported value"),
+        ("template" = Option<String>, Query, description = "A design family for this print only"),
+    ),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "What the stored PDF was printed with versus what would print now", body = ApiResponse<DocumentDesignStatus>),
+        (status = 400, description = "Unknown documentType", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 404, description = "Credit note not found", body = ErrorResponse),
+        (status = 422, description = "TEMPLATE_UNAVAILABLE: the requested or chosen design is not available", body = ErrorResponse),
+    )
+)]
+async fn get_credit_note_document_design(
+    _user: CurrentUser,
+    State(state): State<AppState>,
+    Path((id, document_type)): Path<(String, String)>,
+    Query(params): Query<DesignStatusParams>,
+) -> AppResult<Json<ApiResponse<DocumentDesignStatus>>> {
+    require_credit_note_type(&document_type)?;
+    let credit_note = service::credit_notes::get_credit_note(&state.db, &id).await?;
+    let status = documents::service::print_design_status(
+        &state.db,
+        &state.document_server,
+        "credit-note",
+        params.template.as_deref(),
+        &credit_note.key,
+        "credit-note",
+    )
+    .await?;
+    Ok(Json(ApiResponse::success(
+        status,
+        "Document design status retrieved successfully",
+    )))
 }

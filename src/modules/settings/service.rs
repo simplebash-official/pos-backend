@@ -6,11 +6,11 @@ use crate::{
     clients::{db::Db, document_server::DocumentServerClient},
     core::error::{AppError, AppResult},
     domain::settings::{
-        DocumentKindSettings, DocumentTemplateOption, DocumentTemplatesResponse,
-        ShopProfileResponse, UpdateDocumentTemplatesRequest, UpdateShopProfileRequest,
+        DocumentTemplatesResponse, ShopProfileResponse, UpdateDocumentTemplatesRequest,
+        UpdateShopProfileRequest,
     },
     modules::{
-        documents::service::templates::{self, KindListing, Selections},
+        documents::service::templates::{self, DesignSettings},
         settings::{
             model::{DocumentTemplateSettingsDocument, ShopProfileDocument},
             repository,
@@ -190,53 +190,36 @@ pub(crate) async fn update_shop_profile(
     .await
 }
 
-/// The shop's stored template choice per document kind (empty when the shop
-/// never picked one). Printing reads this to decide which design to render.
-pub(crate) async fn get_document_template_selections(db: &Db) -> AppResult<Selections> {
+/// The shop's stored designs: the family chosen per document kind and the
+/// option values saved per design (both empty when the shop never changed
+/// anything). Printing reads this to decide which design to render.
+pub(crate) async fn get_document_template_settings(db: &Db) -> AppResult<DesignSettings> {
     Ok(
         repository::find_document_template_settings(db, DOCUMENT_TEMPLATE_SETTINGS_KEY)
             .await?
-            .map(|doc| doc.selections)
+            .map(|doc| DesignSettings {
+                selections: doc.selections,
+                options: doc.options,
+            })
             .unwrap_or_default(),
     )
 }
 
-fn to_response(listing: Vec<KindListing>) -> DocumentTemplatesResponse {
-    DocumentTemplatesResponse {
-        kinds: listing
-            .into_iter()
-            .map(|kind| DocumentKindSettings {
-                kind: kind.kind.to_string(),
-                label: kind.label.to_string(),
-                selected: kind.selected,
-                effective: kind.effective,
-                templates: kind
-                    .templates
-                    .into_iter()
-                    .map(|template| DocumentTemplateOption {
-                        name: template.name,
-                        title: template.title,
-                        is_default: template.is_default,
-                    })
-                    .collect(),
-            })
-            .collect(),
-    }
-}
-
-/// Every selectable document kind with the designs available for it and the
-/// shop's current choice.
+/// Every selectable document kind with the designs available for it, the
+/// shop's current choice and the option values in force.
 pub(crate) async fn get_document_templates(
     db: &Db,
     doc_server: &DocumentServerClient,
 ) -> AppResult<DocumentTemplatesResponse> {
-    let selections = get_document_template_selections(db).await?;
-    Ok(to_response(templates::list(doc_server, &selections).await?))
+    let settings = get_document_template_settings(db).await?;
+    Ok(DocumentTemplatesResponse {
+        kinds: templates::list(doc_server, &settings).await?,
+    })
 }
 
-/// Changes the shop's designs. Every pick is validated against the
-/// document-server's current templates first; nothing is saved unless all of
-/// it is valid.
+/// Changes the shop's designs and option values. Every pick and value is
+/// validated against the document-server's current templates first; nothing
+/// is saved unless all of it is valid.
 pub(crate) async fn update_document_templates(
     db: &Db,
     doc_server: &DocumentServerClient,
@@ -247,31 +230,94 @@ pub(crate) async fn update_document_templates(
             repository::find_document_template_settings(db, DOCUMENT_TEMPLATE_SETTINGS_KEY).await?;
         let current = existing
             .as_ref()
-            .map(|doc| doc.selections.clone())
+            .map(|doc| DesignSettings {
+                selections: doc.selections.clone(),
+                options: doc.options.clone(),
+            })
             .unwrap_or_default();
 
-        let merged = templates::merge_selections(doc_server, current, &req.selections).await?;
+        let merged =
+            templates::merge_settings(doc_server, current, &req.selections, &req.options).await?;
 
-        let now = BsonDateTime::now();
-        let doc = match existing {
-            Some(existing) => DocumentTemplateSettingsDocument {
-                selections: merged.clone(),
-                version: existing.version + 1,
-                updated_at: now,
-                ..existing
-            },
-            None => DocumentTemplateSettingsDocument {
-                id: None,
-                key: DOCUMENT_TEMPLATE_SETTINGS_KEY.to_string(),
-                selections: merged.clone(),
-                version: 1,
-                created_at: now,
-                updated_at: now,
-            },
+        persist_document_template_settings(db, existing, &merged).await?;
+        Ok(DocumentTemplatesResponse {
+            kinds: templates::list(doc_server, &merged).await?,
+        })
+    })
+    .await
+}
+
+async fn persist_document_template_settings(
+    db: &Db,
+    existing: Option<DocumentTemplateSettingsDocument>,
+    settings: &DesignSettings,
+) -> AppResult<()> {
+    let now = BsonDateTime::now();
+    let doc = match existing {
+        Some(existing) => DocumentTemplateSettingsDocument {
+            selections: settings.selections.clone(),
+            options: settings.options.clone(),
+            version: existing.version + 1,
+            updated_at: now,
+            ..existing
+        },
+        None => DocumentTemplateSettingsDocument {
+            id: None,
+            key: DOCUMENT_TEMPLATE_SETTINGS_KEY.to_string(),
+            selections: settings.selections.clone(),
+            options: settings.options.clone(),
+            version: 1,
+            created_at: now,
+            updated_at: now,
+        },
+    };
+    repository::upsert_document_template_settings(db, &doc).await
+}
+
+/// The kind/family pairs of this shop's stored selections (admin console).
+pub async fn list_document_selections(db: &Db) -> AppResult<Vec<(String, String)>> {
+    let mut selections: Vec<(String, String)> = get_document_template_settings(db)
+        .await?
+        .selections
+        .into_iter()
+        .collect();
+    selections.sort();
+    Ok(selections)
+}
+
+/// Removes every stored selection of the given families and the option
+/// values saved for them; returns the `(kind, family)` selections removed.
+/// An explicit operator action: printing then needs a new choice (or falls
+/// to the standard design when the kind is left unchosen).
+pub async fn reset_document_families(
+    db: &Db,
+    families: &[String],
+) -> AppResult<Vec<(String, String)>> {
+    crate::core::logging::domain::tracked("settings.document_designs_reset", async move {
+        let existing =
+            repository::find_document_template_settings(db, DOCUMENT_TEMPLATE_SETTINGS_KEY).await?;
+        let Some(existing) = existing else {
+            return Ok(Vec::new());
         };
-        repository::upsert_document_template_settings(db, &doc).await?;
-
-        Ok(to_response(templates::list(doc_server, &merged).await?))
+        let mut settings = DesignSettings {
+            selections: existing.selections.clone(),
+            options: existing.options.clone(),
+        };
+        let mut removed: Vec<(String, String)> = settings
+            .selections
+            .iter()
+            .filter(|(_, family)| families.contains(family))
+            .map(|(kind, family)| (kind.clone(), family.clone()))
+            .collect();
+        removed.sort();
+        settings
+            .selections
+            .retain(|_, family| !families.contains(family));
+        settings
+            .options
+            .retain(|family, _| !families.contains(family));
+        persist_document_template_settings(db, Some(existing), &settings).await?;
+        Ok(removed)
     })
     .await
 }
@@ -279,7 +325,7 @@ pub(crate) async fn update_document_templates(
 /// PDF of one design's sample data, for the Settings preview.
 pub(crate) async fn render_document_template_preview(
     doc_server: &DocumentServerClient,
-    name: &str,
+    family: &str,
 ) -> AppResult<Vec<u8>> {
-    templates::render_preview(doc_server, name).await
+    templates::render_preview(doc_server, family).await
 }

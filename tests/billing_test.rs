@@ -1313,7 +1313,7 @@ async fn get_invoice_document_returns_pdf_and_caches_by_paper_width() {
     let request = Request::builder()
         .method("GET")
         .uri(format!(
-            "/api/billing/invoices/{invoice_key}/documents/a4-invoice"
+            "/api/billing/invoices/{invoice_key}/documents/a4-invoice?design=current"
         ))
         .header(AUTHORIZATION, format!("Bearer {token}"))
         .body(Body::empty())
@@ -1336,7 +1336,7 @@ async fn get_invoice_document_returns_pdf_and_caches_by_paper_width() {
     let cached_req = Request::builder()
         .method("GET")
         .uri(format!(
-            "/api/billing/invoices/{invoice_key}/documents/a4-invoice"
+            "/api/billing/invoices/{invoice_key}/documents/a4-invoice?design=current"
         ))
         .header(AUTHORIZATION, format!("Bearer {token}"))
         .body(Body::empty())
@@ -1352,7 +1352,7 @@ async fn get_invoice_document_returns_pdf_and_caches_by_paper_width() {
     let thermal_req = Request::builder()
         .method("GET")
         .uri(format!(
-            "/api/billing/invoices/{invoice_key}/documents/thermal-receipt?paperWidthMm=58"
+            "/api/billing/invoices/{invoice_key}/documents/thermal-receipt?paperWidthMm=58&design=current"
         ))
         .header(AUTHORIZATION, format!("Bearer {token}"))
         .body(Body::empty())
@@ -1407,7 +1407,7 @@ async fn get_invoice_document_with_shop_logo_renders() {
             Request::builder()
                 .method("GET")
                 .uri(format!(
-                    "/api/billing/invoices/{invoice_key}/documents/a4-invoice"
+                    "/api/billing/invoices/{invoice_key}/documents/a4-invoice?design=current"
                 ))
                 .header(AUTHORIZATION, format!("Bearer {token}"))
                 .body(Body::empty())
@@ -1810,7 +1810,7 @@ async fn get_invoice_document_persists_document_server_template_key() {
     let request = Request::builder()
         .method("GET")
         .uri(format!(
-            "/api/billing/invoices/{invoice_key}/documents/a4-invoice"
+            "/api/billing/invoices/{invoice_key}/documents/a4-invoice?design=current"
         ))
         .header(AUTHORIZATION, format!("Bearer {token}"))
         .body(Body::empty())
@@ -1877,7 +1877,7 @@ async fn document_render_payload_violating_published_schema_fails_fast_locally()
     let request = Request::builder()
         .method("GET")
         .uri(format!(
-            "/api/billing/invoices/{invoice_key}/documents/a4-invoice"
+            "/api/billing/invoices/{invoice_key}/documents/a4-invoice?design=current"
         ))
         .header(AUTHORIZATION, format!("Bearer {token}"))
         .body(Body::empty())

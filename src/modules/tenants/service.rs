@@ -12,6 +12,7 @@ use crate::{
         tenancy::{Tenant, with_tenant},
     },
     modules::{
+        settings,
         tenants::{model::TenantDocument, repository, usage},
         users,
     },
@@ -383,6 +384,49 @@ pub async fn set_suspended(
         suspension_cache().remove(tenant_id);
         Ok(())
     })
+    .await
+}
+
+/// Runs `work` inside the shop's tenant scope; 404 `TENANT_NOT_FOUND` for a
+/// shop that is not in the directory.
+async fn in_shop<T, F: std::future::Future<Output = AppResult<T>>>(
+    db: &Db,
+    tenant_id: &str,
+    work: F,
+) -> AppResult<T> {
+    repository::find_tenant_by_key(db, tenant_id)
+        .await?
+        .ok_or_else(|| {
+            AppError::not_found_with_code(
+                format!("No shop with id '{tenant_id}'"),
+                codes::TENANT_NOT_FOUND,
+            )
+        })?;
+    with_tenant(Tenant::id(tenant_id)?, work).await
+}
+
+/// The `(kind, family)` document designs a shop has chosen (operator console).
+pub async fn document_selections(db: &Db, tenant_id: &str) -> AppResult<Vec<(String, String)>> {
+    in_shop(
+        db,
+        tenant_id,
+        settings::service::list_document_selections(db),
+    )
+    .await
+}
+
+/// Clears the shop's choices of the given design families, and the option
+/// values it saved for them; returns the `(kind, family)` choices removed.
+pub async fn reset_document_selections(
+    db: &Db,
+    tenant_id: &str,
+    families: &[String],
+) -> AppResult<Vec<(String, String)>> {
+    in_shop(
+        db,
+        tenant_id,
+        settings::service::reset_document_families(db, families),
+    )
     .await
 }
 

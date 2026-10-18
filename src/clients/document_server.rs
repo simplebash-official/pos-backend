@@ -7,77 +7,66 @@
 // `clients::mongo::connect`.
 
 use std::{
+    collections::HashMap,
     sync::Arc,
     time::{Duration, Instant},
 };
 
 use tokio::sync::RwLock;
 
-use crate::core::{
-    error::{AppError, AppResult},
-    response::ApiResponse,
+use crate::{
+    core::{
+        error::{AppError, AppResult},
+        response::ApiResponse,
+    },
+    domain::settings::DesignOption,
 };
 
-/// Stable call-site slug -> the human label document-server publishes as a
-/// template's `description` (its schema `title`). Its on-disk `name` is an
-/// opaque `doc_temp_<nanoid>`, so slugs resolve through the title; this is
-/// the **built-in default** template of each kind, and what
-/// `generated_documents.template_name` stores.
-const TEMPLATE_DESCRIPTIONS: &[(&str, &str)] = &[
-    ("a4-invoice", "A4 Invoice"),
-    ("thermal-receipt", "Thermal Receipt"),
-    ("credit-note", "Credit Note"),
-    ("quotation", "Quotation"),
-    ("analytics-report", "Analytics Report"),
-    ("product-label", "Product Sticker Label"),
-];
-
-/// The built-in default template's title for a call-site slug, if it has one.
-pub fn default_title(slug: &str) -> Option<&'static str> {
-    TEMPLATE_DESCRIPTIONS
-        .iter()
-        .find(|(s, _)| *s == slug)
-        .map(|(_, d)| *d)
-}
-
-/// Resolves a call-site slug to the `description` document-server publishes.
-/// An unrecognised value is returned unchanged, so a caller that already
-/// holds a real description still works.
-fn slug_to_description(slug: &str) -> &str {
-    default_title(slug).unwrap_or(slug)
-}
-
-/// How long a fetched template list is trusted. Templates are added and
-/// edited on the document-server without a restart (`POST /api/templates/sync`),
-/// so the list must refresh by itself; a minute keeps the per-print cost at
-/// zero while a new template shows up almost immediately.
+/// How long a fetched template list is trusted. Designs are published on the
+/// document-server (`POST /api/packages`) without a restart, so the list must
+/// refresh by itself; a minute keeps the per-print cost at zero while a new
+/// design shows up almost immediately.
 const TEMPLATE_CACHE_TTL: Duration = Duration::from_secs(60);
 
-/// The schema keyword a template uses to declare what it is for (see
-/// `document-server/templates/CLAUDE.md`).
-const KIND_KEYWORD: &str = "x-document-kind";
-
-/// One **active** template as the document-server publishes it.
-#[derive(Debug, Clone)]
+/// One published template as the document-server lists it for the calling
+/// tenant: the **latest published version** of a design family that is either
+/// bundled (global) or granted to the tenant.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TemplateInfo {
     /// The document-server-minted unique key (`tpl_...`) — persisted onto
     /// `generated_documents` rows so the POS side durably holds the ID the
     /// document server assigned. Differs per document-server database.
     pub key: String,
-    /// The opaque, stable template id (`doc_temp_<nanoid>`, the `.typ` file
-    /// stem). Identical on every deployment, so this is what shops store.
+    /// The opaque, immutable template id (`doc_temp_<nanoid>`); one per
+    /// version. Identical on every deployment.
     pub name: String,
+    /// The design this version belongs to; a shop selects a family and always
+    /// prints with its latest version.
+    pub family: String,
+    pub version: i64,
+    /// What the template is for (`a4-invoice`, `thermal-receipt`, …).
+    pub kind: String,
     /// Human label (the schema `title`) shown in the dropdowns.
+    #[serde(rename = "description")]
     pub title: String,
-    /// What the template is for (`x-document-kind` in its schema), e.g.
-    /// `a4-invoice`. `None` for a template that does not declare one.
-    pub kind: Option<String>,
-    /// JSON Schema for the template's render payload (`dataSchema`), when
-    /// the template ships one. `None` → no pre-validation (matches that
-    /// service's render-time behavior).
-    pub data_schema: Option<serde_json::Value>,
+    /// `document` or `label`.
+    pub r#type: String,
+    /// `global` (bundled) or `private` (a published package).
+    pub scope: String,
+    /// The built-in default of its kind (`x-default`).
+    pub is_default: bool,
+    /// Controls the template declares (`x-options`); their values travel in
+    /// the payload's `options` object.
+    pub options: Vec<DesignOption>,
+    /// JSON Schema for the template's render payload (`dataSchema`) — the one
+    /// contract this backend codes its payload builders against.
+    pub data_schema: serde_json::Value,
     /// The template's worked sample payload (`data`), used for previews.
-    pub sample: Option<serde_json::Value>,
+    #[serde(rename = "data")]
+    pub sample: serde_json::Value,
+    pub sha256: String,
+    pub min_app_version: Option<String>,
 }
 
 struct TemplateCache {
@@ -90,60 +79,20 @@ pub struct DocumentServerClient {
     base_url: String,
     api_key: String,
     cache_ttl: Duration,
-    // The active templates from `GET /api/templates`, refreshed after
+    // The templates from `GET /api/templates`, one list per tenant (the
+    // document-server filters it by `X-Tenant-Key`; the key here is
+    // `current_tenant_id()`, empty outside a tenant), each refreshed after
     // `cache_ttl`. If a refresh fails while a previous list exists, that list
     // keeps being served (with a warning): a document-server hiccup must not
     // stop the shop from printing. The schema rides along in the same entry
-    // because `render()` validates every payload against it *before*
-    // sending — the schema the document-server publishes is the one contract
-    // this backend codes its payload builders against.
-    template_cache: RwLock<Option<TemplateCache>>,
-}
-
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct TemplateSummary {
-    key: String,
-    /// The opaque `doc_temp_<nanoid>` id.
-    name: String,
-    /// Human label (the template's schema `title`).
-    #[serde(default)]
-    description: Option<String>,
-    /// `GET /api/templates` also lists templates whose `.typ` vanished from
-    /// disk (deactivated, never deleted); those must not be offered or used.
-    #[serde(default = "default_true")]
-    is_active: bool,
-    data_schema: Option<serde_json::Value>,
-    data: Option<serde_json::Value>,
-}
-
-fn default_true() -> bool {
-    true
+    // because `render_template()` validates every payload against it *before*
+    // sending.
+    template_cache: RwLock<HashMap<String, TemplateCache>>,
 }
 
 #[derive(serde::Deserialize)]
 struct TemplatesResponse {
-    templates: Vec<TemplateSummary>,
-}
-
-impl TemplateSummary {
-    fn into_info(self) -> TemplateInfo {
-        let kind = self
-            .data_schema
-            .as_ref()
-            .and_then(|schema| schema.get(KIND_KEYWORD))
-            .and_then(|kind| kind.as_str())
-            .filter(|kind| !kind.is_empty())
-            .map(str::to_string);
-        TemplateInfo {
-            title: self.description.unwrap_or_else(|| self.name.clone()),
-            key: self.key,
-            name: self.name,
-            kind,
-            data_schema: self.data_schema,
-            sample: self.data,
-        }
-    }
+    templates: Vec<TemplateInfo>,
 }
 
 impl DocumentServerClient {
@@ -153,7 +102,7 @@ impl DocumentServerClient {
             base_url,
             api_key,
             cache_ttl: TEMPLATE_CACHE_TTL,
-            template_cache: RwLock::new(None),
+            template_cache: RwLock::new(HashMap::new()),
         }
     }
 
@@ -197,12 +146,11 @@ impl DocumentServerClient {
         ))
     }
 
-    /// Every **active** template, from the cache while it is fresh, else
-    /// from `GET /api/templates`. Unauthenticated on document-server's side
-    /// (`templates` routes are deliberately left open — see that service's
-    /// auth notes), so no API-key header here.
+    /// Every template the calling tenant may use, from the cache while it is
+    /// fresh, else from `GET /api/templates`.
     pub async fn list_templates(&self) -> AppResult<Arc<Vec<TemplateInfo>>> {
-        if let Some(cache) = self.template_cache.read().await.as_ref()
+        let tenant = crate::core::tenancy::current_tenant_id().unwrap_or_default();
+        if let Some(cache) = self.template_cache.read().await.get(&tenant)
             && cache.loaded_at.elapsed() < self.cache_ttl
         {
             return Ok(cache.templates.clone());
@@ -211,14 +159,17 @@ impl DocumentServerClient {
         match self.fetch_templates().await {
             Ok(templates) => {
                 let templates = Arc::new(templates);
-                *self.template_cache.write().await = Some(TemplateCache {
-                    loaded_at: Instant::now(),
-                    templates: templates.clone(),
-                });
+                self.template_cache.write().await.insert(
+                    tenant,
+                    TemplateCache {
+                        loaded_at: Instant::now(),
+                        templates: templates.clone(),
+                    },
+                );
                 Ok(templates)
             }
             Err(err) => {
-                if let Some(cache) = self.template_cache.read().await.as_ref() {
+                if let Some(cache) = self.template_cache.read().await.get(&tenant) {
                     tracing::warn!(
                         category = "http",
                         event = "outbound",
@@ -238,6 +189,7 @@ impl DocumentServerClient {
             .http
             .get(&url)
             .headers(forwarded_headers())
+            .header("X-Internal-Api-Key", &self.api_key)
             .send()
             .await
             .map_err(document_server_unreachable)?;
@@ -249,64 +201,61 @@ impl DocumentServerClient {
 
         let body: ApiResponse<TemplatesResponse> =
             response.json().await.map_err(document_server_unreachable)?;
-        let templates = body
+        Ok(body
             .data
             .ok_or_else(|| AppError::internal("document-server returned no template list"))?
-            .templates;
-
-        Ok(templates
-            .into_iter()
-            .filter(|template| template.is_active)
-            .map(TemplateSummary::into_info)
-            .collect())
+            .templates)
     }
 
-    /// The active template with this opaque `name` (`doc_temp_<nanoid>`).
-    pub async fn find_by_name(&self, name: &str) -> AppResult<Option<TemplateInfo>> {
-        Ok(self
-            .list_templates()
-            .await?
-            .iter()
-            .find(|template| template.name == name)
-            .cloned())
-    }
-
-    /// The template a call-site slug (e.g. `"a4-invoice"`) stands for: the
-    /// active template published under that slug's built-in title.
-    async fn get_template_info(&self, template_slug: &str) -> AppResult<TemplateInfo> {
-        let description = slug_to_description(template_slug);
+    /// The built-in default template of a document kind (`x-default`).
+    pub async fn default_template(&self, kind: &str) -> AppResult<TemplateInfo> {
         self.list_templates()
             .await?
             .iter()
-            .find(|template| template.title == description)
+            .find(|template| template.kind == kind && template.is_default)
             .cloned()
             .ok_or_else(|| {
                 AppError::internal(format!(
-                    "document-server has no template described as '{description}' (slug '{template_slug}')"
+                    "document-server publishes no default template for kind '{kind}'"
                 ))
             })
     }
 
-    /// Renders the built-in template of a call-site slug (e.g.
+    /// Renders the built-in default template of a document kind (e.g.
     /// `"analytics-report"`) against `data`; see [`Self::render_template`].
-    pub async fn render(&self, template_slug: &str, data: serde_json::Value) -> AppResult<Vec<u8>> {
-        let info = self.get_template_info(template_slug).await?;
+    pub async fn render(&self, kind: &str, data: serde_json::Value) -> AppResult<Vec<u8>> {
+        let info = self.default_template(kind).await?;
         self.render_template(&info, data).await
+    }
+
+    /// The stored archive of a package the calling tenant may use
+    /// (`GET /api/packages/{name}/archive`).
+    pub async fn package_archive(&self, name: &str) -> AppResult<Vec<u8>> {
+        let url = format!("{}/api/packages/{name}/archive", self.base_url);
+        let response = self
+            .http
+            .get(&url)
+            .headers(forwarded_headers())
+            .header("X-Internal-Api-Key", &self.api_key)
+            .send()
+            .await
+            .map_err(document_server_unreachable)?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(map_error_body(status, response).await);
+        }
+        response
+            .bytes()
+            .await
+            .map(|b| b.to_vec())
+            .map_err(document_server_unreachable)
     }
 
     /// Renders a specific template's own sample payload — what the Settings
     /// preview shows. The sample's `logoUrl` is dropped: it points at an
     /// external image and a preview must not depend on the network.
     pub async fn render_sample(&self, template: &TemplateInfo) -> AppResult<Vec<u8>> {
-        let mut sample = template.sample.clone().ok_or_else(|| {
-            AppError::not_found_with_code(
-                format!(
-                    "template '{}' has no sample data to preview",
-                    template.title
-                ),
-                "TEMPLATE_SAMPLE_MISSING",
-            )
-        })?;
+        let mut sample = template.sample.clone();
         if let Some(fields) = sample.as_object_mut() {
             fields.remove("logoUrl");
         }
@@ -327,7 +276,7 @@ impl DocumentServerClient {
         info: &TemplateInfo,
         data: serde_json::Value,
     ) -> AppResult<Vec<u8>> {
-        validate_payload(info.data_schema.as_ref(), &data)?;
+        validate_payload(&info.data_schema, &data)?;
 
         let url = format!("{}/api/render/{}", self.base_url, info.key);
         let started = std::time::Instant::now();
@@ -386,14 +335,7 @@ const MAX_REPORTED_SCHEMA_ERRORS: usize = 10;
 /// status the document-server itself answers with for its own validation
 /// (`RENDER_VALIDATION_FAILED`, 422), so callers treat both identically —
 /// this is purely a fail-fast mirror of that service's enforcement.
-fn validate_payload(
-    data_schema: Option<&serde_json::Value>,
-    data: &serde_json::Value,
-) -> AppResult<()> {
-    let Some(data_schema) = data_schema else {
-        return Ok(());
-    };
-
+fn validate_payload(data_schema: &serde_json::Value, data: &serde_json::Value) -> AppResult<()> {
     let validator = jsonschema::validator_for(data_schema).map_err(|err| {
         AppError::internal(format!(
             "document-server published an invalid schema for this template: {err}"

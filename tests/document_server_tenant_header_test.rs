@@ -35,8 +35,11 @@ async fn start_capturing_mock() -> (String, Arc<Mutex<Vec<HeaderMap>>>) {
                     Json(json!({
                         "success": true,
                         "data": { "templates": [
-                            { "key": "tpl_receipt", "name": "doc_temp_x", "description": "Thermal Receipt",
-                              "dataSchema": { "type": "object", "additionalProperties": true } }
+                            { "key": "tpl_receipt", "name": "doc_temp_x", "family": "doc_temp_x", "version": 1,
+                              "type": "document", "kind": "thermal-receipt", "description": "Thermal Receipt",
+                              "status": "published", "scope": "global", "isDefault": true, "options": [],
+                              "sha256": "0", "minAppVersion": null,
+                              "dataSchema": { "type": "object", "additionalProperties": true }, "data": {} }
                         ] }
                     }))
                 }

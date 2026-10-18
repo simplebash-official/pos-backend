@@ -555,7 +555,7 @@ async fn test_sqlite_complete_pos_lifecycle() {
     let (status, headers, a4_bytes) = send_authed_raw(
         &ctx.router,
         "GET",
-        &format!("/api/billing/invoices/{invoice_key}/documents/a4-invoice"),
+        &format!("/api/billing/invoices/{invoice_key}/documents/a4-invoice?design=current"),
         &token,
     )
     .await;
@@ -571,7 +571,7 @@ async fn test_sqlite_complete_pos_lifecycle() {
     let (status, headers, a4_cached_bytes) = send_authed_raw(
         &ctx.router,
         "GET",
-        &format!("/api/billing/invoices/{invoice_number}/documents/a4-invoice"),
+        &format!("/api/billing/invoices/{invoice_number}/documents/a4-invoice?design=current"),
         &token,
     )
     .await;
@@ -583,7 +583,7 @@ async fn test_sqlite_complete_pos_lifecycle() {
     let (status, headers, receipt_bytes) = send_authed_raw(
         &ctx.router,
         "GET",
-        &format!("/api/billing/invoices/{invoice_key}/documents/thermal-receipt?paperWidthMm=80"),
+        &format!("/api/billing/invoices/{invoice_key}/documents/thermal-receipt?paperWidthMm=80&design=current"),
         &token,
     )
     .await;
@@ -595,7 +595,7 @@ async fn test_sqlite_complete_pos_lifecycle() {
     let (status, headers, cn_bytes) = send_authed_raw(
         &ctx.router,
         "GET",
-        &format!("/api/billing/credit-notes/{credit_note_key}/documents/credit-note"),
+        &format!("/api/billing/credit-notes/{credit_note_key}/documents/credit-note?design=current"),
         &token,
     )
     .await;
@@ -607,7 +607,7 @@ async fn test_sqlite_complete_pos_lifecycle() {
     let (status, headers, cn_cached_bytes) = send_authed_raw(
         &ctx.router,
         "GET",
-        &format!("/api/billing/credit-notes/{credit_note_number}/documents/credit-note"),
+        &format!("/api/billing/credit-notes/{credit_note_number}/documents/credit-note?design=current"),
         &token,
     )
     .await;

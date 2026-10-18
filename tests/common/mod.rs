@@ -55,23 +55,32 @@ pub async fn start_strict_mock_document_server() -> String {
     start_mock_document_server_with_templates(templates).await
 }
 
-/// One template entry as `GET /api/templates` publishes it. `kind` goes into
-/// the schema as `x-document-kind` — the marker the backend lists by.
+/// One template entry as `GET /api/templates` publishes it (the latest
+/// published version of a design family). `kind` goes into the schema as
+/// `x-document-kind`; a bundled template is its own family.
 fn mock_template(
     key: &str,
     name: &str,
     title: &str,
     kind: &str,
     contract: serde_json::Value,
-    is_active: bool,
-    sample: Option<serde_json::Value>,
+    is_default: bool,
+    sample: serde_json::Value,
 ) -> serde_json::Value {
-    let mut template = json!({
+    json!({
         "key": key,
         "name": name,
+        "family": name,
+        "version": 1,
         "type": "document",
+        "kind": kind,
         "description": title,
-        "isActive": is_active,
+        "status": "published",
+        "scope": "global",
+        "isDefault": is_default,
+        "options": [],
+        "sha256": "0".repeat(64),
+        "minAppVersion": null,
         "dataSchema": {
             "$schema": "http://json-schema.org/draft-07/schema#",
             "title": title,
@@ -80,11 +89,49 @@ fn mock_template(
             "additionalProperties": true,
             "required": contract["required"],
             "properties": contract["properties"]
+        },
+        "data": sample,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:00:00Z"
+    })
+}
+
+/// A published custom design: a private package of the A4 invoice kind whose
+/// schema requires the `options` object its two controls fill.
+pub fn mock_private_a4_invoice() -> serde_json::Value {
+    let mut template = mock_template(
+        "tpl_client_invoice",
+        "doc_temp_ClientInvoiceV2",
+        "Client Invoice",
+        "a4-invoice",
+        json!({
+            "required": ["invoiceNumber", "options"],
+            "properties": {
+                "invoiceNumber": { "type": "string" },
+                "options": {
+                    "type": "object",
+                    "required": ["showSign", "accent"],
+                    "properties": {
+                        "showSign": { "type": "boolean" },
+                        "accent": { "type": "string" }
+                    }
+                }
+            }
+        }),
+        false,
+        json!({ "invoiceNumber": "INV-CLIENT", "options": { "showSign": true, "accent": "blue" } }),
+    );
+    template["family"] = json!("fam_ClientInvoice00");
+    template["version"] = json!(2);
+    template["scope"] = json!("private");
+    template["sha256"] = json!("a".repeat(64));
+    template["options"] = json!([
+        { "key": "showSign", "type": "toggle", "label": "Signature box", "default": true },
+        {
+            "key": "accent", "type": "select", "label": "Accent colour", "default": "blue",
+            "choices": [{ "value": "blue", "label": "Blue" }, { "value": "red", "label": "Red" }]
         }
-    });
-    if let Some(sample) = sample {
-        template["data"] = sample;
-    }
+    ]);
     template
 }
 
@@ -104,13 +151,12 @@ fn mock_templates_json() -> serde_json::Value {
         }
     });
     let sample_logo = "https://example.invalid/logo.png";
-    // The label template declares no `x-document-kind` (it is not a shop-chosen
-    // design) and is typed `label`, like the real one.
+    // The label template is typed `label`, like the real one.
     let mut product_label = mock_template(
         "tpl_product_label",
         "lbl_temp_qklcWIolwoFFN3xk",
         "Product Sticker Label",
-        "",
+        "product-label",
         json!({
             "required": ["widthMm", "heightMm", "shopName", "elements", "labels"],
             "properties": {
@@ -134,13 +180,9 @@ fn mock_templates_json() -> serde_json::Value {
             }
         }),
         true,
-        None,
+        json!({}),
     );
     product_label["type"] = json!("label");
-    product_label["dataSchema"]
-        .as_object_mut()
-        .expect("mock schema is an object")
-        .remove("x-document-kind");
     json!({
         "success": true,
         "message": "Templates fetched",
@@ -153,28 +195,18 @@ fn mock_templates_json() -> serde_json::Value {
                     "a4-invoice",
                     a4.clone(),
                     true,
-                    Some(json!({ "invoiceNumber": "INV-CLASSIC", "logoUrl": sample_logo })),
+                    json!({ "invoiceNumber": "INV-CLASSIC", "logoUrl": sample_logo }),
                 ),
                 mock_template(
                     "tpl_a4_invoice_modern",
                     "doc_temp_ZahcoYg8xCQjuc8c",
                     "A4 Invoice Modern",
                     "a4-invoice",
-                    a4.clone(),
-                    true,
-                    Some(json!({ "invoiceNumber": "INV-MODERN", "logoUrl": sample_logo })),
-                ),
-                // Retired: its `.typ` vanished, so the document-server keeps the row but
-                // marks it inactive. It must never be offered or rendered.
-                mock_template(
-                    "tpl_a4_invoice_retired",
-                    "doc_temp_RetiredInvoice00",
-                    "A4 Invoice Retired",
-                    "a4-invoice",
                     a4,
                     false,
-                    None,
+                    json!({ "invoiceNumber": "INV-MODERN", "logoUrl": sample_logo }),
                 ),
+                mock_private_a4_invoice(),
                 mock_template(
                     "tpl_thermal_receipt",
                     "doc_temp_4pz79z5iba7TcEIp",
@@ -182,7 +214,7 @@ fn mock_templates_json() -> serde_json::Value {
                     "thermal-receipt",
                     receipt.clone(),
                     true,
-                    Some(json!({ "paperWidthMm": 80, "invoiceNumber": "INV-RECEIPT" })),
+                    json!({ "paperWidthMm": 80, "invoiceNumber": "INV-RECEIPT" }),
                 ),
                 mock_template(
                     "tpl_thermal_receipt_compact",
@@ -190,8 +222,8 @@ fn mock_templates_json() -> serde_json::Value {
                     "Compact Receipt",
                     "thermal-receipt",
                     receipt,
-                    true,
-                    Some(json!({ "paperWidthMm": 58, "invoiceNumber": "INV-COMPACT" })),
+                    false,
+                    json!({ "paperWidthMm": 58, "invoiceNumber": "INV-COMPACT" }),
                 ),
                 mock_template(
                     "tpl_credit_note",
@@ -203,7 +235,7 @@ fn mock_templates_json() -> serde_json::Value {
                         "properties": { "creditNoteNumber": { "type": "string" } }
                     }),
                     true,
-                    Some(json!({ "creditNoteNumber": "CN-SAMPLE" })),
+                    json!({ "creditNoteNumber": "CN-SAMPLE" }),
                 ),
                 mock_template(
                     "tpl_credit_note_compact",
@@ -214,8 +246,8 @@ fn mock_templates_json() -> serde_json::Value {
                         "required": ["creditNoteNumber"],
                         "properties": { "creditNoteNumber": { "type": "string" } }
                     }),
-                    true,
-                    Some(json!({ "creditNoteNumber": "CN-COMPACT" })),
+                    false,
+                    json!({ "creditNoteNumber": "CN-COMPACT" }),
                 ),
                 mock_template(
                     "tpl_quotation",
@@ -231,7 +263,7 @@ fn mock_templates_json() -> serde_json::Value {
                         }
                     }),
                     true,
-                    Some(json!({ "quotationNumber": "QUO-SAMPLE", "validUntil": "01 Jan 2030", "items": [] })),
+                    json!({ "quotationNumber": "QUO-SAMPLE", "validUntil": "01 Jan 2030", "items": [] }),
                 ),
                 product_label,
                 mock_template(
@@ -250,7 +282,7 @@ fn mock_templates_json() -> serde_json::Value {
                         }
                     }),
                     true,
-                    None,
+                    json!({}),
                 ),
             ]
         }
@@ -265,6 +297,7 @@ async fn start_mock_document_server_with_templates(
         body::Body,
         extract::Path,
         http::{HeaderMap, StatusCode, header},
+        response::IntoResponse,
         routing::{get, post},
     };
 
@@ -281,9 +314,44 @@ async fn start_mock_document_server_with_templates(
         )
         .route(
             "/api/templates",
-            get(move || {
+            get(move |headers: HeaderMap| {
                 let templates_response = templates_response.clone();
-                async move { Json(templates_response) }
+                async move {
+                    // Like the real service: the list needs the internal key.
+                    if headers.get("X-Internal-Api-Key").is_none_or(|v| v.is_empty()) {
+                        return (
+                            StatusCode::UNAUTHORIZED,
+                            Json(json!({
+                                "success": false,
+                                "code": "INTERNAL_API_KEY_INVALID",
+                                "message": "missing api key"
+                            })),
+                        );
+                    }
+                    (StatusCode::OK, Json(templates_response))
+                }
+            }),
+        )
+        .route(
+            "/api/packages/{name}/archive",
+            get(|Path(name): Path<String>, headers: HeaderMap| async move {
+                if headers.get("X-Internal-Api-Key").is_none_or(|v| v.is_empty()) {
+                    return (StatusCode::UNAUTHORIZED, Body::empty()).into_response();
+                }
+                if name != "doc_temp_ClientInvoiceV2" {
+                    return (
+                        StatusCode::NOT_FOUND,
+                        [(header::CONTENT_TYPE, "application/json")],
+                        Body::from(r#"{"success":false,"code":"PACKAGE_NOT_FOUND","message":"Package not found"}"#),
+                    )
+                        .into_response();
+                }
+                (
+                    StatusCode::OK,
+                    [(header::CONTENT_TYPE, "application/zip")],
+                    Body::from(format!("PK mock archive of {name}")),
+                )
+                    .into_response()
             }),
         )
         .route(

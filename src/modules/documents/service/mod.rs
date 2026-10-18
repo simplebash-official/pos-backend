@@ -11,7 +11,13 @@ use mongodb::bson::DateTime as BsonDateTime;
 use crate::{
     clients::{db::Db, document_server::DocumentServerClient},
     core::{constants::prefixes, error::AppResult, id::generate_id},
-    modules::documents::{model::GeneratedDocumentDocument, repository},
+    domain::settings::{
+        CurrentDocumentDesign, DocumentDesignChoice, DocumentDesignStatus, StoredDocumentDesign,
+    },
+    modules::{
+        documents::{model::GeneratedDocumentDocument, repository},
+        settings,
+    },
 };
 
 pub(crate) mod templates;
@@ -145,6 +151,9 @@ pub(crate) async fn get_or_render(
             document_type: cache_key.to_string(),
             template_name: resolved.kind.to_string(),
             template_key: resolved.info.key.clone(),
+            template_ref: Some(resolved.info.name.clone()),
+            template_title: Some(resolved.info.title.clone()),
+            template_version: Some(resolved.info.version),
             file_path: relative_path,
             file_size_bytes: pdf_bytes.len() as i64,
             created_at: now,
@@ -154,6 +163,126 @@ pub(crate) async fn get_or_render(
     .await?;
 
     Ok(pdf_bytes)
+}
+
+/// The PDF a document endpoint answers with. `Original` is the stored PDF
+/// exactly as first printed; `Current` resolves the design now in force
+/// (`requested` family, else the shop's choice, else the kind's default),
+/// adds its option values to `data` and renders or serves the PDF cached for
+/// that exact design and options.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn print(
+    db: &Db,
+    doc_server: &DocumentServerClient,
+    generated_documents_dir: &str,
+    kind: &str,
+    requested: Option<&str>,
+    design: DocumentDesignChoice,
+    entity_key: &str,
+    legacy_cache_key: &str,
+    data: serde_json::Value,
+) -> AppResult<Vec<u8>> {
+    match design {
+        DocumentDesignChoice::Original => {
+            get_original(db, generated_documents_dir, entity_key, legacy_cache_key).await
+        }
+        DocumentDesignChoice::Current => {
+            let settings = settings::service::get_document_template_settings(db).await?;
+            let resolved = templates::resolve(doc_server, kind, requested, &settings).await?;
+            let data = templates::with_options(data, &resolved)?;
+            get_or_render(
+                db,
+                doc_server,
+                generated_documents_dir,
+                entity_key,
+                legacy_cache_key,
+                &resolved,
+                data,
+            )
+            .await
+        }
+    }
+}
+
+/// The design status behind a document endpoint: see [`design_status`].
+pub(crate) async fn print_design_status(
+    db: &Db,
+    doc_server: &DocumentServerClient,
+    kind: &str,
+    requested: Option<&str>,
+    entity_key: &str,
+    legacy_cache_key: &str,
+) -> AppResult<DocumentDesignStatus> {
+    let settings = settings::service::get_document_template_settings(db).await?;
+    let resolved = templates::resolve(doc_server, kind, requested, &settings).await?;
+    design_status(db, entity_key, legacy_cache_key, &resolved).await
+}
+
+fn no_original() -> crate::core::error::AppError {
+    crate::core::error::AppError::not_found_with_code(
+        "This document has not been printed before, so there is no original to print.",
+        "NO_ORIGINAL_DOCUMENT",
+    )
+}
+
+/// The PDF as it was first printed: the newest stored document of this print
+/// variant (`legacy_cache_key`) whatever design rendered it. 404
+/// `NO_ORIGINAL_DOCUMENT` when nothing was stored or its file is gone.
+pub(crate) async fn get_original(
+    db: &Db,
+    generated_documents_dir: &str,
+    entity_key: &str,
+    legacy_cache_key: &str,
+) -> AppResult<Vec<u8>> {
+    if !is_safe_path_segment(entity_key) || !is_safe_path_segment(legacy_cache_key) {
+        return Err(crate::core::error::AppError::validation(
+            "document key contains characters that are not allowed",
+        ));
+    }
+    let stored = repository::find_latest_by_entity_and_variant(db, entity_key, legacy_cache_key)
+        .await?
+        .ok_or_else(no_original)?;
+    tokio::fs::read(Path::new(generated_documents_dir).join(&stored.file_path))
+        .await
+        .map_err(|_| no_original())
+}
+
+/// What the stored PDF of this print variant was printed with versus what
+/// would print now (`resolved`). `differs` is only true when the stored row
+/// recorded its design and it is another template than the current one — a
+/// row stored before designs were recorded cannot be compared.
+pub(crate) async fn design_status(
+    db: &Db,
+    entity_key: &str,
+    legacy_cache_key: &str,
+    resolved: &templates::ResolvedTemplate,
+) -> AppResult<DocumentDesignStatus> {
+    if !is_safe_path_segment(entity_key) || !is_safe_path_segment(legacy_cache_key) {
+        return Err(crate::core::error::AppError::validation(
+            "document key contains characters that are not allowed",
+        ));
+    }
+    let stored = repository::find_latest_by_entity_and_variant(db, entity_key, legacy_cache_key)
+        .await?
+        .map(|row| StoredDocumentDesign {
+            template_ref: row.template_ref,
+            title: row.template_title,
+            version: row.template_version,
+            created_at: row.created_at.to_chrono(),
+        });
+    let differs = stored
+        .as_ref()
+        .and_then(|stored| stored.template_ref.as_deref())
+        .is_some_and(|stored_ref| stored_ref != resolved.info.name);
+    Ok(DocumentDesignStatus {
+        stored,
+        current: CurrentDocumentDesign {
+            template_ref: resolved.info.name.clone(),
+            title: resolved.info.title.clone(),
+            version: resolved.info.version,
+        },
+        differs,
+    })
 }
 
 #[cfg(test)]

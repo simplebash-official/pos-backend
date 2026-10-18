@@ -103,8 +103,8 @@ pub async fn get_document_templates(
     )))
 }
 
-/// Choose the shop's designs. Only the kinds in the request change; `null`
-/// returns a kind to the standard design.
+/// Choose the shop's designs and set their option values. Only the kinds and
+/// designs in the request change; `null` returns a kind to the standard design.
 #[utoipa::path(
     put,
     path = "/document-templates",
@@ -115,7 +115,7 @@ pub async fn get_document_templates(
         (status = 400, description = "Unknown document kind", body = ErrorResponse),
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
         (status = 403, description = "Admin role required", body = ErrorResponse),
-        (status = 422, description = "TEMPLATE_UNAVAILABLE: that design does not exist or is not for this kind of document", body = ErrorResponse),
+        (status = 422, description = "TEMPLATE_UNAVAILABLE: that design does not exist or is not for this kind of document; TEMPLATE_OPTIONS_INVALID: an unknown option or a value its control does not accept", body = ErrorResponse),
     ),
     security(("bearerAuth" = []))
 )]
@@ -135,9 +135,9 @@ pub async fn update_document_templates(
 /// A PDF of one design rendered with its own sample data.
 #[utoipa::path(
     get,
-    path = "/document-templates/{name}/preview",
+    path = "/document-templates/{family}/preview",
     tag = modules::SETTINGS,
-    params(("name" = String, Path, description = "The design's id, as listed by GET /settings/document-templates")),
+    params(("family" = String, Path, description = "The design family, as listed by GET /settings/document-templates")),
     responses(
         (status = 200, description = "Sample PDF", content_type = "application/pdf", body = Vec<u8>),
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
@@ -148,9 +148,9 @@ pub async fn update_document_templates(
 pub async fn get_document_template_preview(
     _user: CurrentUser,
     State(state): State<AppState>,
-    Path(name): Path<String>,
+    Path(family): Path<String>,
 ) -> AppResult<Response> {
-    let pdf = service::render_document_template_preview(&state.document_server, &name).await?;
+    let pdf = service::render_document_template_preview(&state.document_server, &family).await?;
     Ok((
         StatusCode::OK,
         [(header::CONTENT_TYPE, "application/pdf")],

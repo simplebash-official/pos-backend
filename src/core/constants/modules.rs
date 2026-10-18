@@ -22,3 +22,4 @@ pub const QUOTATIONS: &str = "quotations";
 pub const LABELS: &str = "labels";
 pub const SESSIONS: &str = "sessions";
 
+pub const DOCUMENT_PACKAGES: &str = "document-packages";

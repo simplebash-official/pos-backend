@@ -207,11 +207,33 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
                 )
                 .await;
         }
+        // Which design rendered the PDF (nullable: rows from before designs
+        // were recorded keep NULL).
+        for column in ["template_ref TEXT", "template_title TEXT", "template_version INTEGER"] {
+            let name = column.split(' ').next().expect("column name");
+            if !gen_doc_cols.iter().any(|(_, existing)| existing == name) {
+                tracing::info!("Migrating 'generated_documents' table: adding '{name}' column");
+                pool.execute(format!("ALTER TABLE generated_documents ADD COLUMN {column}").as_str())
+                    .await?;
+            }
+        }
         let _ = pool
             .execute(
                 "CREATE INDEX IF NOT EXISTS idx_generated_documents_lookup ON generated_documents(entity_key, document_type, created_at DESC)",
             )
             .await;
+    }
+
+    // Per-design option values a shop saved (`family -> key -> value`).
+    let settings_cols = table_columns(pool, "document_template_settings")
+        .await
+        .unwrap_or_default();
+    if !settings_cols.is_empty() && !settings_cols.iter().any(|n| n == "options") {
+        tracing::info!("Migrating 'document_template_settings' table: adding 'options' column");
+        pool.execute(
+            "ALTER TABLE document_template_settings ADD COLUMN options TEXT NOT NULL DEFAULT '{}'",
+        )
+        .await?;
     }
 
     // `quotations` was first created without the sync columns. The capture triggers

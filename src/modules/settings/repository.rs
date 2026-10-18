@@ -193,7 +193,7 @@ pub(crate) async fn find_document_template_settings(
     match db {
         Db::Sqlite(pool) => {
             let row = sqlx::query(
-                "SELECT key, selections, version, created_at, updated_at \
+                "SELECT key, selections, options, version, created_at, updated_at \
                  FROM document_template_settings WHERE key = ?1 LIMIT 1",
             )
             .bind(key)
@@ -203,12 +203,14 @@ pub(crate) async fn find_document_template_settings(
 
             Ok(row.map(|r| {
                 let selections_json: String = r.get("selections");
+                let options_json: String = r.get("options");
                 let created_at: String = r.get("created_at");
                 let updated_at: String = r.get("updated_at");
                 DocumentTemplateSettingsDocument {
                     id: None,
                     key: r.get("key"),
                     selections: serde_json::from_str(&selections_json).unwrap_or_default(),
+                    options: serde_json::from_str(&options_json).unwrap_or_default(),
                     version: r.get("version"),
                     created_at: to_bson_datetime(&created_at),
                     updated_at: to_bson_datetime(&updated_at),
@@ -234,16 +236,19 @@ pub(crate) async fn upsert_document_template_settings(
         Db::Sqlite(pool) => {
             let selections_json =
                 serde_json::to_string(&doc.selections).map_err(|e| save_err(&e))?;
+            let options_json = serde_json::to_string(&doc.options).map_err(|e| save_err(&e))?;
             sqlx::query(
-                "INSERT INTO document_template_settings (key, selections, version, created_at, updated_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5) \
+                "INSERT INTO document_template_settings (key, selections, options, version, created_at, updated_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
                  ON CONFLICT(key) DO UPDATE SET \
                     selections = excluded.selections, \
+                    options = excluded.options, \
                     version = excluded.version, \
                     updated_at = excluded.updated_at",
             )
             .bind(&doc.key)
             .bind(&selections_json)
+            .bind(&options_json)
             .bind(doc.version)
             .bind(bson_to_iso(&doc.created_at))
             .bind(bson_to_iso(&doc.updated_at))
@@ -255,6 +260,8 @@ pub(crate) async fn upsert_document_template_settings(
         Db::Mongo(mongo) => {
             let selections =
                 mongodb::bson::serialize_to_bson(&doc.selections).map_err(|e| save_err(&e))?;
+            let options =
+                mongodb::bson::serialize_to_bson(&doc.options).map_err(|e| save_err(&e))?;
             mongo
                 .collection::<mongodb::bson::Document>(DOCUMENT_TEMPLATE_SETTINGS)
                 .update_one(
@@ -263,6 +270,7 @@ pub(crate) async fn upsert_document_template_settings(
                         "$set": {
                             "key": &doc.key,
                             "selections": selections,
+                            "options": options,
                             "version": doc.version,
                             "updated_at": doc.updated_at,
                         },

@@ -37,6 +37,8 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(set_status))
         .routes(routes!(shop_usage))
         .routes(routes!(batch_usage))
+        .routes(routes!(shop_document_selections))
+        .routes(routes!(reset_shop_document_selections))
 }
 
 // ============================================================================
@@ -325,4 +327,110 @@ mod tests {
         assert!(!secrets_match(b"abcdefg", b"abcdef"));
         assert!(!secrets_match(b"", b"abcdef"));
     }
+}
+
+// ============================================================================
+// Document designs (operator console)
+// ============================================================================
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentSelection {
+    /// The document kind (`a4-invoice`, `thermal-receipt`, `credit-note`, `quotation`).
+    pub kind: String,
+    /// The design family the shop chose for it.
+    pub family: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentSelectionsResponse {
+    pub selections: Vec<DocumentSelection>,
+}
+
+fn to_selections(pairs: Vec<(String, String)>) -> Vec<DocumentSelection> {
+    pairs
+        .into_iter()
+        .map(|(kind, family)| DocumentSelection { kind, family })
+        .collect()
+}
+
+/// The document designs a shop has chosen, so the console can tell whether a
+/// design is in use before revoking it. Requires `X-Provision-Secret`.
+#[utoipa::path(
+    get,
+    path = "/tenants/{tenant_id}/document-selections",
+    tag = modules::TENANTS,
+    params(("tenant_id" = String, Path, description = "The identity service's tenant id (`tnt_...`)")),
+    responses(
+        (status = 200, description = "The shop's chosen designs", body = ApiResponse<DocumentSelectionsResponse>),
+        (status = 401, description = "Missing or wrong provisioning secret", body = ErrorResponse),
+        (status = 404, description = "Unknown shop, or the endpoint is not enabled on this deployment", body = ErrorResponse),
+    )
+)]
+async fn shop_document_selections(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(tenant_id): Path<String>,
+) -> AppResult<Json<ApiResponse<DocumentSelectionsResponse>>> {
+    authorize(&state, &headers)?;
+    let selections = service::document_selections(&state.db, tenant_id.trim()).await?;
+    Ok(Json(ApiResponse::success(
+        DocumentSelectionsResponse {
+            selections: to_selections(selections),
+        },
+        "Document selections",
+    )))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetSelectionsRequest {
+    /// Design families whose choice (and saved option values) is cleared.
+    pub families: Vec<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetSelectionsResponse {
+    /// The `(kind, family)` choices that were cleared.
+    pub reset: Vec<DocumentSelection>,
+}
+
+/// Clears a shop's choice of the given design families (and the option values
+/// it saved for them): an explicit operator action taken together with
+/// revoking the design. Idempotent. Requires `X-Provision-Secret`.
+#[utoipa::path(
+    post,
+    path = "/tenants/{tenant_id}/document-selections/reset",
+    tag = modules::TENANTS,
+    params(("tenant_id" = String, Path, description = "The identity service's tenant id (`tnt_...`)")),
+    request_body = ResetSelectionsRequest,
+    responses(
+        (status = 200, description = "Choices cleared", body = ApiResponse<ResetSelectionsResponse>),
+        (status = 400, description = "No families given", body = ErrorResponse),
+        (status = 401, description = "Missing or wrong provisioning secret", body = ErrorResponse),
+        (status = 404, description = "Unknown shop, or the endpoint is not enabled on this deployment", body = ErrorResponse),
+    )
+)]
+async fn reset_shop_document_selections(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(tenant_id): Path<String>,
+    Json(body): Json<ResetSelectionsRequest>,
+) -> AppResult<Json<ApiResponse<ResetSelectionsResponse>>> {
+    authorize(&state, &headers)?;
+    if body.families.is_empty() {
+        return Err(AppError::validation(
+            "families must name at least one design",
+        ));
+    }
+    let reset =
+        service::reset_document_selections(&state.db, tenant_id.trim(), &body.families).await?;
+    Ok(Json(ApiResponse::success(
+        ResetSelectionsResponse {
+            reset: to_selections(reset),
+        },
+        "Document selections reset",
+    )))
 }

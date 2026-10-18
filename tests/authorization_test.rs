@@ -66,6 +66,14 @@ const PUBLIC_ROUTES: &[(&str, &str)] = &[
     ("PUT", "/api/internal/tenants/{tenant_id}/status"),
     ("GET", "/api/internal/tenants/{tenant_id}/usage"),
     ("POST", "/api/internal/tenants/usage"),
+    (
+        "GET",
+        "/api/internal/tenants/{tenant_id}/document-selections",
+    ),
+    (
+        "POST",
+        "/api/internal/tenants/{tenant_id}/document-selections/reset",
+    ),
 ];
 
 async fn build_test_app() -> axum::Router {

@@ -84,7 +84,8 @@ impl ShopProfileDocument {
     }
 }
 
-/// The shop's chosen template per document kind (`kind slug -> template name`).
+/// The shop's chosen design family per document kind (`kind slug -> family`)
+/// and the option values it saved per design (`family -> key -> value`).
 /// One row per shop (key `main`); tenant-scoped like `shop_profiles`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DocumentTemplateSettingsDocument {
@@ -93,6 +94,8 @@ pub struct DocumentTemplateSettingsDocument {
     pub key: String,
     #[serde(default)]
     pub selections: HashMap<String, String>,
+    #[serde(default)]
+    pub options: HashMap<String, HashMap<String, serde_json::Value>>,
     #[serde(default = "default_version")]
     pub version: i64,
     #[serde(default = "BsonDateTime::now")]

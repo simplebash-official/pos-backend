@@ -207,7 +207,7 @@ async fn only_admin_and_manager_can_use_quotations() {
             ("POST", "/api/quotations".to_string(), Some(valid_body())),
             ("GET", format!("/api/quotations/{key}"), None),
             ("POST", format!("/api/quotations/{key}/cancel"), None),
-            ("GET", format!("/api/quotations/{key}/document"), None),
+            ("GET", format!("/api/quotations/{key}/document?design=current"), None),
         ] {
             let (status, _, bytes) = request(&ctx.router, method, &uri, body, Some(tok)).await;
             assert_eq!(status, StatusCode::FORBIDDEN, "{method} {uri}");
@@ -676,7 +676,7 @@ async fn document_renders_a_pdf_with_the_quotation_template() {
     let tok = token(&ctx.config, Role::Admin);
     let (_, created) = create(&ctx.router, &tok, valid_body()).await;
     let key = created["data"]["key"].as_str().unwrap();
-    let uri = format!("/api/quotations/{key}/document");
+    let uri = format!("/api/quotations/{key}/document?design=current");
 
     let (status, headers, bytes) = request(&ctx.router, "GET", &uri, None, Some(&tok)).await;
     assert_eq!(status, StatusCode::OK);
@@ -708,7 +708,7 @@ async fn document_renders_a_pdf_with_the_quotation_template() {
     let (status, _, _) = request(
         &ctx.router,
         "GET",
-        &format!("{uri}?template=doc_temp_vEf0Y7jQHQj2rIuO"),
+        &format!("{uri}&template=doc_temp_vEf0Y7jQHQj2rIuO"),
         None,
         Some(&tok),
     )
@@ -718,7 +718,7 @@ async fn document_renders_a_pdf_with_the_quotation_template() {
     let (status, _, _) = request(
         &ctx.router,
         "GET",
-        "/api/quotations/quo_missing/document",
+        "/api/quotations/quo_missing/document?design=current",
         None,
         Some(&tok),
     )
@@ -913,7 +913,7 @@ async fn mongo_create_list_cancel_and_print() {
     let (status, _, pdf) = request(
         &app.router,
         "GET",
-        &format!("/api/quotations/{key}/document"),
+        &format!("/api/quotations/{key}/document?design=current"),
         None,
         Some(&manager),
     )

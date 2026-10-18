@@ -1215,7 +1215,7 @@ async fn credit_note_document_accepts_a_design_for_one_print() {
         let router = app.router.clone();
         let token = token.clone();
         let uri =
-            format!("/api/billing/credit-notes/{credit_note_key}/documents/credit-note{query}");
+            format!("/api/billing/credit-notes/{credit_note_key}/documents/credit-note?design=current{query}");
         async move {
             let response = router
                 .oneshot(
@@ -1236,7 +1236,7 @@ async fn credit_note_document_accepts_a_design_for_one_print() {
         }
     };
 
-    let (status, pdf) = get("?template=doc_temp_CompactCredit000").await;
+    let (status, pdf) = get("&template=doc_temp_CompactCredit000").await;
     assert_eq!(status, StatusCode::OK);
     assert!(pdf.contains("tpl_credit_note_compact"), "{pdf}");
 
@@ -1247,8 +1247,8 @@ async fn credit_note_document_accepts_a_design_for_one_print() {
 
     // A design that does not exist (or is for another document) is a clear error.
     for bad in [
-        "?template=doc_temp_nope",
-        "?template=doc_temp_ZahcoYg8xCQjuc8c",
+        "&template=doc_temp_nope",
+        "&template=doc_temp_ZahcoYg8xCQjuc8c",
     ] {
         let (status, body) = get(bad).await;
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{bad}: {body}");
@@ -1289,7 +1289,7 @@ async fn credit_note_document_returns_pdf() {
     let request = Request::builder()
         .method("GET")
         .uri(format!(
-            "/api/billing/credit-notes/{credit_note_key}/documents/credit-note"
+            "/api/billing/credit-notes/{credit_note_key}/documents/credit-note?design=current"
         ))
         .header(AUTHORIZATION, format!("Bearer {token}"))
         .body(Body::empty())
@@ -1312,7 +1312,7 @@ async fn credit_note_document_returns_pdf() {
     let bad_request = Request::builder()
         .method("GET")
         .uri(format!(
-            "/api/billing/credit-notes/{credit_note_key}/documents/return-slip"
+            "/api/billing/credit-notes/{credit_note_key}/documents/return-slip?design=current"
         ))
         .header(AUTHORIZATION, format!("Bearer {token}"))
         .body(Body::empty())

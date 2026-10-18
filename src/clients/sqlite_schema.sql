@@ -531,6 +531,9 @@ CREATE TABLE IF NOT EXISTS generated_documents (
     document_type TEXT NOT NULL,
     template_name TEXT NOT NULL,
     template_key TEXT NOT NULL,
+    template_ref TEXT,
+    template_title TEXT,
+    template_version INTEGER,
     file_path TEXT NOT NULL,
     file_size_bytes INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
@@ -630,6 +633,7 @@ CREATE TABLE IF NOT EXISTS sync_number_blocks (
 CREATE TABLE IF NOT EXISTS document_template_settings (
     key TEXT PRIMARY KEY,
     selections TEXT NOT NULL DEFAULT '{}',
+    options TEXT NOT NULL DEFAULT '{}',
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL

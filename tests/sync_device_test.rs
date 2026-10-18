@@ -1946,7 +1946,7 @@ async fn a_quotation_and_its_cancellation_reach_another_device_and_back() {
     let (status, _) = b
         .call(
             "GET",
-            &format!("/api/quotations/{first}/document"),
+            &format!("/api/quotations/{first}/document?design=current"),
             None,
             Some(&b.admin.clone()),
         )

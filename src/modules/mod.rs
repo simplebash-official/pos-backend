@@ -3,6 +3,7 @@ pub mod backup;
 pub mod barcode;
 pub mod billing;
 pub mod customers;
+pub mod document_packages;
 pub mod documents;
 pub mod employees;
 pub mod imports;

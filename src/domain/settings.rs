@@ -92,45 +92,135 @@ pub struct UpdateShopProfileRequest {
     pub receipt_footer_text: Option<String>,
 }
 
-/// One template in a document kind's dropdown.
+/// Control a design declares for the shop to adjust (`x-options` in its
+/// schema), e.g. a signature-box toggle or an accent colour.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum DesignOptionType {
+    Toggle,
+    Select,
+    Color,
+    Text,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct DocumentTemplateOption {
-    /// The template's stable id (`doc_temp_...`) — what a shop stores.
-    pub name: String,
+pub struct DesignOptionChoice {
+    pub value: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DesignOption {
+    /// Key inside the print payload's `options` object.
+    pub key: String,
+    pub r#type: DesignOptionType,
+    pub label: String,
+    /// A bool for `toggle`, a choice value for `select`, `#RRGGBB` for
+    /// `color`, text for `text`. Declared by the design itself.
+    pub default: serde_json::Value,
+    /// Present (and non-empty) for `select` only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub choices: Option<Vec<DesignOptionChoice>>,
+    /// Present for `text` only (1-200).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_length: Option<u32>,
+}
+
+/// One design in a document kind's dropdown: the latest published version of
+/// a design family.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentDesignFamily {
+    /// The design family's stable id — what a shop stores. For a bundled
+    /// design it is the template's own `doc_temp_...` name.
+    pub family: String,
     /// The label to show (the template's schema title).
     pub title: String,
+    /// Latest published version of the family.
+    pub version: i64,
     /// True for the kind's built-in "standard design".
     pub is_default: bool,
+    /// Controls the design offers; empty when it has none.
+    pub options: Vec<DesignOption>,
 }
 
 /// A kind of printed document and the designs a shop can pick for it.
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentKindSettings {
-    /// `a4-invoice`, `thermal-receipt` or `credit-note`.
+    /// `a4-invoice`, `thermal-receipt`, `credit-note` or `quotation`.
     pub kind: String,
     pub label: String,
-    /// The shop's choice, or `null` for the standard design (also `null` when
-    /// the chosen template has since been removed).
+    /// The family the shop chose, or `null` for the standard design.
     pub selected: Option<String>,
-    /// The template prints use right now.
-    pub effective: String,
+    /// The family prints use right now. `null` when `selected` is no longer
+    /// offered: printing this kind fails (422 `TEMPLATE_UNAVAILABLE`) until a
+    /// design is chosen.
+    pub effective: Option<String>,
     /// The standard design first, then the rest by title.
-    pub templates: Vec<DocumentTemplateOption>,
+    pub families: Vec<DocumentDesignFamily>,
+    /// The option values in force per family offered here that declares
+    /// options (`family -> key -> value`): what the shop saved, else the
+    /// design's declared defaults.
+    pub option_values: HashMap<String, HashMap<String, serde_json::Value>>,
 }
 
 /// The shop's document designs, one entry per kind.
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentTemplatesResponse {
     pub kinds: Vec<DocumentKindSettings>,
 }
 
-/// Request payload to change the shop's designs. Only the kinds present are
-/// changed; `null` returns a kind to the standard design.
+/// Request payload to change the shop's designs. Only what is present
+/// changes: `selections` maps a kind to a family (`null` returns the kind to
+/// the standard design); `options` replaces the given values of a family.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateDocumentTemplatesRequest {
     pub selections: HashMap<String, Option<String>>,
+    pub options: HashMap<String, HashMap<String, serde_json::Value>>,
+}
+
+/// Which design printed a stored document.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredDocumentDesign {
+    /// The template name it was rendered with; `null` for a document stored
+    /// before designs were recorded.
+    pub template_ref: Option<String>,
+    pub title: Option<String>,
+    pub version: Option<i64>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CurrentDocumentDesign {
+    pub template_ref: String,
+    pub title: String,
+    pub version: i64,
+}
+
+/// Answer of the design status endpoints: what a stored document was printed
+/// with versus what would print now.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentDesignStatus {
+    pub stored: Option<StoredDocumentDesign>,
+    pub current: CurrentDocumentDesign,
+    /// True when a stored document exists and was printed with another design.
+    pub differs: bool,
+}
+
+/// `design` query parameter of the document endpoints.
+#[derive(Debug, Clone, Copy, serde::Deserialize, utoipa::ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum DocumentDesignChoice {
+    /// The stored PDF, exactly as first printed.
+    Original,
+    /// The design in force now (rendered if not yet stored for it).
+    Current,
 }

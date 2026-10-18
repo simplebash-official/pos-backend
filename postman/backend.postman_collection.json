@@ -446,30 +446,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{backendBaseUrl}}/api/billing/invoices/{{invoiceKey}}/documents/a4-invoice",
-              "host": [
-                "{{backendBaseUrl}}"
-              ],
-              "path": [
-                "api",
-                "billing",
-                "invoices",
-                "{{invoiceKey}}",
-                "documents",
-                "a4-invoice"
-              ]
-            },
-            "description": "Renders (or returns the cached) PDF for an invoice. `documentType` in the path is `a4-invoice` or `thermal-receipt` — this request is the A4 variant; duplicate it and change the last path segment for the receipt, which also accepts the `paperWidthMm` query param (58 or 80, default 80). Which design prints is the shop's choice for that kind (Settings → Document Designs, `GET/PUT /api/settings/document-templates`), or the standard design when nothing was chosen; add `?template=<design id>` to use a different design for this one print (422 `TEMPLATE_UNAVAILABLE` if it does not exist or is for another kind of document). Response is `application/pdf` bytes, not the usual JSON envelope.\n\n**Requires a valid Bearer token** (any role — `CurrentUser`, no specific permission) or the API returns 401."
-          },
-          "response": []
-        },
-        {
-          "name": "Get Invoice Document (A4 Invoice, chosen design)",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{backendBaseUrl}}/api/billing/invoices/{{invoiceKey}}/documents/a4-invoice?template={{templateName}}",
+              "raw": "{{backendBaseUrl}}/api/billing/invoices/{{invoiceKey}}/documents/a4-invoice?design=current",
               "host": [
                 "{{backendBaseUrl}}"
               ],
@@ -483,8 +460,50 @@
               ],
               "query": [
                 {
+                  "key": "design",
+                  "value": "current",
+                  "description": "'original' = the stored PDF exactly as first printed, 'current' = the design in force now. Required: the caller decides."
+                },
+                {
                   "key": "template",
-                  "value": "{{templateName}}"
+                  "value": "",
+                  "description": "A design family for this print only; defaults to the shop's choice",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Renders (or returns the cached) PDF for an invoice. `documentType` in the path is `a4-invoice` or `thermal-receipt` — this request is the A4 variant; duplicate it and change the last path segment for the receipt, which also accepts the `paperWidthMm` query param (58 or 80, default 80). Which design prints is the shop's choice for that kind (Settings → Document Designs, `GET/PUT /api/settings/document-templates`), or the standard design when nothing was chosen; add `?template=<design id>` to use a different design for this one print (422 `TEMPLATE_UNAVAILABLE` if it does not exist or is for another kind of document). Response is `application/pdf` bytes, not the usual JSON envelope.\n\n**Requires a valid Bearer token** (any role — `CurrentUser`, no specific permission) or the API returns 401."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Invoice Document (A4 Invoice, chosen design)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/billing/invoices/{{invoiceKey}}/documents/a4-invoice?design=current&template={{templateName}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "billing",
+                "invoices",
+                "{{invoiceKey}}",
+                "documents",
+                "a4-invoice"
+              ],
+              "query": [
+                {
+                  "key": "design",
+                  "value": "current",
+                  "description": "'original' = the stored PDF exactly as first printed, 'current' = the design in force now. Required: the caller decides."
+                },
+                {
+                  "key": "template",
+                  "value": "{{templateName}}",
+                  "description": "The design family to print this one document in (an id from GET /settings/document-templates)."
                 }
               ]
             },
@@ -498,7 +517,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{backendBaseUrl}}/api/billing/invoices/{{invoiceKey}}/documents/thermal-receipt",
+              "raw": "{{backendBaseUrl}}/api/billing/invoices/{{invoiceKey}}/documents/thermal-receipt?design=current",
               "host": [
                 "{{backendBaseUrl}}"
               ],
@@ -512,9 +531,20 @@
               ],
               "query": [
                 {
+                  "key": "design",
+                  "value": "current",
+                  "description": "'original' = the stored PDF exactly as first printed, 'current' = the design in force now. Required: the caller decides."
+                },
+                {
                   "key": "paperWidthMm",
                   "value": "80",
-                  "description": "58 or 80, defaults to 80",
+                  "description": "58 or 80 (default 80)",
+                  "disabled": true
+                },
+                {
+                  "key": "template",
+                  "value": "",
+                  "description": "A design family for this print only",
                   "disabled": true
                 }
               ]
@@ -751,7 +781,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{backendBaseUrl}}/api/billing/credit-notes/{{creditNoteKey}}/documents/credit-note",
+              "raw": "{{backendBaseUrl}}/api/billing/credit-notes/{{creditNoteKey}}/documents/credit-note?design=current",
               "host": [
                 "{{backendBaseUrl}}"
               ],
@@ -762,9 +792,92 @@
                 "{{creditNoteKey}}",
                 "documents",
                 "credit-note"
+              ],
+              "query": [
+                {
+                  "key": "design",
+                  "value": "current",
+                  "description": "'original' = the stored PDF exactly as first printed, 'current' = the design in force now. Required: the caller decides."
+                },
+                {
+                  "key": "template",
+                  "value": "",
+                  "description": "A design family for this print only",
+                  "disabled": true
+                }
               ]
             },
             "description": "Renders (or returns the cached copy of) the credit note's printable PDF via the external document-server. The only supported documentType is `credit-note`; anything else returns 400. Responds with `application/pdf` bytes.\n\n**Requires a valid Bearer token** (any role).\n\nOptional `?template=<design id>` prints this credit note in another design for this one print; without it the shop's chosen credit-note design (or the standard one) is used. 422 `TEMPLATE_UNAVAILABLE` if the design does not exist or is for another kind of document."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Invoice Document Design Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/billing/invoices/{{invoiceKey}}/documents/a4-invoice/design",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "billing",
+                "invoices",
+                "{{invoiceKey}}",
+                "documents",
+                "a4-invoice",
+                "design"
+              ],
+              "query": [
+                {
+                  "key": "paperWidthMm",
+                  "value": "80",
+                  "description": "58 or 80 - thermal-receipt only",
+                  "disabled": true
+                },
+                {
+                  "key": "template",
+                  "value": "",
+                  "description": "A design family for this print only",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "What the stored PDF was printed with versus what would print now: {stored: {templateRef,title,version,createdAt}|null, current: {templateRef,title,version}, differs}. `differs` drives the \"original or current design?\" choice before a reprint."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Credit Note Document Design Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/billing/credit-notes/{{creditNoteKey}}/documents/credit-note/design",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "billing",
+                "credit-notes",
+                "{{creditNoteKey}}",
+                "documents",
+                "credit-note",
+                "design"
+              ],
+              "query": [
+                {
+                  "key": "template",
+                  "value": "",
+                  "description": "A design family for this print only",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Same answer as the invoice design status, for a credit note."
           },
           "response": []
         }
@@ -2903,7 +3016,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{backendBaseUrl}}/api/quotations/{{quotationKey}}/document?",
+              "raw": "{{backendBaseUrl}}/api/quotations/{{quotationKey}}/document?design=current",
               "host": [
                 "{{backendBaseUrl}}"
               ],
@@ -2915,14 +3028,49 @@
               ],
               "query": [
                 {
+                  "key": "design",
+                  "value": "current",
+                  "description": "'original' = the stored PDF exactly as first printed, 'current' = the design in force now. Required: the caller decides."
+                },
+                {
                   "key": "template",
-                  "value": "doc_temp_Qu0tati0nV1Std00",
-                  "description": "A design (template name) for this print only. Omitted: the shop's chosen design for quotations. A design that is not a quotation design returns 422 `TEMPLATE_UNAVAILABLE`.",
+                  "value": "",
+                  "description": "A design family for this print only",
                   "disabled": true
                 }
               ]
             },
             "description": "Render (or serve the cached) quotation as an A4 PDF through document-server. A cancelled quotation is cached separately from the active one.\n\n**Requires a valid Bearer token whose `permissions` claim includes `quotations:manage`** (held by the Admin and Manager roles only). Staff and permission-less tokens get 403 `PERMISSION_DENIED`; a missing token gets 401."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Quotation Document Design Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/quotations/{{quotationKey}}/document/design",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "quotations",
+                "{{quotationKey}}",
+                "document",
+                "design"
+              ],
+              "query": [
+                {
+                  "key": "template",
+                  "value": "",
+                  "description": "A design family for this print only",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Same answer as the invoice design status, for a quotation (needs quotations:manage)."
           },
           "response": []
         }
@@ -5061,7 +5209,7 @@
                 "document-templates"
               ]
             },
-            "description": "For each kind of document the shop can choose a design for (`a4-invoice`, `thermal-receipt`, `credit-note`): its label, the designs available (`templates`, standard design first, then by title; retired designs never appear), the shop's choice (`selected`, `null` = standard design, also `null` if the chosen design was removed) and the design prints use right now (`effective`). New designs appear here automatically once the document-server publishes them.\n\n**Requires a valid Bearer token** (any role) or the API returns 401."
+            "description": "Per document kind: the design families on offer (latest version, options), the shop's choice (`selected`), the family in force (`effective`, `null` when the choice is no longer offered) and the option values in force per family (`optionValues`)."
           },
           "response": []
         },
@@ -5077,7 +5225,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"selections\": {\n    \"a4-invoice\": \"doc_temp_ZahcoYg8xCQjuc8c\",\n    \"thermal-receipt\": null\n  }\n}",
+              "raw": "{\n  \"selections\": {\n    \"a4-invoice\": \"{{templateName}}\",\n    \"thermal-receipt\": null\n  },\n  \"options\": {\n    \"{{templateName}}\": {\n      \"showSign\": false,\n      \"accent\": \"red\"\n    }\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5095,7 +5243,7 @@
                 "document-templates"
               ]
             },
-            "description": "Chooses the shop's designs. Only the kinds in `selections` change; a design id picks it, `null` returns that kind to the standard design. Nothing is saved unless every pick is valid: 400 for an unknown kind, 422 `TEMPLATE_UNAVAILABLE` for a design that does not exist, was retired or is for another kind. Returns the same body as the GET.\n\n**Requires Admin JWT** (`role: admin` claim) — 403 for other roles."
+            "description": "Admin only. `selections` maps a kind to a design family (`null` = the standard design); `options` replaces the given option values of a design. Both keys are required (send `{}` for none). 422 TEMPLATE_UNAVAILABLE / TEMPLATE_OPTIONS_INVALID, nothing is saved on failure."
           },
           "response": []
         },
@@ -5117,7 +5265,52 @@
                 "preview"
               ]
             },
-            "description": "A PDF of one design rendered with its own sample data (never a real invoice), for choosing before saving. 404 `TEMPLATE_UNAVAILABLE` for an unknown or retired design. Response is `application/pdf` bytes.\n\n**Requires a valid Bearer token** (any role) or the API returns 401."
+            "description": "PDF of one design family rendered with its own sample data (no logo). `{{templateName}}` here is a design family id."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Document Packages",
+      "item": [
+        {
+          "name": "List Custom Design Packages",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/document-packages",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "document-packages"
+              ]
+            },
+            "description": "Cloud (multi-tenant) only. The latest published version of every custom (private) design the shop may use: name, family, version, kind, title, type, sha256, minAppVersion. Used by the desktop app to mirror them. Any signed-in token of the shop, including a device token."
+          },
+          "response": []
+        },
+        {
+          "name": "Download Custom Design Package",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/document-packages/{{templateName}}/archive",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "document-packages",
+                "{{templateName}}",
+                "archive"
+              ]
+            },
+            "description": "The package zip as the document-server stores it (verify against the listed sha256). 404 when the shop may not use it."
           },
           "response": []
         }
@@ -5358,6 +5551,76 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"tenantIds\": [\n    \"tnt_xxxxxxxxxxxxxxxx\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Shop Document Selections (admin console)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-provision-secret",
+                "value": "{{provisionSecret}}"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/internal/tenants/{{tenantId}}/document-selections",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "internal",
+                "tenants",
+                "{{tenantId}}",
+                "document-selections"
+              ],
+              "query": []
+            },
+            "description": "The `(kind, family)` document designs the shop has chosen, so the console can tell whether a design is in use before revoking it. Requires x-provision-secret."
+          },
+          "response": []
+        },
+        {
+          "name": "Reset Shop Document Selections (admin console)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-provision-secret",
+                "value": "{{provisionSecret}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/internal/tenants/{{tenantId}}/document-selections/reset",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "internal",
+                "tenants",
+                "{{tenantId}}",
+                "document-selections",
+                "reset"
+              ],
+              "query": []
+            },
+            "description": "Clears the shop's choice of the given design families and the option values it saved for them; returns what was reset. Idempotent. Requires x-provision-secret.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"families\": [\n    \"fam_xxxxxxxxxxxxxxxx\"\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
