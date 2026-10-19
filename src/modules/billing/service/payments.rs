@@ -33,6 +33,7 @@ pub async fn record_payment(
     body: RecordPaymentRequest,
     recorded_by_user_id: String,
     recorded_by_name: String,
+    device_id: Option<String>,
 ) -> AppResult<PaymentRecord> {
     crate::core::logging::domain::tracked("billing.payment_recorded", async move {
         if body.amount_cents <= 0 {
@@ -68,16 +69,13 @@ pub async fn record_payment(
 
         let resolved_session_key = match body.session_key {
             Some(k) => Some(k),
-            None => {
-                crate::modules::sessions::repository::sessions::find_active_session_for_cashier(
-                    db,
-                    &recorded_by_user_id,
-                )
-                .await
-                .ok()
-                .flatten()
-                .map(|s| s.key)
-            }
+            None => crate::modules::sessions::service::resolve_active_session(
+                db,
+                device_id.as_deref(),
+                &recorded_by_user_id,
+            )
+            .await?
+            .map(|s| s.key),
         };
 
         let now = BsonDateTime::now();

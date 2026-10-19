@@ -907,21 +907,13 @@ async fn finish_create_credit_note(
 
     let resolved_session_key = match &session_key {
         Some(k) => Some(k.clone()),
-        None => {
-            if let Some(ref term) = device_id {
-                crate::modules::sessions::repository::sessions::find_active_session_for_terminal(db, term)
-                    .await
-                    .ok()
-                    .flatten()
-                    .map(|s| s.key)
-            } else {
-                crate::modules::sessions::repository::sessions::find_active_session_for_cashier(db, &cashier_id)
-                    .await
-                    .ok()
-                    .flatten()
-                    .map(|s| s.key)
-            }
-        }
+        None => crate::modules::sessions::service::resolve_active_session(
+            db,
+            device_id.as_deref(),
+            &cashier_id,
+        )
+        .await?
+        .map(|s| s.key),
     };
 
     let now = BsonDateTime::now();

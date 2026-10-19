@@ -97,6 +97,7 @@ pub(crate) fn invoice_from_sqlite_row(row: &sqlx::sqlite::SqliteRow) -> AppResul
         version: row.get("version"),
         created_at: to_bson_datetime(&created_at_str),
         updated_at: to_bson_datetime(&updated_at_str),
+        updated_by_device: row.get("updated_by_device"),
     })
 }
 
@@ -335,10 +336,10 @@ pub(crate) async fn insert_invoice(
                     due_date, card_last4, card_ref, online_ref, online_note, status,
                     notes, shop_profile_snapshot, warranty_terms_snapshot, document_selection,
                     voided_at, voided_by, voided_reason, closed_at, closed_by,
-                    refunded_cents, credit_note_count, session_key, version, created_at, updated_at
+                    refunded_cents, credit_note_count, session_key, version, created_at, updated_at, updated_by_device
                 ) VALUES (
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 "#,
             )
@@ -383,6 +384,7 @@ pub(crate) async fn insert_invoice(
             .bind(document.version)
             .bind(&created_at_iso)
             .bind(&updated_at_iso)
+            .bind(&document.updated_by_device)
             .execute(pool)
             .await?;
 

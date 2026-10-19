@@ -93,15 +93,15 @@ async fn open_session(
 async fn get_current_session(
     State(state): State<AppState>,
     current_user: CurrentUser,
+    device_id: DeviceId,
     Query(query): Query<CurrentSessionQuery>,
 ) -> AppResult<Json<ApiResponse<Option<RegisterSession>>>> {
     current_user.require_permission(perm::REGISTER_SESSIONS_VIEW)?;
 
-    let session = if let Some(terminal_id) = query.terminal_id.filter(|t| !t.trim().is_empty()) {
-        service::get_active_session_for_terminal(&state.db, &terminal_id).await?
-    } else {
-        service::get_active_session_for_cashier(&state.db, &current_user.user_id).await?
-    };
+    let terminal_id = query.terminal_id.as_deref().or(device_id.0.as_deref());
+    let session = service::resolve_active_session(&state.db, terminal_id, &current_user.user_id)
+        .await?
+        .map(|s| s.into_register_session());
 
     Ok(Json(ApiResponse::success(session, "Active register session retrieved successfully")))
 }

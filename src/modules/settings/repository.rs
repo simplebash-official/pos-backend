@@ -22,7 +22,7 @@ pub(crate) async fn find_shop_profile(
                 "SELECT key, id, legal_name, trading_name, address_lines, primary_phone, \
                  secondary_phone, email, website, business_reg_no, logo_base64, bank_name, \
                  bank_branch, account_name, account_number, default_warranty_text, \
-                 default_footer_text, receipt_footer_text, version, created_at, updated_at \
+                 default_footer_text, receipt_footer_text, allow_shared_user_sessions, version, created_at, updated_at \
                  FROM shop_profiles WHERE key = ?1 LIMIT 1",
             )
             .bind(key)
@@ -36,6 +36,8 @@ pub(crate) async fn find_shop_profile(
                     serde_json::from_str(&address_lines_str).unwrap_or_default();
                 let created_at: String = r.get("created_at");
                 let updated_at: String = r.get("updated_at");
+                let allow_shared_user_sessions_int: i64 =
+                    r.try_get("allow_shared_user_sessions").unwrap_or(0);
 
                 ShopProfileDocument {
                     id: None,
@@ -56,6 +58,7 @@ pub(crate) async fn find_shop_profile(
                     default_warranty_text: r.get("default_warranty_text"),
                     default_footer_text: r.get("default_footer_text"),
                     receipt_footer_text: r.get("receipt_footer_text"),
+                    allow_shared_user_sessions: allow_shared_user_sessions_int != 0,
                     version: r.get("version"),
                     created_at: to_bson_datetime(&created_at),
                     updated_at: to_bson_datetime(&updated_at),
@@ -86,8 +89,8 @@ pub(crate) async fn upsert_shop_profile(db: &Db, doc: &ShopProfileDocument) -> A
                     key, id, legal_name, trading_name, address_lines, primary_phone, secondary_phone, \
                     email, website, business_reg_no, logo_base64, bank_name, bank_branch, account_name, \
                     account_number, default_warranty_text, default_footer_text, receipt_footer_text, \
-                    version, created_at, updated_at \
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21) \
+                    allow_shared_user_sessions, version, created_at, updated_at \
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22) \
                 ON CONFLICT(key) DO UPDATE SET \
                     legal_name = excluded.legal_name, \
                     trading_name = excluded.trading_name, \
@@ -105,6 +108,7 @@ pub(crate) async fn upsert_shop_profile(db: &Db, doc: &ShopProfileDocument) -> A
                     default_warranty_text = excluded.default_warranty_text, \
                     default_footer_text = excluded.default_footer_text, \
                     receipt_footer_text = excluded.receipt_footer_text, \
+                    allow_shared_user_sessions = excluded.allow_shared_user_sessions, \
                     version = excluded.version, \
                     updated_at = excluded.updated_at",
             )
@@ -126,6 +130,7 @@ pub(crate) async fn upsert_shop_profile(db: &Db, doc: &ShopProfileDocument) -> A
             .bind(&doc.default_warranty_text)
             .bind(&doc.default_footer_text)
             .bind(&doc.receipt_footer_text)
+            .bind(if doc.allow_shared_user_sessions { 1i64 } else { 0i64 })
             .bind(doc.version)
             .bind(&created_at)
             .bind(&updated_at)
@@ -162,6 +167,7 @@ pub(crate) async fn upsert_shop_profile(db: &Db, doc: &ShopProfileDocument) -> A
                     "default_warranty_text": &doc.default_warranty_text,
                     "default_footer_text": &doc.default_footer_text,
                     "receipt_footer_text": &doc.receipt_footer_text,
+                    "allow_shared_user_sessions": doc.allow_shared_user_sessions,
                     "version": doc.version,
                     "updated_at": doc.updated_at,
                 },

@@ -138,6 +138,9 @@ pub struct InvoiceDocument {
     /// Timestamp when invoice was last updated.
     #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
+    /// Device identifier that created or last updated this invoice.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_by_device: Option<String>,
 }
 
 fn default_version() -> i64 {
@@ -201,6 +204,7 @@ impl InvoiceDocument {
             session_key: self.session_key,
             created_at: self.created_at.to_chrono(),
             updated_at: self.updated_at.to_chrono(),
+            updated_by_device: self.updated_by_device,
             version: self.version,
         }
     }

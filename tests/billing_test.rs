@@ -1489,6 +1489,7 @@ async fn seed_invoice_full(
             version: 1,
             created_at,
             updated_at: created_at,
+            updated_by_device: None,
         })
         .await
         .unwrap();
@@ -1739,6 +1740,7 @@ async fn seed_invoice_with_number(
             version: 1,
             created_at: now,
             updated_at: now,
+            updated_by_device: None,
         })
         .await
         .unwrap();

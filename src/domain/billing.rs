@@ -429,6 +429,9 @@ pub struct Invoice {
     pub created_at: DateTime<Utc>,
     /// Timestamp when invoice was last updated.
     pub updated_at: DateTime<Utc>,
+    /// Device identifier that created or last updated this invoice.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_by_device: Option<String>,
     /// Optimistic locking version number.
     #[serde(default = "default_version")]
     pub version: i64,

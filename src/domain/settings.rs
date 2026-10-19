@@ -27,6 +27,8 @@ pub struct ShopProfileResponse {
     pub default_warranty_text: String,
     pub default_footer_text: String,
     pub receipt_footer_text: String,
+    #[serde(rename = "allowSharedUserSessions")]
+    pub allow_shared_user_sessions: bool,
 }
 
 impl Default for ShopProfileResponse {
@@ -50,6 +52,7 @@ impl Default for ShopProfileResponse {
             default_warranty_text: String::new(),
             default_footer_text: String::new(),
             receipt_footer_text: String::new(),
+            allow_shared_user_sessions: false,
         }
     }
 }
@@ -90,6 +93,8 @@ pub struct UpdateShopProfileRequest {
     pub default_footer_text: Option<String>,
     #[serde(default)]
     pub receipt_footer_text: Option<String>,
+    #[serde(default, rename = "allowSharedUserSessions")]
+    pub allow_shared_user_sessions: Option<bool>,
 }
 
 /// Control a design declares for the shop to adjust (`x-options` in its

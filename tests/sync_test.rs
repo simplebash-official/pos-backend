@@ -717,6 +717,7 @@ async fn sync_changes_invoices_and_payments_match_the_rest_dto_shape() {
             version: 1,
             created_at: now,
             updated_at: now,
+            updated_by_device: None,
         })
         .await
         .unwrap();

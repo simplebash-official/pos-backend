@@ -284,6 +284,7 @@ async fn dashboard_overview_and_daily_sales_aggregate_data() {
         version: 1,
         created_at: BsonDateTime::from_chrono(target_date),
         updated_at: BsonDateTime::from_chrono(target_date),
+        updated_by_device: None,
     };
 
     let inv2_key = generate_id("inv");
@@ -345,6 +346,7 @@ async fn dashboard_overview_and_daily_sales_aggregate_data() {
         version: 1,
         created_at: BsonDateTime::from_chrono(target_date),
         updated_at: BsonDateTime::from_chrono(target_date),
+        updated_by_device: None,
     };
 
     // Credit invoice
@@ -407,6 +409,7 @@ async fn dashboard_overview_and_daily_sales_aggregate_data() {
         version: 1,
         created_at: BsonDateTime::from_chrono(target_date),
         updated_at: BsonDateTime::from_chrono(target_date),
+        updated_by_device: None,
     };
 
     invoices_coll
@@ -891,6 +894,7 @@ fn analytics_seed_invoice(
         version: 1,
         created_at: BsonDateTime::from_chrono(created_at),
         updated_at: BsonDateTime::from_chrono(created_at),
+        updated_by_device: None,
     }
 }
 

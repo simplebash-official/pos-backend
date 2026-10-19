@@ -119,6 +119,7 @@ fn seed_invoice(
         version: 1,
         created_at: BsonDateTime::from_chrono(created_at),
         updated_at: BsonDateTime::from_chrono(created_at),
+        updated_by_device: None,
     }
 }
 

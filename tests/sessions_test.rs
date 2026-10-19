@@ -48,6 +48,30 @@ async fn send_authed(
     execute(router, req).await
 }
 
+async fn send_authed_with_device(
+    router: &axum::Router,
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+    token: &str,
+    device_id: Option<&str>,
+) -> (StatusCode, Value) {
+    let mut builder = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(AUTHORIZATION, format!("Bearer {token}"));
+    if let Some(did) = device_id {
+        builder = builder.header("x-device-id", did);
+    }
+    let req = if let Some(value) = body {
+        builder = builder.header(CONTENT_TYPE, "application/json");
+        builder.body(Body::from(value.to_string())).unwrap()
+    } else {
+        builder.body(Body::empty()).unwrap()
+    };
+    execute(router, req).await
+}
+
 fn mint_token_for(
     config: &simplebash_pos_backend::core::config::Config,
     user_id_or_username: &str,
@@ -656,3 +680,482 @@ async fn session_discrepancy_outside_movement_and_variance_conversion() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["data"]["hasLateMovements"], true);
 }
+
+#[tokio::test]
+async fn test_shared_vs_isolated_register_shift_mode_and_mid_shift_guard() {
+    let app = common::spawn_app_isolated().await;
+
+    // Seed Admin
+    simplebash_pos_backend::seeds::admin::seed_admin(&app.db_handle, None, None)
+        .await
+        .unwrap();
+
+    let admin_token = mint_token_for(
+        &app.config,
+        "admin",
+        Some(Role::Admin),
+        roles::default_permissions(Role::Admin),
+    );
+
+    // 1. Initial shop profile has allowSharedUserSessions: false
+    let (status, profile_body) = send_authed(
+        &app.router,
+        "GET",
+        "/api/settings/shop-profile",
+        None,
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(profile_body["data"]["allowSharedUserSessions"], false);
+
+    // Mint tokens for Cashier 1 and Cashier 2
+    let cashier1_token = mint_token_for(
+        &app.config,
+        "usr_cashier1",
+        Some(Role::Staff),
+        roles::default_permissions(Role::Staff),
+    );
+    let cashier2_token = mint_token_for(
+        &app.config,
+        "usr_cashier2",
+        Some(Role::Staff),
+        roles::default_permissions(Role::Staff),
+    );
+
+    // 2. In isolated mode, Cashier 1 opens shift on term_1
+    let (status, open_res) = send_authed_with_device(
+        &app.router,
+        "POST",
+        "/api/sessions/open",
+        Some(json!({
+            "terminalId": "term_1",
+            "openingFloatCents": 10000
+        })),
+        &cashier1_token,
+        Some("term_1"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "Body: {open_res}");
+    let session_1_key = open_res["data"]["key"].as_str().unwrap().to_string();
+
+    // 3. Mid-shift guard: attempting to toggle allowSharedUserSessions while active shift exists fails
+    let (status, conflict_res) = send_authed(
+        &app.router,
+        "PUT",
+        "/api/settings/shop-profile",
+        Some(json!({
+            "allowSharedUserSessions": true
+        })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "Body: {conflict_res}");
+    assert_eq!(conflict_res["code"], "ACTIVE_SESSIONS_EXIST");
+
+    // 4. Test resolution in Isolated Mode (allowSharedUserSessions == false):
+    // a) Cashier 1 on term_1 resolves to session_1_key
+    let (status, res) = send_authed_with_device(
+        &app.router,
+        "GET",
+        "/api/sessions/current",
+        None,
+        &cashier1_token,
+        Some("term_1"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(res["data"]["key"], session_1_key);
+
+    // b) Cashier 2 on term_1 resolves to term_1's session
+    let (status, res) = send_authed_with_device(
+        &app.router,
+        "GET",
+        "/api/sessions/current",
+        None,
+        &cashier2_token,
+        Some("term_1"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(res["data"]["key"], session_1_key);
+
+    // c) Cashier 1 with NO terminal_id / device-id returns null in isolated mode
+    let (status, res) = send_authed(
+        &app.router,
+        "GET",
+        "/api/sessions/current",
+        None,
+        &cashier1_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(res["data"].is_null(), "Expected null in isolated mode without terminal_id: {res}");
+
+    // d) Cashier 2 on unused terminal term_2 returns null
+    let (status, res) = send_authed_with_device(
+        &app.router,
+        "GET",
+        "/api/sessions/current",
+        None,
+        &cashier2_token,
+        Some("term_2"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(res["data"].is_null());
+
+    // 5. Close session 1
+    let (status, close_res) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/sessions/{session_1_key}/close"),
+        Some(json!({
+            "countedCashCents": 10000,
+            "closingFloatCents": 10000,
+            "cashDropToSafeCents": 0
+        })),
+        &cashier1_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {close_res}");
+
+    // 6. With active sessions = 0, updating allowSharedUserSessions to true succeeds
+    let (status, update_res) = send_authed(
+        &app.router,
+        "PUT",
+        "/api/settings/shop-profile",
+        Some(json!({
+            "allowSharedUserSessions": true
+        })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {update_res}");
+    assert_eq!(update_res["data"]["allowSharedUserSessions"], true);
+
+    // 7. In Shared Mode, Cashier 2 opens shift on term_2
+    let (status, open_res) = send_authed_with_device(
+        &app.router,
+        "POST",
+        "/api/sessions/open",
+        Some(json!({
+            "terminalId": "term_2",
+            "openingFloatCents": 5000
+        })),
+        &cashier2_token,
+        Some("term_2"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "Body: {open_res}");
+    let session_2_key = open_res["data"]["key"].as_str().unwrap().to_string();
+
+    // 8. Mid-shift guard in reverse: attempting to switch back to isolated mode while session 2 is active fails
+    let (status, conflict_res) = send_authed(
+        &app.router,
+        "PUT",
+        "/api/settings/shop-profile",
+        Some(json!({
+            "allowSharedUserSessions": false
+        })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "Body: {conflict_res}");
+    assert_eq!(conflict_res["code"], "ACTIVE_SESSIONS_EXIST");
+
+    // 9. Test resolution in Shared Mode (allowSharedUserSessions == true):
+    // a) Cashier 1 operating on term_2 resolves to term_2's active session
+    let (status, res) = send_authed_with_device(
+        &app.router,
+        "GET",
+        "/api/sessions/current",
+        None,
+        &cashier1_token,
+        Some("term_2"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(res["data"]["key"], session_2_key);
+
+    // b) Cashier 2 with NO device_id or unknown terminal falls back to Cashier 2's active session
+    let (status, res) = send_authed(
+        &app.router,
+        "GET",
+        "/api/sessions/current",
+        None,
+        &cashier2_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(res["data"]["key"], session_2_key, "Expected fallback to cashier active session in shared mode");
+
+    // c) Cashier 1 with NO device_id has no session and returns null
+    let (status, res) = send_authed(
+        &app.router,
+        "GET",
+        "/api/sessions/current",
+        None,
+        &cashier1_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(res["data"].is_null());
+
+    // 10. Close session 2
+    let (status, close_res) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/sessions/{session_2_key}/close"),
+        Some(json!({
+            "countedCashCents": 5000,
+            "closingFloatCents": 5000,
+            "cashDropToSafeCents": 0
+        })),
+        &cashier2_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {close_res}");
+
+    // 11. Now switching back to isolated mode succeeds
+    let (status, update_res) = send_authed(
+        &app.router,
+        "PUT",
+        "/api/settings/shop-profile",
+        Some(json!({
+            "allowSharedUserSessions": false
+        })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {update_res}");
+    assert_eq!(update_res["data"]["allowSharedUserSessions"], false);
+}
+
+#[tokio::test]
+async fn test_shared_vs_isolated_register_shift_mode_and_mid_shift_guard_sqlite() {
+    let app = common::spawn_app_sqlite().await;
+
+    // Seed Admin
+    simplebash_pos_backend::seeds::admin::seed_admin(&app.db_handle, None, None)
+        .await
+        .unwrap();
+
+    let admin_token = mint_token_for(
+        &app.config,
+        "admin",
+        Some(Role::Admin),
+        roles::default_permissions(Role::Admin),
+    );
+
+    // 1. Initial shop profile has allowSharedUserSessions: false
+    let (status, profile_body) = send_authed(
+        &app.router,
+        "GET",
+        "/api/settings/shop-profile",
+        None,
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(profile_body["data"]["allowSharedUserSessions"], false);
+
+    // Mint tokens for Cashier 1 and Cashier 2
+    let cashier1_token = mint_token_for(
+        &app.config,
+        "usr_cashier1",
+        Some(Role::Staff),
+        roles::default_permissions(Role::Staff),
+    );
+    let cashier2_token = mint_token_for(
+        &app.config,
+        "usr_cashier2",
+        Some(Role::Staff),
+        roles::default_permissions(Role::Staff),
+    );
+
+    // 2. In isolated mode, Cashier 1 opens shift on term_1
+    let (status, open_res) = send_authed_with_device(
+        &app.router,
+        "POST",
+        "/api/sessions/open",
+        Some(json!({
+            "terminalId": "term_1",
+            "openingFloatCents": 10000
+        })),
+        &cashier1_token,
+        Some("term_1"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "Body: {open_res}");
+    let session_1_key = open_res["data"]["key"].as_str().unwrap().to_string();
+
+    // 3. Mid-shift guard: attempting to toggle allowSharedUserSessions while active shift exists fails
+    let (status, conflict_res) = send_authed(
+        &app.router,
+        "PUT",
+        "/api/settings/shop-profile",
+        Some(json!({
+            "allowSharedUserSessions": true
+        })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "Body: {conflict_res}");
+    assert_eq!(conflict_res["code"], "ACTIVE_SESSIONS_EXIST");
+
+    // 4. Test resolution in Isolated Mode (allowSharedUserSessions == false):
+    // a) Cashier 1 on term_1 resolves to session_1_key
+    let (status, res) = send_authed_with_device(
+        &app.router,
+        "GET",
+        "/api/sessions/current",
+        None,
+        &cashier1_token,
+        Some("term_1"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(res["data"]["key"], session_1_key);
+
+    // b) Cashier 2 on term_1 resolves to term_1's session
+    let (status, res) = send_authed_with_device(
+        &app.router,
+        "GET",
+        "/api/sessions/current",
+        None,
+        &cashier2_token,
+        Some("term_1"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(res["data"]["key"], session_1_key);
+
+    // c) Cashier 1 with NO terminal_id / device-id returns null in isolated mode
+    let (status, res) = send_authed(
+        &app.router,
+        "GET",
+        "/api/sessions/current",
+        None,
+        &cashier1_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(res["data"].is_null(), "Expected null in isolated mode without terminal_id: {res}");
+
+    // 5. Close session 1
+    let (status, close_res) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/sessions/{session_1_key}/close"),
+        Some(json!({
+            "countedCashCents": 10000,
+            "closingFloatCents": 10000,
+            "cashDropToSafeCents": 0
+        })),
+        &cashier1_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {close_res}");
+
+    // 6. With active sessions = 0, updating allowSharedUserSessions to true succeeds
+    let (status, update_res) = send_authed(
+        &app.router,
+        "PUT",
+        "/api/settings/shop-profile",
+        Some(json!({
+            "allowSharedUserSessions": true
+        })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {update_res}");
+    assert_eq!(update_res["data"]["allowSharedUserSessions"], true);
+
+    // 7. In Shared Mode, Cashier 2 opens shift on term_2
+    let (status, open_res) = send_authed_with_device(
+        &app.router,
+        "POST",
+        "/api/sessions/open",
+        Some(json!({
+            "terminalId": "term_2",
+            "openingFloatCents": 5000
+        })),
+        &cashier2_token,
+        Some("term_2"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "Body: {open_res}");
+    let session_2_key = open_res["data"]["key"].as_str().unwrap().to_string();
+
+    // 8. Mid-shift guard in reverse: attempting to switch back to isolated mode while session 2 is active fails
+    let (status, conflict_res) = send_authed(
+        &app.router,
+        "PUT",
+        "/api/settings/shop-profile",
+        Some(json!({
+            "allowSharedUserSessions": false
+        })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "Body: {conflict_res}");
+    assert_eq!(conflict_res["code"], "ACTIVE_SESSIONS_EXIST");
+
+    // 9. Test resolution in Shared Mode (allowSharedUserSessions == true):
+    // a) Cashier 1 operating on term_2 resolves to term_2's active session
+    let (status, res) = send_authed_with_device(
+        &app.router,
+        "GET",
+        "/api/sessions/current",
+        None,
+        &cashier1_token,
+        Some("term_2"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(res["data"]["key"], session_2_key);
+
+    // b) Cashier 2 with NO device_id or unknown terminal falls back to Cashier 2's active session
+    let (status, res) = send_authed(
+        &app.router,
+        "GET",
+        "/api/sessions/current",
+        None,
+        &cashier2_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(res["data"]["key"], session_2_key);
+
+    // 10. Close session 2
+    let (status, close_res) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/sessions/{session_2_key}/close"),
+        Some(json!({
+            "countedCashCents": 5000,
+            "closingFloatCents": 5000,
+            "cashDropToSafeCents": 0
+        })),
+        &cashier2_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {close_res}");
+
+    // 11. Now switching back to isolated mode succeeds
+    let (status, update_res) = send_authed(
+        &app.router,
+        "PUT",
+        "/api/settings/shop-profile",
+        Some(json!({
+            "allowSharedUserSessions": false
+        })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {update_res}");
+    assert_eq!(update_res["data"]["allowSharedUserSessions"], false);
+}
+
+

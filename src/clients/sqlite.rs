@@ -166,6 +166,14 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .await;
     }
 
+    let shop_profile_cols = table_columns(pool, "shop_profiles").await.unwrap_or_default();
+    if !shop_profile_cols.is_empty() && !shop_profile_cols.iter().any(|n| n == "allow_shared_user_sessions") {
+        tracing::info!("Migrating 'shop_profiles' table: adding 'allow_shared_user_sessions' column");
+        let _ = pool
+            .execute("ALTER TABLE shop_profiles ADD COLUMN allow_shared_user_sessions INTEGER NOT NULL DEFAULT 0")
+            .await;
+    }
+
     // Check if 'generated_documents' table is missing required columns from earlier schema versions
     let gen_doc_cols: Vec<(i32, String)> =
         sqlx::query_as("SELECT cid, name FROM pragma_table_info('generated_documents')")

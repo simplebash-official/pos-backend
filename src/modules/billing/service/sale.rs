@@ -574,20 +574,12 @@ pub async fn complete_sale(
                 }
                 Some(sess)
             }
-            None => {
-                let active = if let Some(ref term) = device_id {
-                    crate::modules::sessions::repository::sessions::find_active_session_for_terminal(db, term).await?
-                } else {
-                    None
-                };
-                match active {
-                    Some(s) => Some(s),
-                    None => {
-                        crate::modules::sessions::repository::sessions::find_active_session_for_cashier(db, &cashier_id)
-                            .await?
-                    }
-                }
-            }
+            None => crate::modules::sessions::service::resolve_active_session(
+                db,
+                device_id.as_deref(),
+                &cashier_id,
+            )
+            .await?,
         };
         let active_session_key = session_doc.as_ref().map(|s| s.key.clone());
         let active_session_terminal_id = session_doc.as_ref().map(|s| s.terminal_id.clone());
@@ -667,6 +659,7 @@ pub async fn complete_sale(
             version: 1,
             created_at: now,
             updated_at: now,
+            updated_by_device: device_id.clone(),
         };
 
         // From this point on, the sale is committed: nothing below reports

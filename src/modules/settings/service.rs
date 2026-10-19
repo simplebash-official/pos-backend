@@ -93,6 +93,7 @@ pub(crate) async fn update_shop_profile(
                     default_warranty_text: String::new(),
                     default_footer_text: String::new(),
                     receipt_footer_text: String::new(),
+                    allow_shared_user_sessions: false,
                     version: 1,
                     created_at: BsonDateTime::now(),
                     updated_at: BsonDateTime::now(),
@@ -181,6 +182,21 @@ pub(crate) async fn update_shop_profile(
 
         if let Some(receipt_footer) = req.receipt_footer_text {
             doc.receipt_footer_text = receipt_footer;
+        }
+
+        if let Some(new_val) = req.allow_shared_user_sessions {
+            if new_val != doc.allow_shared_user_sessions {
+                let active_count =
+                    crate::modules::sessions::repository::sessions::count_active_sessions(db)
+                        .await?;
+                if active_count > 0 {
+                    return Err(AppError::conflict(
+                        crate::core::constants::codes::ACTIVE_SESSIONS_EXIST,
+                        "Cannot change register shift mode while active register shifts exist. Please close all open shifts in the shop first.",
+                    ));
+                }
+                doc.allow_shared_user_sessions = new_val;
+            }
         }
 
         repository::upsert_shop_profile(db, &doc).await?;

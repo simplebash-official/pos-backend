@@ -44,6 +44,8 @@ pub struct ShopProfileDocument {
     pub default_footer_text: String,
     #[serde(default)]
     pub receipt_footer_text: String,
+    #[serde(default)]
+    pub allow_shared_user_sessions: bool,
     #[serde(default = "default_version")]
     pub version: i64,
     #[serde(default = "BsonDateTime::now")]
@@ -80,6 +82,7 @@ impl ShopProfileDocument {
             default_warranty_text: self.default_warranty_text,
             default_footer_text: self.default_footer_text,
             receipt_footer_text: self.receipt_footer_text,
+            allow_shared_user_sessions: self.allow_shared_user_sessions,
         }
     }
 }
