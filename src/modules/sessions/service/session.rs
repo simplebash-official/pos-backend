@@ -213,7 +213,12 @@ pub async fn submit_blind_count(
         ));
     }
 
+    let expected_cash = session.calculate_expected_cash();
+    let variance = body.counted_cash_cents - expected_cash;
+
+    session.expected_cash_cents = Some(expected_cash);
     session.counted_cash_cents = Some(body.counted_cash_cents);
+    session.cash_variance_cents = Some(variance);
     session.closing_denominations = body.closing_denominations;
     session.status = SessionStatus::Closing;
 
@@ -260,16 +265,7 @@ pub async fn close_session(
         ));
     }
 
-    // Expected cash formula:
-    // opening_float + cash_sales + pay_ins - pay_outs - cash_refunds - owner_withdrawals - cash_drops
-    let expected_cash = session.opening_float_cents
-        + session.total_cash_sales_cents
-        + session.total_pay_in_cents
-        - session.total_pay_out_cents
-        - session.total_cash_refunds_cents
-        - session.total_owner_withdrawals_cents
-        - session.total_cash_drops_cents;
-
+    let expected_cash = session.calculate_expected_cash();
     let variance = body.counted_cash_cents - expected_cash;
     let mut variance_approved_by_id = None;
     let mut variance_approved_by_name = None;
@@ -462,6 +458,7 @@ pub async fn convert_variance(
 
     // Update session: record owner withdrawal, clear variance shortage, and flag late movements
     session.total_owner_withdrawals_cents += shortage_amount;
+    session.expected_cash_cents = Some(session.calculate_expected_cash());
     session.cash_variance_cents = Some(0);
     session.has_late_movements = true;
     sessions::update_session(db, &session).await?;

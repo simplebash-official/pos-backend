@@ -105,7 +105,23 @@ pub struct RegisterSessionDocument {
 }
 
 impl RegisterSessionDocument {
+    pub fn calculate_expected_cash(&self) -> i64 {
+        self.opening_float_cents
+            + self.total_cash_sales_cents
+            + self.total_pay_in_cents
+            - self.total_pay_out_cents
+            - self.total_cash_refunds_cents
+            - self.total_owner_withdrawals_cents
+            - self.total_cash_drops_cents
+    }
+
     pub fn into_register_session(self) -> RegisterSession {
+        let expected_cash = self
+            .expected_cash_cents
+            .unwrap_or_else(|| self.calculate_expected_cash());
+        let cash_variance = self
+            .cash_variance_cents
+            .or_else(|| self.counted_cash_cents.map(|c| c - expected_cash));
         let key = if self.key.is_empty() {
             generate_id(prefixes::REGISTER_SESSION)
         } else {
@@ -133,9 +149,9 @@ impl RegisterSessionDocument {
             closed_at: self.closed_at.map(|d| d.to_chrono()),
             closing_cashier_id: self.closing_cashier_id,
             closing_cashier_name_snapshot: self.closing_cashier_name_snapshot,
-            expected_cash_cents: self.expected_cash_cents,
+            expected_cash_cents: Some(expected_cash),
             counted_cash_cents: self.counted_cash_cents,
-            cash_variance_cents: self.cash_variance_cents,
+            cash_variance_cents: cash_variance,
             closing_denominations: self.closing_denominations,
             closing_note: self.closing_note,
             closing_float_cents: self.closing_float_cents,

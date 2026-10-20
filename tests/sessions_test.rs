@@ -1158,4 +1158,187 @@ async fn test_shared_vs_isolated_register_shift_mode_and_mid_shift_guard_sqlite(
     assert_eq!(update_res["data"]["allowSharedUserSessions"], false);
 }
 
+#[tokio::test]
+async fn reconciliation_exact_and_variance_calculation_on_blind_count() {
+    let app = common::spawn_app().await;
+
+    // Seed Admin
+    simplebash_pos_backend::seeds::admin::seed_admin(&app.db_handle, None, None)
+        .await
+        .unwrap();
+
+    let admin_token = mint_token_for(
+        &app.config,
+        "admin",
+        Some(Role::Admin),
+        roles::default_permissions(Role::Admin),
+    );
+
+    // Set Manager PIN
+    let (status, _) = send_authed(
+        &app.router,
+        "POST",
+        "/api/auth/set-pin",
+        Some(json!({ "pin": "1234" })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let staff_username = format!("stf_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+    let (status, staff_res) = send_authed(
+        &app.router,
+        "POST",
+        "/api/users",
+        Some(json!({
+            "name": "Staff Alice",
+            "username": staff_username,
+            "password": "Password123!",
+            "role": "staff",
+        })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "Staff body: {staff_res}");
+    let staff_id = staff_res["data"]["id"].as_str().unwrap();
+
+    let staff_token = mint_token_for(
+        &app.config,
+        staff_id,
+        Some(Role::Staff),
+        roles::default_permissions(Role::Staff),
+    );
+
+    let term = format!("term_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+
+    // 1. Open session with float Rs. 20.00 (2000 cents)
+    let (status, open_res) = send_authed(
+        &app.router,
+        "POST",
+        "/api/sessions/open",
+        Some(json!({
+            "terminalId": term,
+            "openingFloatCents": 2000
+        })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "Body: {open_res}");
+    let session_key = open_res["data"]["key"].as_str().unwrap();
+
+    // Verify session initially has expectedCashCents = 2000
+    let (status, current_res) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/sessions/{session_key}"),
+        None,
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(current_res["data"]["expectedCashCents"], 2000);
+    assert_eq!(current_res["data"]["countedCashCents"], Value::Null);
+    assert_eq!(current_res["data"]["cashVarianceCents"], Value::Null);
+
+    // 2. Make cash sale of Rs. 4,446.12 (444612 cents)
+    let (status, sale_res) = send_authed(
+        &app.router,
+        "POST",
+        "/api/billing/sales",
+        Some(json!({
+            "sessionKey": session_key,
+            "staff": { "cashierName": "Alice" },
+            "items": [{
+                "sourceType": "retail",
+                "name": "Groceries",
+                "unitPriceCents": 444612,
+                "quantity": 1,
+                "discountCents": 0
+            }],
+            "payment": { "paymentMethod": "cash", "isCredit": false },
+            "shopProfileSnapshot": { "tradingName": "Test Shop" }
+        })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {sale_res}");
+
+    // Verify expectedCashCents is now 2000 + 444612 = 446612 cents
+    let (status, after_sale_res) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/sessions/{session_key}"),
+        None,
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(after_sale_res["data"]["expectedCashCents"], 446612);
+
+    // 3. Submit Blind Count of Rs. 4,446.12 (444612 cents) - exact match to user scenario
+    let (status, count_res) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/sessions/{session_key}/blind-count"),
+        Some(json!({
+            "countedCashCents": 444612
+        })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {count_res}");
+    assert_eq!(count_res["data"]["status"], "closing");
+    assert_eq!(count_res["data"]["countedCashCents"], 444612);
+    // MUST calculate exact expected cash and non-zero variance!
+    assert_eq!(count_res["data"]["expectedCashCents"], 446612);
+    assert_eq!(count_res["data"]["cashVarianceCents"], -2000);
+
+    // 4. Convert the -2000 cents shortage to an owner withdrawal
+    let (status, convert_res) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/sessions/{session_key}/convert-variance"),
+        Some(json!({
+            "reason": "Owner took Rs. 20 for tea",
+            "recipient": "Shop Owner",
+            "managerPin": "1234"
+        })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "Body: {convert_res}");
+
+    // Verify session now has variance cleared to 0 and expected cash reconciled to counted cash (444612)
+    let (status, post_convert_res) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/sessions/{session_key}"),
+        None,
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(post_convert_res["data"]["cashVarianceCents"], 0);
+    assert_eq!(post_convert_res["data"]["totalOwnerWithdrawalsCents"], 2000);
+    assert_eq!(post_convert_res["data"]["expectedCashCents"], 444612);
+
+    // 5. Close the session cleanly
+    let (status, close_res) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/sessions/{session_key}/close"),
+        Some(json!({
+            "countedCashCents": 444612,
+            "closingFloatCents": 2000,
+            "cashDropToSafeCents": 442612
+        })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {close_res}");
+    assert_eq!(close_res["data"]["status"], "closed");
+    assert_eq!(close_res["data"]["expectedCashCents"], 444612);
+    assert_eq!(close_res["data"]["cashVarianceCents"], 0);
+}
+
 

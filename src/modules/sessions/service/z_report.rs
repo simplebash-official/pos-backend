@@ -21,13 +21,7 @@ pub async fn generate_z_report(db: &Db, session_key: &str) -> AppResult<ZReportR
 
     let session_movements = movements::list_cash_movements_for_session(db, &session_doc.key).await?;
 
-    let expected_cash = session_doc.opening_float_cents
-        + session_doc.total_cash_sales_cents
-        + session_doc.total_pay_in_cents
-        - session_doc.total_pay_out_cents
-        - session_doc.total_cash_refunds_cents
-        - session_doc.total_owner_withdrawals_cents
-        - session_doc.total_cash_drops_cents;
+    let expected_cash = session_doc.calculate_expected_cash();
 
     let counted_cash = session_doc.counted_cash_cents.unwrap_or(expected_cash);
     let variance = session_doc.cash_variance_cents.unwrap_or(counted_cash - expected_cash);
