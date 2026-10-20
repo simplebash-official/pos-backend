@@ -265,6 +265,32 @@ async fn create_supplier_validates_email_format() {
 }
 
 #[tokio::test]
+async fn create_supplier_allows_empty_email_and_secondary_phone() {
+    let app = common::spawn_app().await;
+    let token = admin_token(&app.config);
+
+    let mut payload = sample_supplier_payload();
+    payload["email"] = json!("");
+    payload["secondaryPhone"] = json!("");
+    payload["notes"] = json!("");
+    let (status, body) =
+        send_authed(&app.router, "POST", "/api/suppliers", Some(payload), &token).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert!(
+        body["data"].get("email").is_none() || body["data"]["email"].is_null(),
+        "empty email string should be stored as None/null: {body}"
+    );
+    assert!(
+        body["data"].get("secondaryPhone").is_none() || body["data"]["secondaryPhone"].is_null(),
+        "empty secondary phone string should be stored as None/null: {body}"
+    );
+    assert!(
+        body["data"].get("notes").is_none() || body["data"]["notes"].is_null(),
+        "empty notes string should be stored as None/null: {body}"
+    );
+}
+
+#[tokio::test]
 async fn create_and_get_supplier() {
     let app = common::spawn_app().await;
     let token = admin_token(&app.config);
@@ -367,6 +393,21 @@ async fn patch_partial_updates_supplier_leaving_other_fields_unchanged() {
     assert_eq!(body["data"]["notes"], "Updated notes");
     assert_eq!(body["data"]["primaryPhone"], original["primaryPhone"]);
     assert_eq!(body["data"]["email"], original["email"]);
+
+    // Test patching with empty string clears the optional email
+    let (status, body) = send_authed(
+        &app.router,
+        "PATCH",
+        &format!("/api/suppliers/{id}"),
+        Some(json!({ "email": "" })),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        body["data"].get("email").is_none() || body["data"]["email"].is_null(),
+        "patch with empty email string should clear the field: {body}"
+    );
 }
 
 #[tokio::test]

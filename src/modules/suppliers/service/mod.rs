@@ -83,6 +83,24 @@ fn validate_email(email: &str) -> AppResult<()> {
     Ok(())
 }
 
+fn validate_phone(phone: &str, field_label: &str) -> AppResult<()> {
+    if !phone
+        .chars()
+        .all(|c| c.is_ascii_digit() || matches!(c, ' ' | '-' | '+'))
+    {
+        return Err(AppError::validation(format!(
+            "{field_label} may only contain digits, spaces, dashes, and a plus sign"
+        )));
+    }
+    Ok(())
+}
+
+fn sanitize_string(value: Option<String>) -> Option<String> {
+    value
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
 /// Builds the Mongo filter from query params (free-text search across
 /// name/contactPerson/primaryPhone/address, plus a `suppliedCategories`
 /// membership filter) — same construction style as
@@ -166,22 +184,31 @@ pub async fn create_supplier(db: &Db, body: CreateSupplierRequest) -> AppResult<
             &body.address,
             &body.supplied_categories,
         )?;
-        if let Some(email) = &body.email {
-            validate_email(email)?;
+
+        let secondary_phone = sanitize_string(body.secondary_phone);
+        if let Some(ref sec_phone) = secondary_phone {
+            validate_phone(sec_phone, "Backup phone")?;
         }
+
+        let email = sanitize_string(body.email);
+        if let Some(ref e) = email {
+            validate_email(e)?;
+        }
+
+        let notes = sanitize_string(body.notes);
 
         let now = BsonDateTime::now();
         let document = SupplierDocument {
             id: None,
             key: generate_id(prefixes::SUPPLIER),
-            name: body.name,
-            contact_person: body.contact_person,
-            primary_phone: body.primary_phone,
-            secondary_phone: body.secondary_phone,
-            address: body.address,
+            name: body.name.trim().to_string(),
+            contact_person: body.contact_person.trim().to_string(),
+            primary_phone: body.primary_phone.trim().to_string(),
+            secondary_phone,
+            address: body.address.trim().to_string(),
             supplied_categories: body.supplied_categories,
-            email: body.email,
-            notes: body.notes,
+            email,
+            notes,
             version: 1,
             created_at: now,
             updated_at: now,
@@ -214,32 +241,36 @@ pub(crate) async fn replace_supplier(
                 AppError::not_found_with_code("Supplier not found", codes::SUPPLIER_NOT_FOUND)
             })?;
 
+        let secondary_phone = sanitize_string(body.secondary_phone);
+        let email = sanitize_string(body.email);
+        let notes = sanitize_string(body.notes);
+
         if let Some(expected) = expected_version
             && existing.version != expected
         {
             let mut conflicting = Vec::new();
-            if body.name != existing.name {
+            if body.name.trim() != existing.name {
                 conflicting.push("name");
             }
-            if body.contact_person != existing.contact_person {
+            if body.contact_person.trim() != existing.contact_person {
                 conflicting.push("contactPerson");
             }
-            if body.primary_phone != existing.primary_phone {
+            if body.primary_phone.trim() != existing.primary_phone {
                 conflicting.push("primaryPhone");
             }
-            if body.secondary_phone != existing.secondary_phone {
+            if secondary_phone != existing.secondary_phone {
                 conflicting.push("secondaryPhone");
             }
-            if body.address != existing.address {
+            if body.address.trim() != existing.address {
                 conflicting.push("address");
             }
-            if body.email != existing.email {
+            if email != existing.email {
                 conflicting.push("email");
             }
             if body.supplied_categories != existing.supplied_categories {
                 conflicting.push("suppliedCategories");
             }
-            if body.notes != existing.notes {
+            if notes != existing.notes {
                 conflicting.push("notes");
             }
 
@@ -263,21 +294,36 @@ pub(crate) async fn replace_supplier(
             &body.address,
             &body.supplied_categories,
         )?;
-        if let Some(email) = &body.email {
-            validate_email(email)?;
+        if let Some(ref sec_phone) = secondary_phone {
+            validate_phone(sec_phone, "Backup phone")?;
+        }
+        if let Some(ref e) = email {
+            validate_email(e)?;
         }
 
         let mut set_doc = doc! {
-            "name": &body.name,
-            "contact_person": &body.contact_person,
-            "primary_phone": &body.primary_phone,
-            "address": &body.address,
+            "name": body.name.trim(),
+            "contact_person": body.contact_person.trim(),
+            "primary_phone": body.primary_phone.trim(),
+            "address": body.address.trim(),
             "supplied_categories": &body.supplied_categories,
             "updated_at": BsonDateTime::now(),
         };
-        set_doc.insert("secondary_phone", body.secondary_phone);
-        set_doc.insert("email", body.email);
-        set_doc.insert("notes", body.notes);
+        if let Some(sp) = secondary_phone {
+            set_doc.insert("secondary_phone", sp);
+        } else {
+            set_doc.insert("secondary_phone", mongodb::bson::Bson::Null);
+        }
+        if let Some(e) = email {
+            set_doc.insert("email", e);
+        } else {
+            set_doc.insert("email", mongodb::bson::Bson::Null);
+        }
+        if let Some(n) = notes {
+            set_doc.insert("notes", n);
+        } else {
+            set_doc.insert("notes", mongodb::bson::Bson::Null);
+        }
         if let Some(device) = device_id {
             set_doc.insert("updated_by_device", device);
         }
@@ -320,32 +366,32 @@ pub(crate) async fn update_supplier(
         {
             let mut conflicting = Vec::new();
             if let Some(ref name) = body.name
-                && name != &existing.name
+                && name.trim() != existing.name
             {
                 conflicting.push("name");
             }
             if let Some(ref cp) = body.contact_person
-                && cp != &existing.contact_person
+                && cp.trim() != existing.contact_person
             {
                 conflicting.push("contactPerson");
             }
             if let Some(ref pp) = body.primary_phone
-                && pp != &existing.primary_phone
+                && pp.trim() != existing.primary_phone
             {
                 conflicting.push("primaryPhone");
             }
             if let Some(ref sp) = body.secondary_phone
-                && Some(sp) != existing.secondary_phone.as_ref()
+                && sanitize_string(Some(sp.clone())) != existing.secondary_phone
             {
                 conflicting.push("secondaryPhone");
             }
             if let Some(ref addr) = body.address
-                && addr != &existing.address
+                && addr.trim() != existing.address
             {
                 conflicting.push("address");
             }
             if let Some(ref email) = body.email
-                && Some(email) != existing.email.as_ref()
+                && sanitize_string(Some(email.clone())) != existing.email
             {
                 conflicting.push("email");
             }
@@ -355,7 +401,7 @@ pub(crate) async fn update_supplier(
                 conflicting.push("suppliedCategories");
             }
             if let Some(ref notes) = body.notes
-                && Some(notes) != existing.notes.as_ref()
+                && sanitize_string(Some(notes.clone())) != existing.notes
             {
                 conflicting.push("notes");
             }
@@ -373,10 +419,22 @@ pub(crate) async fn update_supplier(
             ));
         }
 
-        let name = body.name.unwrap_or(existing.name);
-        let contact_person = body.contact_person.unwrap_or(existing.contact_person);
-        let primary_phone = body.primary_phone.unwrap_or(existing.primary_phone);
-        let address = body.address.unwrap_or(existing.address);
+        let name = body
+            .name
+            .map(|n| n.trim().to_string())
+            .unwrap_or(existing.name);
+        let contact_person = body
+            .contact_person
+            .map(|cp| cp.trim().to_string())
+            .unwrap_or(existing.contact_person);
+        let primary_phone = body
+            .primary_phone
+            .map(|pp| pp.trim().to_string())
+            .unwrap_or(existing.primary_phone);
+        let address = body
+            .address
+            .map(|a| a.trim().to_string())
+            .unwrap_or(existing.address);
         let supplied_categories = body
             .supplied_categories
             .unwrap_or(existing.supplied_categories);
@@ -388,9 +446,36 @@ pub(crate) async fn update_supplier(
             &address,
             &supplied_categories,
         )?;
-        if let Some(email) = &body.email {
-            validate_email(email)?;
-        }
+
+        let has_secondary_phone = body.secondary_phone.is_some();
+        let secondary_phone = match body.secondary_phone {
+            Some(sp) => {
+                let sanitized = sanitize_string(Some(sp));
+                if let Some(ref phone) = sanitized {
+                    validate_phone(phone, "Backup phone")?;
+                }
+                sanitized
+            }
+            None => existing.secondary_phone,
+        };
+
+        let has_email = body.email.is_some();
+        let email = match body.email {
+            Some(e) => {
+                let sanitized = sanitize_string(Some(e));
+                if let Some(ref mail) = sanitized {
+                    validate_email(mail)?;
+                }
+                sanitized
+            }
+            None => existing.email,
+        };
+
+        let has_notes = body.notes.is_some();
+        let notes = match body.notes {
+            Some(n) => sanitize_string(Some(n)),
+            None => existing.notes,
+        };
 
         let mut set_doc = doc! {
             "name": &name,
@@ -400,14 +485,26 @@ pub(crate) async fn update_supplier(
             "supplied_categories": &supplied_categories,
             "updated_at": BsonDateTime::now(),
         };
-        if let Some(secondary_phone) = body.secondary_phone {
-            set_doc.insert("secondary_phone", secondary_phone);
+        if has_secondary_phone {
+            if let Some(sp) = secondary_phone {
+                set_doc.insert("secondary_phone", sp);
+            } else {
+                set_doc.insert("secondary_phone", mongodb::bson::Bson::Null);
+            }
         }
-        if let Some(email) = body.email {
-            set_doc.insert("email", email);
+        if has_email {
+            if let Some(e) = email {
+                set_doc.insert("email", e);
+            } else {
+                set_doc.insert("email", mongodb::bson::Bson::Null);
+            }
         }
-        if let Some(notes) = body.notes {
-            set_doc.insert("notes", notes);
+        if has_notes {
+            if let Some(n) = notes {
+                set_doc.insert("notes", n);
+            } else {
+                set_doc.insert("notes", mongodb::bson::Bson::Null);
+            }
         }
         if let Some(device) = device_id {
             set_doc.insert("updated_by_device", device);
