@@ -41,22 +41,6 @@ pub(crate) async fn render_uncached(
     .await
 }
 
-/// Renders a document dynamically through the template resolution system (honouring the
-/// shop's chosen design family and options) without reading from or writing to the
-/// `generated_documents` cache. Used for active register sessions where sales continue to occur.
-pub(crate) async fn render_live(
-    db: &Db,
-    doc_server: &DocumentServerClient,
-    kind: &str,
-    requested: Option<&str>,
-    data: serde_json::Value,
-) -> AppResult<Vec<u8>> {
-    let settings = settings::service::get_document_template_settings(db).await?;
-    let resolved = templates::resolve(doc_server, kind, requested, &settings).await?;
-    let data = templates::with_options(data, &resolved)?;
-    doc_server.render_template(&resolved.info, data).await
-}
-
 /// True for a non-empty, at most 128-character string made only of ASCII
 /// letters, digits, `_` and `-` — the alphabet of generated keys
 /// (`<prefix>_<nanoid>`) and of the fixed cache keys. Anything else (a `/`,

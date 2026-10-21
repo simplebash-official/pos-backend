@@ -8,10 +8,7 @@ use axum::{
     },
 };
 use serde_json::{Value, json};
-use simplebash_pos_backend::{
-    core::constants::roles,
-    domain::users::Role,
-};
+use simplebash_pos_backend::{core::constants::roles, domain::users::Role};
 use tower::ServiceExt;
 
 async fn execute(router: &axum::Router, request: Request<Body>) -> (StatusCode, Value) {
@@ -385,6 +382,62 @@ async fn session_full_lifecycle_and_z_report() {
     assert_eq!(status, StatusCode::OK, "Body: {body}");
     assert_eq!(body["data"]["currentBalanceCents"], 33000);
 
+    // 6b. Mid-session Z-Report & document preview (while open)
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/sessions/{session_key}/z-report"),
+        None,
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    assert_eq!(body["data"]["totalInvoicesCount"], 1);
+    assert_eq!(body["data"]["discountCents"], 0);
+    let cash_pm = body["data"]["paymentMethods"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|pm| pm["method"] == "cash")
+        .expect("cash tender must be present");
+    assert_eq!(cash_pm["count"], 1);
+    assert_eq!(cash_pm["totalCents"], 80000);
+
+    // Mid-session PDF document fetch
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!(
+            "/api/sessions/{session_key}/document?design=current"
+        ))
+        .header(AUTHORIZATION, format!("Bearer {staff_token}"))
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.router.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let mid_pdf_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&mid_pdf_bytes).contains("tpl_z_report")
+            || mid_pdf_bytes.starts_with(b"%PDF-")
+    );
+
+    // Fetch again without data change: should serve cached PDF
+    let req2 = Request::builder()
+        .method("GET")
+        .uri(format!(
+            "/api/sessions/{session_key}/document?design=current"
+        ))
+        .header(AUTHORIZATION, format!("Bearer {staff_token}"))
+        .body(Body::empty())
+        .unwrap();
+    let resp2 = app.router.clone().oneshot(req2).await.unwrap();
+    assert_eq!(resp2.status(), StatusCode::OK);
+    let mid_pdf_bytes2 = axum::body::to_bytes(resp2.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(mid_pdf_bytes, mid_pdf_bytes2);
+
     // 7. Submit Blind Count: 33,000 cents
     let (status, body) = send_authed(
         &app.router,
@@ -443,11 +496,33 @@ async fn session_full_lifecycle_and_z_report() {
     assert_eq!(status, StatusCode::OK, "Body: {body}");
     assert_eq!(body["data"]["grossSalesCents"], 80000);
     assert_eq!(body["data"]["netSalesCents"], 80000);
-    assert_eq!(body["data"]["cashReconciliation"]["expectedCashCents"], 33000);
-    assert_eq!(body["data"]["cashReconciliation"]["countedCashCents"], 33000);
+    assert_eq!(body["data"]["totalInvoicesCount"], 1);
+    assert_eq!(body["data"]["discountCents"], 0);
+    let cash_pm = body["data"]["paymentMethods"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|pm| pm["method"] == "cash")
+        .expect("cash tender must be present");
+    assert_eq!(cash_pm["count"], 1);
+    assert_eq!(cash_pm["totalCents"], 80000);
+    assert_eq!(
+        body["data"]["cashReconciliation"]["expectedCashCents"],
+        33000
+    );
+    assert_eq!(
+        body["data"]["cashReconciliation"]["countedCashCents"],
+        33000
+    );
     assert_eq!(body["data"]["cashReconciliation"]["varianceCents"], 0);
-    assert_eq!(body["data"]["cashReconciliation"]["closingFloatCents"], 10000);
-    assert_eq!(body["data"]["cashReconciliation"]["safeDepositCents"], 23000);
+    assert_eq!(
+        body["data"]["cashReconciliation"]["closingFloatCents"],
+        10000
+    );
+    assert_eq!(
+        body["data"]["cashReconciliation"]["safeDepositCents"],
+        23000
+    );
 
     // 9b. Verify Z-Report document design status
     let (status, body) = send_authed(
@@ -464,15 +539,22 @@ async fn session_full_lifecycle_and_z_report() {
     // 9c. Fetch Z-Report PDF document
     let req = Request::builder()
         .method("GET")
-        .uri(format!("/api/sessions/{session_key}/document?design=current"))
+        .uri(format!(
+            "/api/sessions/{session_key}/document?design=current"
+        ))
         .header(AUTHORIZATION, format!("Bearer {staff_token}"))
         .body(Body::empty())
         .unwrap();
     let resp = app.router.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(resp.headers().get(CONTENT_TYPE).unwrap(), "application/pdf");
-    let pdf_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
-    assert!(String::from_utf8_lossy(&pdf_bytes).contains("tpl_z_report") || pdf_bytes.starts_with(b"%PDF-"));
+    let pdf_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&pdf_bytes).contains("tpl_z_report")
+            || pdf_bytes.starts_with(b"%PDF-")
+    );
 
     // 10. Reopen session by Admin
     let (status, body) = send_authed(
@@ -816,7 +898,10 @@ async fn test_shared_vs_isolated_register_shift_mode_and_mid_shift_guard() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(res["data"].is_null(), "Expected null in isolated mode without terminal_id: {res}");
+    assert!(
+        res["data"].is_null(),
+        "Expected null in isolated mode without terminal_id: {res}"
+    );
 
     // d) Cashier 2 on unused terminal term_2 returns null
     let (status, res) = send_authed_with_device(
@@ -914,7 +999,10 @@ async fn test_shared_vs_isolated_register_shift_mode_and_mid_shift_guard() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(res["data"]["key"], session_2_key, "Expected fallback to cashier active session in shared mode");
+    assert_eq!(
+        res["data"]["key"], session_2_key,
+        "Expected fallback to cashier active session in shared mode"
+    );
 
     // c) Cashier 1 with NO device_id has no session and returns null
     let (status, res) = send_authed(
@@ -1067,7 +1155,10 @@ async fn test_shared_vs_isolated_register_shift_mode_and_mid_shift_guard_sqlite(
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(res["data"].is_null(), "Expected null in isolated mode without terminal_id: {res}");
+    assert!(
+        res["data"].is_null(),
+        "Expected null in isolated mode without terminal_id: {res}"
+    );
 
     // 5. Close session 1
     let (status, close_res) = send_authed(
@@ -1404,7 +1495,10 @@ async fn test_cashier_name_resolved_when_token_lacks_name() {
         sub: cashier_id.to_string(),
         exp: 9_999_999_999,
         role: Some(Role::Staff),
-        permissions: roles::default_permissions(Role::Staff).iter().map(|p| p.to_string()).collect(),
+        permissions: roles::default_permissions(Role::Staff)
+            .iter()
+            .map(|p| p.to_string())
+            .collect(),
         tid: None,
         scope: None,
         did: None,
@@ -1418,12 +1512,16 @@ async fn test_cashier_name_resolved_when_token_lacks_name() {
     .unwrap();
 
     // Open session: should resolve Kasun's name via resolve_name()
+    let terminal_id = format!(
+        "term_kasun_{}",
+        &uuid::Uuid::new_v4().simple().to_string()[..8]
+    );
     let (status, open_res) = send_authed(
         &app.router,
         "POST",
         "/api/sessions/open",
         Some(json!({
-            "terminalId": "term_test_kasun",
+            "terminalId": terminal_id,
             "openingFloatCents": 1000,
         })),
         &token,
@@ -1436,7 +1534,7 @@ async fn test_cashier_name_resolved_when_token_lacks_name() {
     let (status, cur_res) = send_authed(
         &app.router,
         "GET",
-        "/api/sessions/current?terminal_id=term_test_kasun",
+        &format!("/api/sessions/current?terminal_id={terminal_id}"),
         None,
         &token,
     )
@@ -1444,5 +1542,3 @@ async fn test_cashier_name_resolved_when_token_lacks_name() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(cur_res["data"]["cashierNameSnapshot"], "Kasun Cashier");
 }
-
-

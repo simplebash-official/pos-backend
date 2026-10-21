@@ -8,23 +8,26 @@ use crate::{
         constants::codes,
         error::{AppError, AppResult},
     },
-    domain::sessions::{
-        ZReportCashReconciliation, ZReportPaymentMethodSummary, ZReportResponse,
-    },
+    domain::sessions::{ZReportCashReconciliation, ZReportPaymentMethodSummary, ZReportResponse},
     modules::sessions::repository::{movements, sessions},
 };
 
 pub async fn generate_z_report(db: &Db, session_key: &str) -> AppResult<ZReportResponse> {
     let session_doc = sessions::find_session_by_id_or_key(db, session_key)
         .await?
-        .ok_or_else(|| AppError::not_found_with_code("Register session not found", codes::SESSION_NOT_FOUND))?;
+        .ok_or_else(|| {
+            AppError::not_found_with_code("Register session not found", codes::SESSION_NOT_FOUND)
+        })?;
 
-    let session_movements = movements::list_cash_movements_for_session(db, &session_doc.key).await?;
+    let session_movements =
+        movements::list_cash_movements_for_session(db, &session_doc.key).await?;
 
     let expected_cash = session_doc.calculate_expected_cash();
 
     let counted_cash = session_doc.counted_cash_cents.unwrap_or(expected_cash);
-    let variance = session_doc.cash_variance_cents.unwrap_or(counted_cash - expected_cash);
+    let variance = session_doc
+        .cash_variance_cents
+        .unwrap_or(counted_cash - expected_cash);
 
     let gross_sales = session_doc.total_cash_sales_cents
         + session_doc.total_card_sales_cents
@@ -34,32 +37,35 @@ pub async fn generate_z_report(db: &Db, session_key: &str) -> AppResult<ZReportR
     let returns = session_doc.total_cash_refunds_cents;
     let net_sales = gross_sales - returns;
 
+    let billing_summary =
+        crate::modules::billing::service::get_session_billing_summary(db, &session_doc.key).await?;
+
     let mut payment_methods = Vec::new();
-    if session_doc.total_cash_sales_cents > 0 {
+    if session_doc.total_cash_sales_cents > 0 || billing_summary.cash_payment_count > 0 {
         payment_methods.push(ZReportPaymentMethodSummary {
             method: "cash".to_string(),
-            count: 0,
+            count: billing_summary.cash_payment_count,
             total_cents: session_doc.total_cash_sales_cents,
         });
     }
-    if session_doc.total_card_sales_cents > 0 {
+    if session_doc.total_card_sales_cents > 0 || billing_summary.card_payment_count > 0 {
         payment_methods.push(ZReportPaymentMethodSummary {
             method: "card".to_string(),
-            count: 0,
+            count: billing_summary.card_payment_count,
             total_cents: session_doc.total_card_sales_cents,
         });
     }
-    if session_doc.total_online_sales_cents > 0 {
+    if session_doc.total_online_sales_cents > 0 || billing_summary.online_payment_count > 0 {
         payment_methods.push(ZReportPaymentMethodSummary {
             method: "online".to_string(),
-            count: 0,
+            count: billing_summary.online_payment_count,
             total_cents: session_doc.total_online_sales_cents,
         });
     }
-    if session_doc.total_credit_sales_cents > 0 {
+    if session_doc.total_credit_sales_cents > 0 || billing_summary.credit_invoice_count > 0 {
         payment_methods.push(ZReportPaymentMethodSummary {
             method: "credit".to_string(),
-            count: 0,
+            count: billing_summary.credit_invoice_count,
             total_cents: session_doc.total_credit_sales_cents,
         });
     }
@@ -80,17 +86,21 @@ pub async fn generate_z_report(db: &Db, session_key: &str) -> AppResult<ZReportR
     };
 
     let mut session = session_doc.into_register_session();
-    crate::modules::sessions::service::session::populate_missing_cashier_name(db, &mut session).await;
+    crate::modules::sessions::service::session::populate_missing_cashier_name(db, &mut session)
+        .await;
 
     Ok(ZReportResponse {
         session,
         gross_sales_cents: gross_sales,
         returns_cents: returns,
         net_sales_cents: net_sales,
-        discount_cents: 0,
-        total_invoices_count: 0,
+        discount_cents: billing_summary.discount_cents,
+        total_invoices_count: billing_summary.total_invoices_count,
         payment_methods,
-        cash_movements: session_movements.into_iter().map(|m| m.into_cash_movement()).collect(),
+        cash_movements: session_movements
+            .into_iter()
+            .map(|m| m.into_cash_movement())
+            .collect(),
         cash_reconciliation,
         generated_at: Utc::now(),
     })

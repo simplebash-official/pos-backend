@@ -23,7 +23,7 @@ use crate::{
             CashMovement, CashMovementListQuery, CashMovementListResponse, CloseSessionRequest,
             ConvertVarianceRequest, CreateCashMovementRequest, DrawerState, OpenSessionRequest,
             RegisterSession, ReopenSessionRequest, SessionListQuery, SessionListResponse,
-            SessionStatus, SubmitBlindCountRequest, ZReportResponse,
+            SubmitBlindCountRequest, ZReportResponse,
         },
         settings::{DocumentDesignChoice, DocumentDesignStatus},
     },
@@ -98,7 +98,13 @@ async fn open_session(
     )
     .await?;
 
-    Ok((StatusCode::CREATED, Json(ApiResponse::success(session, "Register session opened successfully"))))
+    Ok((
+        StatusCode::CREATED,
+        Json(ApiResponse::success(
+            session,
+            "Register session opened successfully",
+        )),
+    ))
 }
 
 #[utoipa::path(
@@ -122,15 +128,19 @@ async fn get_current_session(
     current_user.require_permission(perm::REGISTER_SESSIONS_VIEW)?;
 
     let terminal_id = query.terminal_id.as_deref().or(device_id.0.as_deref());
-    let mut session = service::resolve_active_session(&state.db, terminal_id, &current_user.user_id)
-        .await?
-        .map(|s| s.into_register_session());
+    let mut session =
+        service::resolve_active_session(&state.db, terminal_id, &current_user.user_id)
+            .await?
+            .map(|s| s.into_register_session());
 
     if let Some(ref mut s) = session {
         service::session::populate_missing_cashier_name(&state.db, s).await;
     }
 
-    Ok(Json(ApiResponse::success(session, "Active register session retrieved successfully")))
+    Ok(Json(ApiResponse::success(
+        session,
+        "Active register session retrieved successfully",
+    )))
 }
 
 #[utoipa::path(
@@ -153,7 +163,10 @@ async fn get_session(
 ) -> AppResult<Json<ApiResponse<RegisterSession>>> {
     current_user.require_permission(perm::REGISTER_SESSIONS_VIEW)?;
     let session = service::get_session(&state.db, &key).await?;
-    Ok(Json(ApiResponse::success(session, "Register session details retrieved successfully")))
+    Ok(Json(ApiResponse::success(
+        session,
+        "Register session details retrieved successfully",
+    )))
 }
 
 #[utoipa::path(
@@ -173,7 +186,10 @@ async fn list_sessions(
 ) -> AppResult<Json<ApiResponse<SessionListResponse>>> {
     current_user.require_permission(perm::REGISTER_SESSIONS_VIEW)?;
     let response = service::list_sessions(&state.db, query).await?;
-    Ok(Json(ApiResponse::success(response, "Register sessions retrieved successfully")))
+    Ok(Json(ApiResponse::success(
+        response,
+        "Register sessions retrieved successfully",
+    )))
 }
 
 #[utoipa::path(
@@ -198,7 +214,10 @@ async fn submit_blind_count(
 ) -> AppResult<Json<ApiResponse<RegisterSession>>> {
     current_user.require_permission(perm::REGISTER_SESSIONS_MANAGE)?;
     let session = service::submit_blind_count(&state.db, &key, body).await?;
-    Ok(Json(ApiResponse::success(session, "Blind count recorded successfully")))
+    Ok(Json(ApiResponse::success(
+        session,
+        "Blind count recorded successfully",
+    )))
 }
 
 #[utoipa::path(
@@ -223,16 +242,13 @@ async fn close_session(
 ) -> AppResult<Json<ApiResponse<RegisterSession>>> {
     current_user.require_permission(perm::REGISTER_SESSIONS_MANAGE)?;
     let cashier_name = current_user.resolve_name(&state.db).await;
-    let session = service::close_session(
-        &state.db,
-        &key,
-        current_user.user_id,
-        cashier_name,
-        body,
-    )
-    .await?;
+    let session =
+        service::close_session(&state.db, &key, current_user.user_id, cashier_name, body).await?;
 
-    Ok(Json(ApiResponse::success(session, "Register session closed successfully")))
+    Ok(Json(ApiResponse::success(
+        session,
+        "Register session closed successfully",
+    )))
 }
 
 #[utoipa::path(
@@ -267,7 +283,10 @@ async fn reopen_session(
     )
     .await?;
 
-    Ok(Json(ApiResponse::success(session, "Register session reopened successfully")))
+    Ok(Json(ApiResponse::success(
+        session,
+        "Register session reopened successfully",
+    )))
 }
 
 #[utoipa::path(
@@ -302,7 +321,13 @@ async fn convert_variance(
     )
     .await?;
 
-    Ok((StatusCode::CREATED, Json(ApiResponse::success(movement, "Variance converted to late owner withdrawal"))))
+    Ok((
+        StatusCode::CREATED,
+        Json(ApiResponse::success(
+            movement,
+            "Variance converted to late owner withdrawal",
+        )),
+    ))
 }
 
 #[utoipa::path(
@@ -325,7 +350,10 @@ async fn get_z_report(
 ) -> AppResult<Json<ApiResponse<ZReportResponse>>> {
     current_user.require_permission(perm::REGISTER_SESSIONS_VIEW)?;
     let report = service::generate_z_report(&state.db, &key).await?;
-    Ok(Json(ApiResponse::success(report, "Z-Report generated successfully")))
+    Ok(Json(ApiResponse::success(
+        report,
+        "Z-Report generated successfully",
+    )))
 }
 
 #[utoipa::path(
@@ -351,33 +379,25 @@ async fn get_z_report_document(
 ) -> AppResult<Response> {
     current_user.require_permission(perm::REGISTER_SESSIONS_VIEW)?;
     let report = service::generate_z_report(&state.db, &key).await?;
-    let shop = settings::service::get_shop_profile(&state.db, current_user.tenant_id.as_deref()).await?;
+    let shop =
+        settings::service::get_shop_profile(&state.db, current_user.tenant_id.as_deref()).await?;
     let shop_val = serde_json::to_value(&shop).unwrap_or_default();
-    let data = crate::modules::billing::service::print_payload::build_z_report_data(&report, &shop_val);
+    let data =
+        crate::modules::billing::service::print_payload::build_z_report_data(&report, &shop_val);
 
-    let pdf_bytes = if report.session.status == SessionStatus::Closed {
-        documents::service::print(
-            &state.db,
-            &state.document_server,
-            &state.config.generated_documents_dir,
-            "z-report",
-            params.template.as_deref(),
-            params.design,
-            &report.session.key,
-            "z-report",
-            data,
-        )
-        .await?
-    } else {
-        documents::service::render_live(
-            &state.db,
-            &state.document_server,
-            "z-report",
-            params.template.as_deref(),
-            data,
-        )
-        .await?
-    };
+    let legacy_cache_key = format!("z-report-v{}", report.session.version);
+    let pdf_bytes = documents::service::print(
+        &state.db,
+        &state.document_server,
+        &state.config.generated_documents_dir,
+        "z-report",
+        params.template.as_deref(),
+        params.design,
+        &report.session.key,
+        &legacy_cache_key,
+        data,
+    )
+    .await?;
 
     Ok((
         StatusCode::OK,
@@ -409,13 +429,14 @@ async fn get_z_report_document_design(
 ) -> AppResult<Json<ApiResponse<DocumentDesignStatus>>> {
     current_user.require_permission(perm::REGISTER_SESSIONS_VIEW)?;
     let report = service::generate_z_report(&state.db, &key).await?;
+    let legacy_cache_key = format!("z-report-v{}", report.session.version);
     let status = documents::service::print_design_status(
         &state.db,
         &state.document_server,
         "z-report",
         params.template.as_deref(),
         &report.session.key,
-        "z-report",
+        &legacy_cache_key,
     )
     .await?;
     Ok(Json(ApiResponse::success(
@@ -452,7 +473,13 @@ async fn create_cash_movement(
     )
     .await?;
 
-    Ok((StatusCode::CREATED, Json(ApiResponse::success(movement, "Cash movement recorded successfully"))))
+    Ok((
+        StatusCode::CREATED,
+        Json(ApiResponse::success(
+            movement,
+            "Cash movement recorded successfully",
+        )),
+    ))
 }
 
 #[utoipa::path(
@@ -472,7 +499,10 @@ async fn list_cash_movements(
 ) -> AppResult<Json<ApiResponse<CashMovementListResponse>>> {
     current_user.require_permission(perm::CASH_MOVEMENTS_VIEW)?;
     let response = service::list_movements(&state.db, query).await?;
-    Ok(Json(ApiResponse::success(response, "Cash movements retrieved successfully")))
+    Ok(Json(ApiResponse::success(
+        response,
+        "Cash movements retrieved successfully",
+    )))
 }
 
 #[utoipa::path(
@@ -495,7 +525,10 @@ async fn get_cash_movement(
 ) -> AppResult<Json<ApiResponse<CashMovement>>> {
     current_user.require_permission(perm::CASH_MOVEMENTS_VIEW)?;
     let movement = service::get_movement(&state.db, &key).await?;
-    Ok(Json(ApiResponse::success(movement, "Cash movement details retrieved successfully")))
+    Ok(Json(ApiResponse::success(
+        movement,
+        "Cash movement details retrieved successfully",
+    )))
 }
 
 #[utoipa::path(
@@ -517,5 +550,8 @@ async fn get_drawer_state(
 ) -> AppResult<Json<ApiResponse<Option<DrawerState>>>> {
     current_user.require_permission(perm::REGISTER_SESSIONS_VIEW)?;
     let drawer_state = drawer::get_drawer_state(&state.db, &terminal_id).await?;
-    Ok(Json(ApiResponse::success(drawer_state.map(|s| s.into_drawer_state()), "Drawer state retrieved successfully")))
+    Ok(Json(ApiResponse::success(
+        drawer_state.map(|s| s.into_drawer_state()),
+        "Drawer state retrieved successfully",
+    )))
 }
