@@ -284,6 +284,22 @@ fn mock_templates_json() -> serde_json::Value {
                     true,
                     json!({}),
                 ),
+                mock_template(
+                    "tpl_z_report",
+                    "doc_temp_ZRep0rtV1Std000",
+                    "Z-Report",
+                    "z-report",
+                    json!({
+                        "required": ["sessionNumber", "terminalId", "cashierName"],
+                        "properties": {
+                            "sessionNumber": { "type": "string" },
+                            "terminalId": { "type": "string" },
+                            "cashierName": { "type": "string" }
+                        }
+                    }),
+                    true,
+                    json!({ "sessionNumber": "SES-000042", "terminalId": "TERM-01", "cashierName": "Kasun Perera" }),
+                ),
             ]
         }
     })

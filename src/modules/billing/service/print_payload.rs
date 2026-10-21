@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 use crate::domain::{
     billing::{CreditNote, Invoice, ItemCondition, ItemDisposition},
     quotations::Quotation,
+    sessions::ZReportResponse,
 };
 
 /// `invoice.shop_profile_snapshot` is the frontend's `ShopProfile` object,
@@ -330,6 +331,117 @@ pub(crate) fn build_quotation_data(quotation: &Quotation, shop: &Value) -> Value
     data["bankBranch"] = json!(shop_field_or_empty(shop, "bankBranch"));
     data["accountName"] = json!(shop_field_or_empty(shop, "accountName"));
     data["accountNumber"] = json!(shop_field_or_empty(shop, "accountNumber"));
+    data
+}
+
+/// Builds `data` for the "Z-Report" template — field-for-field the contract
+/// documented in `doc_temp_ZRep0rtV1Std000.schema.json`.
+pub(crate) fn build_z_report_data(report: &ZReportResponse, shop: &Value) -> Value {
+    let session = &report.session;
+    let opened_at = session.opened_at.format("%d %b %Y %H:%M").to_string();
+    let closed_at = session
+        .closed_at
+        .map(|dt| dt.format("%d %b %Y %H:%M").to_string())
+        .unwrap_or_default();
+    let generated_at = report.generated_at.format("%d %b %Y %H:%M").to_string();
+
+    let payment_methods: Vec<Value> = report
+        .payment_methods
+        .iter()
+        .map(|pm| {
+            json!({
+                "method": pm.method,
+                "count": pm.count,
+                "totalCents": pm.total_cents,
+            })
+        })
+        .collect();
+
+    let recon = &report.cash_reconciliation;
+    let cash_reconciliation = json!({
+        "openingFloatCents": recon.opening_float_cents,
+        "cashSalesCents": recon.cash_sales_cents,
+        "payInCents": recon.pay_in_cents,
+        "payOutCents": recon.pay_out_cents,
+        "cashRefundsCents": recon.cash_refunds_cents,
+        "ownerWithdrawalsCents": recon.owner_withdrawals_cents,
+        "cashDropsCents": recon.cash_drops_cents,
+        "expectedCashCents": recon.expected_cash_cents,
+        "countedCashCents": recon.counted_cash_cents,
+        "varianceCents": recon.variance_cents,
+        "closingFloatCents": recon.closing_float_cents,
+        "safeDepositCents": recon.safe_deposit_cents,
+    });
+
+    let cash_movements: Vec<Value> = report
+        .cash_movements
+        .iter()
+        .map(|cm| {
+            json!({
+                "movementNumber": cm.movement_number,
+                "movementType": cm.movement_type.as_str(),
+                "amountCents": cm.amount_cents,
+                "reason": cm.reason,
+                "recipientOrSource": cm.recipient_or_source.clone().unwrap_or_default(),
+                "recordedByNameSnapshot": cm.recorded_by_name_snapshot,
+                "createdAt": cm.created_at.format("%d %b %Y %H:%M").to_string(),
+            })
+        })
+        .collect();
+
+    let mut data = json!({
+        "logoUrl": shop_field_or_empty(shop, "logoBase64"),
+        "sessionNumber": session.session_number,
+        "terminalId": session.terminal_id,
+        "cashierName": session.cashier_name_snapshot,
+        "status": session.status.as_str(),
+        "openedAt": opened_at,
+        "closedAt": closed_at,
+        "grossSalesCents": report.gross_sales_cents,
+        "returnsCents": report.returns_cents,
+        "netSalesCents": report.net_sales_cents,
+        "discountCents": report.discount_cents,
+        "totalInvoicesCount": report.total_invoices_count,
+        "paymentMethods": payment_methods,
+        "cashReconciliation": cash_reconciliation,
+        "cashMovements": cash_movements,
+        "shopTradingName": shop_field_or_empty(shop, "tradingName"),
+        "shopAddressLines": shop_address_lines(shop),
+        "generatedAt": generated_at,
+    });
+
+    if let Some(ref closing_cashier) = session.closing_cashier_name_snapshot {
+        data["closingCashierName"] = json!(closing_cashier);
+    }
+    if let Some(ref note) = session.opening_note {
+        data["openingNote"] = json!(note);
+    }
+    if let Some(ref note) = session.closing_note {
+        data["closingNote"] = json!(note);
+    }
+    if let Some(val) = shop_field(shop, "legalName") {
+        data["shopLegalName"] = json!(val);
+    }
+    if let Some(val) = shop_field(shop, "email") {
+        data["shopEmail"] = json!(val);
+    }
+    if let Some(val) = shop_field(shop, "website") {
+        data["shopWebsite"] = json!(val);
+    }
+    if let Some(val) = shop_field(shop, "businessRegNo") {
+        data["shopBusinessRegNo"] = json!(val);
+    }
+    if let Some(val) = shop_field(shop, "vatNo") {
+        data["shopVatNo"] = json!(val);
+    }
+    data["shopIsVatRegistered"] = json!(shop_bool(shop, "isVatRegistered"));
+    if let Some(val) = shop_field(shop, "primaryPhone") {
+        data["shopPrimaryPhone"] = json!(val);
+    }
+    if let Some(val) = shop_field(shop, "secondaryPhone") {
+        data["shopSecondaryPhone"] = json!(val);
+    }
+
     data
 }
 
@@ -869,5 +981,144 @@ mod schema_drift_tests {
 
         let cancelled = build_quotation_data(&quotation("cancelled", 0), &shop);
         assert_eq!(cancelled["isCancelled"], true);
+    }
+
+    fn base_z_report() -> ZReportResponse {
+        use crate::domain::sessions::{
+            CashMovement, CashMovementType, RegisterSession, SessionStatus,
+            ZReportCashReconciliation, ZReportPaymentMethodSummary, ZReportResponse,
+        };
+        ZReportResponse {
+            session: RegisterSession {
+                id: "64b0000000000000000000c1".to_string(),
+                key: "ses_test".to_string(),
+                session_number: "SES-000042".to_string(),
+                terminal_id: "TERM-01".to_string(),
+                cashier_id: "usr_admin".to_string(),
+                cashier_name_snapshot: "Kasun Perera".to_string(),
+                status: SessionStatus::Closed,
+                opened_at: "2026-10-21T08:30:00Z".parse().unwrap(),
+                opening_float_cents: 200_000,
+                opening_denominations: None,
+                opening_note: Some("Morning opening".to_string()),
+                opening_discrepancy_cents: 0,
+                opening_discrepancy_reason: None,
+                opening_approved_by_id: None,
+                opening_approved_by_name: None,
+                closed_at: Some("2026-10-21T18:00:00Z".parse().unwrap()),
+                closing_cashier_id: Some("usr_admin".to_string()),
+                closing_cashier_name_snapshot: Some("Kasun Perera".to_string()),
+                expected_cash_cents: Some(520_000),
+                counted_cash_cents: Some(520_000),
+                cash_variance_cents: Some(0),
+                closing_float_cents: Some(200_000),
+                cash_drop_to_safe_cents: Some(320_000),
+                closing_denominations: None,
+                closing_note: Some("Reconciled perfectly".to_string()),
+                variance_reason: None,
+                variance_approved_by_id: None,
+                variance_approved_by_name: None,
+                reopened_at: None,
+                reopened_by_id: None,
+                reopened_by_name: None,
+                reopened_reason: None,
+                has_late_movements: false,
+                total_cash_sales_cents: 1_150_000,
+                total_card_sales_cents: 550_000,
+                total_online_sales_cents: 150_000,
+                total_credit_sales_cents: 0,
+                total_cash_refunds_cents: 50_000,
+                total_pay_in_cents: 50_000,
+                total_pay_out_cents: 30_000,
+                total_owner_withdrawals_cents: 100_000,
+                total_cash_drops_cents: 700_000,
+                created_at: "2026-10-21T08:30:00Z".parse().unwrap(),
+                updated_at: "2026-10-21T18:00:00Z".parse().unwrap(),
+                version: 1,
+            },
+            gross_sales_cents: 1_850_000,
+            returns_cents: 50_000,
+            net_sales_cents: 1_800_000,
+            discount_cents: 25_000,
+            total_invoices_count: 24,
+            payment_methods: vec![
+                ZReportPaymentMethodSummary {
+                    method: "cash".to_string(),
+                    count: 14,
+                    total_cents: 1_150_000,
+                },
+                ZReportPaymentMethodSummary {
+                    method: "card".to_string(),
+                    count: 8,
+                    total_cents: 550_000,
+                },
+            ],
+            cash_movements: vec![CashMovement {
+                id: "64b0000000000000000000d1".to_string(),
+                key: "cm_test".to_string(),
+                movement_number: "CM-000101".to_string(),
+                movement_type: CashMovementType::PayIn,
+                amount_cents: 50_000,
+                session_key: Some("ses_test".to_string()),
+                terminal_id: "TERM-01".to_string(),
+                reason: "Till float replenishment".to_string(),
+                recipient_or_source: Some("Main Safe".to_string()),
+                supplier_key: None,
+                recorded_by_user_id: "usr_admin".to_string(),
+                recorded_by_name_snapshot: "Kasun Perera".to_string(),
+                approved_by_user_id: None,
+                approved_by_name_snapshot: None,
+                recorded_late: false,
+                original_variance_session_key: None,
+                created_at: "2026-10-21T10:15:00Z".parse().unwrap(),
+                updated_at: "2026-10-21T10:15:00Z".parse().unwrap(),
+                version: 1,
+            }],
+            cash_reconciliation: ZReportCashReconciliation {
+                opening_float_cents: 200_000,
+                cash_sales_cents: 1_150_000,
+                pay_in_cents: 50_000,
+                pay_out_cents: 30_000,
+                cash_refunds_cents: 50_000,
+                owner_withdrawals_cents: 100_000,
+                cash_drops_cents: 700_000,
+                expected_cash_cents: 520_000,
+                counted_cash_cents: 520_000,
+                variance_cents: 0,
+                closing_float_cents: 200_000,
+                safe_deposit_cents: 320_000,
+            },
+            generated_at: "2026-10-21T18:02:00Z".parse().unwrap(),
+        }
+    }
+
+    #[test]
+    fn z_report_payload_matches_published_schema() {
+        let shop = cash_sale_invoice().shop_profile_snapshot;
+        assert_matches_schema("z-report", &build_z_report_data(&base_z_report(), &shop));
+
+        // Open session with minimal/empty shop profile: must still satisfy contract
+        let mut open_report = base_z_report();
+        open_report.session.status = crate::domain::sessions::SessionStatus::Open;
+        open_report.session.closed_at = None;
+        assert_matches_schema("z-report", &build_z_report_data(&open_report, &json!({})));
+    }
+
+    #[test]
+    fn z_report_payload_carries_exact_reconciliation_math() {
+        let shop = json!({ "tradingName": "TechFix", "logoBase64": "data:image/png;base64,AAAA" });
+        let payload = build_z_report_data(&base_z_report(), &shop);
+        assert_eq!(payload["sessionNumber"], "SES-000042");
+        assert_eq!(payload["terminalId"], "TERM-01");
+        assert_eq!(payload["cashierName"], "Kasun Perera");
+        assert_eq!(payload["status"], "closed");
+        assert_eq!(payload["grossSalesCents"], 1_850_000);
+        assert_eq!(payload["returnsCents"], 50_000);
+        assert_eq!(payload["netSalesCents"], 1_800_000);
+        assert_eq!(payload["discountCents"], 25_000);
+        assert_eq!(payload["totalInvoicesCount"], 24);
+        assert_eq!(payload["cashReconciliation"]["expectedCashCents"], 520_000);
+        assert_eq!(payload["cashReconciliation"]["countedCashCents"], 520_000);
+        assert_eq!(payload["cashReconciliation"]["varianceCents"], 0);
     }
 }

@@ -2,8 +2,10 @@
 
 use axum::{
     Json,
+    body::Body,
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{StatusCode, header},
+    response::{IntoResponse, Response},
 };
 use serde::Deserialize;
 use utoipa_axum::{router::OpenApiRouter, routes};
@@ -16,18 +18,36 @@ use crate::{
         middleware::{auth::CurrentUser, sync_headers::DeviceId},
         response::{ApiResponse, ErrorResponse},
     },
-    domain::sessions::{
-        CashMovement, CashMovementListQuery, CashMovementListResponse, CloseSessionRequest,
-        ConvertVarianceRequest, CreateCashMovementRequest, DrawerState, OpenSessionRequest,
-        RegisterSession, ReopenSessionRequest, SessionListQuery, SessionListResponse,
-        SubmitBlindCountRequest, ZReportResponse,
+    domain::{
+        sessions::{
+            CashMovement, CashMovementListQuery, CashMovementListResponse, CloseSessionRequest,
+            ConvertVarianceRequest, CreateCashMovementRequest, DrawerState, OpenSessionRequest,
+            RegisterSession, ReopenSessionRequest, SessionListQuery, SessionListResponse,
+            SessionStatus, SubmitBlindCountRequest, ZReportResponse,
+        },
+        settings::{DocumentDesignChoice, DocumentDesignStatus},
     },
-    modules::sessions::{repository::drawer, service},
+    modules::{
+        documents,
+        sessions::{repository::drawer, service},
+        settings,
+    },
 };
 
 #[derive(Debug, Deserialize)]
 pub struct CurrentSessionQuery {
     pub terminal_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ZReportDocumentQueryParams {
+    template: Option<String>,
+    design: DocumentDesignChoice,
+}
+
+#[derive(Debug, Deserialize)]
+struct ZReportDesignStatusParams {
+    template: Option<String>,
 }
 
 pub fn router() -> OpenApiRouter<AppState> {
@@ -44,6 +64,8 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(reopen_session))
         .routes(routes!(convert_variance))
         .routes(routes!(get_z_report))
+        .routes(routes!(get_z_report_document))
+        .routes(routes!(get_z_report_document_design))
         .routes(routes!(get_session))
 }
 
@@ -297,6 +319,102 @@ async fn get_z_report(
     current_user.require_permission(perm::REGISTER_SESSIONS_VIEW)?;
     let report = service::generate_z_report(&state.db, &key).await?;
     Ok(Json(ApiResponse::success(report, "Z-Report generated successfully")))
+}
+
+#[utoipa::path(
+    get,
+    path = "/{key}/document",
+    params(
+        ("key" = String, Path, description = "Register session key or number"),
+        ("template" = Option<String>, Query, description = "A design family for this print only; defaults to the shop's choice for z-reports"),
+        ("design" = DocumentDesignChoice, Query, description = "'original' = the stored PDF as first printed, 'current' = the design in force now"),
+    ),
+    responses(
+        (status = 200, description = "Z-Report PDF", content_type = "application/pdf", body = Vec<u8>),
+        (status = 404, description = "Session not found", body = ErrorResponse),
+    ),
+    security(("bearerAuth" = [])),
+    tag = "Register Sessions"
+)]
+async fn get_z_report_document(
+    State(state): State<AppState>,
+    current_user: CurrentUser,
+    Path(key): Path<String>,
+    Query(params): Query<ZReportDocumentQueryParams>,
+) -> AppResult<Response> {
+    current_user.require_permission(perm::REGISTER_SESSIONS_VIEW)?;
+    let report = service::generate_z_report(&state.db, &key).await?;
+    let shop = settings::service::get_shop_profile(&state.db, current_user.tenant_id.as_deref()).await?;
+    let shop_val = serde_json::to_value(&shop).unwrap_or_default();
+    let data = crate::modules::billing::service::print_payload::build_z_report_data(&report, &shop_val);
+
+    let pdf_bytes = if report.session.status == SessionStatus::Closed {
+        documents::service::print(
+            &state.db,
+            &state.document_server,
+            &state.config.generated_documents_dir,
+            "z-report",
+            params.template.as_deref(),
+            params.design,
+            &report.session.key,
+            "z-report",
+            data,
+        )
+        .await?
+    } else {
+        documents::service::render_live(
+            &state.db,
+            &state.document_server,
+            "z-report",
+            params.template.as_deref(),
+            data,
+        )
+        .await?
+    };
+
+    Ok((
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/pdf")],
+        Body::from(pdf_bytes),
+    )
+        .into_response())
+}
+
+#[utoipa::path(
+    get,
+    path = "/{key}/document/design",
+    params(
+        ("key" = String, Path, description = "Register session key or number"),
+        ("template" = Option<String>, Query, description = "A design family for this print only"),
+    ),
+    responses(
+        (status = 200, description = "Z-Report design status", body = ApiResponse<DocumentDesignStatus>),
+        (status = 404, description = "Session not found", body = ErrorResponse),
+    ),
+    security(("bearerAuth" = [])),
+    tag = "Register Sessions"
+)]
+async fn get_z_report_document_design(
+    State(state): State<AppState>,
+    current_user: CurrentUser,
+    Path(key): Path<String>,
+    Query(params): Query<ZReportDesignStatusParams>,
+) -> AppResult<Json<ApiResponse<DocumentDesignStatus>>> {
+    current_user.require_permission(perm::REGISTER_SESSIONS_VIEW)?;
+    let report = service::generate_z_report(&state.db, &key).await?;
+    let status = documents::service::print_design_status(
+        &state.db,
+        &state.document_server,
+        "z-report",
+        params.template.as_deref(),
+        &report.session.key,
+        "z-report",
+    )
+    .await?;
+    Ok(Json(ApiResponse::success(
+        status,
+        "Z-Report document design status retrieved successfully",
+    )))
 }
 
 #[utoipa::path(

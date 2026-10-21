@@ -30,6 +30,10 @@ pub(crate) const SELECTABLE_KINDS: &[DocumentKind] = &[
         slug: "quotation",
         label: "Quotation",
     },
+    DocumentKind {
+        slug: "z-report",
+        label: "Z-Report",
+    },
 ];
 
 pub(crate) fn find(slug: &str) -> Option<&'static DocumentKind> {

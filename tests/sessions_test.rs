@@ -448,6 +448,31 @@ async fn session_full_lifecycle_and_z_report() {
     assert_eq!(body["data"]["cashReconciliation"]["closingFloatCents"], 10000);
     assert_eq!(body["data"]["cashReconciliation"]["safeDepositCents"], 23000);
 
+    // 9b. Verify Z-Report document design status
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/sessions/{session_key}/document/design"),
+        None,
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    assert_eq!(body["data"]["current"]["title"], "Z-Report");
+
+    // 9c. Fetch Z-Report PDF document
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/api/sessions/{session_key}/document?design=current"))
+        .header(AUTHORIZATION, format!("Bearer {staff_token}"))
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.router.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(resp.headers().get(CONTENT_TYPE).unwrap(), "application/pdf");
+    let pdf_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    assert!(String::from_utf8_lossy(&pdf_bytes).contains("tpl_z_report") || pdf_bytes.starts_with(b"%PDF-"));
+
     // 10. Reopen session by Admin
     let (status, body) = send_authed(
         &app.router,
