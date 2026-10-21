@@ -485,6 +485,13 @@ mod tests {
                 "analytics-report",
                 true,
             ),
+            template(
+                "doc_temp_zreport",
+                "doc_temp_zreport",
+                "Z-Report",
+                "z-report",
+                true,
+            ),
         ]
     }
 
