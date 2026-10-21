@@ -86,6 +86,7 @@ fn mint_token_for(
         tid: None,
         scope: None,
         did: None,
+        name: Some("Test Cashier".to_string()),
     };
     jsonwebtoken::encode(
         &jsonwebtoken::Header::default(),
@@ -1364,6 +1365,84 @@ async fn reconciliation_exact_and_variance_calculation_on_blind_count() {
     assert_eq!(close_res["data"]["status"], "closed");
     assert_eq!(close_res["data"]["expectedCashCents"], 444612);
     assert_eq!(close_res["data"]["cashVarianceCents"], 0);
+}
+
+#[tokio::test]
+async fn test_cashier_name_resolved_when_token_lacks_name() {
+    let app = common::spawn_app().await;
+
+    simplebash_pos_backend::seeds::admin::seed_admin(&app.db_handle, None, None)
+        .await
+        .unwrap();
+
+    let admin_token = mint_token_for(
+        &app.config,
+        "admin",
+        Some(Role::Admin),
+        roles::default_permissions(Role::Admin),
+    );
+
+    let username = format!("kasun_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+    let (status, users_res) = send_authed(
+        &app.router,
+        "POST",
+        "/api/users",
+        Some(json!({
+            "name": "Kasun Cashier",
+            "username": username,
+            "password": "Password123!",
+            "role": "staff",
+        })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "Body: {users_res}");
+    let cashier_id = users_res["data"]["id"].as_str().unwrap();
+
+    // Mint token for Kasun WITHOUT name claim to simulate older token or unpropagated name
+    let claims = simplebash_pos_backend::core::middleware::auth::Claims {
+        sub: cashier_id.to_string(),
+        exp: 9_999_999_999,
+        role: Some(Role::Staff),
+        permissions: roles::default_permissions(Role::Staff).iter().map(|p| p.to_string()).collect(),
+        tid: None,
+        scope: None,
+        did: None,
+        name: None,
+    };
+    let token = jsonwebtoken::encode(
+        &jsonwebtoken::Header::default(),
+        &claims,
+        &jsonwebtoken::EncodingKey::from_secret(app.config.jwt_secret.as_bytes()),
+    )
+    .unwrap();
+
+    // Open session: should resolve Kasun's name via resolve_name()
+    let (status, open_res) = send_authed(
+        &app.router,
+        "POST",
+        "/api/sessions/open",
+        Some(json!({
+            "terminalId": "term_test_kasun",
+            "openingFloatCents": 1000,
+        })),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "Body: {open_res}");
+    assert_eq!(open_res["data"]["cashierNameSnapshot"], "Kasun Cashier");
+
+    // Fetch current session: should also have Kasun Cashier
+    let (status, cur_res) = send_authed(
+        &app.router,
+        "GET",
+        "/api/sessions/current?terminal_id=term_test_kasun",
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(cur_res["data"]["cashierNameSnapshot"], "Kasun Cashier");
 }
 
 

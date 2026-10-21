@@ -40,6 +40,9 @@ pub struct Claims {
     /// Registered device id, present on device tokens.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub did: Option<String>,
+    /// Display name of the user. Present on local login tokens and identity tokens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 /// Identifies the caller. Extracting `CurrentUser` from a handler's
@@ -62,6 +65,27 @@ pub struct CurrentUser {
 }
 
 impl CurrentUser {
+    /// Resolves the human-readable display name for this user.
+    /// Checks the token's `name` claim first; falls back to querying the user
+    /// by their ObjectId in `db`; falls back to "Cashier" if neither is available.
+    pub async fn resolve_name(&self, db: &crate::clients::db::Db) -> String {
+        if let Some(ref name) = self.name {
+            let trimmed = name.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+        if let Ok(oid) = mongodb::bson::oid::ObjectId::parse_str(&self.user_id) {
+            if let Ok(user) = crate::modules::users::service::get_user(db, oid).await {
+                let trimmed = user.name.trim();
+                if !trimmed.is_empty() {
+                    return trimmed.to_string();
+                }
+            }
+        }
+        "Cashier".to_string()
+    }
+
     /// The caller's device id, or 403 `DEVICE_TOKEN_REQUIRED` unless the
     /// token is a device token (`scope` contains `device` and it carries a
     /// `did`). Guards the sync push/pull routes, which only registered
@@ -329,6 +353,7 @@ pub async fn verify_bearer(headers: &HeaderMap, config: &Config) -> AppResult<Ve
     );
     verified.scope = decoded.claims.scope;
     verified.device_id = decoded.claims.did;
+    verified.name = decoded.claims.name;
     Ok(verified)
 }
 

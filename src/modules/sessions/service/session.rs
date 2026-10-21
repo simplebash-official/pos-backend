@@ -466,11 +466,46 @@ pub async fn convert_variance(
     Ok(inserted.into_cash_movement())
 }
 
+/// If a session's `cashier_name_snapshot` is empty (e.g. from an older session opened
+/// when cashier names were not propagated), resolve it from `users::service::get_user`.
+pub async fn populate_missing_cashier_name(db: &Db, session: &mut RegisterSession) {
+    if session.cashier_name_snapshot.trim().is_empty() {
+        if let Ok(oid) = mongodb::bson::oid::ObjectId::parse_str(&session.cashier_id) {
+            if let Ok(user) = users::service::get_user(db, oid).await {
+                let trimmed = user.name.trim();
+                if !trimmed.is_empty() {
+                    session.cashier_name_snapshot = trimmed.to_string();
+                }
+            }
+        }
+    }
+    if let Some(ref closing_id) = session.closing_cashier_id {
+        if session
+            .closing_cashier_name_snapshot
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .is_empty()
+        {
+            if let Ok(oid) = mongodb::bson::oid::ObjectId::parse_str(closing_id) {
+                if let Ok(user) = users::service::get_user(db, oid).await {
+                    let trimmed = user.name.trim();
+                    if !trimmed.is_empty() {
+                        session.closing_cashier_name_snapshot = Some(trimmed.to_string());
+                    }
+                }
+            }
+        }
+    }
+}
+
 pub async fn get_session(db: &Db, key: &str) -> AppResult<RegisterSession> {
     let session = sessions::find_session_by_id_or_key(db, key)
         .await?
         .ok_or_else(|| AppError::not_found_with_code("Register session not found", codes::SESSION_NOT_FOUND))?;
-    Ok(session.into_register_session())
+    let mut reg = session.into_register_session();
+    populate_missing_cashier_name(db, &mut reg).await;
+    Ok(reg)
 }
 
 pub async fn get_active_session_for_terminal(
@@ -478,7 +513,14 @@ pub async fn get_active_session_for_terminal(
     terminal_id: &str,
 ) -> AppResult<Option<RegisterSession>> {
     let session = sessions::find_active_session_for_terminal(db, terminal_id).await?;
-    Ok(session.map(|s| s.into_register_session()))
+    match session {
+        Some(s) => {
+            let mut reg = s.into_register_session();
+            populate_missing_cashier_name(db, &mut reg).await;
+            Ok(Some(reg))
+        }
+        None => Ok(None),
+    }
 }
 
 pub async fn get_active_session_for_cashier(
@@ -486,7 +528,14 @@ pub async fn get_active_session_for_cashier(
     cashier_id: &str,
 ) -> AppResult<Option<RegisterSession>> {
     let session = sessions::find_active_session_for_cashier(db, cashier_id).await?;
-    Ok(session.map(|s| s.into_register_session()))
+    match session {
+        Some(s) => {
+            let mut reg = s.into_register_session();
+            populate_missing_cashier_name(db, &mut reg).await;
+            Ok(Some(reg))
+        }
+        None => Ok(None),
+    }
 }
 
 pub async fn list_sessions(
@@ -498,8 +547,15 @@ pub async fn list_sessions(
     let (docs, total) = sessions::list_sessions(db, &query).await?;
     let total_pages = total.div_ceil(limit);
 
+    let mut sessions = Vec::with_capacity(docs.len());
+    for d in docs {
+        let mut reg = d.into_register_session();
+        populate_missing_cashier_name(db, &mut reg).await;
+        sessions.push(reg);
+    }
+
     Ok(SessionListResponse {
-        sessions: docs.into_iter().map(|d| d.into_register_session()).collect(),
+        sessions,
         total,
         page,
         limit,

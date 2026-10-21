@@ -250,6 +250,7 @@ pub(crate) async fn perform_setup(
             tid: crate::core::tenancy::current_tenant_id(),
             scope: None,
             did: None,
+            name: Some(user.name.clone()),
         };
         let token = encode(
             &Header::default(),

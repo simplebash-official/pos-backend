@@ -79,8 +79,11 @@ pub async fn generate_z_report(db: &Db, session_key: &str) -> AppResult<ZReportR
         safe_deposit_cents: session_doc.cash_drop_to_safe_cents.unwrap_or(0),
     };
 
+    let mut session = session_doc.into_register_session();
+    crate::modules::sessions::service::session::populate_missing_cashier_name(db, &mut session).await;
+
     Ok(ZReportResponse {
-        session: session_doc.into_register_session(),
+        session,
         gross_sales_cents: gross_sales,
         returns_cents: returns,
         net_sales_cents: net_sales,

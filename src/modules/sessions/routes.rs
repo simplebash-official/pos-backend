@@ -88,10 +88,11 @@ async fn open_session(
     Json(body): Json<OpenSessionRequest>,
 ) -> AppResult<(StatusCode, Json<ApiResponse<RegisterSession>>)> {
     current_user.require_permission(perm::REGISTER_SESSIONS_MANAGE)?;
+    let cashier_name = current_user.resolve_name(&state.db).await;
     let session = service::open_session(
         &state.db,
         current_user.user_id,
-        current_user.name.unwrap_or_default(),
+        cashier_name,
         body,
         device_id.0,
     )
@@ -121,9 +122,13 @@ async fn get_current_session(
     current_user.require_permission(perm::REGISTER_SESSIONS_VIEW)?;
 
     let terminal_id = query.terminal_id.as_deref().or(device_id.0.as_deref());
-    let session = service::resolve_active_session(&state.db, terminal_id, &current_user.user_id)
+    let mut session = service::resolve_active_session(&state.db, terminal_id, &current_user.user_id)
         .await?
         .map(|s| s.into_register_session());
+
+    if let Some(ref mut s) = session {
+        service::session::populate_missing_cashier_name(&state.db, s).await;
+    }
 
     Ok(Json(ApiResponse::success(session, "Active register session retrieved successfully")))
 }
@@ -217,11 +222,12 @@ async fn close_session(
     Json(body): Json<CloseSessionRequest>,
 ) -> AppResult<Json<ApiResponse<RegisterSession>>> {
     current_user.require_permission(perm::REGISTER_SESSIONS_MANAGE)?;
+    let cashier_name = current_user.resolve_name(&state.db).await;
     let session = service::close_session(
         &state.db,
         &key,
         current_user.user_id,
-        current_user.name.unwrap_or_default(),
+        cashier_name,
         body,
     )
     .await?;
@@ -250,11 +256,12 @@ async fn reopen_session(
     Json(body): Json<ReopenSessionRequest>,
 ) -> AppResult<Json<ApiResponse<RegisterSession>>> {
     current_user.require_permission(perm::REGISTER_SESSIONS_MANAGE)?;
+    let cashier_name = current_user.resolve_name(&state.db).await;
     let session = service::reopen_session(
         &state.db,
         &key,
         current_user.user_id,
-        current_user.name.unwrap_or_default(),
+        cashier_name,
         current_user.role,
         body,
     )
@@ -435,10 +442,11 @@ async fn create_cash_movement(
     Json(body): Json<CreateCashMovementRequest>,
 ) -> AppResult<(StatusCode, Json<ApiResponse<CashMovement>>)> {
     current_user.require_permission(perm::CASH_MOVEMENTS_CREATE)?;
+    let cashier_name = current_user.resolve_name(&state.db).await;
     let movement = service::record_movement(
         &state.db,
         current_user.user_id,
-        current_user.name.unwrap_or_default(),
+        cashier_name,
         body,
         device_id.0,
     )

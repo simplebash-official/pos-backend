@@ -555,6 +555,7 @@ pub fn mint_token(config: &Config, role: Option<Role>, permissions: &[&str]) -> 
         tid: None,
         scope: None,
         did: None,
+        name: Some("Test User".to_string()),
     };
     encode(
         &Header::default(),
@@ -581,6 +582,7 @@ pub fn mint_token_for_tenant(
         tid: tid.map(str::to_string),
         scope: None,
         did: None,
+        name: Some("Test User".to_string()),
     };
     encode(
         &Header::default(),
@@ -601,6 +603,7 @@ pub fn mint_device_token(config: &Config, tid: &str, device_id: &str) -> String 
         tid: Some(tid.to_string()),
         scope: Some("device".to_string()),
         did: Some(device_id.to_string()),
+        name: None,
     };
     encode(
         &Header::default(),

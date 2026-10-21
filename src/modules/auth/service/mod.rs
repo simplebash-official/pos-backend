@@ -147,6 +147,7 @@ async fn login_in_scope(
             tid: crate::core::tenancy::current_tenant_id(),
             scope: None,
             did: None,
+            name: Some(user.name.clone()),
         };
         let token = encode(
             &Header::default(),
