@@ -155,6 +155,14 @@ pub fn index_specs(multi_tenant: bool) -> Vec<IndexSpec> {
         false,
     );
 
+    // Register shift session invoice reads
+    specs.add(
+        "invoices",
+        "invoices_session_key",
+        doc! { "session_key": 1 },
+        false,
+    );
+
     // Credit-reminder / receivables reads and repair & print-job reminders.
     specs.add(
         "invoices",

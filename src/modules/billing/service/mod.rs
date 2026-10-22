@@ -85,6 +85,9 @@ pub async fn list_invoices(db: &Db, query: InvoiceListQuery) -> AppResult<Invoic
     if let Some(payment_method) = query.payment_method.filter(|s| !s.trim().is_empty()) {
         and_clauses.push(doc! { "payment_method": payment_method.trim() });
     }
+    if let Some(session_key) = query.session_key.filter(|s| !s.trim().is_empty()) {
+        and_clauses.push(doc! { "session_key": session_key.trim() });
+    }
     if query.date_preset.as_deref() == Some("today") {
         let (today_start, today_end) = today_utc_range();
         and_clauses.push(doc! {

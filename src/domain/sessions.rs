@@ -311,6 +311,7 @@ pub struct SetPinRequest {
 #[serde(rename_all = "camelCase")]
 #[into_params(parameter_in = Query)]
 pub struct SessionListQuery {
+    pub search: Option<String>,
     pub terminal_id: Option<String>,
     pub cashier_id: Option<String>,
     pub status: Option<String>,

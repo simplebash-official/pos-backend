@@ -627,6 +627,21 @@ pub async fn list_sessions(
             if let Some(status) = &query.status {
                 filter.insert("status", status);
             }
+            if let Some(search) = &query.search {
+                let s = search.trim();
+                if !s.is_empty() {
+                    let regex = crate::core::utils::build_bson_regex(s);
+                    filter.insert(
+                        "$or",
+                        vec![
+                            doc! { "session_number": &regex },
+                            doc! { "cashier_name_snapshot": &regex },
+                            doc! { "opening_note": &regex },
+                            doc! { "closing_note": &regex },
+                        ],
+                    );
+                }
+            }
             if let Some(from) = &query.from {
                 filter.insert("opened_at", doc! { "$gte": from });
             }
@@ -666,6 +681,17 @@ pub async fn list_sessions(
             if let Some(status) = &query.status {
                 conditions.push("status = ?".to_string());
                 bindings.push(status.clone());
+            }
+            if let Some(search) = &query.search {
+                let s = search.trim();
+                if !s.is_empty() {
+                    let pattern = format!("%{s}%");
+                    conditions.push("(session_number LIKE ? OR cashier_name_snapshot LIKE ? OR opening_note LIKE ? OR closing_note LIKE ?)".to_string());
+                    bindings.push(pattern.clone());
+                    bindings.push(pattern.clone());
+                    bindings.push(pattern.clone());
+                    bindings.push(pattern);
+                }
             }
             if let Some(from) = &query.from {
                 conditions.push("opened_at >= ?".to_string());

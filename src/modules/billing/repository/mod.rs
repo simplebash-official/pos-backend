@@ -209,6 +209,10 @@ fn build_invoice_where_clause(filter: &Document) -> (String, Vec<String>) {
             conditions.push("payment_method = ?".to_string());
             bindings.push(payment_method.to_string());
         }
+        if let Ok(session_key) = doc.get_str("session_key") {
+            conditions.push("session_key = ?".to_string());
+            bindings.push(session_key.to_string());
+        }
         if let Ok(is_credit) = doc.get_bool("is_credit") {
             conditions.push("is_credit = ?".to_string());
             bindings.push(if is_credit {

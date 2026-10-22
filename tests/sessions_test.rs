@@ -211,6 +211,7 @@ async fn session_full_lifecycle_and_z_report() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "Body: {body}");
     let session_key = body["data"]["key"].as_str().unwrap().to_string();
+    let session_number = body["data"]["sessionNumber"].as_str().unwrap().to_string();
     assert_eq!(body["data"]["status"], "open");
     assert_eq!(body["data"]["openingFloatCents"], 10000);
 
@@ -354,6 +355,22 @@ async fn session_full_lifecycle_and_z_report() {
     .await;
     assert_eq!(status, StatusCode::OK, "Body: {body}");
     assert_eq!(body["data"]["invoice"]["sessionKey"], session_key);
+
+    // Verify invoice listing filtered by sessionKey with pagination
+    let (status, inv_list) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/billing/invoices?sessionKey={session_key}&page=1&limit=15"),
+        None,
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {inv_list}");
+    assert_eq!(inv_list["data"]["total"], 1);
+    assert_eq!(inv_list["data"]["page"], 1);
+    assert_eq!(inv_list["data"]["limit"], 15);
+    assert_eq!(inv_list["data"]["totalPages"], 1);
+    assert_eq!(inv_list["data"]["invoices"][0]["sessionKey"], session_key);
 
     // Verify session sales and drawer balance:
     // opening: 10,000 + pay_in: 5,000 - pay_out: 2,000 - owner: 60,000 + sale: 80,000 = 33,000 cents
@@ -567,6 +584,74 @@ async fn session_full_lifecycle_and_z_report() {
     .await;
     assert_eq!(status, StatusCode::OK, "Body: {body}");
     assert_eq!(body["data"]["status"], "reopened");
+    assert!(body["data"]["closedAt"].is_null(), "closedAt must be null upon reopen");
+
+    // 10b. Verify current session endpoint resolves the reopened session for the terminal
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/sessions/current?terminal_id={terminal_id}"),
+        None,
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    assert_eq!(body["data"]["status"], "reopened");
+    assert_eq!(body["data"]["key"], session_key);
+
+    // 10c. Re-closing flow: blind count and close again
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/sessions/{session_key}/blind-count"),
+        Some(json!({ "countedCashCents": 33000 })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    assert_eq!(body["data"]["status"], "closing");
+
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/sessions/{session_key}/close"),
+        Some(json!({
+            "countedCashCents": 33000,
+            "closingFloatCents": 10000,
+            "cashDropToSafeCents": 23000,
+            "closingNote": "Final recount closed"
+        })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    assert_eq!(body["data"]["status"], "closed");
+    assert!(!body["data"]["closedAt"].is_null(), "closedAt must be set upon close");
+
+    // 11. Test listing sessions with search query
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/sessions?search={session_number}"),
+        None,
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    let found = body["data"]["sessions"].as_array().unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0]["key"], session_key);
+
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        "/api/sessions?search=NON_EXISTENT_SESSION_NUMBER_XYZ",
+        None,
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    assert_eq!(body["data"]["sessions"].as_array().unwrap().len(), 0);
 }
 
 #[tokio::test]
