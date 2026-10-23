@@ -398,8 +398,8 @@ mod tests {
         // 17 sync + 4 created_at + 2 invoice analytics + 3 reminders + products_key
         // + idempotency unique/ttl + serial unique + serial status
         // + stock_batches product_key + shop_profiles + document_template_settings
-        // + label_templates + label_print_jobs key/created_at.
-        assert_eq!(specs.len(), 37);
+        // + label_templates + label_print_jobs key/created_at + invoices session_key.
+        assert_eq!(specs.len(), 38);
         assert!(specs.iter().all(|s| s.keys.get(TENANT_FIELD).is_none()));
         assert!(names(&specs).contains(&"products.sync_updated_at_key".to_string()));
         assert!(names(&specs).contains(&"idempotency_keys.idempotency_ttl".to_string()));
