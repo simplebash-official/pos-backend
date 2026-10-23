@@ -20,6 +20,25 @@ pub const REGISTER_SESSIONS_VIEW: &str = "register_sessions:view";
 pub const REGISTER_SESSIONS_MANAGE: &str = "register_sessions:manage";
 pub const CASH_MOVEMENTS_CREATE: &str = "cash_movements:create";
 pub const CASH_MOVEMENTS_VIEW: &str = "cash_movements:view";
+/// Reversing a cash movement after the short undo window has passed. Manager and Admin. (The
+/// person who recorded a movement can undo it themselves inside the window.)
+pub const CASH_MOVEMENTS_REVERSE: &str = "cash_movements:reverse";
+/// Rent and Bills, Staff Payment and Supplier Payment from the drawer: the
+/// larger, accountable payouts only a Manager or Admin may record.
+pub const CASH_MOVEMENTS_CREATE_MANAGED: &str = "cash_movements:create:managed";
+/// Creating a drawer category on the spot. Every role holds it, but only for the
+/// low-risk movement types; the rest need `CASH_CATEGORIES_MANAGE`.
+pub const CASH_CATEGORIES_CREATE: &str = "cash_categories:create";
+/// Creating a category for any movement type, and renaming, merging, hiding and
+/// reviewing categories. Manager and Admin.
+pub const CASH_CATEGORIES_MANAGE: &str = "cash_categories:manage";
+/// Reading the expense ledger and its figures. Manager and Admin: a cashier sees the drawer's
+/// own movements, not the shop's costs.
+pub const EXPENSES_VIEW: &str = "expenses:view";
+/// Entering a cost paid from the bank, a card or online (or a bill still to pay) and paying it.
+pub const EXPENSES_MANAGE: &str = "expenses:manage";
+/// Adding landlords/vendors and other payees to the shared payee directory.
+pub const PAYEES_MANAGE: &str = "payees:manage";
 
 /// Read access to the catalog, stock levels, the stock-movement audit trail
 /// and the category tree — every `GET` under `/api/inventory` except the

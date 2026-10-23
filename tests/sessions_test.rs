@@ -8,7 +8,19 @@ use axum::{
     },
 };
 use serde_json::{Value, json};
-use simplebash_pos_backend::{core::constants::roles, domain::users::Role};
+use simplebash_pos_backend::{
+    core::constants::roles,
+    domain::{
+        cash_categories::category_key,
+        sessions::CashMovementType,
+        users::Role,
+    },
+};
+
+/// Key of a built-in cash category, the way the app derives it.
+fn cat(movement_type: CashMovementType, name: &str) -> String {
+    category_key(movement_type, name)
+}
 use tower::ServiceExt;
 
 async fn execute(router: &axum::Router, request: Request<Body>) -> (StatusCode, Value) {
@@ -247,11 +259,11 @@ async fn session_full_lifecycle_and_z_report() {
         "POST",
         "/api/sessions/movements",
         Some(json!({
-            "movementType": "pay_in",
+            "movementType": "add_cash",
             "amountCents": 5000,
             "sessionKey": session_key,
             "terminalId": terminal_id,
-            "reason": "Change float top-up"
+            "categoryKey": cat(CashMovementType::AddCash, "Change float top-up")
         })),
         &staff_token,
     )
@@ -264,11 +276,11 @@ async fn session_full_lifecycle_and_z_report() {
         "POST",
         "/api/sessions/movements",
         Some(json!({
-            "movementType": "pay_out_expense",
+            "movementType": "petty_expense",
             "amountCents": 2000,
             "sessionKey": session_key,
             "terminalId": terminal_id,
-            "reason": "Refreshments"
+            "categoryKey": cat(CashMovementType::PettyExpense, "Tea and refreshments")
         })),
         &staff_token,
     )
@@ -276,7 +288,7 @@ async fn session_full_lifecycle_and_z_report() {
     assert_eq!(status, StatusCode::CREATED, "Body: {body}");
 
     // 5. Record Owner Withdrawal:
-    // a) Over threshold (> 50,000 cents) without PIN fails
+    // a) Without a PIN it fails
     let (status, _) = send_authed(
         &app.router,
         "POST",
@@ -286,15 +298,16 @@ async fn session_full_lifecycle_and_z_report() {
             "amountCents": 60000,
             "sessionKey": session_key,
             "terminalId": terminal_id,
-            "recipientOrSource": "Mr. Silva (Owner)",
-            "reason": "Personal Drawings"
+            "payeeName": "Mr. Silva (Owner)",
+            "categoryKey": cat(CashMovementType::OwnerWithdrawal, "Personal use")
         })),
         &staff_token,
     )
     .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    // The drawer holds less than Rs. 600, so going over it is refused before anything else.
+    assert_eq!(status, StatusCode::CONFLICT);
 
-    // b) Over threshold with Manager PIN (5555) fails because admin is required
+    // b) A wrong PIN is refused
     let (status, _) = send_authed(
         &app.router,
         "POST",
@@ -304,16 +317,17 @@ async fn session_full_lifecycle_and_z_report() {
             "amountCents": 60000,
             "sessionKey": session_key,
             "terminalId": terminal_id,
-            "recipientOrSource": "Mr. Silva (Owner)",
-            "reason": "Personal Drawings",
-            "managerPin": "5555"
+            "payeeName": "Mr. Silva (Owner)",
+            "categoryKey": cat(CashMovementType::OwnerWithdrawal, "Personal use"),
+            "overrideReason": "Owner needs cash today",
+            "managerPin": "0000"
         })),
         &staff_token,
     )
     .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
 
-    // c) Over threshold with Admin PIN (9999) succeeds
+    // c) A manager PIN (5555) is enough, whatever the amount
     let (status, body) = send_authed(
         &app.router,
         "POST",
@@ -323,9 +337,10 @@ async fn session_full_lifecycle_and_z_report() {
             "amountCents": 60000,
             "sessionKey": session_key,
             "terminalId": terminal_id,
-            "recipientOrSource": "Mr. Silva (Owner)",
-            "reason": "Personal Drawings",
-            "managerPin": "9999"
+            "payeeName": "Mr. Silva (Owner)",
+            "categoryKey": cat(CashMovementType::OwnerWithdrawal, "Personal use"),
+            "overrideReason": "Owner needs cash today",
+            "managerPin": "5555"
         })),
         &staff_token,
     )
@@ -770,8 +785,8 @@ async fn session_discrepancy_outside_movement_and_variance_conversion() {
             "movementType": "owner_withdrawal",
             "amountCents": 1000,
             "terminalId": terminal_id,
-            "recipientOrSource": "Owner Outside Shift",
-            "reason": "Emergency petty cash",
+            "payeeName": "Owner Outside Shift",
+            "categoryKey": cat(CashMovementType::OwnerWithdrawal, "Personal use"),
             "managerPin": "1234"
         })),
         &staff_token,

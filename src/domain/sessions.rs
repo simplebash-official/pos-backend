@@ -37,44 +37,97 @@ impl SessionStatus {
     }
 }
 
-/// Category of cash entering or leaving the register drawer.
+/// What a drawer cash event is. The type decides which fields the form asks for
+/// and which way the cash moves (`direction`); the category refines the purpose.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CashMovementType {
-    /// Adding change or capital top-up into the drawer.
-    PayIn,
-    /// Petty cash expense (e.g. tea, cleaning, urgent office supply).
-    PayOutExpense,
-    /// Cash paid to a supplier for an invoice / goods.
-    PayOutSupplier,
-    /// Owner cash drawings — recorded as equity withdrawal, never as an expense.
+    /// Small daily spends (tea, fuel, stationery).
+    PettyExpense,
+    /// Shop rent, utilities, licences and instalments.
+    RentAndBills,
+    /// Salary, advances, bonus and statutory remittances.
+    StaffPayment,
+    /// Stock and supplier dues paid in cash.
+    SupplierPayment,
+    /// Owner drawings: equity, never an expense.
     OwnerWithdrawal,
-    /// Transferring excess cash from register drawer to safe or bank deposit.
+    /// Float, capital or a bank withdrawal put into the drawer.
+    AddCash,
+    /// Excess cash moved to the safe or the bank.
     CashDrop,
-    /// Drawer opened without a sale (audit trail for security/fraud prevention).
-    DrawerOpenNoSale,
+    /// Drawer opened without a sale (audit trail only, no amount).
+    NoSale,
 }
 
 impl CashMovementType {
     pub fn as_str(&self) -> &'static str {
         match self {
-            CashMovementType::PayIn => "pay_in",
-            CashMovementType::PayOutExpense => "pay_out_expense",
-            CashMovementType::PayOutSupplier => "pay_out_supplier",
+            CashMovementType::PettyExpense => "petty_expense",
+            CashMovementType::RentAndBills => "rent_and_bills",
+            CashMovementType::StaffPayment => "staff_payment",
+            CashMovementType::SupplierPayment => "supplier_payment",
             CashMovementType::OwnerWithdrawal => "owner_withdrawal",
+            CashMovementType::AddCash => "add_cash",
             CashMovementType::CashDrop => "cash_drop",
-            CashMovementType::DrawerOpenNoSale => "drawer_open_no_sale",
+            CashMovementType::NoSale => "no_sale",
         }
     }
 
     pub fn parse(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
-            "pay_in" => Some(CashMovementType::PayIn),
-            "pay_out_expense" => Some(CashMovementType::PayOutExpense),
-            "pay_out_supplier" => Some(CashMovementType::PayOutSupplier),
+        match s {
+            "petty_expense" => Some(CashMovementType::PettyExpense),
+            "rent_and_bills" => Some(CashMovementType::RentAndBills),
+            "staff_payment" => Some(CashMovementType::StaffPayment),
+            "supplier_payment" => Some(CashMovementType::SupplierPayment),
             "owner_withdrawal" => Some(CashMovementType::OwnerWithdrawal),
+            "add_cash" => Some(CashMovementType::AddCash),
             "cash_drop" => Some(CashMovementType::CashDrop),
-            "drawer_open_no_sale" => Some(CashMovementType::DrawerOpenNoSale),
+            "no_sale" => Some(CashMovementType::NoSale),
+            _ => None,
+        }
+    }
+
+    /// Which way cash moves, stored on every row so reports total cash in and
+    /// out without parsing type names.
+    pub fn direction(&self) -> CashDirection {
+        match self {
+            CashMovementType::PettyExpense
+            | CashMovementType::RentAndBills
+            | CashMovementType::StaffPayment
+            | CashMovementType::SupplierPayment
+            | CashMovementType::OwnerWithdrawal => CashDirection::Out,
+            CashMovementType::AddCash => CashDirection::In,
+            CashMovementType::CashDrop | CashMovementType::NoSale => CashDirection::Neutral,
+        }
+    }
+}
+
+/// Direction of a movement as far as the drawer's expected cash is concerned.
+/// A cash drop is `Neutral` for profit reports but still lowers the drawer, which
+/// the session totals track in their own `total_cash_drops_cents` bucket.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CashDirection {
+    Out,
+    In,
+    Neutral,
+}
+
+impl CashDirection {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CashDirection::Out => "out",
+            CashDirection::In => "in",
+            CashDirection::Neutral => "neutral",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "out" => Some(CashDirection::Out),
+            "in" => Some(CashDirection::In),
+            "neutral" => Some(CashDirection::Neutral),
             _ => None,
         }
     }
@@ -161,21 +214,51 @@ pub struct CashMovement {
     pub key: String,
     pub movement_number: String,
     pub movement_type: CashMovementType,
+    pub direction: CashDirection,
     pub amount_cents: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_key: Option<String>,
     pub terminal_id: String,
-    pub reason: String,
+    pub category_key: String,
+    /// Live name of the category, so a rename shows on old movements.
+    pub category_name: String,
+    /// A one-off label typed instead of saving a new category; the row then points at the type's "Other".
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub recipient_or_source: Option<String>,
+    pub custom_label: Option<String>,
+    /// `sup_…`, `emp_…` or `pye_…` key from the payee directory, when the payee is a saved one.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub supplier_key: Option<String>,
+    pub payee_key: Option<String>,
+    /// Who was paid, withdrew or handed over the cash, as written on the voucher.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payee_name: Option<String>,
+    /// First day of the period a rent, bill or salary covers (`YYYY-MM-DD`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub period_start: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub period_end: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reference_no: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
     pub recorded_by_user_id: String,
     pub recorded_by_name_snapshot: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub approved_by_user_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub approved_by_name_snapshot: Option<String>,
+    /// Why a manager let a payout go over the cash in the drawer, or why a movement was reversed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_reason: Option<String>,
+    /// Set on a reversal: the movement it cancels. A reversal moves the drawer the opposite way.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reverses_key: Option<String>,
+    /// Set when a reversal of this movement exists. Worked out when read, never stored on this row.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reversed_by_key: Option<String>,
+    /// Until when the person who recorded this can undo it without a manager. Absent for a reversal,
+    /// a no-sale open, or a movement that is already reversed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub undo_until: Option<DateTime<Utc>>,
     pub recorded_late: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub original_variance_session_key: Option<String>,
@@ -253,17 +336,45 @@ pub struct ReopenSessionRequest {
 #[serde(rename_all = "camelCase")]
 pub struct CreateCashMovementRequest {
     pub movement_type: CashMovementType,
+    /// Zero for `no_sale`, greater than zero for every other type.
     pub amount_cents: i64,
+    /// The open shift this belongs to. Absent only for cash taken out between shifts, which the
+    /// drawer ledger carries into the next shift's opening count.
     #[serde(default)]
     pub session_key: Option<String>,
     pub terminal_id: String,
-    pub reason: String,
+    pub category_key: String,
     #[serde(default)]
-    pub recipient_or_source: Option<String>,
+    pub custom_label: Option<String>,
     #[serde(default)]
-    pub supplier_key: Option<String>,
+    pub payee_key: Option<String>,
+    #[serde(default)]
+    pub payee_name: Option<String>,
+    #[serde(default)]
+    pub period_start: Option<String>,
+    #[serde(default)]
+    pub period_end: Option<String>,
+    #[serde(default)]
+    pub reference_no: Option<String>,
+    #[serde(default)]
+    pub note: Option<String>,
     #[serde(default)]
     pub manager_pin: Option<String>,
+    /// Why a payout bigger than the cash in the drawer is allowed; required together with a manager PIN in that case.
+    #[serde(default)]
+    pub override_reason: Option<String>,
+    /// Set to record a rent or bill payment for a month that is already paid.
+    #[serde(default)]
+    pub confirm_duplicate: bool,
+}
+
+/// Body for `POST /sessions/movements/{key}/reverse`.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReverseCashMovementRequest {
+    /// Required once the undo window has passed; optional inside it.
+    #[serde(default)]
+    pub reason: Option<String>,
 }
 
 /// Body for `POST /billing/sessions/{key}/convert-variance`.
@@ -341,6 +452,12 @@ pub struct CashMovementListQuery {
     pub session_key: Option<String>,
     pub terminal_id: Option<String>,
     pub movement_type: Option<String>,
+    pub category_key: Option<String>,
+    /// The category plus everything merged into it; filled in by the service from `category_key`.
+    #[serde(skip)]
+    #[param(ignore)]
+    pub category_keys: Option<Vec<String>>,
+    pub payee_key: Option<String>,
     pub recorded_late: Option<bool>,
     pub date_preset: Option<String>,
     pub from: Option<String>,

@@ -208,6 +208,9 @@ async fn status_without_token(router: &axum::Router, method: &str, path: &str) -
     let request = Request::builder()
         .method(Method::from_bytes(method.as_bytes()).unwrap())
         .uri(concrete_path(path))
+        // Each probe is its own client: the API's per-client rate limit (burst 200) would
+        // otherwise answer 429 once the route surface outgrows it, hiding the 401 under test.
+        .header("x-real-ip", format!("probe {method} {path}"))
         .header(axum::http::header::CONTENT_TYPE, "application/json")
         .body(Body::empty())
         .unwrap();

@@ -22,8 +22,8 @@ use crate::{
         sessions::{
             CashMovement, CashMovementListQuery, CashMovementListResponse, CloseSessionRequest,
             ConvertVarianceRequest, CreateCashMovementRequest, DrawerState, OpenSessionRequest,
-            RegisterSession, ReopenSessionRequest, SessionListQuery, SessionListResponse,
-            SubmitBlindCountRequest, ZReportResponse,
+            RegisterSession, ReopenSessionRequest, ReverseCashMovementRequest, SessionListQuery,
+            SessionListResponse, SubmitBlindCountRequest, ZReportResponse,
         },
         settings::{DocumentDesignChoice, DocumentDesignStatus},
     },
@@ -57,6 +57,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_drawer_state))
         .routes(routes!(list_sessions))
         .routes(routes!(create_cash_movement))
+        .routes(routes!(reverse_cash_movement))
         .routes(routes!(list_cash_movements))
         .routes(routes!(get_cash_movement))
         .routes(routes!(submit_blind_count))
@@ -463,6 +464,9 @@ async fn create_cash_movement(
     Json(body): Json<CreateCashMovementRequest>,
 ) -> AppResult<(StatusCode, Json<ApiResponse<CashMovement>>)> {
     current_user.require_permission(perm::CASH_MOVEMENTS_CREATE)?;
+    if service::requires_managed_permission(body.movement_type) {
+        current_user.require_permission(perm::CASH_MOVEMENTS_CREATE_MANAGED)?;
+    }
     let cashier_name = current_user.resolve_name(&state.db).await;
     let movement = service::record_movement(
         &state.db,
@@ -479,6 +483,45 @@ async fn create_cash_movement(
             movement,
             "Cash movement recorded successfully",
         )),
+    ))
+}
+
+#[utoipa::path(
+    post,
+    path = "/movements/{key}/reverse",
+    params(("key" = String, Path, description = "Key of the movement to reverse")),
+    request_body = ReverseCashMovementRequest,
+    responses(
+        (status = 201, description = "The reversing entry", body = ApiResponse<CashMovement>),
+        (status = 403, description = "Only a manager can reverse this now", body = ErrorResponse),
+        (status = 409, description = "Already reversed", body = ErrorResponse)
+    ),
+    security(("bearerAuth" = [])),
+    tag = "Cash Movements"
+)]
+async fn reverse_cash_movement(
+    State(state): State<AppState>,
+    current_user: CurrentUser,
+    device_id: DeviceId,
+    Path(key): Path<String>,
+    Json(body): Json<ReverseCashMovementRequest>,
+) -> AppResult<(StatusCode, Json<ApiResponse<CashMovement>>)> {
+    current_user.require_permission(perm::CASH_MOVEMENTS_CREATE)?;
+    let can_reverse = current_user.has_permission(perm::CASH_MOVEMENTS_REVERSE);
+    let name = current_user.resolve_name(&state.db).await;
+    let movement = service::reverse_movement(
+        &state.db,
+        &key,
+        current_user.user_id,
+        name,
+        can_reverse,
+        body,
+        device_id.0,
+    )
+    .await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(ApiResponse::success(movement, "Cash movement reversed successfully")),
     ))
 }
 

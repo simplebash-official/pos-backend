@@ -56,6 +56,7 @@ Rules that keep it correct:
   purpose: shipped agents retry a 5xx and keep the change, but bisect a 4xx batch down to the
   refused change and drop it. Raise the minimum whenever the synced data shape changes in a way
   an older app would corrupt, and release that desktop version right after the cloud deploy.
+- **Rows two devices can create independently get a derived key.** `cash_categories` (`ccat_<type>_<hash of the normalized name>`) and `payees` (`pye_<type>_<hash>`) are `Lww` resources whose key is computed from their identity (`domain::cash_categories::category_key` / `payee_key`), so the same category typed offline on two terminals, or seeded on a desktop and in the cloud, converges to one row instead of colliding on a unique name. Do not give them random keys or a unique name index. `cash_movements` stay `AppendOnly`; a category merge is a change to the *category* (`merged_into_key`), never a rewrite of movements.
 - **Realtime is notification only.** SSE events carry `{seq, resource, origin}`, never record
   data; clients read through `GET /sync/pull` or REST, so permissions and DTO shapes stay put.
   Polling remains the safety net (desktop timer 60 s while both streams are up, 15 s otherwise).

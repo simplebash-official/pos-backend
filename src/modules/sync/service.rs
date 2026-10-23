@@ -171,7 +171,7 @@ pub(crate) async fn hydrate(
             crate::modules::sessions::service::hydrate_session_sync_documents(documents)?,
         )?,
         "cashMovements" | "cash_movements" => to_values(
-            crate::modules::sessions::service::hydrate_movement_sync_documents(documents)?,
+            crate::modules::sessions::service::hydrate_movement_sync_documents(db, documents).await?,
         )?,
         _ => Vec::new(),
     };

@@ -53,6 +53,11 @@ pub const SYNCED_COLLECTIONS: &[&str] = &[
     "quotations",
     "register_sessions",
     "cash_movements",
+    "cash_categories",
+    "payees",
+    "expenses",
+    "expense_payments",
+    "recurring_expenses",
     "users",
 ];
 

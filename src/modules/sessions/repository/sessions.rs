@@ -564,11 +564,14 @@ pub async fn increment_session_movements(
 ) -> AppResult<()> {
     let now = BsonDateTime::now();
     let col_name = match movement_type {
-        CashMovementType::PayIn => "total_pay_in_cents",
-        CashMovementType::PayOutExpense | CashMovementType::PayOutSupplier => "total_pay_out_cents",
+        CashMovementType::AddCash => "total_pay_in_cents",
+        CashMovementType::PettyExpense
+        | CashMovementType::RentAndBills
+        | CashMovementType::StaffPayment
+        | CashMovementType::SupplierPayment => "total_pay_out_cents",
         CashMovementType::OwnerWithdrawal => "total_owner_withdrawals_cents",
         CashMovementType::CashDrop => "total_cash_drops_cents",
-        CashMovementType::DrawerOpenNoSale => return Ok(()),
+        CashMovementType::NoSale => return Ok(()),
     };
 
     match db {

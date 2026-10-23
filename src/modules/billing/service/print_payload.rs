@@ -381,8 +381,9 @@ pub(crate) fn build_z_report_data(report: &ZReportResponse, shop: &Value) -> Val
                 "movementNumber": cm.movement_number,
                 "movementType": cm.movement_type.as_str(),
                 "amountCents": cm.amount_cents,
-                "reason": cm.reason,
-                "recipientOrSource": cm.recipient_or_source.clone().unwrap_or_default(),
+                // The Z-report templates still print these two lines; they move to category/payee/note in the reporting phase.
+                "reason": cm.custom_label.clone().unwrap_or_else(|| cm.category_name.clone()),
+                "recipientOrSource": cm.payee_name.clone().unwrap_or_default(),
                 "recordedByNameSnapshot": cm.recorded_by_name_snapshot,
                 "createdAt": cm.created_at.format("%d %b %Y %H:%M").to_string(),
             })
@@ -985,7 +986,7 @@ mod schema_drift_tests {
 
     fn base_z_report() -> ZReportResponse {
         use crate::domain::sessions::{
-            CashMovement, CashMovementType, RegisterSession, SessionStatus,
+            CashDirection, CashMovement, CashMovementType, RegisterSession, SessionStatus,
             ZReportCashReconciliation, ZReportPaymentMethodSummary, ZReportResponse,
         };
         ZReportResponse {
@@ -1057,13 +1058,24 @@ mod schema_drift_tests {
                 id: "64b0000000000000000000d1".to_string(),
                 key: "cm_test".to_string(),
                 movement_number: "CM-000101".to_string(),
-                movement_type: CashMovementType::PayIn,
+                movement_type: CashMovementType::AddCash,
+                direction: CashDirection::In,
                 amount_cents: 50_000,
                 session_key: Some("ses_test".to_string()),
                 terminal_id: "TERM-01".to_string(),
-                reason: "Till float replenishment".to_string(),
-                recipient_or_source: Some("Main Safe".to_string()),
-                supplier_key: None,
+                category_key: "ccat_add_cash_test".to_string(),
+                category_name: "Change float top-up".to_string(),
+                custom_label: None,
+                payee_key: None,
+                payee_name: Some("Main Safe".to_string()),
+                period_start: None,
+                period_end: None,
+                reference_no: None,
+                note: None,
+                approval_reason: None,
+                reverses_key: None,
+                reversed_by_key: None,
+                undo_until: None,
                 recorded_by_user_id: "usr_admin".to_string(),
                 recorded_by_name_snapshot: "Kasun Perera".to_string(),
                 approved_by_user_id: None,

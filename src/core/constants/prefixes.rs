@@ -29,6 +29,11 @@ pub const LABEL_TEMPLATE: &str = "ltpl";
 pub const LABEL_PRINT_JOB: &str = "lpj";
 pub const REGISTER_SESSION: &str = "sess";
 pub const CASH_MOVEMENT: &str = "cshm";
+pub const CASH_CATEGORY: &str = "ccat";
+pub const PAYEE: &str = "pye";
+pub const EXPENSE: &str = "exp";
+pub const RECURRING_EXPENSE: &str = "rexp";
+pub const EXPENSE_PAYMENT: &str = "expp";
 
 /// Key of the batch the migration to stock batches gives every product for the
 /// stock (and price) it held before batches existed. Deterministic, so the

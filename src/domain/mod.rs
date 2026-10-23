@@ -4,14 +4,17 @@
 pub mod auth;
 pub mod backup;
 pub mod billing;
+pub mod cash_categories;
 pub mod customers;
 pub mod employees;
+pub mod expenses;
 pub mod imports;
 pub mod inventory;
 pub mod labels;
 pub mod print_jobs;
 pub mod purchases;
 pub mod quotations;
+pub mod recurring_expenses;
 pub mod repairs;
 pub mod reports;
 pub mod sequences;

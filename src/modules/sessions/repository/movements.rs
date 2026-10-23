@@ -10,8 +10,8 @@ use crate::{
         sqlite::{bson_to_iso, generate_id_hex, to_bson_datetime},
         tenant_db::{ScopedCollection, TenantDatabase},
     },
-    core::error::AppResult,
-    domain::sessions::{CashMovementListQuery, CashMovementType},
+    core::error::{AppError, AppResult},
+    domain::sessions::{CashDirection, CashMovementListQuery, CashMovementType},
     modules::sessions::model::CashMovementDocument,
 };
 
@@ -22,8 +22,13 @@ fn cash_movements_col(db: &TenantDatabase) -> ScopedCollection<CashMovementDocum
 pub(crate) fn movement_from_sqlite_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<CashMovementDocument> {
     let id_str: String = row.get("id");
     let movement_type_str: String = row.get("movement_type");
-    let movement_type = CashMovementType::parse(&movement_type_str)
-        .unwrap_or(CashMovementType::PayIn);
+    let movement_type = CashMovementType::parse(&movement_type_str).ok_or_else(|| {
+        AppError::internal(format!("Unknown cash movement type '{movement_type_str}' in database"))
+    })?;
+    let direction_str: String = row.get("direction");
+    let direction = CashDirection::parse(&direction_str).ok_or_else(|| {
+        AppError::internal(format!("Unknown cash movement direction '{direction_str}' in database"))
+    })?;
     let recorded_late_int: i64 = row.get("recorded_late");
     let created_at_str: String = row.get("created_at");
     let updated_at_str: String = row.get("updated_at");
@@ -33,16 +38,24 @@ pub(crate) fn movement_from_sqlite_row(row: &sqlx::sqlite::SqliteRow) -> AppResu
         key: row.get("key"),
         movement_number: row.get("movement_number"),
         movement_type,
+        direction,
         amount_cents: row.get("amount_cents"),
         session_key: row.get("session_key"),
         terminal_id: row.get("terminal_id"),
-        reason: row.get("reason"),
-        recipient_or_source: row.get("recipient_or_source"),
-        supplier_key: row.get("supplier_key"),
+        category_key: row.get("category_key"),
+        custom_label: row.get("custom_label"),
+        payee_key: row.get("payee_key"),
+        payee_name: row.get("payee_name"),
+        period_start: row.get("period_start"),
+        period_end: row.get("period_end"),
+        reference_no: row.get("reference_no"),
+        note: row.get("note"),
         recorded_by_user_id: row.get("recorded_by_user_id"),
         recorded_by_name_snapshot: row.get("recorded_by_name_snapshot"),
         approved_by_user_id: row.get("approved_by_user_id"),
         approved_by_name_snapshot: row.get("approved_by_name_snapshot"),
+        approval_reason: row.get("approval_reason"),
+        reverses_key: row.get("reverses_key"),
         recorded_late: recorded_late_int != 0,
         original_variance_session_key: row.get("original_variance_session_key"),
         version: row.get("version"),
@@ -51,6 +64,7 @@ pub(crate) fn movement_from_sqlite_row(row: &sqlx::sqlite::SqliteRow) -> AppResu
     })
 }
 
+/// Inserts one movement row (append-only: movements are never edited or deleted).
 pub async fn insert_cash_movement(
     db: &Db,
     mut doc: CashMovementDocument,
@@ -72,14 +86,16 @@ pub async fn insert_cash_movement(
             sqlx::query(
                 r#"
                 INSERT INTO cash_movements (
-                    key, id, movement_number, movement_type, amount_cents, session_key,
-                    terminal_id, reason, recipient_or_source, supplier_key,
+                    key, id, movement_number, movement_type, direction, amount_cents, session_key,
+                    terminal_id, category_key, custom_label, payee_key, payee_name,
+                    period_start, period_end, reference_no, note,
                     recorded_by_user_id, recorded_by_name_snapshot,
                     approved_by_user_id, approved_by_name_snapshot,
+                    approval_reason, reverses_key,
                     recorded_late, original_variance_session_key,
                     version, created_at, updated_at
                 ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 "#
             )
@@ -87,16 +103,24 @@ pub async fn insert_cash_movement(
             .bind(&id)
             .bind(&doc.movement_number)
             .bind(doc.movement_type.as_str())
+            .bind(doc.direction.as_str())
             .bind(doc.amount_cents)
             .bind(&doc.session_key)
             .bind(&doc.terminal_id)
-            .bind(&doc.reason)
-            .bind(&doc.recipient_or_source)
-            .bind(&doc.supplier_key)
+            .bind(&doc.category_key)
+            .bind(&doc.custom_label)
+            .bind(&doc.payee_key)
+            .bind(&doc.payee_name)
+            .bind(&doc.period_start)
+            .bind(&doc.period_end)
+            .bind(&doc.reference_no)
+            .bind(&doc.note)
             .bind(&doc.recorded_by_user_id)
             .bind(&doc.recorded_by_name_snapshot)
             .bind(&doc.approved_by_user_id)
             .bind(&doc.approved_by_name_snapshot)
+            .bind(&doc.approval_reason)
+            .bind(&doc.reverses_key)
             .bind(if doc.recorded_late { 1 } else { 0 })
             .bind(&doc.original_variance_session_key)
             .bind(doc.version)
@@ -188,6 +212,12 @@ pub async fn list_cash_movements(
             if let Some(movement_type) = &query.movement_type {
                 filter.insert("movement_type", movement_type);
             }
+            if let Some(category_keys) = &query.category_keys {
+                filter.insert("category_key", doc! { "$in": category_keys });
+            }
+            if let Some(payee_key) = &query.payee_key {
+                filter.insert("payee_key", payee_key);
+            }
             if let Some(recorded_late) = query.recorded_late {
                 filter.insert("recorded_late", recorded_late);
             }
@@ -231,6 +261,15 @@ pub async fn list_cash_movements(
                 conditions.push("movement_type = ?".to_string());
                 bindings.push(movement_type.clone());
             }
+            if let Some(category_keys) = &query.category_keys {
+                let placeholders = category_keys.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+                conditions.push(format!("category_key IN ({placeholders})"));
+                bindings.extend(category_keys.iter().cloned());
+            }
+            if let Some(payee_key) = &query.payee_key {
+                conditions.push("payee_key = ?".to_string());
+                bindings.push(payee_key.clone());
+            }
             if let Some(recorded_late) = query.recorded_late {
                 conditions.push("recorded_late = ?".to_string());
                 bindings.push(if recorded_late { "1".to_string() } else { "0".to_string() });
@@ -268,6 +307,153 @@ pub async fn list_cash_movements(
                 results.push(movement_from_sqlite_row(&r)?);
             }
             Ok((results, total as u64))
+        }
+    }
+}
+
+/// Movements per category key, for ranking the picker by this shop's real usage.
+pub async fn count_movements_by_category(db: &Db) -> AppResult<Vec<(String, i64)>> {
+    count_by(db, "category_key").await
+}
+
+/// Movements per saved payee key, so the payee combobox can put frequent payees first.
+pub async fn count_movements_by_payee(db: &Db) -> AppResult<Vec<(String, i64)>> {
+    count_by(db, "payee_key").await
+}
+
+async fn count_by(db: &Db, field: &'static str) -> AppResult<Vec<(String, i64)>> {
+    match db {
+        Db::Mongo(mongo_db) => {
+            let pipeline = vec![
+                doc! { "$match": { field: { "$type": "string" } } },
+                doc! { "$group": { "_id": format!("${field}"), "n": { "$sum": 1 } } },
+            ];
+            let mut cursor = cash_movements_col(mongo_db).aggregate(pipeline).await?;
+            let mut out = Vec::new();
+            while let Some(row) = cursor.try_next().await? {
+                let key = row.get_str("_id").map_err(|e| AppError::internal(e.to_string()))?;
+                let n = match row.get("n") {
+                    Some(mongodb::bson::Bson::Int32(n)) => i64::from(*n),
+                    Some(mongodb::bson::Bson::Int64(n)) => *n,
+                    _ => 0,
+                };
+                out.push((key.to_string(), n));
+            }
+            Ok(out)
+        }
+        Db::Sqlite(pool) => {
+            let sql = format!(
+                "SELECT {field} AS k, COUNT(*) AS n FROM cash_movements \
+                 WHERE {field} IS NOT NULL AND deleted_at IS NULL GROUP BY {field}"
+            );
+            let rows = sqlx::query(&sql).fetch_all(pool).await?;
+            Ok(rows.iter().map(|r| (r.get("k"), r.get("n"))).collect())
+        }
+    }
+}
+
+/// Movements of the given types recorded on or between two days (`YYYY-MM-DD`, UTC, inclusive;
+/// `None` is open-ended), oldest first. For the expense ledger, which reads drawer payments
+/// straight from here.
+pub async fn list_movements_of_types(
+    db: &Db,
+    types: &[CashMovementType],
+    from: Option<&str>,
+    to: Option<&str>,
+) -> AppResult<Vec<CashMovementDocument>> {
+    let type_names: Vec<&str> = types.iter().map(CashMovementType::as_str).collect();
+    match db {
+        Db::Mongo(mongo_db) => {
+            let mut filter = doc! { "movement_type": { "$in": &type_names } };
+            let mut range = doc! {};
+            let day_start = |day: &str| -> AppResult<mongodb::bson::DateTime> {
+                let date = chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d")
+                    .map_err(|_| AppError::validation("Please pick a valid date."))?;
+                Ok(mongodb::bson::DateTime::from_chrono(
+                    date.and_hms_opt(0, 0, 0).expect("midnight exists").and_utc(),
+                ))
+            };
+            if let Some(from) = from {
+                range.insert("$gte", day_start(from)?);
+            }
+            if let Some(to) = to {
+                // Inclusive end day: everything before the next midnight.
+                let next = chrono::NaiveDate::parse_from_str(to, "%Y-%m-%d")
+                    .map_err(|_| AppError::validation("Please pick a valid date."))?
+                    .succ_opt()
+                    .ok_or_else(|| AppError::validation("Please pick a valid date."))?;
+                range.insert("$lt", day_start(&next.format("%Y-%m-%d").to_string())?);
+            }
+            if !range.is_empty() {
+                filter.insert("created_at", range);
+            }
+            let mut cursor = cash_movements_col(mongo_db)
+                .find(filter)
+                .sort(doc! { "created_at": 1 })
+                .await?;
+            let mut out = Vec::new();
+            while let Some(item) = cursor.try_next().await? {
+                out.push(item);
+            }
+            Ok(out)
+        }
+        Db::Sqlite(pool) => {
+            let placeholders = type_names.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            let mut sql = format!(
+                "SELECT * FROM cash_movements WHERE deleted_at IS NULL AND movement_type IN ({placeholders})"
+            );
+            if from.is_some() {
+                sql.push_str(" AND substr(created_at, 1, 10) >= ?");
+            }
+            if to.is_some() {
+                sql.push_str(" AND substr(created_at, 1, 10) <= ?");
+            }
+            sql.push_str(" ORDER BY created_at ASC");
+            let mut query = sqlx::query(&sql);
+            for name in &type_names {
+                query = query.bind(*name);
+            }
+            if let Some(from) = from {
+                query = query.bind(from);
+            }
+            if let Some(to) = to {
+                query = query.bind(to);
+            }
+            let rows = query.fetch_all(pool).await?;
+            rows.iter().map(movement_from_sqlite_row).collect()
+        }
+    }
+}
+
+/// For each of the given movement keys, the key of the reversal that cancels it, if one exists.
+pub async fn find_reversals_of(db: &Db, keys: &[String]) -> AppResult<Vec<(String, String)>> {
+    if keys.is_empty() {
+        return Ok(Vec::new());
+    }
+    match db {
+        Db::Mongo(mongo_db) => {
+            let mut cursor = cash_movements_col(mongo_db)
+                .find(doc! { "reverses_key": { "$in": keys } })
+                .await?;
+            let mut out = Vec::new();
+            while let Some(item) = cursor.try_next().await? {
+                if let Some(original) = item.reverses_key {
+                    out.push((original, item.key));
+                }
+            }
+            Ok(out)
+        }
+        Db::Sqlite(pool) => {
+            let placeholders = keys.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            let sql = format!(
+                "SELECT reverses_key, key FROM cash_movements WHERE reverses_key IN ({placeholders}) AND deleted_at IS NULL"
+            );
+            let mut query = sqlx::query(&sql);
+            for key in keys {
+                query = query.bind(key);
+            }
+            let rows = query.fetch_all(pool).await?;
+            Ok(rows.iter().map(|r| (r.get("reverses_key"), r.get("key"))).collect())
         }
     }
 }

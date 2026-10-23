@@ -1,5 +1,6 @@
 pub mod admin;
 pub mod api_key;
+pub mod cash_categories;
 pub mod customers;
 pub mod inventory;
 pub mod providers;
@@ -11,6 +12,7 @@ use crate::{clients::db::Db, core::error::AppError};
 pub struct SeedSummary {
     pub admin: admin::AdminSeedResult,
     pub providers: providers::ProviderSeedResult,
+    pub cash_categories: cash_categories::CashCategorySeedResult,
     pub suppliers: suppliers::SupplierSeedResult,
     pub customers: customers::CustomerSeedResult,
     pub inventory: inventory::InventorySeedResult,
@@ -22,6 +24,7 @@ pub struct SeedSummary {
 pub async fn seed_all(db: &Db) -> Result<SeedSummary, AppError> {
     let admin = admin::seed_admin(db, None, None).await?;
     let providers = providers::seed_providers(db).await?;
+    let cash_categories = cash_categories::seed_cash_categories(db).await?;
     let suppliers = suppliers::seed_suppliers(db).await?;
     let customers = customers::seed_customers(db).await?;
     let inventory = inventory::seed_inventory(db).await?;
@@ -30,6 +33,7 @@ pub async fn seed_all(db: &Db) -> Result<SeedSummary, AppError> {
     Ok(SeedSummary {
         admin,
         providers,
+        cash_categories,
         suppliers,
         customers,
         inventory,

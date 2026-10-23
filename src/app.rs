@@ -244,6 +244,22 @@ pub fn build_router(state: AppState) -> Router {
             modules::sessions::routes::router(),
         )
         .nest(
+            &format!("/{}", mod_names::CASH_CATEGORIES.replace('_', "-")),
+            modules::cash_categories::routes::router(),
+        )
+        .nest(
+            &format!("/{}", mod_names::EXPENSES),
+            modules::expenses::routes::router(),
+        )
+        .nest(
+            &format!("/{}", mod_names::RECURRING_EXPENSES.replace('_', "-")),
+            modules::recurring_expenses::routes::router(),
+        )
+        .nest(
+            &format!("/{}", mod_names::PAYEES),
+            modules::payees::routes::router(),
+        )
+        .nest(
             &format!("/{}", mod_names::DOCUMENT_PACKAGES),
             modules::document_packages::routes::router(),
         )

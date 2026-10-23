@@ -67,13 +67,14 @@ The invariants below apply everywhere and are easy to violate, so they stay resi
 - `cargo run` — run the server (equivalent to `cargo run --bin simplebash_pos_backend`; required explicitly if disambiguating from the seed binaries). Respects `AUTO_SEED=true` to automatically run seeders on startup.
 - `cargo test` — run all tests. `tests/sqlite_integration_test.rs`, `tests/seeding_test.rs`, `tests/openapi_test.rs`, and `tests/response_format_test.rs` run without live MongoDB; Mongo-specific integration tests require a reachable MongoDB instance.
 - `cargo test --test scenarios_test health_route_returns_success_format` — run a single integration test by name
-- `cargo run --bin seed_all` — runs all seeds in dependency order (`admin`, `providers`, `suppliers`, `customers`, `inventory`, `api_key`) across SQLite or MongoDB
+- `cargo run --bin seed_all` — runs all seeds in dependency order (`admin`, `providers`, `cash_categories`, `suppliers`, `customers`, `inventory`, `api_key`) across SQLite or MongoDB
 - `cargo run --bin seed_admin` — create-if-missing bootstrap of the first Admin account (username `admin` / `admin@1234`, name: `"System Admin"`). Optional overrides via `SEED_ADMIN_PASSWORD`/`SEED_ADMIN_NAME` env vars.
 - `cargo run --bin seed_providers` — upserts default category/subcategory reference data into the `categories`/`subcategories` tables/collections
 - `cargo run --bin seed_suppliers` — upserts sample repair/retail suppliers into the `suppliers` table/collection
 - `cargo run --bin seed_customers` — upserts 20 realistic retail/repair/corporate/print customer profiles into the `customers` table/collection
 - `cargo run --bin seed_inventory` — seeds products, stock movements, and serial numbers into the database
 - `cargo run --bin seed_api_key` — generates and inserts a random API key into the `api_keys` table/collection
+- `cargo run --bin migrate_cash_movements [-- --dry-run]` — one-time MongoDB migration of old cash movements to typed movements with categories (also seeds every shop's built-in cash categories). Idempotent; run it before deploying the typed-movement backend to an environment with existing data. SQLite migrates itself at startup.
 - `make check` (root `Makefile`) — runs `cargo fmt --check`, then `cargo clippy --all-targets --all-features -- -D warnings`, then `cargo test`, stopping at the first failure; `make ci` is an alias for it (the intended CI entrypoint)
 
 **After every change**, run the following and fix anything it reports before considering the work done:

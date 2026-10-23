@@ -761,16 +761,24 @@ CREATE TABLE IF NOT EXISTS cash_movements (
     id TEXT NOT NULL,
     movement_number TEXT NOT NULL UNIQUE,
     movement_type TEXT NOT NULL,
+    direction TEXT NOT NULL,
     amount_cents INTEGER NOT NULL,
     session_key TEXT,
     terminal_id TEXT NOT NULL,
-    reason TEXT NOT NULL,
-    recipient_or_source TEXT,
-    supplier_key TEXT,
+    category_key TEXT NOT NULL,
+    custom_label TEXT,
+    payee_key TEXT,
+    payee_name TEXT,
+    period_start TEXT,
+    period_end TEXT,
+    reference_no TEXT,
+    note TEXT,
     recorded_by_user_id TEXT NOT NULL,
     recorded_by_name_snapshot TEXT NOT NULL,
     approved_by_user_id TEXT,
     approved_by_name_snapshot TEXT,
+    approval_reason TEXT,
+    reverses_key TEXT,
     recorded_late INTEGER NOT NULL DEFAULT 0,
     original_variance_session_key TEXT,
     version INTEGER NOT NULL DEFAULT 1,
@@ -785,6 +793,126 @@ CREATE INDEX IF NOT EXISTS idx_cash_movements_terminal_id ON cash_movements(term
 CREATE INDEX IF NOT EXISTS idx_cash_movements_movement_type ON cash_movements(movement_type);
 CREATE INDEX IF NOT EXISTS idx_cash_movements_created_at ON cash_movements(created_at);
 CREATE INDEX IF NOT EXISTS idx_cash_movements_sync ON cash_movements(updated_at, key);
+CREATE INDEX IF NOT EXISTS idx_cash_movements_category_key ON cash_movements(category_key);
+CREATE INDEX IF NOT EXISTS idx_cash_movements_payee_key ON cash_movements(payee_key);
+CREATE INDEX IF NOT EXISTS idx_cash_movements_reverses_key ON cash_movements(reverses_key);
+
+-- Categories a drawer movement is filed under. Hidden or merged categories stay
+-- (history points at them); `merged_into_key` redirects readers so movements stay append-only.
+-- No UNIQUE on (movement_type, normalized_name): the key is derived from them, so the
+-- same name made on two devices is the same row; the service refuses a name already in use.
+CREATE TABLE IF NOT EXISTS cash_categories (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    movement_type TEXT NOT NULL,
+    name TEXT NOT NULL,
+    name_si TEXT,
+    normalized_name TEXT NOT NULL,
+    report_group TEXT NOT NULL,
+    is_system INTEGER NOT NULL,
+    review_status TEXT NOT NULL,
+    pinned INTEGER NOT NULL,
+    sort_order INTEGER NOT NULL,
+    active INTEGER NOT NULL,
+    requires_receipt INTEGER NOT NULL,
+    requires_approval_over_cents INTEGER,
+    merged_into_key TEXT,
+    created_by_name_snapshot TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by_device TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_cash_categories_type ON cash_categories(movement_type, normalized_name);
+CREATE INDEX IF NOT EXISTS idx_cash_categories_sync ON cash_categories(updated_at, key);
+
+-- The expense ledger: costs paid from the bank, a card or online, or bills still to pay. A
+-- cost paid from the drawer is a cash movement and is read from there, never copied here.
+-- Both tables are append-only: how much is paid and the status are worked out from the
+-- payments at read time.
+CREATE TABLE IF NOT EXISTS expenses (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    expense_number TEXT NOT NULL UNIQUE,
+    expense_date TEXT NOT NULL,
+    category_key TEXT NOT NULL,
+    payee_key TEXT,
+    payee_name TEXT,
+    amount_cents INTEGER NOT NULL,
+    due_date TEXT,
+    reference_no TEXT,
+    note TEXT,
+    recorded_by_user_id TEXT NOT NULL,
+    recorded_by_name_snapshot TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by_device TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(expense_date);
+CREATE INDEX IF NOT EXISTS idx_expenses_category_key ON expenses(category_key);
+CREATE INDEX IF NOT EXISTS idx_expenses_sync ON expenses(updated_at, key);
+
+CREATE TABLE IF NOT EXISTS expense_payments (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    expense_key TEXT NOT NULL,
+    amount_cents INTEGER NOT NULL,
+    paid_from TEXT NOT NULL,
+    paid_on TEXT NOT NULL,
+    reference_no TEXT,
+    note TEXT,
+    recorded_by_user_id TEXT NOT NULL,
+    recorded_by_name_snapshot TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by_device TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_expense_payments_expense_key ON expense_payments(expense_key);
+CREATE INDEX IF NOT EXISTS idx_expense_payments_sync ON expense_payments(updated_at, key);
+
+-- Regular bills (rent, electricity, subscriptions). The key is derived from the category and payee,
+-- so the same bill made on two devices is one row. Never deleted: `active = 0` stops reminders.
+CREATE TABLE IF NOT EXISTS recurring_expenses (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    category_key TEXT NOT NULL,
+    payee_key TEXT,
+    amount_cents INTEGER NOT NULL,
+    due_day INTEGER NOT NULL,
+    remind_days_before INTEGER NOT NULL,
+    paid_from TEXT NOT NULL,
+    note TEXT,
+    active INTEGER NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by_device TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_recurring_expenses_sync ON recurring_expenses(updated_at, key);
+
+-- Vendors (landlords, utility companies) and free-typed payees. Suppliers and staff
+-- are not copied here; the payee directory lists them straight from their own tables.
+CREATE TABLE IF NOT EXISTS payees (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    payee_type TEXT NOT NULL,
+    name TEXT NOT NULL,
+    normalized_name TEXT NOT NULL,
+    phone TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by_device TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_payees_name ON payees(payee_type, normalized_name);
+CREATE INDEX IF NOT EXISTS idx_payees_sync ON payees(updated_at, key);
 
 CREATE TABLE IF NOT EXISTS drawer_state (
     terminal_id TEXT PRIMARY KEY,

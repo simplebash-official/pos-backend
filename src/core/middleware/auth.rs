@@ -112,7 +112,7 @@ impl CurrentUser {
     /// codebase has no existing precedent for parameterized extractors.
     /// This is the pattern to reach for any future permission-gated route.
     pub fn require_permission(&self, permission: &str) -> AppResult<()> {
-        if self.permissions.iter().any(|p| p == permission) {
+        if self.has_permission(permission) {
             Ok(())
         } else {
             Err(AppError::forbidden_with_code(
@@ -120,6 +120,12 @@ impl CurrentUser {
                 crate::core::constants::codes::PERMISSION_DENIED,
             ))
         }
+    }
+
+    /// Whether the caller holds `permission`, for handlers whose behaviour (not
+    /// access) depends on it, e.g. which movement types a category may be made for.
+    pub fn has_permission(&self, permission: &str) -> bool {
+        self.permissions.iter().any(|p| p == permission)
     }
 
     /// Same as `require_permission`, but passes if the caller holds *any*

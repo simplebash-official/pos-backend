@@ -12,7 +12,7 @@ use crate::{
         tenancy::{Tenant, with_tenant},
     },
     modules::{
-        settings,
+        cash_categories, settings,
         tenants::{model::TenantDocument, repository, usage},
         users,
     },
@@ -192,6 +192,12 @@ pub async fn provision_shop(
             true
         }
     };
+
+    // Every shop starts with the drawer's built-in cash categories (idempotent on a replay).
+    with_tenant(Tenant::id(tenant_id)?, async {
+        cash_categories::service::ensure_system_categories(db).await
+    })
+    .await?;
 
     let admin_created = match owner {
         None => false,

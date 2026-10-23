@@ -599,6 +599,9 @@ async fn waiting_changes_are_counted_per_resource_and_named_for_people() {
 async fn nothing_is_captured_while_a_batch_is_being_applied() {
     let dev = Device::new().await;
     dev.sync("POST", "/api/sync/enable", Some(json!({}))).await;
+    // Enabling queues what the device already holds (the built-in cash categories); only
+    // the write made while a batch is being applied must add nothing.
+    let queued_on_enable = dev.pending_out().await;
 
     sqlx::query("UPDATE sync_state SET applying = 1 WHERE id = 1")
         .execute(dev.pool())
@@ -614,7 +617,7 @@ async fn nothing_is_captured_while_a_batch_is_being_applied() {
         .execute(dev.pool())
         .await
         .unwrap();
-    assert_eq!(dev.pending_out().await, 0);
+    assert_eq!(dev.pending_out().await, queued_on_enable);
 }
 
 #[tokio::test]

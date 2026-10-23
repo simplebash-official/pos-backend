@@ -1,5 +1,9 @@
-// Cash movement service: pay-in, pay-out, owner withdrawal, cash drop, and drawer open events.
+// Cash movement service: every drawer cash event (petty expense, rent and bills, staff and
+// supplier payments, owner withdrawals, added cash, cash drops and no-sale opens).
 
+use std::collections::HashMap;
+
+use chrono::NaiveDate;
 use mongodb::bson::DateTime as BsonDateTime;
 
 use crate::{
@@ -8,16 +12,19 @@ use crate::{
         constants::{codes, prefixes},
         error::{AppError, AppResult},
         id::generate_id,
+        logging::domain::tracked,
     },
     domain::{
+        cash_categories::PayeeType,
+        recurring_expenses::PeriodStatusQuery,
         sequences::ReserveSequenceRequest,
         sessions::{
-            CashMovement, CashMovementListQuery, CashMovementListResponse, CashMovementType,
-            CreateCashMovementRequest,
+            CashDirection, CashMovement, CashMovementListQuery, CashMovementListResponse,
+            CashMovementType, CreateCashMovementRequest, ReverseCashMovementRequest, SessionStatus,
         },
     },
     modules::{
-        sequences,
+        cash_categories, payees, recurring_expenses, sequences,
         sessions::{
             model::CashMovementDocument,
             repository::{drawer, movements, sessions},
@@ -26,9 +33,66 @@ use crate::{
     },
 };
 
-/// Configurable threshold above which owner withdrawal requires an Admin (Owner) PIN specifically.
-pub const OWNER_WITHDRAWAL_ADMIN_THRESHOLD_CENTS: i64 = 50_000;
+const LABEL_MAX: usize = 60;
+const REFERENCE_MAX: usize = 60;
+const NOTE_MAX: usize = 200;
 
+/// Types that move accountable money and need the managed-payout permission on top of the basic one.
+pub fn requires_managed_permission(movement_type: CashMovementType) -> bool {
+    matches!(
+        movement_type,
+        CashMovementType::RentAndBills | CashMovementType::StaffPayment | CashMovementType::SupplierPayment
+    )
+}
+
+/// Movements per category key (including none merged), for ranking the category picker.
+pub(crate) async fn movement_counts_by_category(db: &Db) -> AppResult<Vec<(String, i64)>> {
+    movements::count_movements_by_category(db).await
+}
+
+/// Movements per saved payee key, for ranking the payee list.
+pub(crate) async fn movement_counts_by_payee(db: &Db) -> AppResult<Vec<(String, i64)>> {
+    movements::count_movements_by_payee(db).await
+}
+
+/// Trims an optional text field; blank means absent, too long is refused.
+fn clean_text(label: &str, value: Option<&str>, max: usize) -> AppResult<Option<String>> {
+    let Some(text) = value.map(str::trim).filter(|t| !t.is_empty()) else {
+        return Ok(None);
+    };
+    if text.chars().count() > max {
+        return Err(AppError::validation(format!("{label} can have up to {max} letters.")));
+    }
+    Ok(Some(text.to_string()))
+}
+
+fn parse_period(start: Option<&str>, end: Option<&str>) -> AppResult<Option<(String, String)>> {
+    match (start.map(str::trim), end.map(str::trim)) {
+        (None, None) => Ok(None),
+        (Some(s), Some(e)) => {
+            let parse = |v: &str| {
+                NaiveDate::parse_from_str(v, "%Y-%m-%d")
+                    .map_err(|_| AppError::validation("Please pick a valid period."))
+            };
+            if parse(s)? > parse(e)? {
+                return Err(AppError::validation("The period must end after it starts."));
+            }
+            Ok(Some((s.to_string(), e.to_string())))
+        }
+        _ => Err(AppError::validation("Please give both the start and the end of the period.")),
+    }
+}
+
+/// Refuses a field that does not belong to the movement type, so a stale form cannot save data nothing will read.
+fn forbid(applies: bool, present: bool, what: &str) -> AppResult<()> {
+    if !applies && present {
+        return Err(AppError::validation(format!("{what} does not apply to this kind of payment.")));
+    }
+    Ok(())
+}
+
+/// Records one drawer cash event. Validates the shift, the amount, the category, the fields
+/// this type needs and (where required) a manager PIN, then books it on the shift and the drawer.
 pub async fn record_movement(
     db: &Db,
     recorded_by_user_id: String,
@@ -36,131 +100,477 @@ pub async fn record_movement(
     body: CreateCashMovementRequest,
     device_id: Option<String>,
 ) -> AppResult<CashMovement> {
-    if body.terminal_id.trim().is_empty() {
-        return Err(AppError::validation("terminalId is required"));
-    }
-    if body.reason.trim().is_empty() {
-        return Err(AppError::validation("Reason is required"));
-    }
-
-    if body.movement_type != CashMovementType::DrawerOpenNoSale && body.amount_cents <= 0 {
-        return Err(AppError::validation("Movement amount must be greater than zero"));
-    }
-
-    let mut approved_by_id = None;
-    let mut approved_by_name = None;
-
-    // Owner withdrawals require PIN authorization (and if above threshold, owner/admin specifically)
-    if body.movement_type == CashMovementType::OwnerWithdrawal {
-        if body.recipient_or_source.as_deref().unwrap_or("").trim().is_empty() {
-            return Err(AppError::validation("Recipient is required for owner withdrawal"));
+    tracked("cash_movement.recorded", async move {
+        let movement_type = body.movement_type;
+        if body.terminal_id.trim().is_empty() {
+            return Err(AppError::validation("terminalId is required"));
         }
 
-        let pin = body.manager_pin.as_deref().ok_or_else(|| {
-            AppError::forbidden_with_code(
-                "PIN authorization is required for owner withdrawal",
-                codes::PIN_NOT_SET,
-            )
-        })?;
-
-        let required_role = if body.amount_cents > OWNER_WITHDRAWAL_ADMIN_THRESHOLD_CENTS {
-            "admin"
+        // The cash the drawer holds right now: the open shift's expected cash, or, between shifts, the
+        // drawer's own running balance.
+        let cash_in_drawer = if let Some(session_key) = &body.session_key {
+            let session = sessions::find_session_by_key(db, session_key)
+                .await?
+                .ok_or_else(|| AppError::not_found_with_code("Register session not found", codes::SESSION_NOT_FOUND))?;
+            if !matches!(session.status, SessionStatus::Open | SessionStatus::Reopened) {
+                return Err(AppError::validation_with_code(
+                    "This shift is not open, so cash cannot be recorded on it.",
+                    codes::NO_ACTIVE_SESSION,
+                ));
+            }
+            session.calculate_expected_cash()
         } else {
-            "manager"
+            drawer::get_drawer_state(db, &body.terminal_id)
+                .await?
+                .map_or(0, |state| state.current_balance_cents)
         };
 
-        let approver = users::service::verify_user_pin(db, pin, Some(required_role))
-            .await?
-            .ok_or_else(|| {
-                if required_role == "admin" {
-                    AppError::forbidden_with_code(
-                        "Owner/Admin PIN is required for withdrawals exceeding the owner threshold",
-                        codes::OWNER_APPROVAL_REQUIRED,
-                    )
-                } else {
-                    AppError::unauthorized_with_code("Invalid manager/owner PIN", codes::INVALID_PIN)
+        if movement_type == CashMovementType::NoSale {
+            if body.amount_cents != 0 {
+                return Err(AppError::validation("A no-sale open has no amount."));
+            }
+        } else if body.amount_cents <= 0 {
+            return Err(AppError::validation("Movement amount must be greater than zero"));
+        }
+
+        let category =
+            cash_categories::service::category_for_movement(db, &body.category_key, movement_type).await?;
+        let custom_label = clean_text("The label", body.custom_label.as_deref(), LABEL_MAX)?;
+        if custom_label.is_some() && category.key != cash_categories::service::other_category_key(movement_type) {
+            return Err(AppError::validation(
+                "A one-off label can only be used with the Other category.",
+            ));
+        }
+        let reference_no = clean_text("The reference", body.reference_no.as_deref(), REFERENCE_MAX)?;
+        let note = clean_text("The note", body.note.as_deref(), NOTE_MAX)?;
+        let period = parse_period(body.period_start.as_deref(), body.period_end.as_deref())?;
+        let typed_payee = clean_text("The name", body.payee_name.as_deref(), 60)?;
+
+        use CashMovementType as T;
+        let has_payee = body.payee_key.is_some() || typed_payee.is_some();
+        forbid(!matches!(movement_type, T::CashDrop | T::NoSale), has_payee, "A name")?;
+        forbid(matches!(movement_type, T::RentAndBills | T::StaffPayment), period.is_some(), "A period")?;
+        forbid(
+            matches!(movement_type, T::PettyExpense | T::RentAndBills | T::SupplierPayment | T::AddCash),
+            reference_no.is_some(),
+            "A reference",
+        )?;
+
+        // Who was paid. A saved payee is resolved from the module that owns it, never trusted from the client.
+        let mut payee_key = body.payee_key.clone();
+        let mut payee_name = typed_payee;
+        if let Some(key) = &payee_key {
+            let resolved = payees::service::resolve_payee(db, key).await?;
+            let expected = match movement_type {
+                T::StaffPayment => Some(PayeeType::Staff),
+                T::SupplierPayment => Some(PayeeType::Supplier),
+                T::RentAndBills => Some(PayeeType::Vendor),
+                _ => None,
+            };
+            if expected.is_some_and(|e| e != resolved.payee_type) {
+                return Err(AppError::validation("This person cannot be paid for this kind of payment."));
+            }
+            payee_name = Some(resolved.name);
+        }
+        match movement_type {
+            T::StaffPayment => {
+                if payee_key.is_none() {
+                    return Err(AppError::validation("Please pick the staff member."));
                 }
+            }
+            T::SupplierPayment => {
+                if payee_key.is_none() {
+                    return Err(AppError::validation("Please pick the supplier."));
+                }
+            }
+            T::RentAndBills => {
+                if payee_key.is_none() {
+                    return Err(AppError::validation("Please pick who is being paid."));
+                }
+                if period.is_none() {
+                    return Err(AppError::validation("Please pick the period this payment covers."));
+                }
+            }
+            T::OwnerWithdrawal => {
+                if payee_name.is_none() {
+                    return Err(AppError::validation("Please enter who took the cash."));
+                }
+            }
+            T::PettyExpense => {
+                // A name typed once is saved so it is offered next time.
+                if payee_key.is_none()
+                    && let Some(name) = &payee_name
+                {
+                    let saved = payees::service::ensure_other_payee(db, name).await?;
+                    payee_key = Some(saved.key);
+                    payee_name = Some(saved.name);
+                }
+            }
+            T::AddCash | T::CashDrop | T::NoSale => {}
+        }
+
+        // Rent and bills for a month that is already paid is asked about, not silently doubled.
+        if movement_type == T::RentAndBills
+            && !body.confirm_duplicate
+            && let (Some(payee), Some((start, _))) = (&payee_key, &period)
+        {
+            let status = recurring_expenses::service::period_status(
+                db,
+                PeriodStatusQuery {
+                    category_key: category.key.clone(),
+                    payee_key: Some(payee.clone()),
+                    period: start[..7].to_string(),
+                },
+            )
+            .await?;
+            if status.already_paid {
+                let last = &status.payments[status.payments.len() - 1];
+                return Err(AppError::conflict(
+                    codes::PERIOD_ALREADY_PAID,
+                    format!(
+                        "{} for {} already has {} recorded (last on {}). Confirm if this is another payment.",
+                        category.name,
+                        start.get(..7).unwrap_or(start),
+                        money(status.paid_cents),
+                        last.date
+                    ),
+                ));
+            }
+        }
+
+        // A payout bigger than the cash in the drawer is allowed only when a manager says why.
+        let takes_cash_out = movement_type.direction() == CashDirection::Out || movement_type == T::CashDrop;
+        let over_drawer = takes_cash_out && body.amount_cents > cash_in_drawer;
+        let override_reason = clean_text("The reason", body.override_reason.as_deref(), NOTE_MAX)?;
+        if over_drawer {
+            if body.manager_pin.is_none() || override_reason.is_none() {
+                return Err(AppError::conflict(
+                    codes::DRAWER_CASH_EXCEEDED,
+                    format!(
+                        "The drawer only holds {}. To pay out more, a manager or owner needs to enter their PIN and say why.",
+                        money(cash_in_drawer)
+                    ),
+                ));
+            }
+        } else {
+            forbid(false, override_reason.is_some(), "A reason for going over the drawer")?;
+        }
+
+        // A manager PIN: always for owner drawings and staff pay, above a category's own limit, and to go over the drawer.
+        let over_limit = category
+            .requires_approval_over_cents
+            .is_some_and(|limit| body.amount_cents > limit);
+        let mut approved_by_id = None;
+        let mut approved_by_name = None;
+        if matches!(movement_type, T::OwnerWithdrawal | T::StaffPayment) || over_limit || over_drawer {
+            let pin = body.manager_pin.as_deref().ok_or_else(|| {
+                AppError::forbidden_with_code(
+                    "A manager or owner PIN is required for this payment",
+                    codes::PIN_NOT_SET,
+                )
             })?;
+            let approver = users::service::verify_user_pin(db, pin, Some("manager"))
+                .await?
+                .ok_or_else(|| {
+                    AppError::unauthorized_with_code("Invalid manager/owner PIN", codes::INVALID_PIN)
+                })?;
+            approved_by_id = Some(approver.id);
+            approved_by_name = Some(approver.name);
+        }
 
-        approved_by_id = Some(approver.id);
-        approved_by_name = Some(approver.name);
-    }
+        let reservation = sequences::service::reserve_sequence(
+            db,
+            "cash_movement".to_string(),
+            ReserveSequenceRequest { block_size: Some(1), device_id },
+        )
+        .await?;
+        let movement_number = format!(
+            "{}{:0width$}",
+            reservation.prefix,
+            reservation.start,
+            width = reservation.padding
+        );
 
-    let reservation = sequences::service::reserve_sequence(
-        db,
-        "cash_movement".to_string(),
-        ReserveSequenceRequest {
-            block_size: Some(1),
-            device_id,
-        },
-    )
-    .await?;
+        let now = BsonDateTime::now();
+        let inserted = movements::insert_cash_movement(
+            db,
+            CashMovementDocument {
+                id: None,
+                key: generate_id(prefixes::CASH_MOVEMENT),
+                movement_number,
+                movement_type,
+                direction: movement_type.direction(),
+                amount_cents: body.amount_cents,
+                session_key: body.session_key.clone(),
+                terminal_id: body.terminal_id.clone(),
+                category_key: category.key.clone(),
+                custom_label,
+                payee_key,
+                payee_name,
+                period_start: period.as_ref().map(|p| p.0.clone()),
+                period_end: period.map(|p| p.1),
+                reference_no,
+                note,
+                recorded_by_user_id,
+                recorded_by_name_snapshot: recorded_by_name,
+                approved_by_user_id: approved_by_id,
+                approved_by_name_snapshot: approved_by_name,
+                approval_reason: if over_drawer { override_reason } else { None },
+                reverses_key: None,
+                recorded_late: false,
+                original_variance_session_key: None,
+                version: 1,
+                created_at: now,
+                updated_at: now,
+            },
+        )
+        .await?;
 
-    let movement_number = format!(
-        "{}{:0width$}",
-        reservation.prefix,
-        reservation.start,
-        width = reservation.padding
-    );
+        if let Some(session_key) = &body.session_key {
+            sessions::increment_session_movements(db, session_key, movement_type, body.amount_cents).await?;
+        }
+        // The drawer balance survives across shifts, so it moves with every movement.
+        let delta = drawer_delta(movement_type, body.amount_cents);
+        if delta != 0 {
+            drawer::update_drawer_balance(db, &body.terminal_id, delta).await?;
+        }
 
-    let now = BsonDateTime::now();
-    let movement_doc = CashMovementDocument {
-        id: None,
-        key: generate_id(prefixes::CASH_MOVEMENT),
-        movement_number,
-        movement_type: body.movement_type,
-        amount_cents: body.amount_cents,
-        session_key: body.session_key.clone(),
-        terminal_id: body.terminal_id.clone(),
-        reason: body.reason,
-        recipient_or_source: body.recipient_or_source,
-        supplier_key: body.supplier_key,
-        recorded_by_user_id,
-        recorded_by_name_snapshot: recorded_by_name,
-        approved_by_user_id: approved_by_id,
-        approved_by_name_snapshot: approved_by_name,
-        recorded_late: false,
-        original_variance_session_key: None,
-        version: 1,
-        created_at: now,
-        updated_at: now,
-    };
-
-    let inserted = movements::insert_cash_movement(db, movement_doc).await?;
-
-    // If movement is associated with an active session, update session totals
-    if let Some(session_key) = &body.session_key {
-        sessions::increment_session_movements(db, session_key, body.movement_type, body.amount_cents).await?;
-    }
-
-    // Update drawer ledger balance (Option A: drawer balance survives across sessions)
-    let delta = match body.movement_type {
-        CashMovementType::PayIn => body.amount_cents,
-        CashMovementType::PayOutExpense
-        | CashMovementType::PayOutSupplier
-        | CashMovementType::OwnerWithdrawal
-        | CashMovementType::CashDrop => -body.amount_cents,
-        CashMovementType::DrawerOpenNoSale => 0,
-    };
-
-    if delta != 0 {
-        drawer::update_drawer_balance(db, &body.terminal_id, delta).await?;
-    }
-
-    Ok(inserted.into_cash_movement())
+        one_movement(db, inserted).await
+    })
+    .await
 }
 
+/// How a movement changes the cash in the drawer: added cash raises it, every payout and drop lowers it.
+fn drawer_delta(movement_type: CashMovementType, amount_cents: i64) -> i64 {
+    use CashMovementType as T;
+    match movement_type {
+        T::AddCash => amount_cents,
+        T::PettyExpense | T::RentAndBills | T::StaffPayment | T::SupplierPayment | T::OwnerWithdrawal | T::CashDrop => {
+            -amount_cents
+        }
+        T::NoSale => 0,
+    }
+}
+
+/// `Rs. 1,234.50`, for messages that tell a person how much is in the drawer.
+fn money(cents: i64) -> String {
+    let sign = if cents < 0 { "-" } else { "" };
+    let whole = (cents.abs() / 100).to_string();
+    let mut grouped = String::new();
+    for (i, digit) in whole.chars().enumerate() {
+        if i > 0 && (whole.len() - i).is_multiple_of(3) {
+            grouped.push(',');
+        }
+        grouped.push(digit);
+    }
+    format!("{sign}Rs. {grouped}.{:02}", cents.abs() % 100)
+}
+
+/// How long the person who recorded a movement can undo it without a manager.
+pub const UNDO_WINDOW_SECONDS: i64 = 120;
+
+/// Cancels a movement by recording its opposite; the original row is never edited or deleted. The person
+/// who recorded it can undo it inside [`UNDO_WINDOW_SECONDS`]; after that only someone allowed to reverse
+/// (`can_reverse`) can, and must say why. Reversing twice is refused: the reversal's key is derived from
+/// the original's, so two devices undoing the same movement offline are the same row.
+pub async fn reverse_movement(
+    db: &Db,
+    key: &str,
+    user_id: String,
+    user_name: String,
+    can_reverse: bool,
+    body: ReverseCashMovementRequest,
+    device_id: Option<String>,
+) -> AppResult<CashMovement> {
+    tracked("cash_movement.reversed", async move {
+        let original = movements::find_cash_movement_by_key(db, key)
+            .await?
+            .ok_or_else(|| AppError::not_found_with_code("Cash movement not found", codes::CASH_MOVEMENT_NOT_FOUND))?;
+        if original.reverses_key.is_some() || original.movement_type == CashMovementType::NoSale {
+            return Err(AppError::validation_with_code(
+                "This entry cannot be reversed.",
+                codes::MOVEMENT_NOT_REVERSIBLE,
+            ));
+        }
+        let reversal_key = format!("{key}_rev");
+        if movements::find_cash_movement_by_key(db, &reversal_key).await?.is_some() {
+            return Err(AppError::conflict(
+                codes::MOVEMENT_ALREADY_REVERSED,
+                "This movement was already reversed.",
+            ));
+        }
+        if let Some(session_key) = &original.session_key {
+            let session = sessions::find_session_by_key(db, session_key)
+                .await?
+                .ok_or_else(|| AppError::not_found_with_code("Register session not found", codes::SESSION_NOT_FOUND))?;
+            if !matches!(session.status, SessionStatus::Open | SessionStatus::Reopened) {
+                return Err(AppError::validation_with_code(
+                    "That shift is closed. Reopen it first to reverse this movement.",
+                    codes::NO_ACTIVE_SESSION,
+                ));
+            }
+        }
+
+        let age = chrono::Utc::now() - original.created_at.to_chrono();
+        let own_undo = original.recorded_by_user_id == user_id && age.num_seconds() <= UNDO_WINDOW_SECONDS;
+        let reason = clean_text("The reason", body.reason.as_deref(), NOTE_MAX)?;
+        if !own_undo {
+            if !can_reverse {
+                return Err(AppError::forbidden_with_code(
+                    "Only a manager can reverse this now.",
+                    codes::PERMISSION_DENIED,
+                ));
+            }
+            if reason.is_none() {
+                return Err(AppError::validation("Please say why this is being reversed."));
+            }
+        }
+
+        let reservation = sequences::service::reserve_sequence(
+            db,
+            "cash_movement".to_string(),
+            ReserveSequenceRequest { block_size: Some(1), device_id },
+        )
+        .await?;
+        let movement_number = format!(
+            "{}{:0width$}",
+            reservation.prefix,
+            reservation.start,
+            width = reservation.padding
+        );
+        let now = BsonDateTime::now();
+        let reversal = movements::insert_cash_movement(
+            db,
+            CashMovementDocument {
+                id: None,
+                key: reversal_key,
+                movement_number,
+                movement_type: original.movement_type,
+                // The opposite way round, so totals by direction cancel out.
+                direction: match original.direction {
+                    CashDirection::Out => CashDirection::In,
+                    CashDirection::In => CashDirection::Out,
+                    CashDirection::Neutral => CashDirection::Neutral,
+                },
+                amount_cents: original.amount_cents,
+                session_key: original.session_key.clone(),
+                terminal_id: original.terminal_id.clone(),
+                category_key: original.category_key.clone(),
+                custom_label: original.custom_label.clone(),
+                payee_key: original.payee_key.clone(),
+                payee_name: original.payee_name.clone(),
+                period_start: None,
+                period_end: None,
+                reference_no: None,
+                note: Some(format!("Reversal of {}", original.movement_number)),
+                recorded_by_user_id: user_id,
+                recorded_by_name_snapshot: user_name,
+                approved_by_user_id: None,
+                approved_by_name_snapshot: None,
+                approval_reason: reason,
+                reverses_key: Some(original.key.clone()),
+                recorded_late: false,
+                original_variance_session_key: None,
+                version: 1,
+                created_at: now,
+                updated_at: now,
+            },
+        )
+        .await?;
+
+        if let Some(session_key) = &original.session_key {
+            sessions::increment_session_movements(db, session_key, original.movement_type, -original.amount_cents)
+                .await?;
+        }
+        let delta = -drawer_delta(original.movement_type, original.amount_cents);
+        if delta != 0 {
+            drawer::update_drawer_balance(db, &original.terminal_id, delta).await?;
+        }
+        one_movement(db, reversal).await
+    })
+    .await
+}
+
+/// One stored row as the API shape.
+async fn one_movement(db: &Db, doc: CashMovementDocument) -> AppResult<CashMovement> {
+    Ok(to_movements(db, vec![doc]).await?.remove(0))
+}
+
+/// Live category names for a batch of movement rows.
+pub(crate) async fn category_names(
+    db: &Db,
+    docs: &[CashMovementDocument],
+) -> AppResult<HashMap<String, String>> {
+    let mut keys: Vec<String> = docs.iter().map(|d| d.category_key.clone()).collect();
+    keys.sort_unstable();
+    keys.dedup();
+    cash_categories::service::display_names(db, &keys).await
+}
+
+/// Which of these movement keys have been reversed.
+pub(crate) async fn reversed_keys(db: &Db, keys: &[String]) -> AppResult<std::collections::HashSet<String>> {
+    Ok(movements::find_reversals_of(db, keys)
+        .await?
+        .into_iter()
+        .map(|(original, _)| original)
+        .collect())
+}
+
+/// Drawer payments that can be business costs (every outgoing kind but owner drawings), between
+/// two days, for the expense ledger to read. The ledger keeps only those whose category counts as a cost.
+pub(crate) async fn expense_movements(
+    db: &Db,
+    from: Option<&str>,
+    to: Option<&str>,
+) -> AppResult<Vec<CashMovementDocument>> {
+    movements::list_movements_of_types(
+        db,
+        &[
+            CashMovementType::PettyExpense,
+            CashMovementType::RentAndBills,
+            CashMovementType::StaffPayment,
+            CashMovementType::SupplierPayment,
+        ],
+        from,
+        to,
+    )
+    .await
+}
+
+/// Converts stored rows to the API shape: the live category name, and the reversal of each if one exists.
+pub(crate) async fn to_movements(db: &Db, docs: Vec<CashMovementDocument>) -> AppResult<Vec<CashMovement>> {
+    let names = category_names(db, &docs).await?;
+    let keys: Vec<String> = docs.iter().map(|d| d.key.clone()).collect();
+    let reversals: HashMap<String, String> =
+        movements::find_reversals_of(db, &keys).await?.into_iter().collect();
+    Ok(docs
+        .into_iter()
+        .map(|doc| {
+            let name = names
+                .get(&doc.category_key)
+                .cloned()
+                .expect("category_names resolves the category of every row it is given");
+            let reversed_by = reversals.get(&doc.key).cloned();
+            doc.into_cash_movement(name, reversed_by)
+        })
+        .collect())
+}
+
+/// A page of movements, newest first. Filtering by a category includes everything merged into it.
 pub async fn list_movements(
     db: &Db,
-    query: CashMovementListQuery,
+    mut query: CashMovementListQuery,
 ) -> AppResult<CashMovementListResponse> {
     let page = query.page.unwrap_or(1).max(1);
     let limit = query.limit.unwrap_or(50).min(200);
+    if let Some(key) = query.category_key.take() {
+        query.category_keys = Some(cash_categories::service::keys_including_merged(db, &key).await?);
+    }
     let (docs, total) = movements::list_cash_movements(db, &query).await?;
     let total_pages = total.div_ceil(limit);
 
     Ok(CashMovementListResponse {
-        movements: docs.into_iter().map(|d| d.into_cash_movement()).collect(),
+        movements: to_movements(db, docs).await?,
         total,
         page,
         limit,
@@ -172,5 +582,5 @@ pub async fn get_movement(db: &Db, key: &str) -> AppResult<CashMovement> {
     let doc = movements::find_cash_movement_by_key(db, key)
         .await?
         .ok_or_else(|| AppError::not_found_with_code("Cash movement not found", codes::CASH_MOVEMENT_NOT_FOUND))?;
-    Ok(doc.into_cash_movement())
+    one_movement(db, doc).await
 }

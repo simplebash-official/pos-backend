@@ -222,6 +222,62 @@ pub fn index_specs(multi_tenant: bool) -> Vec<IndexSpec> {
         false,
     );
 
+    // Drawer categories and the payee directory (`modules::cash_categories`,
+    // `modules::payees`): name lookups for the picker and the duplicate check, and the
+    // per-category / per-payee movement counts that rank them.
+    specs.add(
+        "cash_categories",
+        "cash_categories_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    specs.add(
+        "cash_categories",
+        "cash_categories_type_name",
+        doc! { "movement_type": 1, "normalized_name": 1 },
+        false,
+    );
+    specs.add(
+        "payees",
+        "payees_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    specs.add(
+        "payees",
+        "payees_type_name",
+        doc! { "payee_type": 1, "normalized_name": 1 },
+        false,
+    );
+    // The expense ledger (`modules::expenses`): payments are read per expense, and the list
+    // is read by date.
+    specs.add("expenses", "expenses_key_unique", doc! { "key": 1 }, true);
+    specs.add(
+        "recurring_expenses",
+        "recurring_expenses_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    specs.add("expenses", "expenses_date", doc! { "expense_date": 1 }, false);
+    specs.add(
+        "expense_payments",
+        "expense_payments_expense_key",
+        doc! { "expense_key": 1 },
+        false,
+    );
+    specs.add(
+        "cash_movements",
+        "cash_movements_category_key",
+        doc! { "category_key": 1 },
+        false,
+    );
+    specs.add(
+        "cash_movements",
+        "cash_movements_payee_key",
+        doc! { "payee_key": 1 },
+        false,
+    );
+
     specs.add(
         "shop_profiles",
         "shop_profiles_key_unique",
@@ -398,8 +454,10 @@ mod tests {
         // 17 sync + 4 created_at + 2 invoice analytics + 3 reminders + products_key
         // + idempotency unique/ttl + serial unique + serial status
         // + stock_batches product_key + shop_profiles + document_template_settings
-        // + label_templates + label_print_jobs key/created_at + invoices session_key.
-        assert_eq!(specs.len(), 38);
+        // + label_templates + label_print_jobs key/created_at + invoices session_key
+        // + cash_categories key/type-name + payees key/type-name + cash_movements category/payee
+        // + expenses key/date + expense_payments expense_key.
+        assert_eq!(specs.len(), 48);
         assert!(specs.iter().all(|s| s.keys.get(TENANT_FIELD).is_none()));
         assert!(names(&specs).contains(&"products.sync_updated_at_key".to_string()));
         assert!(names(&specs).contains(&"idempotency_keys.idempotency_ttl".to_string()));
@@ -414,6 +472,10 @@ mod tests {
             [
                 "idempotency_key_user_unique",
                 "product_serials_serial_number_unique",
+                "cash_categories_key_unique",
+                "payees_key_unique",
+                "expenses_key_unique",
+                "recurring_expenses_key_unique",
                 "shop_profiles_key_unique",
                 "document_template_settings_key_unique",
                 "label_templates_key_unique",

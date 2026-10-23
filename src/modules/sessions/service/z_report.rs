@@ -2,6 +2,8 @@
 
 use chrono::Utc;
 
+use super::movement;
+
 use crate::{
     clients::db::Db,
     core::{
@@ -97,10 +99,7 @@ pub async fn generate_z_report(db: &Db, session_key: &str) -> AppResult<ZReportR
         discount_cents: billing_summary.discount_cents,
         total_invoices_count: billing_summary.total_invoices_count,
         payment_methods,
-        cash_movements: session_movements
-            .into_iter()
-            .map(|m| m.into_cash_movement())
-            .collect(),
+        cash_movements: movement::to_movements(db, session_movements).await?,
         cash_reconciliation,
         generated_at: Utc::now(),
     })

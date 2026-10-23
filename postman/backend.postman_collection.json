@@ -1382,6 +1382,823 @@
       ]
     },
     {
+      "name": "Cash Categories",
+      "item": [
+        {
+          "name": "List Cash Categories",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/cash-categories?movementType=petty_expense&includeHidden=false&search=tea&needsReview=false",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "cash-categories"
+              ],
+              "query": [
+                {
+                  "key": "movementType",
+                  "value": "petty_expense",
+                  "description": "One of: petty_expense | rent_and_bills | staff_payment | supplier_payment | owner_withdrawal | add_cash | cash_drop | no_sale",
+                  "disabled": true
+                },
+                {
+                  "key": "includeHidden",
+                  "value": "false",
+                  "description": "true also returns hidden categories (management screen)",
+                  "disabled": true
+                },
+                {
+                  "key": "search",
+                  "value": "tea",
+                  "description": "Matches name or Sinhala name, ignoring case and spacing",
+                  "disabled": true
+                },
+                {
+                  "key": "needsReview",
+                  "value": "false",
+                  "description": "true returns only categories a cashier made that nobody has reviewed yet",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Categories a drawer cash movement can be filed under, best first: pinned, then most used by this shop, then the shop's own order. Merged-away categories never appear. `usageCount` is counted at read time (merged categories add to their target).\n\n**Requires `cash_movements:view`** (all roles). `includeHidden=true` and `needsReview=true` also need `cash_categories:manage` (Admin and Manager)."
+          },
+          "response": []
+        },
+        {
+          "name": "Find Similar Cash Categories",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/cash-categories/similar?movementType=petty_expense&name=Fule",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "cash-categories",
+                "similar"
+              ],
+              "query": [
+                {
+                  "key": "movementType",
+                  "value": "petty_expense",
+                  "description": "One of: petty_expense | rent_and_bills | staff_payment | supplier_payment | owner_withdrawal | add_cash | cash_drop | no_sale"
+                },
+                {
+                  "key": "name",
+                  "value": "Fule",
+                  "description": "The name being typed"
+                }
+              ]
+            },
+            "description": "Existing categories whose name is close to a typed one (typos or containment), so the cashier can pick one instead of adding a near-duplicate. At most 3.\n\n**Requires `cash_categories:create`** (all roles)."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Cash Category",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/cash-categories",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "cash-categories"
+              ]
+            },
+            "description": "Add a category for one kind of payment. Names are 2 to 40 letters and unique per kind of payment ignoring case and spacing (409 `CASH_CATEGORY_NAME_TAKEN`, or `CASH_CATEGORY_HIDDEN` when the name belongs to a hidden category). A cashier can only add to petty_expense, add_cash, cash_drop and no_sale (403 `CASH_CATEGORY_TYPE_RESTRICTED` otherwise) and the category waits for review; a manager can add to any kind and choose `reportGroup`.\n\n**Requires `cash_categories:create`** (all roles).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"movementType\": \"petty_expense\",\n  \"name\": \"Generator diesel\",\n  \"nameSi\": null,\n  \"reportGroup\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "    const data = pm.response.json().data;",
+                  "    pm.environment.set(\"cashCategoryKey\", data.key);",
+                  "    console.log(`cashCategoryKey (${data.key}) saved`);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Cash Category",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/cash-categories/{{cashCategoryKey}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "cash-categories",
+                "{{cashCategoryKey}}"
+              ]
+            },
+            "description": "Rename, hide (`active: false`), pin, reorder, set the receipt rule or an approval limit (`requiresApprovalOverCents`, 0 clears it), set the report group, or approve a cashier-made category (`approve: true`). Absent fields are unchanged. The built-in Other category cannot be renamed or hidden.\n\n**Requires `cash_categories:manage`** (Admin and Manager).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Generator fuel\",\n  \"approve\": true,\n  \"requiresApprovalOverCents\": 500000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Merge Cash Category",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/cash-categories/{{cashCategoryKey}}/merge",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "cash-categories",
+                "{{cashCategoryKey}}",
+                "merge"
+              ]
+            },
+            "description": "Merge a duplicate into another category of the same kind of payment. Movements keep their key (they are never edited); the merged category redirects readers to the target, so history and reports follow. Built-in categories cannot be merged away.\n\n**Requires `cash_categories:manage`** (Admin and Manager).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"targetKey\": \"ccat_petty_expense_0123456789ab\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Cash Movements",
+      "item": [
+        {
+          "name": "Record Cash Movement",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/sessions/movements",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "sessions",
+                "movements"
+              ]
+            },
+            "description": "Record one drawer cash event. `movementType` is one of petty_expense | rent_and_bills | staff_payment | supplier_payment | owner_withdrawal | add_cash | cash_drop | no_sale. The category must belong to that kind of payment and be visible; `customLabel` is only for the type's Other category. Each type asks for its own fields and refuses the rest: rent_and_bills needs a vendor `payeeKey` and `periodStart`/`periodEnd` (YYYY-MM-DD); staff_payment a staff `payeeKey`; supplier_payment a supplier `payeeKey`; owner_withdrawal a `payeeName`; no_sale has `amountCents` 0 and no payee. A name typed on a petty_expense is saved to the payee list. A manager or owner `managerPin` is required for owner_withdrawal, staff_payment and any payout above the category's `requiresApprovalOverCents`. `sessionKey` may be omitted only for cash taken out between shifts.\n\n**Requires `cash_movements:create`**; rent_and_bills, staff_payment and supplier_payment also need `cash_movements:create:managed` (Admin and Manager).\n\nA payout (any outgoing kind or a cash drop) bigger than the cash the drawer holds (the open shift's expected cash, or the drawer's running balance between shifts) is refused with 409 `DRAWER_CASH_EXCEEDED` unless a manager or owner `managerPin` and an `overrideReason` are sent; both are kept on the entry (`approvedBy…`, `approvalReason`).\n\nA rent_and_bills payment for a month that is already paid (a regular bill paid in full, or anything recorded for that category and payee when there is no regular bill) is refused with 409 `PERIOD_ALREADY_PAID` unless `confirmDuplicate` is true.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"movementType\": \"petty_expense\",\n  \"amountCents\": 1500,\n  \"sessionKey\": \"{{sessionKey}}\",\n  \"terminalId\": \"term_front\",\n  \"categoryKey\": \"{{cashCategoryKey}}\",\n  \"customLabel\": null,\n  \"payeeKey\": null,\n  \"payeeName\": \"Corner shop\",\n  \"periodStart\": null,\n  \"periodEnd\": null,\n  \"referenceNo\": null,\n  \"note\": \"Biscuits\",\n  \"managerPin\": null,\n  \"overrideReason\": null,\n  \"confirmDuplicate\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "    const data = pm.response.json().data;",
+                  "    pm.environment.set(\"cashMovementKey\", data.key);",
+                  "    console.log(`cashMovementKey (${data.key}) saved`);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reverse Cash Movement",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Entered the wrong amount\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/sessions/movements/{{cashMovementKey}}/reverse",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "sessions",
+                "movements",
+                "{{cashMovementKey}}",
+                "reverse"
+              ]
+            },
+            "description": "Cancel a movement by recording its opposite; the original is never edited or deleted. Its `undoUntil` says how long the person who recorded it can undo it without a manager (120 seconds); after that, or for someone else's movement, only a Manager or Admin (`cash_movements:reverse`) can, and `reason` is required. The drawer and the shift's totals move back. A movement can be reversed once (409 `MOVEMENT_ALREADY_REVERSED`); a reversal or a no-sale open cannot be reversed (400 `MOVEMENT_NOT_REVERSIBLE`); the shift must be open. A reversed drawer payment stops counting as an expense.\n\n**Requires `cash_movements:create`.**"
+          },
+          "response": []
+        },
+        {
+          "name": "List Cash Movements",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/sessions/movements?sessionKey={{sessionKey}}&terminalId=term_front&movementType=petty_expense&categoryKey={{cashCategoryKey}}&payeeKey={{payeeKey}}&recordedLate=false&page=1&limit=50",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "sessions",
+                "movements"
+              ],
+              "query": [
+                {
+                  "key": "sessionKey",
+                  "value": "{{sessionKey}}",
+                  "description": "Only this shift's movements",
+                  "disabled": true
+                },
+                {
+                  "key": "terminalId",
+                  "value": "term_front",
+                  "description": "Only this register",
+                  "disabled": true
+                },
+                {
+                  "key": "movementType",
+                  "value": "petty_expense",
+                  "description": "One of: petty_expense | rent_and_bills | staff_payment | supplier_payment | owner_withdrawal | add_cash | cash_drop | no_sale",
+                  "disabled": true
+                },
+                {
+                  "key": "categoryKey",
+                  "value": "{{cashCategoryKey}}",
+                  "description": "Category and anything merged into it",
+                  "disabled": true
+                },
+                {
+                  "key": "payeeKey",
+                  "value": "{{payeeKey}}",
+                  "description": "Only payments to this payee",
+                  "disabled": true
+                },
+                {
+                  "key": "recordedLate",
+                  "value": "false",
+                  "description": "true returns only late-recorded movements",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "1-based page number"
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "Page size (default 50, max 200)"
+                }
+              ]
+            },
+            "description": "Cash movements, newest first. Filtering by `categoryKey` includes everything merged into that category. Every row carries the category's live name.\n\n**Requires `cash_movements:view`.**"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Cash Movement",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/sessions/movements/{{cashMovementKey}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "sessions",
+                "movements",
+                "{{cashMovementKey}}"
+              ]
+            },
+            "description": "One cash movement by key.\n\n**Requires `cash_movements:view`.**"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Payees",
+      "item": [
+        {
+          "name": "List Payees",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/payees?payeeType=vendor&search=landlord",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payees"
+              ],
+              "query": [
+                {
+                  "key": "payeeType",
+                  "value": "vendor",
+                  "description": "One of: supplier | staff | vendor | other",
+                  "disabled": true
+                },
+                {
+                  "key": "search",
+                  "value": "landlord",
+                  "description": "Matches name or phone, ignoring case and spacing",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "The shared payee directory: suppliers and active staff (read live from their own modules) plus saved vendors and free-typed payees, most used first.\n\n**Requires `cash_movements:view`** (all roles)."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Payee",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/payees",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payees"
+              ]
+            },
+            "description": "Add a landlord, utility company or other payee. Suppliers and staff are added on their own pages (400). The same name twice is 409 `PAYEE_NAME_TAKEN`.\n\n**Requires `payees:manage`** (Admin and Manager).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payeeType\": \"vendor\",\n  \"name\": \"Mr. Landlord\",\n  \"phone\": \"0771234567\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "    const data = pm.response.json().data;",
+                  "    pm.environment.set(\"payeeKey\", data.key);",
+                  "    console.log(`payeeKey (${data.key}) saved`);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Expenses",
+      "item": [
+        {
+          "name": "List Expenses",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/expenses?search=water&categoryKey={{cashCategoryKey}}&payeeKey={{payeeKey}}&status=unpaid&source=ledger&from=2026-10-01&to=2026-10-31&page=1&limit=50",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "expenses"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "water",
+                  "description": "Matches number, category, payee, reference or note, ignoring case and spacing",
+                  "disabled": true
+                },
+                {
+                  "key": "categoryKey",
+                  "value": "{{cashCategoryKey}}",
+                  "description": "Category and anything merged into it",
+                  "disabled": true
+                },
+                {
+                  "key": "payeeKey",
+                  "value": "{{payeeKey}}",
+                  "description": "Only this payee",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "unpaid",
+                  "description": "One of: unpaid (anything still owed) | overdue | paid",
+                  "disabled": true
+                },
+                {
+                  "key": "source",
+                  "value": "ledger",
+                  "description": "One of: ledger | drawer",
+                  "disabled": true
+                },
+                {
+                  "key": "from",
+                  "value": "2026-10-01",
+                  "description": "First day, YYYY-MM-DD",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2026-10-31",
+                  "description": "Last day, YYYY-MM-DD",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "1-based page number"
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "Page size (default 50, max 200)"
+                }
+              ]
+            },
+            "description": "Every business cost, newest first: ledger expenses (bank, card, online or still to pay) and payments made from the drawer, which are read from the cash movements and never entered twice. Drawer payments only count when their category is a cost (a loan instalment or owner drawings are not).\n\n**Requires `expenses:view`** (Admin and Manager; a cashier gets 403 `PERMISSION_DENIED`)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Expense Stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/expenses/stats",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "expenses",
+                "stats"
+              ]
+            },
+            "description": "This month's costs (and how much of it was paid from the drawer) and what is still owed, with the overdue part.\n\n**Requires `expenses:view`** (Admin and Manager; a cashier gets 403 `PERMISSION_DENIED`)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Expense",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/expenses/{{expenseKey}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "expenses",
+                "{{expenseKey}}"
+              ]
+            },
+            "description": "One ledger expense with its payments.\n\n**Requires `expenses:view`** (Admin and Manager; a cashier gets 403 `PERMISSION_DENIED`)."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Expense",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/expenses",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "expenses"
+              ]
+            },
+            "description": "Enter a cost paid from the bank, a card or online (`paidFrom` bank | card | online, paid in full on `expenseDate`) or a bill still to pay (`paidFrom: unpaid`, optional `dueDate`). Cash from the drawer is a cash movement, not an entry here (400). The category must count as a business cost. A typed `payeeName` is saved to the payee list.\n\n**Requires `expenses:manage`** (Admin and Manager).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"expenseDate\": \"2026-10-23\",\n  \"categoryKey\": \"{{cashCategoryKey}}\",\n  \"payeeKey\": null,\n  \"payeeName\": \"Ceylon Electricity Board\",\n  \"amountCents\": 1200000,\n  \"paidFrom\": \"unpaid\",\n  \"dueDate\": \"2026-11-10\",\n  \"referenceNo\": \"BILL-77\",\n  \"note\": \"October\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "    const data = pm.response.json().data;",
+                  "    pm.environment.set(\"expenseKey\", data.expense.key);",
+                  "    console.log(`expenseKey (${data.expense.key}) saved`);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Record Expense Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/expenses/{{expenseKey}}/payments",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "expenses",
+                "{{expenseKey}}",
+                "payments"
+              ]
+            },
+            "description": "Pay a bill, or part of it, from the bank, a card or online. Never more than is still owed (409 `EXPENSE_OVERPAID`). When it is paid in full it is no longer overdue.\n\n**Requires `expenses:manage`** (Admin and Manager).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amountCents\": 400000,\n  \"paidFrom\": \"bank\",\n  \"paidOn\": \"2026-10-24\",\n  \"referenceNo\": \"TXN-1\",\n  \"note\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Regular Bills",
+      "item": [
+        {
+          "name": "List Regular Bills",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/recurring-expenses?includeInactive=false",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "recurring-expenses"
+              ],
+              "query": [
+                {
+                  "key": "includeInactive",
+                  "value": "false",
+                  "description": "true also returns bills that were stopped",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Every regular bill with where it stands for the month that needs attention: the earlier of last month and this month that is not paid in full, else this month. `status` is `upcoming`, `due` (inside its reminder window or due today), `overdue` or `paid`; `payments` are the costs already recorded for that month from the drawer and the ledger (a reversed drawer payment does not count). Most urgent first.\n\n**Requires `expenses:view`** (Admin and Manager)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Period Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/recurring-expenses/period-status?categoryKey={{cashCategoryKey}}&payeeKey={{payeeKey}}&period=2026-10",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "recurring-expenses",
+                "period-status"
+              ],
+              "query": [
+                {
+                  "key": "categoryKey",
+                  "value": "{{cashCategoryKey}}",
+                  "description": "Category key"
+                },
+                {
+                  "key": "payeeKey",
+                  "value": "{{payeeKey}}",
+                  "description": "Payee key; leave out to match any payee",
+                  "disabled": true
+                },
+                {
+                  "key": "period",
+                  "value": "2026-10",
+                  "description": "Month, YYYY-MM"
+                }
+              ]
+            },
+            "description": "What is already recorded for a category (and payee) in one month, with the regular bill's usual amount when there is one. `alreadyPaid` is true when a regular bill is paid in full, or when anything is recorded and there is no regular bill. The cash form uses it for its \"already paid\" warning.\n\n**Requires `expenses:view`** (Admin and Manager)."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Regular Bill",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/recurring-expenses",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "recurring-expenses"
+              ]
+            },
+            "description": "Add a regular bill. The category must count as a business cost (400 otherwise). One bill per category and payee (409 `RECURRING_EXPENSE_EXISTS`). `dueDay` 1 to 31 (a shorter month uses its last day), `remindDaysBefore` 0 to 30, `paidFrom` one of drawer | bank | card | online.\n\n**Requires `expenses:manage`** (Admin and Manager).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"categoryKey\": \"{{cashCategoryKey}}\",\n  \"payeeKey\": \"{{payeeKey}}\",\n  \"amountCents\": 5000000,\n  \"dueDay\": 5,\n  \"remindDaysBefore\": 3,\n  \"paidFrom\": \"drawer\",\n  \"note\": \"Monthly shop rent\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "    const data = pm.response.json().data;",
+                  "    pm.environment.set(\"recurringExpenseKey\", data.key);",
+                  "    console.log(`recurringExpenseKey (${data.key}) saved`);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Regular Bill",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/recurring-expenses/{{recurringExpenseKey}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "recurring-expenses",
+                "{{recurringExpenseKey}}"
+              ]
+            },
+            "description": "Change the amount, due day, reminder days, usual account or note, or stop (`active: false`) or restart a regular bill. Absent fields are unchanged. The category and payee identify the bill and cannot be changed.\n\n**Requires `expenses:manage`** (Admin and Manager).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amountCents\": 5500000,\n  \"dueDay\": 7,\n  \"remindDaysBefore\": 5,\n  \"paidFrom\": \"bank\",\n  \"active\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "Inventory",
       "item": [
         {
@@ -5762,6 +6579,36 @@
     {
       "key": "labelJobKey",
       "value": "lpj_example",
+      "type": "string"
+    },
+    {
+      "key": "cashCategoryKey",
+      "value": "cashCategoryKey_example",
+      "type": "string"
+    },
+    {
+      "key": "payeeKey",
+      "value": "payeeKey_example",
+      "type": "string"
+    },
+    {
+      "key": "cashMovementKey",
+      "value": "cashMovementKey_example",
+      "type": "string"
+    },
+    {
+      "key": "sessionKey",
+      "value": "sessionKey_example",
+      "type": "string"
+    },
+    {
+      "key": "expenseKey",
+      "value": "exp_example",
+      "type": "string"
+    },
+    {
+      "key": "recurringExpenseKey",
+      "value": "rexp_example",
       "type": "string"
     }
   ]

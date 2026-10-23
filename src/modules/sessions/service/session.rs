@@ -2,6 +2,8 @@
 
 use mongodb::bson::DateTime as BsonDateTime;
 
+use super::movement;
+
 use crate::{
     clients::db::Db,
     core::{
@@ -19,7 +21,7 @@ use crate::{
         users::Role,
     },
     modules::{
-        sequences,
+        cash_categories, sequences,
         sessions::{
             model::{CashMovementDocument, DrawerStateDocument, RegisterSessionDocument},
             repository::{drawer, movements, sessions},
@@ -490,16 +492,24 @@ pub async fn convert_variance(
         key: generate_id(prefixes::CASH_MOVEMENT),
         movement_number,
         movement_type: CashMovementType::OwnerWithdrawal,
+        direction: CashMovementType::OwnerWithdrawal.direction(),
         amount_cents: shortage_amount,
         session_key: Some(session.key.clone()),
         terminal_id: session.terminal_id.clone(),
-        reason: format!("Late-recorded owner withdrawal from variance: {}", body.reason),
-        recipient_or_source: Some(body.recipient),
-        supplier_key: None,
+        category_key: cash_categories::service::other_category_key(CashMovementType::OwnerWithdrawal),
+        custom_label: None,
+        payee_key: None,
+        payee_name: Some(body.recipient),
+        period_start: None,
+        period_end: None,
+        reference_no: None,
+        note: Some(format!("Late-recorded owner withdrawal from variance: {}", body.reason)),
         recorded_by_user_id,
         recorded_by_name_snapshot: recorded_by_name,
         approved_by_user_id: Some(approver.id),
         approved_by_name_snapshot: Some(approver.name),
+        approval_reason: None,
+        reverses_key: None,
         recorded_late: true,
         original_variance_session_key: Some(session.key.clone()),
         version: 1,
@@ -516,7 +526,7 @@ pub async fn convert_variance(
     session.has_late_movements = true;
     sessions::update_session(db, &session).await?;
 
-    Ok(inserted.into_cash_movement())
+    Ok(movement::to_movements(db, vec![inserted]).await?.remove(0))
 }
 
 /// If a session's `cashier_name_snapshot` is empty (e.g. from an older session opened

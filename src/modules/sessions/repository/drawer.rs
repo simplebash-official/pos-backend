@@ -105,6 +105,8 @@ pub async fn update_drawer_balance(
                     doc! {
                         "$inc": { "current_balance_cents": delta_cents },
                         "$set": { "updated_at": now },
+                        // A first-ever movement on a terminal creates the row; it must be a complete drawer state.
+                        "$setOnInsert": { "last_closing_float_cents": 0_i64 },
                     },
                 )
                 .upsert(true)

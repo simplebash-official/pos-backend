@@ -59,6 +59,16 @@ async fn main() {
         .await;
     }
 
+    // The drawer's starting categories are required reference data, not demo data, so they
+    // are ensured on every start (idempotent). A multi-tenant cloud has no shop in scope here:
+    // each shop gets them when it is provisioned.
+    if config.tenant_mode != simplebash_pos_backend::core::config::TenantMode::Multi
+        && let Err(err) = simplebash_pos_backend::modules::cash_categories::service::ensure_system_categories(&db).await
+    {
+        tracing::error!(%err, "failed to ensure the built-in cash categories");
+        std::process::exit(1);
+    }
+
     // A publicly reachable instance must never come up with the well-known
     // default admin login, so auto-seeding needs an operator-chosen password there.
     // Loopback (desktop / local dev) keeps the convenience default.

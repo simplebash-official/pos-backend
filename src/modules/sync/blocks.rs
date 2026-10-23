@@ -28,6 +28,7 @@ pub(crate) fn canonical_name(name: &str) -> String {
         "quotation" | "quotations" => "quotation",
         "session" | "sessions" | "registersession" | "registersessions" => "session",
         "cashmovement" | "cashmovements" => "cash_movement",
+        "expense" | "expenses" => "expense",
         other => return other.to_string(),
     }
     .to_string()

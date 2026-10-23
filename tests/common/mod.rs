@@ -468,6 +468,10 @@ async fn spawn_mongo_app(db_name: String, document_server_url: String) -> TestAp
         config.document_server_api_key.clone(),
     ));
     let db_handle = simplebash_pos_backend::clients::db::Db::from_mongo(db.clone());
+    // Like `main`, a single-shop app starts with the built-in cash categories.
+    simplebash_pos_backend::modules::cash_categories::service::ensure_system_categories(&db_handle)
+        .await
+        .expect("failed to ensure the built-in cash categories");
     let reports_engine = Arc::new(
         simplebash_pos_backend::modules::reports::engine::AnalyticsEngine::new(db_handle.clone()),
     );
@@ -507,6 +511,9 @@ pub async fn spawn_app_sqlite_with_document_server_url(document_server_url: Stri
     let db_handle = clients::db::connect_from_config(&config)
         .await
         .expect("failed to connect to test SQLite database");
+    simplebash_pos_backend::modules::cash_categories::service::ensure_system_categories(&db_handle)
+        .await
+        .expect("failed to ensure the built-in cash categories");
 
     config.document_server_url = document_server_url;
     let config = Arc::new(config);

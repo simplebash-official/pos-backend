@@ -7,9 +7,11 @@ use serde::{Deserialize, Serialize};
 use crate::{
     core::{constants::prefixes, id::generate_id},
     domain::sessions::{
-        CashMovement, CashMovementType, DrawerState, RegisterSession, SessionStatus,
+        CashDirection, CashMovement, CashMovementType, DrawerState, RegisterSession, SessionStatus,
     },
 };
+
+use crate::modules::sessions::service::UNDO_WINDOW_SECONDS;
 
 fn default_version() -> i64 {
     1
@@ -188,21 +190,36 @@ pub struct CashMovementDocument {
     pub key: String,
     pub movement_number: String,
     pub movement_type: CashMovementType,
+    pub direction: CashDirection,
     pub amount_cents: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_key: Option<String>,
     pub terminal_id: String,
-    pub reason: String,
+    pub category_key: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub recipient_or_source: Option<String>,
+    pub custom_label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub supplier_key: Option<String>,
+    pub payee_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payee_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub period_start: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub period_end: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reference_no: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
     pub recorded_by_user_id: String,
     pub recorded_by_name_snapshot: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub approved_by_user_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub approved_by_name_snapshot: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reverses_key: Option<String>,
     #[serde(default)]
     pub recorded_late: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -216,7 +233,9 @@ pub struct CashMovementDocument {
 }
 
 impl CashMovementDocument {
-    pub fn into_cash_movement(self) -> CashMovement {
+    /// `category_name` is the category's live name, resolved by the caller, so a rename shows on old rows;
+    /// `reversed_by_key` is the reversal of this row, if one exists.
+    pub fn into_cash_movement(self, category_name: String, reversed_by_key: Option<String>) -> CashMovement {
         let key = if self.key.is_empty() {
             generate_id(prefixes::CASH_MOVEMENT)
         } else {
@@ -230,16 +249,30 @@ impl CashMovementDocument {
             key,
             movement_number: self.movement_number,
             movement_type: self.movement_type,
+            direction: self.direction,
             amount_cents: self.amount_cents,
             session_key: self.session_key,
             terminal_id: self.terminal_id,
-            reason: self.reason,
-            recipient_or_source: self.recipient_or_source,
-            supplier_key: self.supplier_key,
+            category_key: self.category_key,
+            category_name,
+            custom_label: self.custom_label,
+            payee_key: self.payee_key,
+            payee_name: self.payee_name,
+            period_start: self.period_start,
+            period_end: self.period_end,
+            reference_no: self.reference_no,
+            note: self.note,
             recorded_by_user_id: self.recorded_by_user_id,
             recorded_by_name_snapshot: self.recorded_by_name_snapshot,
             approved_by_user_id: self.approved_by_user_id,
             approved_by_name_snapshot: self.approved_by_name_snapshot,
+            approval_reason: self.approval_reason,
+            undo_until: (self.reverses_key.is_none()
+                && reversed_by_key.is_none()
+                && self.movement_type != CashMovementType::NoSale)
+                .then(|| self.created_at.to_chrono() + chrono::Duration::seconds(UNDO_WINDOW_SECONDS)),
+            reverses_key: self.reverses_key,
+            reversed_by_key,
             recorded_late: self.recorded_late,
             original_variance_session_key: self.original_variance_session_key,
             version: self.version,
