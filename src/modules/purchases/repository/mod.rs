@@ -111,7 +111,6 @@ pub(crate) async fn insert_purchase(
 }
 
 /// Sorted `date` descending — "newest first" per the frontend contract.
-#[allow(dead_code)]
 pub(crate) async fn list_purchases_by_supplier(
     db: &Db,
     supplier_key: &str,

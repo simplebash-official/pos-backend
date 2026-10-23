@@ -42,6 +42,14 @@ pub const EXPENSES_MANAGE: &str = "expenses:manage";
 pub const ACCOUNTS_VIEW: &str = "accounts:view";
 /// Setting the opening balance of the bank, card and online accounts. Admin only: it moves what the shop believes it holds.
 pub const ACCOUNTS_MANAGE: &str = "accounts:manage";
+/// Reading what suppliers are owed and what staff still owe on advances. Manager and Admin.
+pub const BALANCES_VIEW: &str = "balances:view";
+/// Setting where a supplier balance starts and recording an advance recovered from a staff member's pay. Manager and Admin.
+pub const BALANCES_MANAGE: &str = "balances:manage";
+/// Reading the receipt photos attached to a movement, expense or income. Everyone who can see the record.
+pub const ATTACHMENTS_VIEW: &str = "attachments:view";
+/// Attaching a receipt photo to a movement, expense or income. Everyone who can record one.
+pub const ATTACHMENTS_CREATE: &str = "attachments:create";
 pub const INCOME_VIEW: &str = "income:view";
 /// Entering money received into the bank, a card or online. Manager and Admin.
 pub const INCOME_MANAGE: &str = "income:manage";

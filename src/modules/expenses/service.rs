@@ -217,6 +217,36 @@ pub(crate) async fn period_payments(
         .collect())
 }
 
+/// One ledger payment, as the balances need it.
+pub(crate) struct LedgerPayout {
+    pub payee_key: Option<String>,
+    pub category_key: String,
+    /// `YYYY-MM-DD` the money left.
+    pub day: String,
+    pub number: String,
+    pub amount_cents: i64,
+}
+
+/// Every payment made against a ledger expense (bank, card or online), with who it was for and what for.
+pub(crate) async fn ledger_payouts(db: &Db) -> AppResult<Vec<LedgerPayout>> {
+    let expenses = repository::list_expenses(db, None, None).await?;
+    let by_key: HashMap<&str, &ExpenseDocument> = expenses.iter().map(|e| (e.key.as_str(), e)).collect();
+    Ok(repository::list_all_payments(db)
+        .await?
+        .iter()
+        .filter_map(|p| {
+            let e = by_key.get(p.expense_key.as_str())?;
+            Some(LedgerPayout {
+                payee_key: e.payee_key.clone(),
+                category_key: e.category_key.clone(),
+                day: p.paid_on.clone(),
+                number: e.expense_number.clone(),
+                amount_cents: p.amount_cents,
+            })
+        })
+        .collect())
+}
+
 /// What was paid out of the bank, a card or online on or after `since` (`YYYY-MM-DD`), as `(account, cents)`
 /// per payment. Drawer payments are cash movements and not counted here.
 pub(crate) async fn account_payments_since(db: &Db, since: &str) -> AppResult<Vec<(PaidFrom, i64)>> {

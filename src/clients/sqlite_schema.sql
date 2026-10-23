@@ -917,6 +917,65 @@ CREATE TABLE IF NOT EXISTS account_openings (
 
 CREATE INDEX IF NOT EXISTS idx_account_openings_sync ON account_openings(updated_at, key);
 
+-- Receipt photos attached to a cash movement, expense or income. The image is kept as base64 text
+-- (small: the app shrinks it first) so it syncs like any other row. Append-only.
+CREATE TABLE IF NOT EXISTS attachments (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    owner_kind TEXT NOT NULL,
+    owner_key TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    data_base64 TEXT NOT NULL,
+    uploaded_by_user_id TEXT NOT NULL,
+    uploaded_by_name_snapshot TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by_device TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_attachments_owner ON attachments(owner_kind, owner_key);
+CREATE INDEX IF NOT EXISTS idx_attachments_sync ON attachments(updated_at, key);
+
+-- Where a supplier balance starts (what the shop owed on a day) and, for staff, any advance owed before
+-- the records began. One row per supplier or employee (`bopen_<key>`); balances are never stored.
+CREATE TABLE IF NOT EXISTS balance_openings (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    subject_kind TEXT NOT NULL,
+    subject_key TEXT NOT NULL,
+    opening_balance_cents INTEGER NOT NULL,
+    as_of_date TEXT NOT NULL,
+    set_by_name_snapshot TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by_device TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_balance_openings_sync ON balance_openings(updated_at, key);
+
+-- Part of a staff advance taken back from the staff member's pay. Append-only.
+CREATE TABLE IF NOT EXISTS advance_recoveries (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    employee_key TEXT NOT NULL,
+    amount_cents INTEGER NOT NULL,
+    recovered_on TEXT NOT NULL,
+    note TEXT,
+    recorded_by_user_id TEXT NOT NULL,
+    recorded_by_name_snapshot TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by_device TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_advance_recoveries_employee_key ON advance_recoveries(employee_key);
+CREATE INDEX IF NOT EXISTS idx_advance_recoveries_sync ON advance_recoveries(updated_at, key);
+
 -- Regular bills (rent, electricity, subscriptions). The key is derived from the category and payee,
 -- so the same bill made on two devices is one row. Never deleted: `active = 0` stops reminders.
 CREATE TABLE IF NOT EXISTS recurring_expenses (

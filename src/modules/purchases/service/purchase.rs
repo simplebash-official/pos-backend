@@ -226,6 +226,15 @@ pub async fn list_purchases(db: &Db, query: PurchaseListQuery) -> AppResult<Purc
     })
 }
 
+/// What was bought from a supplier, as `(YYYY-MM-DD, total cost in cents)` per purchase.
+pub(crate) async fn costs_of_supplier(db: &Db, supplier_key: &str) -> AppResult<Vec<(String, i64)>> {
+    Ok(repository::list_purchases_by_supplier(db, supplier_key)
+        .await?
+        .into_iter()
+        .map(|p| (p.date.to_chrono().format("%Y-%m-%d").to_string(), p.quantity * p.unit_cost_cents))
+        .collect())
+}
+
 /// Used by `suppliers::service::delete_supplier`'s `SUPPLIER_HAS_PURCHASES`
 /// guard.
 pub(crate) async fn count_purchases_for_supplier(db: &Db, supplier_key: &str) -> AppResult<u64> {

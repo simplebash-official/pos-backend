@@ -252,6 +252,14 @@ pub fn build_router(state: AppState) -> Router {
             modules::expenses::routes::router(),
         )
         .nest(
+            &format!("/{}", mod_names::ATTACHMENTS),
+            modules::attachments::routes::router(),
+        )
+        .nest(
+            &format!("/{}", mod_names::BALANCES),
+            modules::balances::routes::router(),
+        )
+        .nest(
             &format!("/{}", mod_names::ACCOUNTS),
             modules::accounts::routes::router(),
         )

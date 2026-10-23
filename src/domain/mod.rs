@@ -2,8 +2,10 @@
 // Populated as domain modules (billing, repairs, inventory, ...) grow.
 
 pub mod accounts;
+pub mod attachments;
 pub mod auth;
 pub mod backup;
+pub mod balances;
 pub mod billing;
 pub mod cash_categories;
 pub mod customers;

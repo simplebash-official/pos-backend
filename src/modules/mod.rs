@@ -1,6 +1,8 @@
 pub mod accounts;
+pub mod attachments;
 pub mod auth;
 pub mod backup;
+pub mod balances;
 pub mod barcode;
 pub mod billing;
 pub mod cash_categories;

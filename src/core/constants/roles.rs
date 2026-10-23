@@ -30,6 +30,10 @@ const ADMIN_PERMISSIONS: &[&str] = &[
     perm::INCOME_MANAGE,
     perm::ACCOUNTS_VIEW,
     perm::ACCOUNTS_MANAGE,
+    perm::BALANCES_VIEW,
+    perm::BALANCES_MANAGE,
+    perm::ATTACHMENTS_VIEW,
+    perm::ATTACHMENTS_CREATE,
     perm::INVENTORY_READ,
     perm::INVENTORY_WRITE,
     perm::INVENTORY_ADMIN,
@@ -64,6 +68,10 @@ const MANAGER_PERMISSIONS: &[&str] = &[
     perm::INCOME_VIEW,
     perm::INCOME_MANAGE,
     perm::ACCOUNTS_VIEW,
+    perm::BALANCES_VIEW,
+    perm::BALANCES_MANAGE,
+    perm::ATTACHMENTS_VIEW,
+    perm::ATTACHMENTS_CREATE,
     perm::INVENTORY_READ,
     perm::INVENTORY_WRITE,
     perm::INVENTORY_ADMIN,
@@ -91,6 +99,8 @@ const STAFF_PERMISSIONS: &[&str] = &[
     perm::CASH_MOVEMENTS_VIEW,
     perm::CASH_MOVEMENTS_CREATE,
     perm::CASH_CATEGORIES_CREATE,
+    perm::ATTACHMENTS_VIEW,
+    perm::ATTACHMENTS_CREATE,
 ];
 
 /// The fixed permission set a role's JWT carries at login. Three flat

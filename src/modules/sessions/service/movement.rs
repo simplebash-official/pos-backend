@@ -547,6 +547,34 @@ pub(crate) async fn income_movements(
     movements::list_movements_of_types(db, &[CashMovementType::AddCash], from, to).await
 }
 
+/// One drawer payout, as the balances need it.
+pub(crate) struct Payout {
+    pub payee_key: Option<String>,
+    pub category_key: String,
+    /// `YYYY-MM-DD` (UTC) the cash was handed over.
+    pub day: String,
+    pub number: String,
+    pub amount_cents: i64,
+}
+
+/// Every drawer movement of one type, reversed ones and their reversals left out.
+pub(crate) async fn payouts_of_type(db: &Db, movement_type: CashMovementType) -> AppResult<Vec<Payout>> {
+    let movements = movements::list_movements_of_types(db, &[movement_type], None, None).await?;
+    let keys: Vec<String> = movements.iter().map(|m| m.key.clone()).collect();
+    let reversed = reversed_keys(db, &keys).await?;
+    Ok(movements
+        .into_iter()
+        .filter(|m| m.reverses_key.is_none() && !reversed.contains(&m.key))
+        .map(|m| Payout {
+            day: m.created_at.to_chrono().format("%Y-%m-%d").to_string(),
+            payee_key: m.payee_key,
+            category_key: m.category_key,
+            number: m.movement_number,
+            amount_cents: m.amount_cents,
+        })
+        .collect())
+}
+
 /// Cash the shop holds in all its drawers right now (the sum of every terminal's running balance).
 pub(crate) async fn drawer_cash_total(db: &Db) -> AppResult<i64> {
     Ok(drawer::list_drawer_states(db).await?.iter().map(|s| s.current_balance_cents).sum())

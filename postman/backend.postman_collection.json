@@ -2263,6 +2263,234 @@
       ]
     },
     {
+      "name": "Balances",
+      "item": [
+        {
+          "name": "List Supplier Balances",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/balances/suppliers",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "balances",
+                "suppliers"
+              ]
+            },
+            "description": "Every supplier with what the shop owes them. A supplier has no `balanceCents`, `openingBalanceCents`, `asOfDate`, `purchasedCents` or `paidCents` until an opening balance is set (stock may have been paid for before payments were tracked). After that: balance = opening + purchases (quantity x unit cost) - payments to that supplier (supplier payments from the drawer and ledger payments by bank, card or online), counting purchases and payments on and after `asOfDate`; negative when paid ahead. Biggest debt first.\n\n**Requires `balances:view`** (Admin and Manager; a cashier gets 403 `PERMISSION_DENIED`)."
+          },
+          "response": []
+        },
+        {
+          "name": "Set Balance Opening",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/balances/supplier/{{supplierKey}}/opening",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "balances",
+                "supplier",
+                "{{supplierKey}}",
+                "opening"
+              ]
+            },
+            "description": "Sets, or changes, what was owed on `asOfDate` (`YYYY-MM-DD`, today or earlier). `kind` is `supplier` (what the shop owed) or `staff` (what the staff member owed the shop before the records began; optional). 404 when the supplier or employee does not exist, 400 for an unknown kind or a future date.\n\n**Requires `balances:manage`** (Admin and Manager).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"openingBalanceCents\": 100000,\n  \"asOfDate\": \"2026-10-01\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List Staff Advances",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/balances/staff",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "balances",
+                "staff"
+              ]
+            },
+            "description": "Staff who have been given an advance or staff loan (staff-payment categories \"Advance\" and \"Staff loan\", paid from the drawer or the ledger) with what each still owes: opening (if any) + given - recovered. Biggest first.\n\n**Requires `balances:view`** (Admin and Manager; a cashier gets 403 `PERMISSION_DENIED`)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Staff Advance",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/balances/staff/{{employeeKey}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "balances",
+                "staff",
+                "{{employeeKey}}"
+              ]
+            },
+            "description": "One staff member's summary, the advances handed out and the parts recovered from pay (404 for an unknown employee).\n\n**Requires `balances:view`** (Admin and Manager; a cashier gets 403 `PERMISSION_DENIED`)."
+          },
+          "response": []
+        },
+        {
+          "name": "Recover Staff Advance",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/balances/staff/{{employeeKey}}/recoveries",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "balances",
+                "staff",
+                "{{employeeKey}}",
+                "recoveries"
+              ]
+            },
+            "description": "Records part of an advance taken back from pay. Never more than the staff member still owes (409 `ADVANCE_OVER_RECOVERED`).\n\n**Requires `balances:manage`** (Admin and Manager).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amountCents\": 30000,\n  \"recoveredOn\": \"2026-10-31\",\n  \"note\": \"October pay\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Attachments",
+      "item": [
+        {
+          "name": "List Attachments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/attachments?ownerKind=expense&ownerKey={{expenseKey}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "attachments"
+              ],
+              "query": [
+                {
+                  "key": "ownerKind",
+                  "value": "expense",
+                  "description": "One of: cash_movement | expense | income"
+                },
+                {
+                  "key": "ownerKey",
+                  "value": "{{expenseKey}}",
+                  "description": "Key of the record"
+                }
+              ]
+            },
+            "description": "The receipt photos of one record, oldest first (details only; the image is read from the content route). `ownerKind` is `cash_movement`, `expense` or `income`. Needs `attachments:view` plus the permission to see that record (`cash_movements:view`, `expenses:view` or `income:view`)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Attachment Content",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/attachments/{{attachmentKey}}/content",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "attachments",
+                "{{attachmentKey}}",
+                "content"
+              ]
+            },
+            "description": "The image bytes with their real `Content-Type` (cached for a year; a photo never changes). 404 `ATTACHMENT_NOT_FOUND`. Same permissions as the list."
+          },
+          "response": []
+        },
+        {
+          "name": "Upload Attachment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/attachments",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "attachments"
+              ]
+            },
+            "description": "Attaches a photo to a record. `dataBase64` is the image bytes, at most 1 MB once decoded, and must really be a JPEG, PNG or WebP matching `contentType` (checked by its bytes). A record holds at most 5 photos (409 `ATTACHMENT_LIMIT`). Needs `attachments:create` plus the permission to record that kind of record (`cash_movements:create`, `expenses:manage` or `income:manage`).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ownerKind\": \"expense\",\n  \"ownerKey\": \"{{expenseKey}}\",\n  \"fileName\": \"receipt.jpg\",\n  \"contentType\": \"image/jpeg\",\n  \"dataBase64\": \"/9j/4AAQSkZJRg...\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "Regular Bills",
       "item": [
         {
@@ -6830,6 +7058,11 @@
     {
       "key": "incomeKey",
       "value": "inc_example",
+      "type": "string"
+    },
+    {
+      "key": "attachmentKey",
+      "value": "att_example",
       "type": "string"
     }
   ]

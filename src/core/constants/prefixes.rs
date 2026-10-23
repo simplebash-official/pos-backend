@@ -36,6 +36,10 @@ pub const RECURRING_EXPENSE: &str = "rexp";
 pub const EXPENSE_PAYMENT: &str = "expp";
 pub const INCOME: &str = "inc";
 /// Account opening balances use fixed keys `aopen_<kind>` so the same account set up on two devices is one row.
+/// Balance openings use fixed keys `bopen_<subject key>`.
+pub const BALANCE_OPENING: &str = "bopen";
+pub const ATTACHMENT: &str = "att";
+pub const ADVANCE_RECOVERY: &str = "advr";
 pub const ACCOUNT_OPENING: &str = "aopen";
 
 /// Key of the batch the migration to stock batches gives every product for the

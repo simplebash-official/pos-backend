@@ -311,6 +311,36 @@ pub const SYNC_RESOURCES: &[ResourceSpec] = &[
         order: 155,
         phase: Phase::P3a,
     },
+    ResourceSpec {
+        name: "balanceOpenings",
+        table: "balance_openings",
+        class: MergeClass::Lww,
+        soft_delete: false,
+        derived: &[],
+        local_only: &[],
+        order: 156,
+        phase: Phase::P3a,
+    },
+    ResourceSpec {
+        name: "advanceRecoveries",
+        table: "advance_recoveries",
+        class: MergeClass::AppendOnly,
+        soft_delete: false,
+        derived: &[],
+        local_only: &[],
+        order: 157,
+        phase: Phase::P3a,
+    },
+    ResourceSpec {
+        name: "attachments",
+        table: "attachments",
+        class: MergeClass::AppendOnly,
+        soft_delete: false,
+        derived: &[],
+        local_only: &[],
+        order: 158,
+        phase: Phase::P3a,
+    },
 ];
 
 /// Payload fields that travel between a device and the cloud but must never be
