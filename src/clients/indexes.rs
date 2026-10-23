@@ -259,6 +259,9 @@ pub fn index_specs(multi_tenant: bool) -> Vec<IndexSpec> {
         true,
     );
     specs.add("expenses", "expenses_date", doc! { "expense_date": 1 }, false);
+    // The income ledger (`modules::incomes`): read by date.
+    specs.add("incomes", "incomes_key_unique", doc! { "key": 1 }, true);
+    specs.add("incomes", "incomes_date", doc! { "income_date": 1 }, false);
     specs.add(
         "expense_payments",
         "expense_payments_expense_key",
@@ -456,8 +459,8 @@ mod tests {
         // + stock_batches product_key + shop_profiles + document_template_settings
         // + label_templates + label_print_jobs key/created_at + invoices session_key
         // + cash_categories key/type-name + payees key/type-name + cash_movements category/payee
-        // + expenses key/date + expense_payments expense_key.
-        assert_eq!(specs.len(), 48);
+        // + expenses key/date + expense_payments expense_key + incomes key/date.
+        assert_eq!(specs.len(), 50);
         assert!(specs.iter().all(|s| s.keys.get(TENANT_FIELD).is_none()));
         assert!(names(&specs).contains(&"products.sync_updated_at_key".to_string()));
         assert!(names(&specs).contains(&"idempotency_keys.idempotency_ttl".to_string()));
@@ -476,6 +479,7 @@ mod tests {
                 "payees_key_unique",
                 "expenses_key_unique",
                 "recurring_expenses_key_unique",
+                "incomes_key_unique",
                 "shop_profiles_key_unique",
                 "document_template_settings_key_unique",
                 "label_templates_key_unique",

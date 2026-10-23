@@ -291,6 +291,16 @@ pub const SYNC_RESOURCES: &[ResourceSpec] = &[
         order: 153,
         phase: Phase::P3a,
     },
+    ResourceSpec {
+        name: "incomes",
+        table: "incomes",
+        class: MergeClass::AppendOnly,
+        soft_delete: false,
+        derived: &[],
+        local_only: &[],
+        order: 154,
+        phase: Phase::P3a,
+    },
 ];
 
 /// Payload fields that travel between a device and the cloud but must never be

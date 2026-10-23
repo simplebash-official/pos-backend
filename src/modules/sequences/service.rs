@@ -56,6 +56,7 @@ pub async fn reserve_sequence(
             "session" | "sessions" | "register_session" | "register_sessions" => ("SES-", 6),
             "cash_movement" | "cash_movements" | "cashmovement" | "cashmovements" => ("CSH-", 6),
             "expense" | "expenses" => ("EXP-", 6),
+            "income" | "incomes" => ("INC-", 6),
             // Four digits: quotations are rarer than invoices. No year in the
             // number — the counter is one running sequence.
             "quotation" | "quotations" => ("QUO-", 4),

@@ -875,6 +875,31 @@ CREATE TABLE IF NOT EXISTS expense_payments (
 CREATE INDEX IF NOT EXISTS idx_expense_payments_expense_key ON expense_payments(expense_key);
 CREATE INDEX IF NOT EXISTS idx_expense_payments_sync ON expense_payments(updated_at, key);
 
+-- Money received that is not a sale (bank, card or online). Cash into the drawer is a cash movement.
+CREATE TABLE IF NOT EXISTS incomes (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    income_number TEXT NOT NULL UNIQUE,
+    income_date TEXT NOT NULL,
+    category_key TEXT NOT NULL,
+    payee_key TEXT,
+    payee_name TEXT,
+    amount_cents INTEGER NOT NULL,
+    received_into TEXT NOT NULL,
+    reference_no TEXT,
+    note TEXT,
+    recorded_by_user_id TEXT NOT NULL,
+    recorded_by_name_snapshot TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by_device TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_incomes_date ON incomes(income_date);
+CREATE INDEX IF NOT EXISTS idx_incomes_category_key ON incomes(category_key);
+CREATE INDEX IF NOT EXISTS idx_incomes_sync ON incomes(updated_at, key);
+
 -- Regular bills (rent, electricity, subscriptions). The key is derived from the category and payee,
 -- so the same bill made on two devices is one row. Never deleted: `active = 0` stops reminders.
 CREATE TABLE IF NOT EXISTS recurring_expenses (

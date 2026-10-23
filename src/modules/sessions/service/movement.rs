@@ -196,7 +196,7 @@ pub async fn record_movement(
                     return Err(AppError::validation("Please enter who took the cash."));
                 }
             }
-            T::PettyExpense => {
+            T::PettyExpense | T::AddCash => {
                 // A name typed once is saved so it is offered next time.
                 if payee_key.is_none()
                     && let Some(name) = &payee_name
@@ -206,7 +206,7 @@ pub async fn record_movement(
                     payee_name = Some(saved.name);
                 }
             }
-            T::AddCash | T::CashDrop | T::NoSale => {}
+            T::CashDrop | T::NoSale => {}
         }
 
         // Rent and bills for a month that is already paid is asked about, not silently doubled.
@@ -535,6 +535,16 @@ pub(crate) async fn expense_movements(
         to,
     )
     .await
+}
+
+/// Cash put into the drawer between two days, for the income ledger to read. The ledger keeps
+/// only those whose category counts as income (not a float, capital or a loan).
+pub(crate) async fn income_movements(
+    db: &Db,
+    from: Option<&str>,
+    to: Option<&str>,
+) -> AppResult<Vec<CashMovementDocument>> {
+    movements::list_movements_of_types(db, &[CashMovementType::AddCash], from, to).await
 }
 
 /// Converts stored rows to the API shape: the live category name, and the reversal of each if one exists.

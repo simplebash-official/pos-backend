@@ -24,6 +24,7 @@ pub const SESSIONS: &str = "sessions";
 pub const CASH_CATEGORIES: &str = "cash_categories";
 pub const PAYEES: &str = "payees";
 pub const EXPENSES: &str = "expenses";
+pub const INCOMES: &str = "incomes";
 pub const RECURRING_EXPENSES: &str = "recurring_expenses";
 
 pub const DOCUMENT_PACKAGES: &str = "document-packages";

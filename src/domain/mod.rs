@@ -9,6 +9,7 @@ pub mod customers;
 pub mod employees;
 pub mod expenses;
 pub mod imports;
+pub mod incomes;
 pub mod inventory;
 pub mod labels;
 pub mod print_jobs;

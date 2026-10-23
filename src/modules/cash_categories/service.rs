@@ -114,6 +114,7 @@ pub async fn list_categories(db: &Db, query: CashCategoryListQuery) -> AppResult
     let include_hidden = query.include_hidden.unwrap_or(false);
     let needs_review = query.needs_review.unwrap_or(false);
     let only_costs = query.for_expenses.unwrap_or(false);
+    let only_income = query.for_income.unwrap_or(false);
     let search = query.search.as_deref().map(normalize_name).filter(|s| !s.is_empty());
 
     let all = repository::list_all(db).await?;
@@ -126,6 +127,7 @@ pub async fn list_categories(db: &Db, query: CashCategoryListQuery) -> AppResult
         .filter(|c| include_hidden || c.active)
         .filter(|c| !needs_review || c.review_status == ReviewStatus::NeedsReview)
         .filter(|c| !only_costs || is_expense_group(c.report_group))
+        .filter(|c| !only_income || c.report_group == ReportGroup::OtherIncome)
         .filter(|c| {
             search.as_ref().is_none_or(|q| {
                 c.normalized_name.contains(q.as_str())
@@ -523,6 +525,24 @@ pub(crate) async fn category_for_expense(db: &Db, key: &str) -> AppResult<CashCa
     if !is_expense_group(doc.report_group) {
         return Err(AppError::validation_with_code(
             "This category is not a business cost. Please choose another one.",
+            codes::CASH_CATEGORY_WRONG_TYPE,
+        ));
+    }
+    Ok(doc)
+}
+
+/// A category an income can be filed under: visible, and counted as income.
+pub(crate) async fn category_for_income(db: &Db, key: &str) -> AppResult<CashCategoryDocument> {
+    let doc = require_category(db, key).await?;
+    if !doc.active || doc.merged_into_key.is_some() {
+        return Err(AppError::conflict(
+            codes::CASH_CATEGORY_HIDDEN,
+            "This category is hidden. Please choose another one.",
+        ));
+    }
+    if doc.report_group != ReportGroup::OtherIncome {
+        return Err(AppError::validation_with_code(
+            "This category is not income. Please choose another one.",
             codes::CASH_CATEGORY_WRONG_TYPE,
         ));
     }

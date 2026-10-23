@@ -1390,7 +1390,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{backendBaseUrl}}/api/cash-categories?movementType=petty_expense&includeHidden=false&search=tea&needsReview=false",
+              "raw": "{{backendBaseUrl}}/api/cash-categories?movementType=petty_expense&includeHidden=false&search=tea&needsReview=false&forExpenses=true&forIncome=true",
               "host": [
                 "{{backendBaseUrl}}"
               ],
@@ -1421,6 +1421,18 @@
                   "key": "needsReview",
                   "value": "false",
                   "description": "true returns only categories a cashier made that nobody has reviewed yet",
+                  "disabled": true
+                },
+                {
+                  "key": "forExpenses",
+                  "value": "true",
+                  "description": "Only categories that count as a business cost, for the expense ledger",
+                  "disabled": true
+                },
+                {
+                  "key": "forIncome",
+                  "value": "true",
+                  "description": "Only categories that count as income, for the income ledger",
                   "disabled": true
                 }
               ]
@@ -2041,6 +2053,151 @@
                 }
               }
             }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Income",
+      "item": [
+        {
+          "name": "List Income",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/incomes?search=dialog&categoryKey={{cashCategoryKey}}&payeeKey={{payeeKey}}&source=ledger&from=2026-10-01&to=2026-10-31&page=1&limit=50",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "incomes"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "dialog",
+                  "description": "Matches number, category, payer, reference or note, ignoring case and spacing",
+                  "disabled": true
+                },
+                {
+                  "key": "categoryKey",
+                  "value": "{{cashCategoryKey}}",
+                  "description": "Category and anything merged into it",
+                  "disabled": true
+                },
+                {
+                  "key": "payeeKey",
+                  "value": "{{payeeKey}}",
+                  "description": "Only this payer",
+                  "disabled": true
+                },
+                {
+                  "key": "source",
+                  "value": "ledger",
+                  "description": "One of: ledger | drawer",
+                  "disabled": true
+                },
+                {
+                  "key": "from",
+                  "value": "2026-10-01",
+                  "description": "First day, YYYY-MM-DD",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2026-10-31",
+                  "description": "Last day, YYYY-MM-DD",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "1-based page number"
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "Page size (default 50, max 200)"
+                }
+              ]
+            },
+            "description": "Money received that is not a sale, newest first: ledger entries (bank, card or online) and cash added to the drawer under an income category, which is read from the cash movements and never entered twice. A float, owner capital or a loan added to the drawer is not income.\n\n**Requires `income:view`** (Admin and Manager; a cashier gets 403 `PERMISSION_DENIED`)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Income Stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/incomes/stats",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "incomes",
+                "stats"
+              ]
+            },
+            "description": "This month's and last month's other income, and how much of this month's went into the drawer.\n\n**Requires `income:view`** (Admin and Manager; a cashier gets 403 `PERMISSION_DENIED`)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Income",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/incomes/{{incomeKey}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "incomes",
+                "{{incomeKey}}"
+              ]
+            },
+            "description": "One ledger income by key (404 `INCOME_NOT_FOUND`).\n\n**Requires `income:view`** (Admin and Manager; a cashier gets 403 `PERMISSION_DENIED`)."
+          },
+          "response": []
+        },
+        {
+          "name": "Record Income",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/incomes",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "incomes"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"incomeDate\": \"2026-10-23\",\n  \"categoryKey\": \"{{cashCategoryKey}}\",\n  \"payeeName\": \"Dialog\",\n  \"amountCents\": 450000,\n  \"receivedInto\": \"bank\",\n  \"referenceNo\": \"TXN-9\",\n  \"note\": \"October commission\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Enters money received into the bank, a card or online (`receivedInto` `bank` | `card` | `online`). `drawer` is refused (400): cash put into the drawer is a cash movement of type `add_cash` under an income category such as \"Scrap and waste sale\". The category must count as income (list them with `GET /cash-categories?forIncome=true`). A typed `payeeName` is saved to the payee list.\n\n**Requires `income:manage`** (Admin and Manager)."
           },
           "response": []
         }
@@ -6609,6 +6766,11 @@
     {
       "key": "recurringExpenseKey",
       "value": "rexp_example",
+      "type": "string"
+    },
+    {
+      "key": "incomeKey",
+      "value": "inc_example",
       "type": "string"
     }
   ]

@@ -68,6 +68,7 @@ async fn main() {
             "payees",
             "recurring_expenses",
             "expense_payments",
+            "incomes",
             "expenses",
             "generated_documents",
             "document_template_settings",

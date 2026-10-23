@@ -26,6 +26,9 @@ pub enum ReportGroup {
     Transfer,
     /// Loans received and principal repaid: only the interest part is an expense.
     Liabilities,
+    /// Money received that is not a sale (scrap, commission, supplier refunds, interest):
+    /// counts as income in profit and loss.
+    OtherIncome,
 }
 
 impl ReportGroup {
@@ -37,6 +40,7 @@ impl ReportGroup {
             ReportGroup::OwnerEquity => "owner_equity",
             ReportGroup::Transfer => "transfer",
             ReportGroup::Liabilities => "liabilities",
+            ReportGroup::OtherIncome => "other_income",
         }
     }
 
@@ -48,6 +52,7 @@ impl ReportGroup {
             "owner_equity" => Some(ReportGroup::OwnerEquity),
             "transfer" => Some(ReportGroup::Transfer),
             "liabilities" => Some(ReportGroup::Liabilities),
+            "other_income" => Some(ReportGroup::OtherIncome),
             _ => None,
         }
     }
@@ -173,6 +178,8 @@ pub struct CashCategoryListQuery {
     pub needs_review: Option<bool>,
     /// Only categories that count as a business cost, for the expense ledger.
     pub for_expenses: Option<bool>,
+    /// Only categories that count as income, for the income ledger.
+    pub for_income: Option<bool>,
 }
 
 /// Query for `GET /cash-categories/similar`.

@@ -37,6 +37,10 @@ pub const CASH_CATEGORIES_MANAGE: &str = "cash_categories:manage";
 pub const EXPENSES_VIEW: &str = "expenses:view";
 /// Entering a cost paid from the bank, a card or online (or a bill still to pay) and paying it.
 pub const EXPENSES_MANAGE: &str = "expenses:manage";
+/// Reading the income ledger (money received that is not a sale) and its figures. Manager and Admin.
+pub const INCOME_VIEW: &str = "income:view";
+/// Entering money received into the bank, a card or online. Manager and Admin.
+pub const INCOME_MANAGE: &str = "income:manage";
 /// Adding landlords/vendors and other payees to the shared payee directory.
 pub const PAYEES_MANAGE: &str = "payees:manage";
 
