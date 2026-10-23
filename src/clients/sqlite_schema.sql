@@ -917,6 +917,24 @@ CREATE TABLE IF NOT EXISTS account_openings (
 
 CREATE INDEX IF NOT EXISTS idx_account_openings_sync ON account_openings(updated_at, key);
 
+-- The shop's drawer rules: one row (`cset_shop`). Seeded with the shipped starting values and then
+-- edited by the owner; nothing reads a value that is not here.
+CREATE TABLE IF NOT EXISTS cash_settings (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    undo_window_seconds INTEGER NOT NULL,
+    approval_threshold_cents INTEGER,
+    quick_amounts_cents JSON NOT NULL,
+    float_target_cents INTEGER,
+    updated_by_name_snapshot TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by_device TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_cash_settings_sync ON cash_settings(updated_at, key);
+
 -- Receipt photos attached to a cash movement, expense or income. The image is kept as base64 text
 -- (small: the app shrinks it first) so it syncs like any other row. Append-only.
 CREATE TABLE IF NOT EXISTS attachments (

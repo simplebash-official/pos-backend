@@ -11,7 +11,6 @@ use crate::{
     },
 };
 
-use crate::modules::sessions::service::UNDO_WINDOW_SECONDS;
 
 fn default_version() -> i64 {
     1
@@ -235,7 +234,12 @@ pub struct CashMovementDocument {
 impl CashMovementDocument {
     /// `category_name` is the category's live name, resolved by the caller, so a rename shows on old rows;
     /// `reversed_by_key` is the reversal of this row, if one exists.
-    pub fn into_cash_movement(self, category_name: String, reversed_by_key: Option<String>) -> CashMovement {
+    pub fn into_cash_movement(
+        self,
+        category_name: String,
+        reversed_by_key: Option<String>,
+        undo_window_seconds: i64,
+    ) -> CashMovement {
         let key = if self.key.is_empty() {
             generate_id(prefixes::CASH_MOVEMENT)
         } else {
@@ -270,7 +274,7 @@ impl CashMovementDocument {
             undo_until: (self.reverses_key.is_none()
                 && reversed_by_key.is_none()
                 && self.movement_type != CashMovementType::NoSale)
-                .then(|| self.created_at.to_chrono() + chrono::Duration::seconds(UNDO_WINDOW_SECONDS)),
+                .then(|| self.created_at.to_chrono() + chrono::Duration::seconds(undo_window_seconds)),
             reverses_key: self.reverses_key,
             reversed_by_key,
             recorded_late: self.recorded_late,

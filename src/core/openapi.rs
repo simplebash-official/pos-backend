@@ -36,6 +36,7 @@ use utoipa::{
         (name = "Expenses", description = "Business costs from every account, and bills still to pay"),
         (name = "Income", description = "Money received that is not a sale, from every account"),
         (name = "Accounts", description = "Balances of the drawer, bank, card and online accounts"),
+        (name = "Cash Settings", description = "The shop's drawer rules: undo window, approval limit, quick amounts, float target"),
         (name = "Attachments", description = "Receipt photos attached to movements, expenses and income"),
         (name = "Balances", description = "What suppliers are owed and what staff still owe on advances"),
         (name = "Regular Bills", description = "Monthly bills like rent: schedules, reminders and what is already paid"),

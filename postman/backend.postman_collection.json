@@ -1593,6 +1593,63 @@
       ]
     },
     {
+      "name": "Cash Settings",
+      "item": [
+        {
+          "name": "Get Cash Settings",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/cash-settings",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "cash-settings"
+              ]
+            },
+            "description": "The shop's drawer rules: `undoWindowSeconds`, `approvalThresholdCents` (absent = no shop-wide limit), `quickAmountsCents` and `floatTargetCents` (absent = none), `version`. Every shop has them from the start (seeded with Rs. 100/500/1,000/5,000 quick amounts and a 120 second undo window).\n\n**Requires `cash_movements:view`** (every role: the cash form reads them)."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Cash Settings",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/cash-settings",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "cash-settings"
+              ]
+            },
+            "description": "Replaces the whole set; an absent `approvalThresholdCents` or `floatTargetCents` clears that rule. `undoWindowSeconds` 10 to 3600; every amount more than zero and at most Rs. 1,000,000; 1 to 8 `quickAmountsCents`, strictly ascending. The shop-wide approval limit only applies to cash leaving the drawer.\n\n**Requires `cash_settings:manage`** (Admin only).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"undoWindowSeconds\": 120,\n  \"approvalThresholdCents\": 2000000,\n  \"quickAmountsCents\": [\n    10000,\n    50000,\n    100000,\n    500000\n  ],\n  \"floatTargetCents\": 3000000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "Cash Movements",
       "item": [
         {

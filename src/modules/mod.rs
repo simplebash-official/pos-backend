@@ -6,6 +6,7 @@ pub mod balances;
 pub mod barcode;
 pub mod billing;
 pub mod cash_categories;
+pub mod cash_settings;
 pub mod customers;
 pub mod document_packages;
 pub mod documents;

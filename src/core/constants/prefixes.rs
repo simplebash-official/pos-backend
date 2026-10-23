@@ -38,6 +38,8 @@ pub const INCOME: &str = "inc";
 /// Account opening balances use fixed keys `aopen_<kind>` so the same account set up on two devices is one row.
 /// Balance openings use fixed keys `bopen_<subject key>`.
 pub const BALANCE_OPENING: &str = "bopen";
+/// The shop's drawer rules are one row with the fixed key `cset_shop`.
+pub const CASH_SETTINGS_KEY: &str = "cset_shop";
 pub const ATTACHMENT: &str = "att";
 pub const ADVANCE_RECOVERY: &str = "advr";
 pub const ACCOUNT_OPENING: &str = "aopen";

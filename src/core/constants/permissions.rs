@@ -50,6 +50,8 @@ pub const BALANCES_MANAGE: &str = "balances:manage";
 pub const ATTACHMENTS_VIEW: &str = "attachments:view";
 /// Attaching a receipt photo to a movement, expense or income. Everyone who can record one.
 pub const ATTACHMENTS_CREATE: &str = "attachments:create";
+/// Changing the drawer rules: the undo window, the approval limit, the quick amounts and the float target. Admin only.
+pub const CASH_SETTINGS_MANAGE: &str = "cash_settings:manage";
 pub const INCOME_VIEW: &str = "income:view";
 /// Entering money received into the bank, a card or online. Manager and Admin.
 pub const INCOME_MANAGE: &str = "income:manage";

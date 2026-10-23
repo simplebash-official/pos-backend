@@ -256,6 +256,10 @@ pub fn build_router(state: AppState) -> Router {
             modules::attachments::routes::router(),
         )
         .nest(
+            &format!("/{}", mod_names::CASH_SETTINGS.replace('_', "-")),
+            modules::cash_settings::routes::router(),
+        )
+        .nest(
             &format!("/{}", mod_names::BALANCES),
             modules::balances::routes::router(),
         )

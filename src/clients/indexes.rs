@@ -271,6 +271,8 @@ pub fn index_specs(multi_tenant: bool) -> Vec<IndexSpec> {
     // Receipt photos (`modules::attachments`): listed by the record they belong to.
     specs.add("attachments", "attachments_key_unique", doc! { "key": 1 }, true);
     specs.add("attachments", "attachments_owner", doc! { "owner_kind": 1, "owner_key": 1 }, false);
+    // The shop's drawer rules (`modules::cash_settings`): one row.
+    specs.add("cash_settings", "cash_settings_key_unique", doc! { "key": 1 }, true);
     specs.add(
         "expense_payments",
         "expense_payments_expense_key",
@@ -468,8 +470,8 @@ mod tests {
         // + stock_batches product_key + shop_profiles + document_template_settings
         // + label_templates + label_print_jobs key/created_at + invoices session_key
         // + cash_categories key/type-name + payees key/type-name + cash_movements category/payee
-        // + expenses key/date + expense_payments expense_key + incomes key/date + account_openings key + balance_openings key + advance_recoveries key/employee_key + attachments key/owner.
-        assert_eq!(specs.len(), 56);
+        // + expenses key/date + expense_payments expense_key + incomes key/date + account_openings key + balance_openings key + advance_recoveries key/employee_key + attachments key/owner + cash_settings key.
+        assert_eq!(specs.len(), 57);
         assert!(specs.iter().all(|s| s.keys.get(TENANT_FIELD).is_none()));
         assert!(names(&specs).contains(&"products.sync_updated_at_key".to_string()));
         assert!(names(&specs).contains(&"idempotency_keys.idempotency_ttl".to_string()));
@@ -493,6 +495,7 @@ mod tests {
                 "balance_openings_key_unique",
                 "advance_recoveries_key_unique",
                 "attachments_key_unique",
+                "cash_settings_key_unique",
                 "shop_profiles_key_unique",
                 "document_template_settings_key_unique",
                 "label_templates_key_unique",

@@ -8,6 +8,7 @@ pub mod backup;
 pub mod balances;
 pub mod billing;
 pub mod cash_categories;
+pub mod cash_settings;
 pub mod customers;
 pub mod employees;
 pub mod expenses;

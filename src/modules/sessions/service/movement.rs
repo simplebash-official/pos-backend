@@ -24,7 +24,7 @@ use crate::{
         },
     },
     modules::{
-        cash_categories, payees, recurring_expenses, sequences,
+        cash_categories, cash_settings, payees, recurring_expenses, sequences,
         sessions::{
             model::CashMovementDocument,
             repository::{drawer, movements, sessions},
@@ -256,10 +256,14 @@ pub async fn record_movement(
             forbid(false, override_reason.is_some(), "A reason for going over the drawer")?;
         }
 
-        // A manager PIN: always for owner drawings and staff pay, above a category's own limit, and to go over the drawer.
-        let over_limit = category
-            .requires_approval_over_cents
-            .is_some_and(|limit| body.amount_cents > limit);
+        // A manager PIN: always for owner drawings and staff pay, above the category's own limit or the
+        // shop-wide one, and to go over the drawer.
+        // The shop-wide limit is about cash leaving the drawer; cash put in never needs it.
+        let shop_limit = if takes_cash_out { cash_settings::service::approval_threshold_cents(db).await? } else { None };
+        let over_limit = [category.requires_approval_over_cents, shop_limit]
+            .into_iter()
+            .flatten()
+            .any(|limit| body.amount_cents > limit);
         let mut approved_by_id = None;
         let mut approved_by_name = None;
         if matches!(movement_type, T::OwnerWithdrawal | T::StaffPayment) || over_limit || over_drawer {
@@ -366,11 +370,8 @@ fn money(cents: i64) -> String {
     format!("{sign}Rs. {grouped}.{:02}", cents.abs() % 100)
 }
 
-/// How long the person who recorded a movement can undo it without a manager.
-pub const UNDO_WINDOW_SECONDS: i64 = 120;
-
 /// Cancels a movement by recording its opposite; the original row is never edited or deleted. The person
-/// who recorded it can undo it inside [`UNDO_WINDOW_SECONDS`]; after that only someone allowed to reverse
+/// who recorded it can undo it inside the shop's undo window (`cash_settings`); after that only someone allowed to reverse
 /// (`can_reverse`) can, and must say why. Reversing twice is refused: the reversal's key is derived from
 /// the original's, so two devices undoing the same movement offline are the same row.
 pub async fn reverse_movement(
@@ -412,7 +413,7 @@ pub async fn reverse_movement(
         }
 
         let age = chrono::Utc::now() - original.created_at.to_chrono();
-        let own_undo = original.recorded_by_user_id == user_id && age.num_seconds() <= UNDO_WINDOW_SECONDS;
+        let own_undo = original.recorded_by_user_id == user_id && age.num_seconds() <= cash_settings::service::undo_window_seconds(db).await?;
         let reason = clean_text("The reason", body.reason.as_deref(), NOTE_MAX)?;
         if !own_undo {
             if !can_reverse {
@@ -613,7 +614,12 @@ pub(crate) async fn bank_cash_moves(
 
 /// Converts stored rows to the API shape: the live category name, and the reversal of each if one exists.
 pub(crate) async fn to_movements(db: &Db, docs: Vec<CashMovementDocument>) -> AppResult<Vec<CashMovement>> {
+    // Nothing to convert, nothing to look up (a shop with no movements yet need not have its rules row).
+    if docs.is_empty() {
+        return Ok(Vec::new());
+    }
     let names = category_names(db, &docs).await?;
+    let undo_window_seconds = cash_settings::service::undo_window_seconds(db).await?;
     let keys: Vec<String> = docs.iter().map(|d| d.key.clone()).collect();
     let reversals: HashMap<String, String> =
         movements::find_reversals_of(db, &keys).await?.into_iter().collect();
@@ -625,7 +631,7 @@ pub(crate) async fn to_movements(db: &Db, docs: Vec<CashMovementDocument>) -> Ap
                 .cloned()
                 .expect("category_names resolves the category of every row it is given");
             let reversed_by = reversals.get(&doc.key).cloned();
-            doc.into_cash_movement(name, reversed_by)
+            doc.into_cash_movement(name, reversed_by, undo_window_seconds)
         })
         .collect())
 }

@@ -72,6 +72,7 @@ async fn main() {
             "account_openings",
             "balance_openings",
             "attachments",
+            "cash_settings",
             "advance_recoveries",
             "expenses",
             "generated_documents",

@@ -32,6 +32,7 @@ const ADMIN_PERMISSIONS: &[&str] = &[
     perm::ACCOUNTS_MANAGE,
     perm::BALANCES_VIEW,
     perm::BALANCES_MANAGE,
+    perm::CASH_SETTINGS_MANAGE,
     perm::ATTACHMENTS_VIEW,
     perm::ATTACHMENTS_CREATE,
     perm::INVENTORY_READ,
