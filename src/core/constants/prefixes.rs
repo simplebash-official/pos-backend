@@ -35,6 +35,8 @@ pub const EXPENSE: &str = "exp";
 pub const RECURRING_EXPENSE: &str = "rexp";
 pub const EXPENSE_PAYMENT: &str = "expp";
 pub const INCOME: &str = "inc";
+/// Account opening balances use fixed keys `aopen_<kind>` so the same account set up on two devices is one row.
+pub const ACCOUNT_OPENING: &str = "aopen";
 
 /// Key of the batch the migration to stock batches gives every product for the
 /// stock (and price) it held before batches existed. Deterministic, so the

@@ -38,6 +38,10 @@ pub const EXPENSES_VIEW: &str = "expenses:view";
 /// Entering a cost paid from the bank, a card or online (or a bill still to pay) and paying it.
 pub const EXPENSES_MANAGE: &str = "expenses:manage";
 /// Reading the income ledger (money received that is not a sale) and its figures. Manager and Admin.
+/// Reading the account balances (drawer, bank, card, online). Manager and Admin.
+pub const ACCOUNTS_VIEW: &str = "accounts:view";
+/// Setting the opening balance of the bank, card and online accounts. Admin only: it moves what the shop believes it holds.
+pub const ACCOUNTS_MANAGE: &str = "accounts:manage";
 pub const INCOME_VIEW: &str = "income:view";
 /// Entering money received into the bank, a card or online. Manager and Admin.
 pub const INCOME_MANAGE: &str = "income:manage";

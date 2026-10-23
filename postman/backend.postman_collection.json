@@ -2204,6 +2204,65 @@
       ]
     },
     {
+      "name": "Accounts",
+      "item": [
+        {
+          "name": "List Accounts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/accounts",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "accounts"
+              ]
+            },
+            "description": "The cash drawer, bank, card and online accounts with their balances. The drawer is the running cash of every terminal. Bank, card and online have no balance (`balanceCents`, `openingBalanceCents`, `asOfDate` and `activity` are absent) until an opening balance is set; after that the balance is worked out from the opening balance plus sales paid that way (card and online), income received, cash taken to the bank (cash drops under \"To bank deposit\"), less costs paid, card and online refunds and cash brought back (add-cash under \"Bank withdrawal to drawer\"), counting activity on and after `asOfDate`.\n\n**Requires `accounts:view`** (Admin and Manager; a cashier gets 403 `PERMISSION_DENIED`)."
+          },
+          "response": []
+        },
+        {
+          "name": "Set Account Opening Balance",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/accounts/bank/opening",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "accounts",
+                "bank",
+                "opening"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"openingBalanceCents\": 1000000,\n  \"asOfDate\": \"2026-10-01\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Sets, or changes, what the `bank`, `card` or `online` account held on `asOfDate` (`YYYY-MM-DD`, today or earlier; may be negative for an overdraft). The `drawer` has no opening balance (400), nor does an unknown kind (400). The row key is fixed per kind (`aopen_bank`), so the same account set up on two devices is one row.\n\n**Requires `accounts:manage`** (Admin only; a manager gets 403 `PERMISSION_DENIED`)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "Regular Bills",
       "item": [
         {

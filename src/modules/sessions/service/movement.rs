@@ -547,6 +547,42 @@ pub(crate) async fn income_movements(
     movements::list_movements_of_types(db, &[CashMovementType::AddCash], from, to).await
 }
 
+/// Cash the shop holds in all its drawers right now (the sum of every terminal's running balance).
+pub(crate) async fn drawer_cash_total(db: &Db) -> AppResult<i64> {
+    Ok(drawer::list_drawer_states(db).await?.iter().map(|s| s.current_balance_cents).sum())
+}
+
+/// Cash taken to the bank or brought back from it, from `since` (`YYYY-MM-DD`) on, as
+/// `(deposited, withdrawn)`. A deposit is a cash drop under any of `deposit_categories`, a withdrawal an
+/// add-cash under any of `withdrawal_categories`; reversed movements and their reversals cancel out.
+pub(crate) async fn bank_cash_moves(
+    db: &Db,
+    since: &str,
+    deposit_categories: &[String],
+    withdrawal_categories: &[String],
+) -> AppResult<(i64, i64)> {
+    let movements = movements::list_movements_of_types(
+        db,
+        &[CashMovementType::CashDrop, CashMovementType::AddCash],
+        Some(since),
+        None,
+    )
+    .await?;
+    let keys: Vec<String> = movements.iter().map(|m| m.key.clone()).collect();
+    let reversed = reversed_keys(db, &keys).await?;
+    let (mut deposited, mut withdrawn) = (0, 0);
+    for m in movements.iter().filter(|m| m.reverses_key.is_none() && !reversed.contains(&m.key)) {
+        match m.movement_type {
+            CashMovementType::CashDrop if deposit_categories.contains(&m.category_key) => deposited += m.amount_cents,
+            CashMovementType::AddCash if withdrawal_categories.contains(&m.category_key) => {
+                withdrawn += m.amount_cents;
+            }
+            _ => {}
+        }
+    }
+    Ok((deposited, withdrawn))
+}
+
 /// Converts stored rows to the API shape: the live category name, and the reversal of each if one exists.
 pub(crate) async fn to_movements(db: &Db, docs: Vec<CashMovementDocument>) -> AppResult<Vec<CashMovement>> {
     let names = category_names(db, &docs).await?;

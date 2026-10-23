@@ -217,6 +217,17 @@ pub(crate) async fn period_payments(
         .collect())
 }
 
+/// What was paid out of the bank, a card or online on or after `since` (`YYYY-MM-DD`), as `(account, cents)`
+/// per payment. Drawer payments are cash movements and not counted here.
+pub(crate) async fn account_payments_since(db: &Db, since: &str) -> AppResult<Vec<(PaidFrom, i64)>> {
+    Ok(repository::list_all_payments(db)
+        .await?
+        .into_iter()
+        .filter(|p| p.paid_on.as_str() >= since)
+        .map(|p| (p.paid_from, p.amount_cents))
+        .collect())
+}
+
 /// A page of costs with the filters of the Expenses screen.
 pub async fn list_expenses(db: &Db, query: ExpenseListQuery) -> AppResult<ExpenseListResponse> {
     if let Some(from) = &query.from {

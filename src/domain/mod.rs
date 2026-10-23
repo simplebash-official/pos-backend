@@ -1,6 +1,7 @@
 // Pure business types shared across modules — no I/O, no framework types.
 // Populated as domain modules (billing, repairs, inventory, ...) grow.
 
+pub mod accounts;
 pub mod auth;
 pub mod backup;
 pub mod billing;

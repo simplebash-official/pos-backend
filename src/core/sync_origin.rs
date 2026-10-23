@@ -58,6 +58,7 @@ pub const SYNCED_COLLECTIONS: &[&str] = &[
     "expenses",
     "expense_payments",
     "incomes",
+    "account_openings",
     "recurring_expenses",
     "users",
 ];

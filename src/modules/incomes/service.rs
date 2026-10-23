@@ -127,6 +127,15 @@ async fn all_rows(db: &Db, from: Option<&str>, to: Option<&str>) -> AppResult<Ve
     Ok(rows)
 }
 
+/// What was received into the bank, a card or online on or after `since` (`YYYY-MM-DD`), as `(account, cents)`.
+pub(crate) async fn account_receipts_since(db: &Db, since: &str) -> AppResult<Vec<(ReceivedInto, i64)>> {
+    Ok(repository::list_incomes(db, Some(since), None)
+        .await?
+        .into_iter()
+        .map(|i| (i.received_into, i.amount_cents))
+        .collect())
+}
+
 /// A page of income with the filters of the Income screen.
 pub async fn list_incomes(db: &Db, query: IncomeListQuery) -> AppResult<IncomeListResponse> {
     if let Some(from) = &query.from {

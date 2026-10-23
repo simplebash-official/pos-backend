@@ -900,6 +900,23 @@ CREATE INDEX IF NOT EXISTS idx_incomes_date ON incomes(income_date);
 CREATE INDEX IF NOT EXISTS idx_incomes_category_key ON incomes(category_key);
 CREATE INDEX IF NOT EXISTS idx_incomes_sync ON incomes(updated_at, key);
 
+-- Where the bank, card and online accounts start: one row per kind (`aopen_bank`...), set once by the
+-- owner. Balances are worked out from activity on and after `as_of_date`, never stored.
+CREATE TABLE IF NOT EXISTS account_openings (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    opening_balance_cents INTEGER NOT NULL,
+    as_of_date TEXT NOT NULL,
+    set_by_name_snapshot TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by_device TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_account_openings_sync ON account_openings(updated_at, key);
+
 -- Regular bills (rent, electricity, subscriptions). The key is derived from the category and payee,
 -- so the same bill made on two devices is one row. Never deleted: `active = 0` stops reminders.
 CREATE TABLE IF NOT EXISTS recurring_expenses (
