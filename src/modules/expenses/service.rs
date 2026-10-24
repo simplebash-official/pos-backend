@@ -187,8 +187,18 @@ async fn all_rows(db: &Db, from: Option<&str>, to: Option<&str>) -> AppResult<Ve
     Ok(rows)
 }
 
+/// Every cost dated between two days (`YYYY-MM-DD`, inclusive), drawer payments included, for the money reports.
+pub(crate) async fn rows_between(db: &Db, from: &str, to: &str) -> AppResult<Vec<ExpenseRow>> {
+    all_rows(db, Some(from), Some(to)).await
+}
+
+/// Every cost with something still to pay, whenever it was dated, for the payables report.
+pub(crate) async fn unpaid_rows(db: &Db) -> AppResult<Vec<ExpenseRow>> {
+    Ok(all_rows(db, None, None).await?.into_iter().filter(|r| r.balance_cents > 0).collect())
+}
+
 /// The month (`YYYY-MM`) a cost counts towards: the period a drawer payment names, else its own date.
-fn counted_month(row: &ExpenseRow) -> &str {
+pub(crate) fn counted_month(row: &ExpenseRow) -> &str {
     &row.period_start.as_deref().unwrap_or(&row.date)[..7]
 }
 

@@ -424,6 +424,14 @@ async fn session_full_lifecycle_and_z_report() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "Body: {body}");
+    // The shift's movements totalled by kind and category: cash added in, a payout and the owner's drawing out.
+    let summary = body["data"]["movementSummary"].as_array().unwrap();
+    let total = |direction: &str| -> i64 {
+        summary.iter().filter(|g| g["direction"] == direction).map(|g| g["totalCents"].as_i64().unwrap()).sum()
+    };
+    assert_eq!(total("in"), 5000, "{summary:?}");
+    assert_eq!(total("out"), 2000 + 60000, "{summary:?}");
+    assert!(summary.iter().all(|g| g["count"].as_u64().unwrap() >= 1 && g["categoryName"].is_string()));
     assert_eq!(body["data"]["totalInvoicesCount"], 1);
     assert_eq!(body["data"]["discountCents"], 0);
     let cash_pm = body["data"]["paymentMethods"]

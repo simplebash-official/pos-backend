@@ -381,11 +381,25 @@ pub(crate) fn build_z_report_data(report: &ZReportResponse, shop: &Value) -> Val
                 "movementNumber": cm.movement_number,
                 "movementType": cm.movement_type.as_str(),
                 "amountCents": cm.amount_cents,
-                // The Z-report templates still print these two lines; they move to category/payee/note in the reporting phase.
+                // The published Z-report schema still requires these two lines; `movementSummary` below carries the grouped totals.
                 "reason": cm.custom_label.clone().unwrap_or_else(|| cm.category_name.clone()),
                 "recipientOrSource": cm.payee_name.clone().unwrap_or_default(),
                 "recordedByNameSnapshot": cm.recorded_by_name_snapshot,
                 "createdAt": cm.created_at.format("%d %b %Y %H:%M").to_string(),
+            })
+        })
+        .collect();
+
+    let movement_summary: Vec<Value> = report
+        .movement_summary
+        .iter()
+        .map(|g| {
+            json!({
+                "movementType": g.movement_type.as_str(),
+                "direction": g.direction.as_str(),
+                "categoryName": g.category_name,
+                "count": g.count,
+                "totalCents": g.total_cents,
             })
         })
         .collect();
@@ -406,6 +420,7 @@ pub(crate) fn build_z_report_data(report: &ZReportResponse, shop: &Value) -> Val
         "paymentMethods": payment_methods,
         "cashReconciliation": cash_reconciliation,
         "cashMovements": cash_movements,
+        "movementSummary": movement_summary,
         "shopTradingName": shop_field_or_empty(shop, "tradingName"),
         "shopAddressLines": shop_address_lines(shop),
         "generatedAt": generated_at,
@@ -1086,6 +1101,7 @@ mod schema_drift_tests {
                 updated_at: "2026-10-21T10:15:00Z".parse().unwrap(),
                 version: 1,
             }],
+            movement_summary: vec![],
             cash_reconciliation: ZReportCashReconciliation {
                 opening_float_cents: 200_000,
                 cash_sales_cents: 1_150_000,

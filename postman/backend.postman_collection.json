@@ -2320,6 +2320,137 @@
       ]
     },
     {
+      "name": "Finance Reports",
+      "item": [
+        {
+          "name": "Profit and costs",
+          "item": [
+            {
+              "name": "Profit and Loss",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{backendBaseUrl}}/api/finance-reports/profit-loss?from=2026-10-01&to=2026-10-31",
+                  "host": [
+                    "{{backendBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "finance-reports",
+                    "profit-loss"
+                  ],
+                  "query": [
+                    {
+                      "key": "from",
+                      "value": "2026-10-01",
+                      "description": "First day of the report, `YYYY-MM-DD` (required)."
+                    },
+                    {
+                      "key": "to",
+                      "value": "2026-10-31",
+                      "description": "Last day of the report, `YYYY-MM-DD`, inclusive (required). At most two years after `from`."
+                    }
+                  ]
+                },
+                "description": "Sales (after discounts, voided bills left out) less returns and what the sold items cost, plus other income, less running costs and staff pay, for the period. A cost counts on its own date whether or not it is paid yet. Supplier stock payments, owner drawings, cash drops and loan repayments are not costs. `netProfitCents` is negative for a loss.\n\n**Requires `reports:view`** (Admin and Manager; a cashier gets 403 `PERMISSION_DENIED`). Nothing is stored: every figure is worked out from the ledgers when asked."
+              },
+              "response": []
+            },
+            {
+              "name": "Costs by Category and Month",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{backendBaseUrl}}/api/finance-reports/expenses?from=2026-10-01&to=2026-10-31",
+                  "host": [
+                    "{{backendBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "finance-reports",
+                    "expenses"
+                  ],
+                  "query": [
+                    {
+                      "key": "from",
+                      "value": "2026-10-01",
+                      "description": "First day of the report, `YYYY-MM-DD` (required)."
+                    },
+                    {
+                      "key": "to",
+                      "value": "2026-10-31",
+                      "description": "Last day of the report, `YYYY-MM-DD`, inclusive (required). At most two years after `from`."
+                    }
+                  ]
+                },
+                "description": "Every cost in the period (drawer payments included, supplier stock payments too) per category, biggest first, with a total for each month of the period (months with no cost show 0). A rent or pay payment counts in the month it covers.\n\n**Requires `reports:view`** (Admin and Manager; a cashier gets 403 `PERMISSION_DENIED`). Nothing is stored: every figure is worked out from the ledgers when asked."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Money",
+          "item": [
+            {
+              "name": "Cash Flow",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{backendBaseUrl}}/api/finance-reports/cash-flow?from=2026-10-01&to=2026-10-31",
+                  "host": [
+                    "{{backendBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "finance-reports",
+                    "cash-flow"
+                  ],
+                  "query": [
+                    {
+                      "key": "from",
+                      "value": "2026-10-01",
+                      "description": "First day of the report, `YYYY-MM-DD` (required)."
+                    },
+                    {
+                      "key": "to",
+                      "value": "2026-10-31",
+                      "description": "Last day of the report, `YYYY-MM-DD`, inclusive (required). At most two years after `from`."
+                    }
+                  ]
+                },
+                "description": "Money in and out of the drawer, bank, card and online accounts over the period, with the reasons (`sales`, `refunds`, `other_income`, `cash_added`, `paid_out`, `owner_withdrawals`, `cash_to_bank_or_safe`, `bank_deposits`, `bank_withdrawals`, `expense_payments`). A cash drop to the bank is out of the drawer and into the bank, so it shows on both.\n\n**Requires `reports:view`** (Admin and Manager; a cashier gets 403 `PERMISSION_DENIED`). Nothing is stored: every figure is worked out from the ledgers when asked."
+              },
+              "response": []
+            },
+            {
+              "name": "Payables",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{backendBaseUrl}}/api/finance-reports/payables",
+                  "host": [
+                    "{{backendBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "finance-reports",
+                    "payables"
+                  ]
+                },
+                "description": "What the shop still has to pay today: bills not paid in full (soonest due first, with overdue ones marked) and suppliers it owes. A supplier whose opening balance was never set is not listed (its balance is unknown; see Balances).\n\n**Requires `reports:view`** (Admin and Manager; a cashier gets 403 `PERMISSION_DENIED`). Nothing is stored: every figure is worked out from the ledgers when asked."
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Balances",
       "item": [
         {

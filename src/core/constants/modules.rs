@@ -26,6 +26,7 @@ pub const PAYEES: &str = "payees";
 pub const EXPENSES: &str = "expenses";
 pub const INCOMES: &str = "incomes";
 pub const ACCOUNTS: &str = "accounts";
+pub const FINANCE_REPORTS: &str = "finance_reports";
 pub const BALANCES: &str = "balances";
 pub const CASH_SETTINGS: &str = "cash_settings";
 pub const ATTACHMENTS: &str = "attachments";

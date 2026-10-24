@@ -128,6 +128,11 @@ async fn all_rows(db: &Db, from: Option<&str>, to: Option<&str>) -> AppResult<Ve
 }
 
 /// What was received into the bank, a card or online on or after `since` (`YYYY-MM-DD`), as `(account, cents)`.
+/// Every income dated between two days (`YYYY-MM-DD`, inclusive), cash added to the drawer included, for the money reports.
+pub(crate) async fn rows_between(db: &Db, from: &str, to: &str) -> AppResult<Vec<IncomeRow>> {
+    all_rows(db, Some(from), Some(to)).await
+}
+
 pub(crate) async fn account_receipts_since(db: &Db, since: &str) -> AppResult<Vec<(ReceivedInto, i64)>> {
     Ok(repository::list_incomes(db, Some(since), None)
         .await?

@@ -504,6 +504,18 @@ pub struct ZReportCashReconciliation {
     pub safe_deposit_cents: i64,
 }
 
+/// What one shift took in or paid out under one category, for the Z-report. A reversed movement and its
+/// reversal cancel out and are not counted.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ZReportMovementGroup {
+    pub movement_type: CashMovementType,
+    pub direction: CashDirection,
+    pub category_name: String,
+    pub count: u64,
+    pub total_cents: i64,
+}
+
 /// Full Z-Report (End-of-Session Summary).
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -516,6 +528,8 @@ pub struct ZReportResponse {
     pub total_invoices_count: u64,
     pub payment_methods: Vec<ZReportPaymentMethodSummary>,
     pub cash_movements: Vec<CashMovement>,
+    /// The shift's drawer movements totalled by kind and category, in the order the kinds are picked.
+    pub movement_summary: Vec<ZReportMovementGroup>,
     pub cash_reconciliation: ZReportCashReconciliation,
     pub generated_at: DateTime<Utc>,
 }
