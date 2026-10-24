@@ -1650,3 +1650,117 @@ async fn test_cashier_name_resolved_when_token_lacks_name() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(cur_res["data"]["cashierNameSnapshot"], "Kasun Cashier");
 }
+
+#[tokio::test]
+async fn cancel_close_returns_a_counted_shift_to_open() {
+    let app = common::spawn_app().await;
+
+    simplebash_pos_backend::seeds::admin::seed_admin(&app.db_handle, None, None)
+        .await
+        .unwrap();
+    let admin_token = mint_token_for(
+        &app.config,
+        "admin",
+        Some(Role::Admin),
+        roles::default_permissions(Role::Admin),
+    );
+
+    let staff_username = format!("stf_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+    let (status, staff_res) = send_authed(
+        &app.router,
+        "POST",
+        "/api/users",
+        Some(json!({
+            "name": "Staff Cara",
+            "username": staff_username,
+            "password": "Password123!",
+            "role": "staff",
+        })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "Staff body: {staff_res}");
+    let staff_token = mint_token_for(
+        &app.config,
+        staff_res["data"]["id"].as_str().unwrap(),
+        Some(Role::Staff),
+        roles::default_permissions(Role::Staff),
+    );
+
+    let term = format!("term_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+    let (status, open_res) = send_authed(
+        &app.router,
+        "POST",
+        "/api/sessions/open",
+        Some(json!({ "terminalId": term, "openingFloatCents": 2000 })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "Body: {open_res}");
+    let key = open_res["data"]["key"].as_str().unwrap();
+    let cancel_path = format!("/api/sessions/{key}/cancel-close");
+
+    // Counting moves the shift to closing; cancelling puts it back and forgets the count.
+    let (status, counted) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/sessions/{key}/blind-count"),
+        Some(json!({ "countedCashCents": 1500 })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {counted}");
+    assert_eq!(counted["data"]["status"], "closing");
+
+    let (status, cancelled) =
+        send_authed(&app.router, "POST", &cancel_path, None, &staff_token).await;
+    assert_eq!(status, StatusCode::OK, "Body: {cancelled}");
+    assert_eq!(cancelled["data"]["status"], "open");
+    assert_eq!(cancelled["data"]["countedCashCents"], Value::Null);
+    assert_eq!(cancelled["data"]["cashVarianceCents"], Value::Null);
+
+    // Cancelling again, on an open shift, changes nothing.
+    let (status, again) = send_authed(&app.router, "POST", &cancel_path, None, &staff_token).await;
+    assert_eq!(status, StatusCode::OK, "Body: {again}");
+    assert_eq!(again["data"]["status"], "open");
+
+    // The shift can be counted again from scratch.
+    let (status, recounted) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/sessions/{key}/blind-count"),
+        Some(json!({ "countedCashCents": 2000 })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {recounted}");
+    assert_eq!(recounted["data"]["status"], "closing");
+
+    // A closed shift cannot be un-closed this way.
+    let (status, closed) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/sessions/{key}/close"),
+        Some(json!({
+            "countedCashCents": 2000,
+            "closingFloatCents": 2000,
+            "cashDropToSafeCents": 0
+        })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {closed}");
+    let (status, refused) = send_authed(&app.router, "POST", &cancel_path, None, &staff_token).await;
+    assert_eq!(status, StatusCode::CONFLICT, "Body: {refused}");
+
+    // Unknown shift.
+    let (status, _) = send_authed(
+        &app.router,
+        "POST",
+        "/api/sessions/nope/cancel-close",
+        None,
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

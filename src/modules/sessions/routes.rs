@@ -61,6 +61,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(list_cash_movements))
         .routes(routes!(get_cash_movement))
         .routes(routes!(submit_blind_count))
+        .routes(routes!(cancel_close))
         .routes(routes!(close_session))
         .routes(routes!(reopen_session))
         .routes(routes!(convert_variance))
@@ -218,6 +219,33 @@ async fn submit_blind_count(
     Ok(Json(ApiResponse::success(
         session,
         "Blind count recorded successfully",
+    )))
+}
+
+#[utoipa::path(
+    post,
+    path = "/{key}/cancel-close",
+    params(
+        ("key" = String, Path, description = "Register session key")
+    ),
+    responses(
+        (status = 200, description = "Closing cancelled, session back in use", body = ApiResponse<RegisterSession>),
+        (status = 404, description = "Session not found", body = ErrorResponse),
+        (status = 409, description = "Session already closed", body = ErrorResponse)
+    ),
+    security(("bearerAuth" = [])),
+    tag = "Register Sessions"
+)]
+async fn cancel_close(
+    State(state): State<AppState>,
+    current_user: CurrentUser,
+    Path(key): Path<String>,
+) -> AppResult<Json<ApiResponse<RegisterSession>>> {
+    current_user.require_permission(perm::REGISTER_SESSIONS_MANAGE)?;
+    let session = service::cancel_close(&state.db, &key).await?;
+    Ok(Json(ApiResponse::success(
+        session,
+        "Closing cancelled successfully",
     )))
 }
 
