@@ -61,6 +61,9 @@ pub async fn record_purchase(db: &Db, body: CreatePurchaseRequest) -> AppResult<
         }
         inventory_product_serial::ensure_serials_untracked(db, &serial_numbers).await?;
 
+        // Purchase, batch, movement, product total and serials commit together
+        // or not at all; everything validated above ran before this point.
+        let mut tx = db.begin().await?;
         let now = BsonDateTime::now();
         let key = generate_id(prefixes::PURCHASE);
         let document = PurchaseDocument {
@@ -81,13 +84,13 @@ pub async fn record_purchase(db: &Db, body: CreatePurchaseRequest) -> AppResult<
             updated_by_device: None,
         };
 
-        let inserted = repository::insert_purchase(db, document).await?;
+        let inserted = repository::insert_purchase(&mut tx, document).await?;
 
         let product_object_id = ObjectId::parse_str(&product.id).expect(
             "Product.id returned from get_product_by_key is always a valid ObjectId hex string",
         );
         let batch = inventory_stock_batch::create_batch(
-            db,
+            &mut tx,
             inventory_stock_batch::NewBatch {
                 product_id: product_object_id,
                 product_key: product.key.clone(),
@@ -107,13 +110,14 @@ pub async fn record_purchase(db: &Db, body: CreatePurchaseRequest) -> AppResult<
 
         if product.is_serialized {
             inventory_product_serial::create_serials_for_purchase(
-                db,
+                &mut tx,
                 &product.key,
                 &batch.key,
                 &serial_numbers,
             )
             .await?;
         }
+        tx.commit().await?;
 
         let supplier_summary = SupplierSummary {
             id: supplier.id,

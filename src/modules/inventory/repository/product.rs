@@ -13,6 +13,7 @@ use crate::{
     clients::{
         db::Db,
         sqlite::{bson_to_iso, generate_id_hex, to_bson_datetime},
+        uow::{Backend, Unit},
     },
     core::error::AppResult,
     domain::inventory::Product,
@@ -210,17 +211,19 @@ fn build_product_where_clause(filter: &Document) -> (String, Vec<String>) {
 }
 
 pub(crate) async fn find_product_by_id(
-    db: &Db,
+    unit: impl Into<Unit<'_>>,
     id: ObjectId,
 ) -> AppResult<Option<ProductDocument>> {
-    match db {
-        Db::Mongo(db) => Ok(products(db)
-            .find_one(doc! { "_id": id, "deleted_at": { "$exists": false } })
-            .await?),
-        Db::Sqlite(pool) => {
+    let mut unit = unit.into();
+    match unit.backend().await? {
+        Backend::Mongo(db, session) => Ok(crate::in_session!(
+            products(db).find_one(doc! { "_id": id, "deleted_at": { "$exists": false } }),
+            session
+        )?),
+        Backend::Sqlite(mut conn) => {
             let row = sqlx::query("SELECT * FROM products WHERE id = ? AND deleted_at IS NULL")
                 .bind(id.to_hex())
-                .fetch_optional(pool)
+                .fetch_optional(&mut *conn)
                 .await?;
 
             row.map(|r| row_to_product_doc(&r)).transpose()
@@ -619,12 +622,13 @@ pub(crate) async fn find_low_stock_products(db: &Db) -> AppResult<Vec<ProductDoc
 }
 
 pub(crate) async fn adjust_product_stock_pipeline(
-    db: &Db,
+    unit: impl Into<Unit<'_>>,
     id: ObjectId,
     delta: i64,
 ) -> AppResult<Option<(i64, ProductDocument)>> {
-    match db {
-        Db::Mongo(db) => {
+    let mut unit = unit.into();
+    match unit.backend().await? {
+        Backend::Mongo(db, session) => {
             let mut filter = doc! { "_id": id };
             if delta < 0 {
                 filter.insert("stock_quantity", doc! { "$gte": -delta });
@@ -641,11 +645,13 @@ pub(crate) async fn adjust_product_stock_pipeline(
                 }
             }];
 
-            let result = products(db)
-                .preserve_origin()
-                .find_one_and_update(filter, pipeline_update)
-                .return_document(ReturnDocument::After)
-                .await?;
+            let result = crate::in_session!(
+                products(db)
+                    .preserve_origin()
+                    .find_one_and_update(filter, pipeline_update)
+                    .return_document(ReturnDocument::After),
+                session
+            )?;
 
             if let Some(updated) = result {
                 let previous_stock = updated.stock_quantity - delta;
@@ -654,7 +660,7 @@ pub(crate) async fn adjust_product_stock_pipeline(
                 Ok(None)
             }
         }
-        Db::Sqlite(pool) => {
+        Backend::Sqlite(mut conn) => {
             let id_str = id.to_hex();
 
             // Atomic single-statement update with stock floor guard (stock_quantity + delta >= 0)
@@ -675,7 +681,7 @@ pub(crate) async fn adjust_product_stock_pipeline(
             .bind(delta)
             .bind(&id_str)
             .bind(delta)
-            .fetch_optional(pool)
+            .fetch_optional(&mut *conn)
             .await?;
 
             if let Some(row) = row {

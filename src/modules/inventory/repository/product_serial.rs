@@ -13,6 +13,7 @@ use crate::{
     clients::{
         db::Db,
         sqlite::{bson_to_iso, generate_id_hex, to_bson_datetime},
+        uow::{Backend, Unit},
     },
     core::error::AppResult,
     domain::inventory::SerialStatus,
@@ -52,17 +53,20 @@ fn row_to_serial_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<ProductSerialDo
 }
 
 pub(crate) async fn insert_product_serial(
-    db: &Db,
+    unit: impl Into<Unit<'_>>,
     serial: ProductSerialDocument,
 ) -> AppResult<ProductSerialDocument> {
-    match db {
-        Db::Mongo(db) => {
-            let result = product_serials(db).insert_one(&serial).await?;
+    let mut unit = unit.into();
+    match unit.backend().await? {
+        Backend::Mongo(db, session) => {
+            let result = product_serials(db)
+                .insert_one_in(&serial, session)
+                .await?;
             let mut inserted = serial;
             inserted.id = result.inserted_id.as_object_id();
             Ok(inserted)
         }
-        Db::Sqlite(pool) => {
+        Backend::Sqlite(mut conn) => {
             let id = serial
                 .id
                 .map(|oid| oid.to_hex())
@@ -95,7 +99,7 @@ pub(crate) async fn insert_product_serial(
             .bind(serial.version)
             .bind(&created_at_iso)
             .bind(&updated_at_iso)
-            .execute(pool)
+            .execute(&mut *conn)
             .await?;
 
             let mut inserted = serial;

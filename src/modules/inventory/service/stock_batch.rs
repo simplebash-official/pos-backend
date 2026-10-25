@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, HashMap};
 use mongodb::bson::{DateTime as BsonDateTime, oid::ObjectId};
 
 use crate::{
-    clients::db::Db,
+    clients::{db::Db, uow::Unit},
     core::{
         constants::{codes, prefixes},
         error::{AppError, AppResult},
@@ -70,7 +70,11 @@ pub(crate) struct NewBatch {
 /// quantity, the product total and the ledger agree from the first write —
 /// the same shape every later move has, which is what lets sync rebuild the
 /// remaining quantity from movements alone.
-pub(crate) async fn create_batch(db: &Db, batch: NewBatch) -> AppResult<StockBatch> {
+pub(crate) async fn create_batch(
+    unit: impl Into<Unit<'_>>,
+    batch: NewBatch,
+) -> AppResult<StockBatch> {
+    let mut unit = unit.into();
     if batch.quantity < 1 {
         return Err(AppError::validation("Quantity must be at least 1"));
     }
@@ -78,7 +82,7 @@ pub(crate) async fn create_batch(db: &Db, batch: NewBatch) -> AppResult<StockBat
 
     let now = BsonDateTime::now();
     let inserted = repository::stock_batch::insert_batch(
-        db,
+        &mut unit,
         StockBatchDocument {
             id: None,
             key: generate_id(prefixes::STOCK_BATCH),
@@ -101,7 +105,7 @@ pub(crate) async fn create_batch(db: &Db, batch: NewBatch) -> AppResult<StockBat
     .await?;
 
     super::stock::apply_stock_delta(
-        db,
+        &mut unit,
         batch.product_id,
         Some(&inserted.key),
         batch.quantity,
@@ -111,7 +115,7 @@ pub(crate) async fn create_batch(db: &Db, batch: NewBatch) -> AppResult<StockBat
     )
     .await?;
 
-    let stored = repository::stock_batch::find_batch_by_key(db, &inserted.key)
+    let stored = repository::stock_batch::find_batch_by_key(&mut unit, &inserted.key)
         .await?
         .ok_or_else(|| batch_not_found(&inserted.key))?;
     Ok(stored.into_stock_batch())

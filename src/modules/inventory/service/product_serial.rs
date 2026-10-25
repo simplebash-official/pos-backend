@@ -10,7 +10,7 @@ use chrono::{Duration, Utc};
 use mongodb::bson::{DateTime as BsonDateTime, Document, doc, oid::ObjectId};
 
 use crate::{
-    clients::db::Db,
+    clients::{db::Db, uow::Unit},
     core::{
         constants::{codes, prefixes},
         error::{AppError, AppResult},
@@ -68,14 +68,16 @@ pub(crate) async fn ensure_serials_untracked(db: &Db, serial_numbers: &[String])
 
 /// Mints `ProductSerialDocument`s for units received on a purchase receipt,
 /// each tied to the stock batch the purchase created (a unit sells at its
-/// batch's price). Re-checks uniqueness first (`ensure_serials_untracked`).
+/// batch's price). Callers check uniqueness first (`ensure_serials_untracked`);
+/// inside a transaction the unique index on the serial number is the backstop
+/// and a duplicate rolls the whole receipt back.
 pub(crate) async fn create_serials_for_purchase(
-    db: &Db,
+    unit: impl Into<Unit<'_>>,
     product_key: &str,
     batch_key: &str,
     serial_numbers: &[String],
 ) -> AppResult<()> {
-    ensure_serials_untracked(db, serial_numbers).await?;
+    let mut unit = unit.into();
 
     let now = BsonDateTime::now();
     for serial_number in serial_numbers {
@@ -95,7 +97,7 @@ pub(crate) async fn create_serials_for_purchase(
             created_at: now,
             updated_at: now,
         };
-        repository::product_serial::insert_product_serial(db, document).await?;
+        repository::product_serial::insert_product_serial(&mut unit, document).await?;
     }
     Ok(())
 }

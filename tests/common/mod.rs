@@ -452,6 +452,42 @@ pub async fn spawn_app_isolated() -> TestApp {
     spawn_mongo_app(db_name, start_mock_document_server().await).await
 }
 
+/// Collections a transaction writes to. `main` creates every collection at start-up (through
+/// `ensure_indexes`); a test database is fresh, and a transaction that creates a collection
+/// implicitly conflicts with a concurrent one doing the same ("namespace is already in use").
+/// Only these are created, because every collection counts against Atlas's 500 per cluster.
+const TRANSACTIONAL_COLLECTIONS: &[&str] = &[
+    "purchases",
+    "stock_batches",
+    "stock_movements",
+    "product_serials",
+];
+
+/// Start-up work done once per database and process, however many tests start an app on it at
+/// the same time: the transactional collections above, and the built-in cash categories (their
+/// unique key index rejects a concurrent second seeding).
+async fn start_up_once(db: &Database, db_handle: &simplebash_pos_backend::clients::db::Db) {
+    static DONE: tokio::sync::Mutex<Option<std::collections::HashSet<String>>> =
+        tokio::sync::Mutex::const_new(None);
+    let mut done = DONE.lock().await;
+    if done
+        .get_or_insert_with(Default::default)
+        .insert(db.name().to_string())
+    {
+        let existing = db.list_collection_names().await.expect("list collections");
+        for name in TRANSACTIONAL_COLLECTIONS {
+            if !existing.iter().any(|e| e == name) {
+                db.create_collection(*name).await.expect("create collection");
+            }
+        }
+        simplebash_pos_backend::modules::cash_categories::service::ensure_system_categories(
+            db_handle,
+        )
+        .await
+        .expect("failed to ensure the built-in cash categories");
+    }
+}
+
 async fn spawn_mongo_app(db_name: String, document_server_url: String) -> TestApp {
     let mut config = Config::from_env().expect("invalid configuration for test run");
     config.mongodb_db_name = db_name;
@@ -468,10 +504,7 @@ async fn spawn_mongo_app(db_name: String, document_server_url: String) -> TestAp
         config.document_server_api_key.clone(),
     ));
     let db_handle = simplebash_pos_backend::clients::db::Db::from_mongo(db.clone());
-    // Like `main`, a single-shop app starts with the built-in cash categories.
-    simplebash_pos_backend::modules::cash_categories::service::ensure_system_categories(&db_handle)
-        .await
-        .expect("failed to ensure the built-in cash categories");
+    start_up_once(&db, &db_handle).await;
     let reports_engine = Arc::new(
         simplebash_pos_backend::modules::reports::engine::AnalyticsEngine::new(db_handle.clone()),
     );

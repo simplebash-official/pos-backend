@@ -7,7 +7,7 @@
 use mongodb::bson::{DateTime as BsonDateTime, doc, oid::ObjectId};
 
 use crate::{
-    clients::db::Db,
+    clients::{db::Db, uow::Unit},
     core::{
         constants::{codes, prefixes},
         error::{AppError, AppResult},
@@ -34,7 +34,7 @@ use crate::{
 /// disagree. This is the one place stock is ever mutated, so every caller
 /// gets the same guard and audit trail for free.
 pub(crate) async fn apply_stock_delta(
-    db: &Db,
+    unit: impl Into<Unit<'_>>,
     id: ObjectId,
     batch_key: Option<&str>,
     delta: i64,
@@ -42,6 +42,7 @@ pub(crate) async fn apply_stock_delta(
     reference_id: Option<String>,
     note: Option<String>,
 ) -> AppResult<(i64, ProductDocument)> {
+    let mut unit = unit.into();
     if delta != 0 && batch_key.is_none() {
         return Err(AppError::internal(
             "A stock quantity change must name the batch it moves",
@@ -50,14 +51,14 @@ pub(crate) async fn apply_stock_delta(
 
     if let Some(batch_key) = batch_key
         && delta != 0
-        && repository::stock_batch::adjust_batch_remaining(db, batch_key, delta)
+        && repository::stock_batch::adjust_batch_remaining(&mut unit, batch_key, delta)
             .await?
             .is_none()
     {
-        let batch = repository::stock_batch::find_batch_by_key(db, batch_key)
+        let batch = repository::stock_batch::find_batch_by_key(&mut unit, batch_key)
             .await?
             .ok_or_else(|| super::stock_batch::batch_not_found(batch_key))?;
-        let name = repository::product::find_product_by_id(db, id)
+        let name = repository::product::find_product_by_id(&mut unit, id)
             .await?
             .map(|product| product.name)
             .unwrap_or_default();
@@ -75,17 +76,17 @@ pub(crate) async fn apply_stock_delta(
         ));
     }
 
-    let adjusted = repository::product::adjust_product_stock_pipeline(db, id, delta).await;
+    let adjusted = repository::product::adjust_product_stock_pipeline(&mut unit, id, delta).await;
     let (previous_stock_quantity, updated) = match adjusted {
         Ok(Some(result)) => result,
         failed => {
             if let Some(batch_key) = batch_key
                 && delta != 0
             {
-                repository::stock_batch::adjust_batch_remaining(db, batch_key, -delta).await?;
+                repository::stock_batch::adjust_batch_remaining(&mut unit, batch_key, -delta).await?;
             }
             failed?;
-            let existing = repository::product::find_product_by_id(db, id)
+            let existing = repository::product::find_product_by_id(&mut unit, id)
                 .await?
                 .ok_or_else(|| {
                     AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
@@ -105,7 +106,7 @@ pub(crate) async fn apply_stock_delta(
 
     let now = BsonDateTime::now();
     repository::stock::insert_stock_movement(
-        db,
+        &mut unit,
         StockMovementDocument {
             id: None,
             key: generate_id(prefixes::STOCK_MOVEMENT),

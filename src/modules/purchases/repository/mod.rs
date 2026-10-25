@@ -14,6 +14,7 @@ use crate::{
     clients::{
         db::Db,
         sqlite::{bson_to_iso, generate_id_hex, to_bson_datetime},
+        uow::{Backend, Unit},
     },
     core::error::AppResult,
     modules::purchases::model::PurchaseDocument,
@@ -53,12 +54,13 @@ fn row_to_purchase_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<PurchaseDocum
 /// Inserts `document` and backfills its `id` from the driver-generated
 /// `_id`, since the caller builds the document with `id: None`.
 pub(crate) async fn insert_purchase(
-    db: &Db,
+    unit: impl Into<Unit<'_>>,
     mut document: PurchaseDocument,
 ) -> AppResult<PurchaseDocument> {
-    match db {
-        Db::Mongo(db) => {
-            let result = purchases(db).insert_one(&document).await?;
+    let mut unit = unit.into();
+    match unit.backend().await? {
+        Backend::Mongo(db, session) => {
+            let result = purchases(db).insert_one_in(&document, session).await?;
             document.id = Some(
                 result
                     .inserted_id
@@ -67,7 +69,7 @@ pub(crate) async fn insert_purchase(
             );
             Ok(document)
         }
-        Db::Sqlite(pool) => {
+        Backend::Sqlite(mut conn) => {
             let id = document
                 .id
                 .map(|oid| oid.to_hex())
@@ -101,7 +103,7 @@ pub(crate) async fn insert_purchase(
             .bind(&updated_at_iso)
             .bind(&deleted_at_iso)
             .bind(&document.updated_by_device)
-            .execute(pool)
+            .execute(&mut *conn)
             .await?;
 
             document.id = ObjectId::parse_str(&id).ok();

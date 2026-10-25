@@ -11,6 +11,7 @@ use crate::{
     clients::{
         db::Db,
         sqlite::{bson_to_iso, generate_id_hex, to_bson_datetime},
+        uow::{Backend, Unit},
     },
     core::error::AppResult,
     domain::inventory::StockMovementType,
@@ -52,15 +53,18 @@ fn row_to_stock_movement_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<StockMo
 }
 
 pub(crate) async fn insert_stock_movement(
-    db: &Db,
+    unit: impl Into<Unit<'_>>,
     movement: StockMovementDocument,
 ) -> AppResult<()> {
-    match db {
-        Db::Mongo(db) => {
-            stock_movements(db).insert_one(&movement).await?;
+    let mut unit = unit.into();
+    match unit.backend().await? {
+        Backend::Mongo(db, session) => {
+            stock_movements(db)
+                .insert_one_in(&movement, session)
+                .await?;
             Ok(())
         }
-        Db::Sqlite(pool) => {
+        Backend::Sqlite(mut conn) => {
             let id = movement
                 .id
                 .map(|oid| oid.to_hex())
@@ -91,7 +95,7 @@ pub(crate) async fn insert_stock_movement(
             .bind(&updated_at_iso)
             .bind(&deleted_at_iso)
             .bind(&movement.updated_by_device)
-            .execute(pool)
+            .execute(&mut *conn)
             .await?;
 
             Ok(())

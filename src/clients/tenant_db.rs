@@ -109,6 +109,11 @@ impl TenantDatabase {
     pub fn unscoped(&self) -> &Database {
         &self.inner
     }
+
+    /// The driver client, only to open a session for a transaction (`Db::begin`).
+    pub(crate) fn client(&self) -> &mongodb::Client {
+        self.inner.client()
+    }
 }
 
 pub struct ScopedCollection<T: Send + Sync> {
@@ -240,15 +245,26 @@ impl<T: Serialize + DeserializeOwned + Send + Sync> ScopedCollection<T> {
     /// Inserts the document stamped with the tenant (any caller-supplied
     /// `tenant_id` is overwritten) and, on a synced collection, the origin.
     pub async fn insert_one(&self, doc: impl Borrow<T>) -> Result<InsertOneResult, MongoError> {
+        self.insert_one_in(doc, None).await
+    }
+
+    /// [`Self::insert_one`] inside a transaction's session when there is one.
+    pub async fn insert_one_in(
+        &self,
+        doc: impl Borrow<T>,
+        session: Option<&mut mongodb::ClientSession>,
+    ) -> Result<InsertOneResult, MongoError> {
         let mut document = match mongodb::bson::serialize_to_bson(doc.borrow())? {
             Bson::Document(d) => d,
             _ => return Err(MongoError::custom("inserted value is not a document")),
         };
         document = self.stamp_doc(document);
-        self.inner
-            .clone_with_type::<Document>()
-            .insert_one(document)
-            .await
+        let collection = self.inner.clone_with_type::<Document>();
+        let action = collection.insert_one(document);
+        match session {
+            Some(session) => action.session(session).await,
+            None => action.await,
+        }
     }
 
     /// Replaces the matching document, keeping it inside the tenant.

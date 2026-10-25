@@ -18,6 +18,7 @@ use crate::{
     clients::{
         db::Db,
         sqlite::{bson_to_iso, generate_id_hex, to_bson_datetime},
+        uow::{Backend, Unit},
     },
     core::error::AppResult,
     modules::inventory::model::StockBatchDocument,
@@ -57,16 +58,17 @@ fn row_to_batch_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<StockBatchDocume
 
 /// Inserts a new batch and returns it with its id filled in.
 pub(crate) async fn insert_batch(
-    db: &Db,
+    unit: impl Into<Unit<'_>>,
     mut batch: StockBatchDocument,
 ) -> AppResult<StockBatchDocument> {
-    match db {
-        Db::Mongo(db) => {
-            let result = stock_batches(db).insert_one(&batch).await?;
+    let mut unit = unit.into();
+    match unit.backend().await? {
+        Backend::Mongo(db, session) => {
+            let result = stock_batches(db).insert_one_in(&batch, session).await?;
             batch.id = result.inserted_id.as_object_id();
             Ok(batch)
         }
-        Db::Sqlite(pool) => {
+        Backend::Sqlite(mut conn) => {
             let id = batch
                 .id
                 .map(|oid| oid.to_hex())
@@ -97,7 +99,7 @@ pub(crate) async fn insert_batch(
             .bind(bson_to_iso(&batch.updated_at))
             .bind(batch.deleted_at.as_ref().map(bson_to_iso))
             .bind(&batch.updated_by_device)
-            .execute(pool)
+            .execute(&mut *conn)
             .await?;
             batch.id = ObjectId::parse_str(&id).ok();
             Ok(batch)
@@ -106,16 +108,21 @@ pub(crate) async fn insert_batch(
 }
 
 /// Fetches one live batch by its key.
-pub(crate) async fn find_batch_by_key(db: &Db, key: &str) -> AppResult<Option<StockBatchDocument>> {
-    match db {
-        Db::Mongo(db) => Ok(stock_batches(db)
-            .find_one(doc! { "key": key, "deleted_at": { "$exists": false } })
-            .await?),
-        Db::Sqlite(pool) => {
+pub(crate) async fn find_batch_by_key(
+    unit: impl Into<Unit<'_>>,
+    key: &str,
+) -> AppResult<Option<StockBatchDocument>> {
+    let mut unit = unit.into();
+    match unit.backend().await? {
+        Backend::Mongo(db, session) => Ok(crate::in_session!(
+            stock_batches(db).find_one(doc! { "key": key, "deleted_at": { "$exists": false } }),
+            session
+        )?),
+        Backend::Sqlite(mut conn) => {
             let row =
                 sqlx::query("SELECT * FROM stock_batches WHERE key = ? AND deleted_at IS NULL")
                     .bind(key)
-                    .fetch_optional(pool)
+                    .fetch_optional(&mut *conn)
                     .await?;
             row.map(|r| row_to_batch_doc(&r)).transpose()
         }
@@ -194,12 +201,13 @@ pub(crate) async fn list_in_stock_batches_for_products(
 /// the last unit cannot both pass. Like the product stock column, only the
 /// derived value changes: no `version`/`updated_at` bump, writer preserved.
 pub(crate) async fn adjust_batch_remaining(
-    db: &Db,
+    unit: impl Into<Unit<'_>>,
     key: &str,
     delta: i64,
 ) -> AppResult<Option<StockBatchDocument>> {
-    match db {
-        Db::Mongo(db) => {
+    let mut unit = unit.into();
+    match unit.backend().await? {
+        Backend::Mongo(db, session) => {
             let mut filter = doc! { "key": key, "deleted_at": { "$exists": false } };
             if delta < 0 {
                 filter.insert("remaining_quantity", doc! { "$gte": -delta });
@@ -207,13 +215,15 @@ pub(crate) async fn adjust_batch_remaining(
             let update = vec![doc! {
                 "$set": { "remaining_quantity": { "$add": ["$remaining_quantity", delta] } }
             }];
-            Ok(stock_batches(db)
-                .preserve_origin()
-                .find_one_and_update(filter, update)
-                .return_document(ReturnDocument::After)
-                .await?)
+            Ok(crate::in_session!(
+                stock_batches(db)
+                    .preserve_origin()
+                    .find_one_and_update(filter, update)
+                    .return_document(ReturnDocument::After),
+                session
+            )?)
         }
-        Db::Sqlite(pool) => {
+        Backend::Sqlite(mut conn) => {
             let row = sqlx::query(
                 r#"
                 UPDATE stock_batches
@@ -225,7 +235,7 @@ pub(crate) async fn adjust_batch_remaining(
             .bind(delta)
             .bind(key)
             .bind(delta)
-            .fetch_optional(pool)
+            .fetch_optional(&mut *conn)
             .await?;
             row.map(|r| row_to_batch_doc(&r)).transpose()
         }
