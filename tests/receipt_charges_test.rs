@@ -382,7 +382,6 @@ async fn scenario(app: &common::TestApp) {
         }),
         ("a discount cannot be paid to someone else", shop.receipt(one_line.clone(), json!([{ "kind": "discount", "amountCents": 100, "billedBy": "third_party", "payeeKey": shop.courier_key }]))),
         ("a supplier's own charge has no payee", shop.receipt(one_line.clone(), json!([{ "kind": "shipping", "amountCents": 100, "billedBy": "supplier", "payeeKey": shop.courier_key }]))),
-        ("a third-party charge needs a payee", shop.receipt(one_line.clone(), json!([{ "kind": "shipping", "amountCents": 100, "billedBy": "third_party" }]))),
         ("one product has nothing to spread over", shop.receipt(one_line.clone(), json!([{ "kind": "shipping", "amountCents": 100, "billedBy": "supplier", "allocation": "value" }]))),
         ("a third-party charge needs a way to pay", shop.receipt(one_line.clone(), json!([courier.clone()]))),
         ("a payment with nothing to pay", {
@@ -408,6 +407,55 @@ async fn scenario(app: &common::TestApp) {
         assert_eq!(status, StatusCode::BAD_REQUEST, "{what}: {response}");
     }
     assert_eq!(shop.expected_cash().await, drawer, "refusals move no cash");
+
+    // ---- An "other" charge can say what it is; nothing else may. ----
+    let (_, d_key) = shop.product("Described item", false).await;
+    let described_line = json!([{ "productKey": d_key, "quantity": 2, "lineTotalCents": 10_000, "sellingPriceCents": 9_000 }]);
+    let other = |description: Value| {
+        let mut charge = json!({ "kind": "other", "amountCents": 1_200, "billedBy": "supplier" });
+        if !description.is_null() {
+            charge["description"] = description;
+        }
+        shop.receipt(described_line.clone(), json!([charge]))
+    };
+    let (status, saved) = shop.post("/api/purchase-receipts", other(json!("  Packing tape  "))).await;
+    assert_eq!(status, StatusCode::CREATED, "{saved}");
+    assert_eq!(saved["data"]["charges"][0]["description"], "Packing tape");
+    assert_eq!(saved["data"]["totalCents"], 11_200, "the description changes no figure");
+    let (status, blank) = shop.post("/api/purchase-receipts", other(json!("   "))).await;
+    assert_eq!(status, StatusCode::CREATED, "{blank}");
+    assert!(blank["data"]["charges"][0].get("description").is_none(), "blank means none");
+    let (status, none) = shop.post("/api/purchase-receipts", other(Value::Null)).await;
+    assert_eq!(status, StatusCode::CREATED, "{none}");
+    assert!(none["data"]["charges"][0].get("description").is_none());
+    let receipts_before = shop.receipts().await;
+    for (what, body) in [
+        ("81 characters", other(json!("x".repeat(81)))),
+        ("a shipping charge with a description", {
+            shop.receipt(
+                described_line.clone(),
+                json!([{ "kind": "shipping", "amountCents": 100, "billedBy": "supplier", "description": "Van" }]),
+            )
+        }),
+    ] {
+        let (status, response) = shop.post("/api/purchase-receipts", body).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{what}: {response}");
+    }
+    assert_eq!(shop.receipts().await, receipts_before, "a refused charge saves no receipt");
+
+    // ---- Who is paid is optional for a charge paid to someone else. ----
+    let mut body = shop.receipt(
+        described_line.clone(),
+        json!([{ "kind": "handling", "amountCents": 300, "billedBy": "third_party" }]),
+    );
+    body["chargesPayment"] = shop.drawer_charges_payment();
+    let (status, nameless) = shop.post("/api/purchase-receipts", body).await;
+    assert_eq!(status, StatusCode::CREATED, "{nameless}");
+    let charge = &nameless["data"]["charges"][0];
+    assert!(charge.get("payeeKey").is_none());
+    assert_eq!(charge["paymentKind"], "cash_movement");
+    assert_eq!(nameless["data"]["paidToOthersCents"], 300);
+    assert_eq!(nameless["data"]["totalCents"], 10_000);
 
     // ---- A serialized product keeps every serial across a split lot. ----
     let (_, phone_key) = shop.product("Phone", true).await;
@@ -484,4 +532,34 @@ async fn charges_on_mongo() {
     let app = common::spawn_app_isolated().await;
     scenario(&app).await;
     app.db.drop().await.ok();
+}
+
+/// A database that created `receipt_charges` before it had a description column gets one at start.
+#[tokio::test]
+async fn an_older_charges_table_gets_its_description_column() {
+    use sqlx::sqlite::SqlitePoolOptions;
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    sqlx::query(
+        "CREATE TABLE receipt_charges (key TEXT PRIMARY KEY, id TEXT NOT NULL, receipt_key TEXT NOT NULL)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    simplebash_pos_backend::clients::sqlite::migrate_schema(&pool)
+        .await
+        .unwrap();
+    let columns: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM pragma_table_info('receipt_charges')")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert!(columns.iter().any(|c| c == "description"), "{columns:?}");
+    // Running it again changes nothing.
+    simplebash_pos_backend::clients::sqlite::migrate_schema(&pool)
+        .await
+        .unwrap();
 }

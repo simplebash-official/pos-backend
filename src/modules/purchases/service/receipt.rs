@@ -93,9 +93,10 @@ struct Outlay {
     paid_on: Option<String>,
     category_key: String,
     movement_type: CashMovementType,
-    payee_key: String,
-    /// Names the owner in the note of the capital row when the owner paid.
-    payee_name: String,
+    /// Who is paid; a charge paid to someone else may have no saved payee.
+    payee_key: Option<String>,
+    /// Names who was paid in the note of the capital row when the owner paid.
+    payee_name: Option<String>,
     reference_no: Option<String>,
     note: String,
 }
@@ -142,10 +143,12 @@ async fn prepare_outlay(
                             period_start: None,
                             period_end: None,
                             reference_no: outlay.reference_no.clone(),
-                            note: Some(format!(
-                                "Paid {} from own pocket. {}",
-                                outlay.payee_name, outlay.note
-                            )),
+                            note: Some(match &outlay.payee_name {
+                                Some(name) => {
+                                    format!("Paid {name} from own pocket. {}", outlay.note)
+                                }
+                                None => format!("Paid from own pocket. {}", outlay.note),
+                            }),
                             manager_pin: None,
                             override_reason: None,
                             confirm_duplicate: false,
@@ -171,7 +174,7 @@ async fn prepare_outlay(
                     terminal_id,
                     category_key: outlay.category_key,
                     custom_label: None,
-                    payee_key: Some(outlay.payee_key),
+                    payee_key: outlay.payee_key,
                     payee_name: None,
                     period_start: None,
                     period_end: None,
@@ -217,7 +220,7 @@ async fn prepare_outlay(
                 CreateExpenseRequest {
                     expense_date: paid_on,
                     category_key: outlay.category_key,
-                    payee_key: Some(outlay.payee_key),
+                    payee_key: outlay.payee_key,
                     payee_name: None,
                     amount_cents: outlay.amount_cents,
                     paid_from,
@@ -311,18 +314,10 @@ fn spread_charges(
                 "A discount can only be on the supplier's bill",
             ));
         }
-        match (charge.billed_by, charge.payee_key.is_some()) {
-            (BilledBy::ThirdParty, false) => {
-                return Err(AppError::validation(
-                    "Say who is paid for an extra charge that is not on the supplier's bill",
-                ));
-            }
-            (BilledBy::Supplier, true) => {
-                return Err(AppError::validation(
-                    "A charge on the supplier's bill is paid with the bill, so it has no payee",
-                ));
-            }
-            _ => {}
+        if charge.billed_by == BilledBy::Supplier && charge.payee_key.is_some() {
+            return Err(AppError::validation(
+                "A charge on the supplier's bill is paid with the bill, so it has no payee",
+            ));
         }
         let allocation = match (lines.len() > 1, charge.allocation) {
             (true, Some(allocation)) => Some(allocation),
@@ -454,17 +449,19 @@ pub async fn record_receipt(
                 line.selling_price_cents,
             )?;
         }
-        let mut third_party_payees = Vec::new();
+        let mut payee_names: Vec<Option<String>> = Vec::with_capacity(body.charges.len());
         for charge in &body.charges {
-            if let Some(payee_key) = &charge.payee_key {
-                let payee = payees::service::resolve_payee(db, payee_key).await?;
-                if !matches!(payee.payee_type, PayeeType::Vendor | PayeeType::Other) {
-                    return Err(AppError::validation(
-                        "A supplier or a staff member cannot be paid as an extra charge",
-                    ));
-                }
-                third_party_payees.push(payee.name);
+            let Some(payee_key) = &charge.payee_key else {
+                payee_names.push(None);
+                continue;
+            };
+            let payee = payees::service::resolve_payee(db, payee_key).await?;
+            if !matches!(payee.payee_type, PayeeType::Vendor | PayeeType::Other) {
+                return Err(AppError::validation(
+                    "A supplier or a staff member cannot be paid as an extra charge",
+                ));
             }
+            payee_names.push(Some(payee.name));
         }
         let has_third_party = body.charges.iter().any(|c| c.billed_by == BilledBy::ThirdParty);
         match (has_third_party, &body.charges_payment) {
@@ -609,8 +606,8 @@ pub async fn record_receipt(
                         paid_on,
                         category_key,
                         movement_type: CashMovementType::SupplierPayment,
-                        payee_key: supplier.key.clone(),
-                        payee_name: supplier.name.clone(),
+                        payee_key: Some(supplier.key.clone()),
+                        payee_name: Some(supplier.name.clone()),
                         reference_no: reference_no.clone(),
                         note: format!("Receipt {receipt_number}"),
                     },
@@ -632,15 +629,10 @@ pub async fn record_receipt(
             paid_on,
         }) = body.charges_payment.clone()
         {
-            let mut payee_names = third_party_payees.iter();
             for (index, charge) in body.charges.iter().enumerate() {
-                let Some(payee_key) = &charge.payee_key else {
+                if charge.billed_by != BilledBy::ThirdParty {
                     continue;
-                };
-                let payee_name = payee_names
-                    .next()
-                    .cloned()
-                    .expect("every third-party charge has a resolved payee");
+                }
                 let prepared = prepare_outlay(
                     db,
                     by.as_ref().expect("a payer is known when a charge is paid"),
@@ -658,8 +650,8 @@ pub async fn record_receipt(
                             STOCK_CHARGES_CATEGORY,
                         ),
                         movement_type: CashMovementType::PettyExpense,
-                        payee_key: payee_key.clone(),
-                        payee_name,
+                        payee_key: charge.payee_key.clone(),
+                        payee_name: payee_names[index].clone(),
                         reference_no: reference_no.clone(),
                         note: format!("Extra charge on receipt {receipt_number}"),
                     },
