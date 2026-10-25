@@ -5,6 +5,7 @@
 // outside this module tree can reach past `routes`/`service` into
 // persistence (see `modules::inventory` for the reference pattern this
 // mirrors).
+pub mod charges;
 mod model;
 mod repository;
 pub mod routes;

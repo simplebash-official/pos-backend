@@ -719,7 +719,7 @@ async fn record_purchase_increments_stock_and_writes_movement() {
             "lines": [{
                 "productKey": product_key,
                 "quantity": 25,
-                "unitCostCents": 1500,
+                "lineTotalCents": 25 * 1500,
                 "sellingPriceCents": 2500,
             }],
         })),
@@ -731,7 +731,9 @@ async fn record_purchase_increments_stock_and_writes_movement() {
     assert_eq!(body["data"]["referenceNo"], "INV-TEST-1");
     assert_eq!(body["data"]["supplier"]["key"], supplier_key);
     let line = &body["data"]["lines"][0];
-    assert_eq!(line["totalCostCents"], 25 * 1500);
+    assert_eq!(line["landedTotalCents"], 25 * 1500);
+    assert_eq!(line["lineTotalCents"], 25 * 1500);
+    assert_eq!(line["landedUnitCostCents"], 1500);
     assert_eq!(line["product"]["key"], product_key);
     assert_eq!(line["receiptKey"], body["data"]["key"]);
     let purchase_key = line["key"].as_str().unwrap().to_string();
@@ -791,7 +793,7 @@ async fn record_purchase_requires_auth_and_validates_quantity() {
         "lines": [{
             "productKey": product_key,
             "quantity": 5,
-            "unitCostCents": 1000,
+            "lineTotalCents": 5 * 1000,
             "sellingPriceCents": 2500,
         }],
     });
@@ -832,7 +834,7 @@ async fn list_purchases_without_keys_returns_paginated_collection() {
             "lines": [{
                 "productKey": product_key,
                 "quantity": 3,
-                "unitCostCents": 1500,
+                "lineTotalCents": 3 * 1500,
                 "sellingPriceCents": 2500,
             }],
         })),
@@ -881,7 +883,7 @@ async fn deleting_a_supplier_with_purchase_history_is_blocked() {
             "lines": [{
                 "productKey": product_key,
                 "quantity": 5,
-                "unitCostCents": 1000,
+                "lineTotalCents": 5 * 1000,
                 "sellingPriceCents": 2500,
             }],
         })),

@@ -39,8 +39,16 @@ pub struct PurchaseReceipt {
     pub supplier: Option<SupplierSummary>,
     /// The products received, each with its own cost and selling price.
     pub lines: Vec<Purchase>,
-    /// Sum of `quantity x unit cost` over the lines.
+    /// What the lines cost, before any extra charge: the sum of the lines' totals.
+    pub goods_cents: i64,
+    /// Extra charges the supplier put on the bill, discounts taken off (signed). Adds to what is owed.
+    pub extra_charges_cents: i64,
+    /// Extra charges paid to someone other than the supplier (courier, agent). Not owed to the supplier.
+    pub paid_to_others_cents: i64,
+    /// What the supplier's bill comes to: the goods plus the extra charges it carries.
     pub total_cents: i64,
+    /// The extra charges on this receipt, oldest first.
+    pub charges: Vec<ReceiptCharge>,
     /// Taken off the bill by supplier credits (short or damaged goods, price differences).
     pub credited_cents: i64,
     /// Paid against the bill, reversed payments left out.
@@ -177,12 +185,175 @@ pub struct ReceiptPayment {
     /// refused for the drawer and the owner's pocket (cash is booked when it is recorded).
     #[serde(default)]
     pub paid_on: Option<String>,
-    /// A manager or owner PIN, when the payment needs one.
-    #[serde(default)]
-    pub manager_pin: Option<String>,
+}
+
+/// A manager or owner's approval for the cash this receipt takes out of the drawer, goods payment
+/// and extra-charge payments together. One approval covers the whole request.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReceiptApproval {
+    /// A manager or owner PIN.
+    pub manager_pin: String,
     /// Why more is paid out than the drawer holds.
     #[serde(default)]
     pub override_reason: Option<String>,
+}
+
+/// What kind of extra charge this is. A discount lowers the cost; the rest raise it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ChargeKind {
+    Shipping,
+    Customs,
+    Handling,
+    Insurance,
+    Other,
+    /// Taken off by the supplier (early payment, a price break). Counts as a negative charge.
+    Discount,
+}
+
+impl ChargeKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ChargeKind::Shipping => "shipping",
+            ChargeKind::Customs => "customs",
+            ChargeKind::Handling => "handling",
+            ChargeKind::Insurance => "insurance",
+            ChargeKind::Other => "other",
+            ChargeKind::Discount => "discount",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "shipping" => Some(ChargeKind::Shipping),
+            "customs" => Some(ChargeKind::Customs),
+            "handling" => Some(ChargeKind::Handling),
+            "insurance" => Some(ChargeKind::Insurance),
+            "other" => Some(ChargeKind::Other),
+            "discount" => Some(ChargeKind::Discount),
+            _ => None,
+        }
+    }
+}
+
+/// Who asks for the money of an extra charge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BilledBy {
+    /// It is on the supplier's bill: it adds to (or, for a discount, takes from) what is owed them.
+    Supplier,
+    /// Someone else is paid (courier, clearing agent, porter): paid now, not owed to the supplier.
+    ThirdParty,
+}
+
+impl BilledBy {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            BilledBy::Supplier => "supplier",
+            BilledBy::ThirdParty => "third_party",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "supplier" => Some(BilledBy::Supplier),
+            "third_party" => Some(BilledBy::ThirdParty),
+            _ => None,
+        }
+    }
+}
+
+/// How an extra charge is spread over the products on the receipt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Allocation {
+    /// In proportion to what each line costs.
+    Value,
+    /// In proportion to how many units each line has.
+    Quantity,
+}
+
+impl Allocation {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Allocation::Value => "value",
+            Allocation::Quantity => "quantity",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "value" => Some(Allocation::Value),
+            "quantity" => Some(Allocation::Quantity),
+            _ => None,
+        }
+    }
+}
+
+/// One extra charge on a receipt being recorded.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReceiptChargeRequest {
+    pub kind: ChargeKind,
+    /// Always positive; a discount is a `discount` kind, not a negative amount.
+    pub amount_cents: i64,
+    pub billed_by: BilledBy,
+    /// How it is spread over the products. Required when the receipt has two or more lines,
+    /// refused when it has one.
+    #[serde(default)]
+    pub allocation: Option<Allocation>,
+    /// The saved payee (courier, agent) a third-party charge is paid to. Required for
+    /// `third_party`, refused for `supplier`.
+    #[serde(default)]
+    pub payee_key: Option<String>,
+}
+
+/// How the third-party extra charges are paid, as the receipt is recorded. Same sources as the
+/// goods payment; the money is filed under the shop's "Stock charges" category.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ChargesPayment {
+    pub source: PaymentSource,
+    /// This register's terminal. Required for the drawer and the owner's pocket, refused otherwise.
+    #[serde(default)]
+    pub terminal_id: Option<String>,
+    /// The open shift the cash is booked on; omitted only between shifts.
+    #[serde(default)]
+    pub session_key: Option<String>,
+    /// `YYYY-MM-DD` the money left the account. Required for the bank, a card and online,
+    /// refused for the drawer and the owner's pocket.
+    #[serde(default)]
+    pub paid_on: Option<String>,
+}
+
+/// An extra charge as returned to API clients.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReceiptCharge {
+    /// MongoDB hex ID.
+    pub id: String,
+    /// Unique business key (`rchg_...`).
+    pub key: String,
+    pub receipt_key: String,
+    pub supplier_key: String,
+    pub kind: ChargeKind,
+    pub amount_cents: i64,
+    pub billed_by: BilledBy,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allocation: Option<Allocation>,
+    /// The payee a third-party charge was paid to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payee_key: Option<String>,
+    /// What paid a third-party charge.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payment_kind: Option<PaymentKind>,
+    /// Key of the cash movement or expense payment that paid a third-party charge.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payment_key: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub version: i64,
 }
 
 /// One product on a receipt being recorded.
@@ -193,8 +364,9 @@ pub struct ReceiptLineRequest {
     pub product_key: String,
     /// Units received.
     pub quantity: i64,
-    /// Cost price per unit in cents.
-    pub unit_cost_cents: i64,
+    /// What the whole line costs in cents: the supplier's lot price, or quantity x price each.
+    /// The unit cost is worked out from this (plus the line's share of extra charges), never sent.
+    pub line_total_cents: i64,
     /// Price each received unit sells at, in cents.
     pub selling_price_cents: i64,
     /// One serial number per unit, required (and counted against `quantity`) when the product
@@ -223,6 +395,17 @@ pub struct CreateReceiptRequest {
     /// What is paid as the stock is received. Absent means the whole receipt is on credit.
     #[serde(default)]
     pub payment: Option<ReceiptPayment>,
+    /// Extra charges: shipping, duty, handling, insurance, a discount. They go into the cost of the
+    /// stock; the ones the supplier bills also change what is owed to the supplier.
+    #[serde(default)]
+    pub charges: Vec<ReceiptChargeRequest>,
+    /// How the third-party charges are paid. Required when any charge is `third_party`, refused
+    /// otherwise.
+    #[serde(default)]
+    pub charges_payment: Option<ChargesPayment>,
+    /// Manager or owner approval for the drawer cash this request takes out.
+    #[serde(default)]
+    pub approval: Option<ReceiptApproval>,
     /// Set after a `DUPLICATE_RECEIPT` warning to record the receipt anyway.
     #[serde(default)]
     pub confirm_duplicate: bool,

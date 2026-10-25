@@ -83,7 +83,7 @@ async fn scenario(app: &common::TestApp) {
         "/api/purchase-receipts",
         Some(json!({
             "supplierKey": supplier_key, "date": chrono::Utc::now().to_rfc3339(),
-            "lines": [{ "productKey": product["data"]["key"], "quantity": 10, "unitCostCents": 50_000, "sellingPriceCents": 80_000 }]
+            "lines": [{ "productKey": product["data"]["key"], "quantity": 10, "lineTotalCents": 500000, "sellingPriceCents": 80_000 }]
         })),
         &admin,
     )

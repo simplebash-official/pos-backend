@@ -25,6 +25,8 @@ pub const SYSTEM_CATEGORIES: &[(CashMovementType, &str, ReportGroup)] = &[
     (T::PettyExpense, "Repairs and maintenance", G::OperatingExpense),
     (T::PettyExpense, "Packaging", G::OperatingExpense),
     (T::PettyExpense, "Courier and postage", G::OperatingExpense),
+    // Paid to a courier or agent while receiving stock: stock cost, so not an operating expense.
+    (T::PettyExpense, "Stock charges", G::Purchases),
     (T::PettyExpense, "Other", G::OperatingExpense),
     (T::RentAndBills, "Shop rent", G::OperatingExpense),
     (T::RentAndBills, "Electricity", G::OperatingExpense),

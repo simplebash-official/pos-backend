@@ -842,6 +842,7 @@ async fn an_outdated_desktop_app_cannot_push_or_pull_until_it_updates() {
     refused(register("1.12.0").await);
     refused(register("1.13.0").await);
     refused(register("1.22.0").await);
+    refused(register("1.23.0").await);
     refused(register("not-a-version").await);
     try_all().await.into_iter().for_each(refused);
     let stored = app
@@ -853,7 +854,7 @@ async fn an_outdated_desktop_app_cannot_push_or_pull_until_it_updates() {
     assert_eq!(stored, 0, "nothing from the outdated app was applied");
 
     // After the update it registers its new version and syncs as usual.
-    let (status, body) = register("1.23.0").await;
+    let (status, body) = register("1.24.0").await;
     assert_eq!(status, StatusCode::OK, "{body}");
     for (status, body) in try_all().await {
         assert_eq!(status, StatusCode::OK, "{body}");

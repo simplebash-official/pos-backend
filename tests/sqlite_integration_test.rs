@@ -378,7 +378,7 @@ async fn test_sqlite_complete_pos_lifecycle() {
             "lines": [{
                 "productKey": product_key,
                 "quantity": 5,
-                "unitCostCents": 72000,
+                "lineTotalCents": 5 * 72000,
                 "sellingPriceCents": 99900
             }]
         })),

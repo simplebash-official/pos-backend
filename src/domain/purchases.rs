@@ -45,8 +45,8 @@ pub struct ProductSummary {
     pub subcategory: String,
 }
 
-/// A recorded stock intake as returned to API clients. `totalCostCents` is
-/// computed at read time (`quantity * unitCostCents`), never stored — this
+/// A recorded stock intake as returned to API clients. `landedTotalCents` is
+/// computed at read time (`lineTotalCents + chargesShareCents`), never stored — this
 /// codebase never persists a derived numeric field that could go stale
 /// (compare `LowStockItem.deficit`, also computed on the way out).
 /// `supplier`/`product` are the enrichment the frontend's mock layer
@@ -64,13 +64,19 @@ pub struct Purchase {
     pub product_key: String,
     /// Number of units purchased and received.
     pub quantity: i64,
-    /// Unit cost in cents.
-    pub unit_cost_cents: i64,
+    /// What the line cost in cents, before extra charges: the supplier's price for these units.
+    pub line_total_cents: i64,
+    /// This line's share of the receipt's extra charges in cents (discounts negative), worked out
+    /// once when the receipt was recorded.
+    pub charges_share_cents: i64,
+    /// What the units really cost: the line total plus its share of extra charges. Worked out on read.
+    pub landed_total_cents: i64,
+    /// The landed total per unit, rounded to the nearest cent for display; the stock itself is
+    /// costed exactly (a lot that does not divide evenly is held as two batches one cent apart).
+    pub landed_unit_cost_cents: i64,
     /// Price each received unit was set to sell at, in cents (the stock
     /// batch this purchase created starts at it; see `StockBatch`).
     pub selling_price_cents: i64,
-    /// Calculated total cost in cents (quantity * unit_cost_cents).
-    pub total_cost_cents: i64,
     /// Purchase receipt date.
     pub date: DateTime<Utc>,
     /// Foreign key referencing the receipt (supplier invoice) this line belongs to.

@@ -334,7 +334,13 @@ pub(crate) async fn prepare_movement(
                 ));
             }
         } else {
-            forbid(false, override_reason.is_some(), "A reason for going over the drawer")?;
+            // One approval can cover several payments of a supplier receipt, so its reason may
+            // ride along on a payment that does not go over the drawer; it is not stored there.
+            forbid(
+                receipt_key.is_some(),
+                override_reason.is_some(),
+                "A reason for going over the drawer",
+            )?;
         }
 
         // A manager PIN: always for owner drawings and staff pay, above the category's own limit or the

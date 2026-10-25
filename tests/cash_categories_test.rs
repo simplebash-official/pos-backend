@@ -59,7 +59,9 @@ async fn scenario(app: &common::TestApp) {
     let (status, body) = send(app, "GET", "/api/cash-categories?movementType=petty_expense", None, &t.staff).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let petty = body["data"].as_array().unwrap();
-    assert_eq!(petty.len(), 10);
+    // Ten everyday ones plus the system "Stock charges" a receipt files its courier payments under.
+    assert_eq!(petty.len(), 11);
+    assert!(petty.iter().any(|c| c["name"] == "Stock charges"));
     assert_eq!(petty[0]["name"], "Tea and refreshments");
     assert!(petty.iter().all(|c| c["movementType"] == "petty_expense" && c["usageCount"] == 0));
 

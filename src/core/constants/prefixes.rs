@@ -35,6 +35,7 @@ pub const EXPENSE: &str = "exp";
 pub const PURCHASE_RECEIPT: &str = "prc";
 pub const RECEIPT_SETTLEMENT: &str = "rset";
 pub const SUPPLIER_CREDIT: &str = "scr";
+pub const RECEIPT_CHARGE: &str = "rchg";
 pub const RECURRING_EXPENSE: &str = "rexp";
 pub const EXPENSE_PAYMENT: &str = "expp";
 pub const INCOME: &str = "inc";

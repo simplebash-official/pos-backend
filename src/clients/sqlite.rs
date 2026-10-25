@@ -170,6 +170,38 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         pool.execute("ALTER TABLE purchases ADD COLUMN receipt_key TEXT")
             .await?;
     }
+    // A purchase line is priced by its total (`line_total_cents`, the supplier's lot price) with
+    // its share of the receipt's extra charges beside it; the per-unit `unit_cost_cents` is gone,
+    // so the line has one source of truth. Existing lines get quantity x unit cost and no share.
+    // The sync triggers name columns, so they are dropped for the change and `install_triggers`
+    // puts them back right after; the rewrite is not uploaded.
+    let purchase_cols = table_columns(pool, "purchases").await?;
+    if purchase_cols.iter().any(|c| c == "unit_cost_cents") {
+        tracing::info!("Migrating 'purchases' table: unit cost to line total");
+        let mut tx = pool.begin().await?;
+        let triggers: Vec<String> = sqlx::query_scalar(
+            "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'sync\\_%' ESCAPE '\\'",
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+        for trigger in triggers {
+            tx.execute(format!("DROP TRIGGER IF EXISTS \"{trigger}\"").as_str())
+                .await?;
+        }
+        if !purchase_cols.iter().any(|c| c == "line_total_cents") {
+            tx.execute("ALTER TABLE purchases ADD COLUMN line_total_cents INTEGER NOT NULL DEFAULT 0")
+                .await?;
+            tx.execute(
+                "ALTER TABLE purchases ADD COLUMN charges_share_cents INTEGER NOT NULL DEFAULT 0",
+            )
+            .await?;
+        }
+        tx.execute("UPDATE purchases SET line_total_cents = quantity * unit_cost_cents")
+            .await?;
+        tx.execute("ALTER TABLE purchases DROP COLUMN unit_cost_cents")
+            .await?;
+        tx.commit().await?;
+    }
 
     // Check if 'login_sessions' table has a legacy 'user_id' column from earlier revisions
     let columns: Vec<(i32, String)> =

@@ -120,7 +120,7 @@ async fn scenario(app: &common::TestApp) {
             "lines": [{
                 "productKey": product_key,
                 "quantity": serials.len(),
-                "unitCostCents": 30000,
+                "lineTotalCents": serials.len() * 30000,
                 "sellingPriceCents": 50000,
                 "serialNumbers": serials,
             }],

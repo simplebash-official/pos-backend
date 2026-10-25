@@ -67,6 +67,7 @@ pub(crate) async fn restore_backup(
         let mut backup = req.backup;
         upgrade_pre_batch_backup(&mut backup.tables);
         upgrade_pre_receipt_backup(&mut backup.tables);
+        upgrade_pre_line_total_backup(&mut backup.tables);
 
         if backup.version != BACKUP_SCHEMA_VERSION {
             return Err(AppError::validation(format!(
@@ -100,6 +101,32 @@ pub(crate) async fn restore_backup(
         })
     })
     .await
+}
+
+/// A backup taken before lot prices and extra charges prices each purchase line per unit
+/// (`unit_cost_cents`); today's schema holds the line's total (`line_total_cents`) and its share
+/// of extra charges. Rewrites such lines, in memory, exactly the way
+/// `clients::sqlite::migrate_schema` rewrites a live database: the total is quantity x the old
+/// unit cost and there is no share. A backup whose lines already have a total is left untouched.
+fn upgrade_pre_line_total_backup(tables: &mut HashMap<String, Vec<Value>>) {
+    let Some(purchases) = tables.get_mut("purchases") else {
+        return;
+    };
+    for purchase in purchases.iter_mut() {
+        let Some(row) = purchase.as_object_mut() else {
+            continue;
+        };
+        if row.contains_key("line_total_cents") {
+            continue;
+        }
+        let quantity = row.get("quantity").and_then(Value::as_i64).unwrap_or(0);
+        let unit_cost = row
+            .remove("unit_cost_cents")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        row.insert("line_total_cents".into(), json!(quantity * unit_cost));
+        row.insert("charges_share_cents".into(), json!(0));
+    }
 }
 
 /// A backup taken before supplier receipts carries purchases with no `receipt_key`, which
@@ -363,6 +390,25 @@ mod tests {
         assert_eq!(receipts.len(), 2);
         assert_eq!(receipts[0]["reference_no"], "INV-1");
         assert_eq!(receipts[0]["receipt_number"], "PUR-Lpur_a");
+    }
+
+    #[test]
+    fn purchase_lines_priced_per_unit_get_a_line_total() {
+        let mut tables: HashMap<String, Vec<Value>> = HashMap::new();
+        tables.insert(
+            "purchases".into(),
+            vec![
+                json!({ "key": "pur_a", "quantity": 4, "unit_cost_cents": 250 }),
+                json!({ "key": "pur_b", "quantity": 2, "line_total_cents": 900, "charges_share_cents": 10 }),
+            ],
+        );
+        upgrade_pre_line_total_backup(&mut tables);
+        let purchases = &tables["purchases"];
+        assert_eq!(purchases[0]["line_total_cents"], 1000);
+        assert_eq!(purchases[0]["charges_share_cents"], 0);
+        assert!(purchases[0].get("unit_cost_cents").is_none());
+        assert_eq!(purchases[1]["line_total_cents"], 900);
+        assert_eq!(purchases[1]["charges_share_cents"], 10);
     }
 
     #[test]

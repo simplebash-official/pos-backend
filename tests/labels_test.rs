@@ -177,7 +177,7 @@ impl Shop {
         let mut line = json!({
             "productKey": product_key,
             "quantity": quantity,
-            "unitCostCents": price / 2,
+            "lineTotalCents": quantity * (price / 2),
             "sellingPriceCents": price,
         });
         if let Some(serials) = serials {

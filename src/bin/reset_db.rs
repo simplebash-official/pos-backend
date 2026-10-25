@@ -61,6 +61,7 @@ async fn main() {
             "suppliers",
             "supplier_products",
             "supplier_credits",
+            "receipt_charges",
             "receipt_settlements",
             "purchase_receipts",
             "purchases",

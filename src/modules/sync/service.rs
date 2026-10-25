@@ -148,6 +148,9 @@ pub(crate) async fn hydrate(
         "supplierCredits" | "supplier_credits" => {
             to_values(purchases_credit_service::hydrate_sync_documents(documents)?)?
         }
+        "receiptCharges" | "receipt_charges" => {
+            to_values(purchases_receipt_service::hydrate_charge_documents(documents)?)?
+        }
         // The expense ledger has no read-time enrichment on its stored rows, so the wire shape is
         // the stored fields in camelCase.
         "expenses" | "expensePayments" | "expense_payments" => {

@@ -381,6 +381,16 @@ pub const SYNC_RESOURCES: &[ResourceSpec] = &[
         order: 161,
         phase: Phase::P3a,
     },
+    ResourceSpec {
+        name: "receiptCharges",
+        table: "receipt_charges",
+        class: MergeClass::AppendOnly,
+        soft_delete: false,
+        derived: &[],
+        local_only: &[],
+        order: 162,
+        phase: Phase::P3a,
+    },
 ];
 
 /// Payload fields that travel between a device and the cloud but must never be
@@ -434,6 +444,7 @@ pub fn label_column(table: &str) -> Option<&'static str> {
         "expenses" => Some("expense_number"),
         "receipt_settlements" => Some("payment_key"),
         "supplier_credits" => Some("key"),
+        "receipt_charges" => Some("key"),
         _ => None,
     }
 }

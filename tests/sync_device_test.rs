@@ -208,7 +208,7 @@ async fn shop(dev: &Device) -> Value {
             "/api/purchase-receipts",
             Some(json!({
                 "supplierKey": supplier_key, "date": "2026-09-06T00:00:00Z",
-                "lines": [{ "productKey": product_key, "quantity": 5, "unitCostCents": 29000, "sellingPriceCents": 50000 }],
+                "lines": [{ "productKey": product_key, "quantity": 5, "lineTotalCents": 145000, "sellingPriceCents": 50000 }],
                 "payment": {
                     "source": "bank", "amountCents": 100000, "paidOn": "2026-09-06",
                     "categoryKey": simplebash_pos_backend::domain::cash_categories::category_key(
@@ -297,6 +297,7 @@ const SYNCED: &[&str] = &[
     "purchases",
     "receipt_settlements",
     "supplier_credits",
+    "receipt_charges",
     "expenses",
     "expense_payments",
     "stock_movements",

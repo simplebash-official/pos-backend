@@ -173,7 +173,7 @@ async fn record_purchase(
     let mut line = json!({
         "productKey": product_key,
         "quantity": quantity,
-        "unitCostCents": unit_cost_cents,
+        "lineTotalCents": quantity * unit_cost_cents,
         "sellingPriceCents": SERIAL_PRICE_CENTS,
     });
     if let Some(serials) = serial_numbers {

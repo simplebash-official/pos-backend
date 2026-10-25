@@ -5,7 +5,10 @@
 // purchase key in the group, exactly as the SQLite migration derives them
 // (`clients::sqlite::migrate_purchases_to_receipts`), so a desktop and the cloud migrating
 // separately write identical rows and sync merges them. Idempotent: only purchases without a
-// `receipt_key` are touched, and a receipt that already exists is left alone.
+// `receipt_key` are touched, and a receipt that already exists is left alone. The same run moves
+// every purchase line from a per-unit cost to a line total (`line_total_cents` = quantity x the old
+// unit cost, no share of extra charges), which is how a line is priced since extra charges and lot
+// prices arrived.
 
 use std::collections::BTreeMap;
 
@@ -24,6 +27,8 @@ use crate::{
 pub struct Summary {
     pub purchases: u64,
     pub receipts: u64,
+    /// Purchase lines moved from a per-unit cost to a line total.
+    pub line_totals: u64,
 }
 
 fn text(document: &Document, field: &str) -> Option<String> {
@@ -137,6 +142,25 @@ pub async fn migrate_mongo(db: &Database, mode: Mode) -> mongodb::error::Result<
                     "$set": { "receipt_key": &receipt_key },
                     "$unset": { "reference_no": "", "notes": "" },
                 },
+            )
+            .await?;
+    }
+
+    // Lines from before lot prices carry a per-unit cost; the line total is its product with the
+    // quantity. One update computes it on the server, so every line is migrated the same way.
+    let pending = doc! { "line_total_cents": { "$exists": false } };
+    summary.line_totals = purchases.count_documents(pending.clone()).await?;
+    if summary.line_totals > 0 && mode == Mode::Apply {
+        purchases
+            .update_many(
+                pending,
+                vec![
+                    doc! { "$set": {
+                        "line_total_cents": { "$multiply": ["$quantity", "$unit_cost_cents"] },
+                        "charges_share_cents": 0_i64,
+                    } },
+                    doc! { "$unset": "unit_cost_cents" },
+                ],
             )
             .await?;
     }

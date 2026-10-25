@@ -41,8 +41,8 @@ async fn main() {
         .await
         .expect("purchase receipt migration failed");
 
-    if summary.purchases == 0 {
-        println!("Nothing to migrate: every purchase already belongs to a receipt.");
+    if summary.purchases == 0 && summary.line_totals == 0 {
+        println!("Nothing to migrate: every purchase has a receipt and a line total.");
         return;
     }
     let verb = if dry_run { "would" } else { "did" };
@@ -51,4 +51,8 @@ async fn main() {
         summary.purchases
     );
     println!("  receipts created          ({verb}): {}", summary.receipts);
+    println!(
+        "  lines given a line total  ({verb}): {}",
+        summary.line_totals
+    );
 }

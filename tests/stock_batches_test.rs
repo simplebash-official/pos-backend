@@ -149,7 +149,7 @@ impl Shop {
                 "lines": [{
                     "productKey": self.product_key,
                     "quantity": quantity,
-                    "unitCostCents": cost,
+                    "lineTotalCents": quantity * cost,
                     "sellingPriceCents": price,
                 }],
             })),

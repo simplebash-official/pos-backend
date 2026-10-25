@@ -100,7 +100,8 @@ CREATE TABLE IF NOT EXISTS purchases (
     supplier_key TEXT NOT NULL,
     product_key TEXT NOT NULL,
     quantity INTEGER NOT NULL,
-    unit_cost_cents INTEGER NOT NULL,
+    line_total_cents INTEGER NOT NULL,
+    charges_share_cents INTEGER NOT NULL,
     selling_price_cents INTEGER NOT NULL,
     date TEXT NOT NULL,
     receipt_key TEXT NOT NULL,
@@ -177,6 +178,31 @@ CREATE TABLE IF NOT EXISTS supplier_credits (
 CREATE INDEX IF NOT EXISTS idx_credits_supplier_key ON supplier_credits(supplier_key);
 CREATE INDEX IF NOT EXISTS idx_credits_receipt_key ON supplier_credits(receipt_key);
 CREATE INDEX IF NOT EXISTS idx_credits_sync ON supplier_credits(updated_at, key);
+
+-- An extra charge on a receipt: shipping, duty, handling, insurance, other, or a supplier discount
+-- (append-only). A third-party charge also names the payee and the payment that paid it.
+CREATE TABLE IF NOT EXISTS receipt_charges (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    receipt_key TEXT NOT NULL,
+    supplier_key TEXT NOT NULL,
+    date TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    amount_cents INTEGER NOT NULL,
+    billed_by TEXT NOT NULL,
+    allocation TEXT,
+    payee_key TEXT,
+    payment_kind TEXT,
+    payment_key TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by_device TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_charges_receipt_key ON receipt_charges(receipt_key);
+CREATE INDEX IF NOT EXISTS idx_charges_supplier_key ON receipt_charges(supplier_key);
+CREATE INDEX IF NOT EXISTS idx_charges_sync ON receipt_charges(updated_at, key);
 
 CREATE TABLE IF NOT EXISTS stock_movements (
     key TEXT PRIMARY KEY,

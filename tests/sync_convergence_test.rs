@@ -628,6 +628,7 @@ const SYNCED: &[&str] = &[
     "purchases",
     "receipt_settlements",
     "supplier_credits",
+    "receipt_charges",
     "expenses",
     "expense_payments",
     "stock_movements",
@@ -1024,7 +1025,7 @@ async fn concurrent_serial_sale_is_flagged_and_both_invoices_survive() {
             "/api/purchase-receipts",
             Some(json!({
                 "supplierKey": supplier_key, "date": chrono::Utc::now().to_rfc3339(),
-                "lines": [{ "productKey": product_key, "quantity": 1, "unitCostCents": 50000, "sellingPriceCents": 80000, "serialNumbers": [serial] }],
+                "lines": [{ "productKey": product_key, "quantity": 1, "lineTotalCents": 50000, "sellingPriceCents": 80000, "serialNumbers": [serial] }],
                 "payment": {
                     "source": "bank", "amountCents": 30000, "paidOn": "2026-09-06",
                     "categoryKey": simplebash_pos_backend::domain::cash_categories::category_key(

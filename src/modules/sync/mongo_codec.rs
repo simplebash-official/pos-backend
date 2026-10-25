@@ -35,12 +35,21 @@ const DATETIME_FIELDS: &[&str] = &[
 fn enrichment_fields(resource: &str) -> &'static [&'static str] {
     match resource {
         "products" => &["category", "subcategory", "priceTiers"],
-        "purchases" => &["product", "supplier", "totalCostCents"],
+        "purchases" => &[
+            "product",
+            "supplier",
+            "landedTotalCents",
+            "landedUnitCostCents",
+        ],
         "receiptSettlements" => &["reversed"],
         "supplierCredits" => &["voidedByKey"],
         "purchaseReceipts" => &[
             "supplier",
             "lines",
+            "goodsCents",
+            "extraChargesCents",
+            "paidToOthersCents",
+            "charges",
             "totalCents",
             "creditedCents",
             "paidCents",

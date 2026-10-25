@@ -45,6 +45,7 @@ pub const SYNCED_COLLECTIONS: &[&str] = &[
     "purchase_receipts",
     "receipt_settlements",
     "supplier_credits",
+    "receipt_charges",
     "purchases",
     "stock_movements",
     "product_serials",

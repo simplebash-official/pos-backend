@@ -5,6 +5,7 @@
 // call in, but the `mod repository;` declaration in `purchases/mod.rs` is
 // private, so none of this is reachable from outside this module tree.
 
+pub(crate) mod charge;
 pub(crate) mod credit;
 pub(crate) mod receipt;
 pub(crate) mod settlement;
@@ -42,7 +43,8 @@ fn row_to_purchase_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<PurchaseDocum
         supplier_key: row.get("supplier_key"),
         product_key: row.get("product_key"),
         quantity: row.get("quantity"),
-        unit_cost_cents: row.get("unit_cost_cents"),
+        line_total_cents: row.get("line_total_cents"),
+        charges_share_cents: row.get("charges_share_cents"),
         selling_price_cents: row.get("selling_price_cents"),
         date: to_bson_datetime(&date_str),
         receipt_key: row.get("receipt_key"),
@@ -85,10 +87,10 @@ pub(crate) async fn insert_purchase(
             sqlx::query(
                 r#"
                 INSERT INTO purchases (
-                    key, id, supplier_key, product_key, quantity, unit_cost_cents,
-                    selling_price_cents, date, receipt_key, version, created_at,
-                    updated_at, deleted_at, updated_by_device
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    key, id, supplier_key, product_key, quantity, line_total_cents,
+                    charges_share_cents, selling_price_cents, date, receipt_key, version,
+                    created_at, updated_at, deleted_at, updated_by_device
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(&document.key)
@@ -96,7 +98,8 @@ pub(crate) async fn insert_purchase(
             .bind(&document.supplier_key)
             .bind(&document.product_key)
             .bind(document.quantity)
-            .bind(document.unit_cost_cents)
+            .bind(document.line_total_cents)
+            .bind(document.charges_share_cents)
             .bind(document.selling_price_cents)
             .bind(&date_iso)
             .bind(&document.receipt_key)

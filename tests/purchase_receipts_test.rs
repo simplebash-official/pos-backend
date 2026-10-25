@@ -155,8 +155,8 @@ async fn scenario(app: &common::TestApp) {
         body
     };
     let two_lines = json!([
-        { "productKey": case_key, "quantity": 10, "unitCostCents": 500, "sellingPriceCents": 900 },
-        { "productKey": cable_key, "quantity": 4, "unitCostCents": 1200, "sellingPriceCents": 2000 },
+        { "productKey": case_key, "quantity": 10, "lineTotalCents": 5000, "sellingPriceCents": 900 },
+        { "productKey": cable_key, "quantity": 4, "lineTotalCents": 4800, "sellingPriceCents": 2000 },
     ]);
     let invoice = format!("INV-{tag}");
 
@@ -237,7 +237,7 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(status, StatusCode::NOT_FOUND);
 
     // The same invoice number from the same supplier is a warning, until confirmed.
-    let one_line = json!([{ "productKey": case_key, "quantity": 1, "unitCostCents": 500, "sellingPriceCents": 900 }]);
+    let one_line = json!([{ "productKey": case_key, "quantity": 1, "lineTotalCents": 500, "sellingPriceCents": 900 }]);
     let (status, duplicate) = send(
         router,
         "POST",
@@ -290,7 +290,7 @@ async fn scenario(app: &common::TestApp) {
             "zero quantity",
             receipt(
                 None,
-                json!([{ "productKey": case_key, "quantity": 0, "unitCostCents": 1, "sellingPriceCents": 2 }]),
+                json!([{ "productKey": case_key, "quantity": 0, "lineTotalCents": 0, "sellingPriceCents": 2 }]),
                 false,
             ),
         ),
@@ -299,8 +299,8 @@ async fn scenario(app: &common::TestApp) {
             receipt(
                 None,
                 json!([
-                    { "productKey": case_key, "quantity": 1, "unitCostCents": 1, "sellingPriceCents": 2 },
-                    { "productKey": case_key, "quantity": 1, "unitCostCents": 1, "sellingPriceCents": 2 },
+                    { "productKey": case_key, "quantity": 1, "lineTotalCents": 1, "sellingPriceCents": 2 },
+                    { "productKey": case_key, "quantity": 1, "lineTotalCents": 1, "sellingPriceCents": 2 },
                 ]),
                 false,
             ),
@@ -309,7 +309,7 @@ async fn scenario(app: &common::TestApp) {
             "serials on a plain product",
             receipt(
                 None,
-                json!([{ "productKey": case_key, "quantity": 1, "unitCostCents": 1, "sellingPriceCents": 2, "serialNumbers": ["X"] }]),
+                json!([{ "productKey": case_key, "quantity": 1, "lineTotalCents": 1, "sellingPriceCents": 2, "serialNumbers": ["X"] }]),
                 false,
             ),
         ),
@@ -317,7 +317,7 @@ async fn scenario(app: &common::TestApp) {
             "missing serials",
             receipt(
                 None,
-                json!([{ "productKey": phone_key, "quantity": 2, "unitCostCents": 1, "sellingPriceCents": 2 }]),
+                json!([{ "productKey": phone_key, "quantity": 2, "lineTotalCents": 2, "sellingPriceCents": 2 }]),
                 false,
             ),
         ),
@@ -337,7 +337,7 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
-    let (status, _) = send(router, "POST", "/api/purchase-receipts", Some(receipt(None, json!([{ "productKey": "prod_missing", "quantity": 1, "unitCostCents": 1, "sellingPriceCents": 2 }]), false)), &admin).await;
+    let (status, _) = send(router, "POST", "/api/purchase-receipts", Some(receipt(None, json!([{ "productKey": "prod_missing", "quantity": 1, "lineTotalCents": 1, "sellingPriceCents": 2 }]), false)), &admin).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
     // A failed second line takes the first line with it.
@@ -350,8 +350,8 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     let (status, _) = send(router, "POST", "/api/purchase-receipts", Some(receipt(None, json!([
-        { "productKey": cable_key, "quantity": 5, "unitCostCents": 100, "sellingPriceCents": 200 },
-        { "productKey": "prod_missing", "quantity": 1, "unitCostCents": 1, "sellingPriceCents": 2 },
+        { "productKey": cable_key, "quantity": 5, "lineTotalCents": 500, "sellingPriceCents": 200 },
+        { "productKey": "prod_missing", "quantity": 1, "lineTotalCents": 1, "sellingPriceCents": 2 },
     ]), false)), &admin).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     let (_, product) = send(
@@ -477,7 +477,7 @@ async fn payment_scenario(app: &common::TestApp) {
     let receipt = |units: i64, payment: Option<Value>| {
         let mut body = json!({
             "supplierKey": supplier_key, "date": "2026-03-01T00:00:00Z",
-            "lines": [{ "productKey": product_key, "quantity": units, "unitCostCents": 4_000, "sellingPriceCents": 6_000 }],
+            "lines": [{ "productKey": product_key, "quantity": units, "lineTotalCents": units * 4_000, "sellingPriceCents": 6_000 }],
         });
         if let Some(payment) = payment {
             body["payment"] = payment;
@@ -742,19 +742,17 @@ async fn payment_scenario(app: &common::TestApp) {
         .expect("the bank payment is in the ledger");
     assert_eq!(row["amountCents"], 8_000);
     // No day, or a terminal, or a PIN: refused for a bank payment.
-    for payment in [
-        json!({ "source": "bank", "amountCents": 8_000, "categoryKey": cod }),
-        bank(json!({ "terminalId": terminal })),
-        bank(json!({ "managerPin": "1234" })),
+    for (payment, approval) in [
+        (json!({ "source": "bank", "amountCents": 8_000, "categoryKey": cod }), None),
+        (bank(json!({ "terminalId": terminal })), None),
+        (bank(json!({})), Some(json!({ "managerPin": "1234" }))),
     ] {
-        let (status, body) = send(
-            router,
-            "POST",
-            "/api/purchase-receipts",
-            Some(receipt(2, Some(payment))),
-            &admin,
-        )
-        .await;
+        let mut body = receipt(2, Some(payment));
+        if let Some(approval) = approval {
+            body["approval"] = approval;
+        }
+        let (status, body) =
+            send(router, "POST", "/api/purchase-receipts", Some(body), &admin).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     }
 
@@ -947,19 +945,17 @@ async fn payment_scenario(app: &common::TestApp) {
     );
     assert_eq!(second["data"]["settlements"].as_array().unwrap().len(), 2);
     // No day, or a terminal, or a PIN: refused for a bank payment.
-    for payment in [
-        json!({ "source": "bank", "amountCents": 8_000, "categoryKey": cod }),
-        bank(json!({ "terminalId": terminal })),
-        bank(json!({ "managerPin": "1234" })),
+    for (payment, approval) in [
+        (json!({ "source": "bank", "amountCents": 8_000, "categoryKey": cod }), None),
+        (bank(json!({ "terminalId": terminal })), None),
+        (bank(json!({})), Some(json!({ "managerPin": "1234" }))),
     ] {
-        let (status, body) = send(
-            router,
-            "POST",
-            "/api/purchase-receipts",
-            Some(receipt(2, Some(payment))),
-            &admin,
-        )
-        .await;
+        let mut body = receipt(2, Some(payment));
+        if let Some(approval) = approval {
+            body["approval"] = approval;
+        }
+        let (status, body) =
+            send(router, "POST", "/api/purchase-receipts", Some(body), &admin).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     }
 }
@@ -1030,7 +1026,7 @@ async fn credit_scenario(app: &common::TestApp) {
     let receive = |supplier: &str, units: i64| {
         json!({
             "supplierKey": supplier, "date": "2026-03-01T00:00:00Z",
-            "lines": [{ "productKey": product_key, "quantity": units, "unitCostCents": 1_000, "sellingPriceCents": 1_500 }],
+            "lines": [{ "productKey": product_key, "quantity": units, "lineTotalCents": units * 1_000, "sellingPriceCents": 1_500 }],
         })
     };
     let credit = |supplier: &str, receipt: Option<&str>, amount: i64| {
