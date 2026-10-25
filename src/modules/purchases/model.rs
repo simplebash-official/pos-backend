@@ -344,6 +344,9 @@ pub struct ReceiptChargeDocument {
     /// The payee a third-party charge was paid to.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payee_key: Option<String>,
+    /// What an `other` charge is; absent for every other kind and for old rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payment_kind: Option<PaymentKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -374,6 +377,7 @@ impl ReceiptChargeDocument {
             billed_by: self.billed_by,
             allocation: self.allocation,
             payee_key: self.payee_key,
+            description: self.description,
             payment_kind: self.payment_kind,
             payment_key: self.payment_key,
             created_at: self.created_at.to_chrono(),

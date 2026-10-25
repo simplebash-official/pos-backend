@@ -192,6 +192,7 @@ CREATE TABLE IF NOT EXISTS receipt_charges (
     billed_by TEXT NOT NULL,
     allocation TEXT,
     payee_key TEXT,
+    description TEXT,
     payment_kind TEXT,
     payment_key TEXT,
     version INTEGER NOT NULL DEFAULT 1,

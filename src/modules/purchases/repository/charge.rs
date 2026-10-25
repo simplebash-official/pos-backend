@@ -48,6 +48,7 @@ fn charge_from_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<ReceiptChargeDocu
             })
             .transpose()?,
         payee_key: row.get("payee_key"),
+        description: row.get("description"),
         payment_kind: payment_kind
             .map(|k| {
                 PaymentKind::parse(&k).ok_or_else(|| {
@@ -83,9 +84,9 @@ pub(crate) async fn insert_charge(
             sqlx::query(
                 "INSERT INTO receipt_charges (
                     key, id, receipt_key, supplier_key, date, kind, amount_cents, billed_by,
-                    allocation, payee_key, payment_kind, payment_key,
+                    allocation, payee_key, description, payment_kind, payment_key,
                     version, created_at, updated_at, updated_by_device
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&document.key)
             .bind(&id)
@@ -97,6 +98,7 @@ pub(crate) async fn insert_charge(
             .bind(document.billed_by.as_str())
             .bind(document.allocation.map(|a| a.as_str()))
             .bind(&document.payee_key)
+            .bind(&document.description)
             .bind(document.payment_kind.map(|k| k.as_str()))
             .bind(&document.payment_key)
             .bind(document.version)

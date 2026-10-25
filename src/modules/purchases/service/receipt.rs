@@ -61,6 +61,7 @@ use crate::{
 const ALL_RECEIPTS_LIMIT: i64 = 10_000;
 const REFERENCE_MAX: usize = 60;
 const NOTES_MAX: usize = 200;
+const CHARGE_DESCRIPTION_MAX: usize = 80;
 /// The system category a third-party charge is filed under (stock cost, not an operating expense).
 const STOCK_CHARGES_CATEGORY: &str = "Stock charges";
 
@@ -295,6 +296,11 @@ fn spread_charges(
 ) -> AppResult<SpreadCharges> {
     let mut shares = vec![0_i64; lines.len()];
     for charge in requested {
+        if charge.description.is_some() && charge.kind != ChargeKind::Other {
+            return Err(AppError::validation(
+                "A description only applies to an Other charge",
+            ));
+        }
         if charge.amount_cents <= 0 {
             return Err(AppError::validation(
                 "An extra charge must be more than zero",
@@ -425,6 +431,15 @@ pub async fn record_receipt(
             .map(|line| (line.quantity, line.line_total_cents))
             .collect();
         let spread = spread_charges(&body.charges, &line_figures)?;
+        // The description is trimmed once here; blank means none.
+        let mut descriptions = Vec::with_capacity(body.charges.len());
+        for charge in &body.charges {
+            descriptions.push(clean(
+                "The description",
+                charge.description.clone(),
+                CHARGE_DESCRIPTION_MAX,
+            )?);
+        }
         for (line, share) in body.lines.iter().zip(&spread.shares) {
             let landed = line.line_total_cents + share;
             if landed <= 0 {
@@ -785,6 +800,7 @@ pub async fn record_receipt(
                     billed_by: charge.billed_by,
                     allocation: charge.allocation,
                     payee_key: charge.payee_key.clone(),
+                    description: descriptions[index].clone(),
                     payment_kind,
                     payment_key,
                     version: 1,

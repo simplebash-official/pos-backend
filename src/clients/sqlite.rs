@@ -170,6 +170,13 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         pool.execute("ALTER TABLE purchases ADD COLUMN receipt_key TEXT")
             .await?;
     }
+    // `receipt_charges.description` (what an "other" charge is) arrived after the table itself.
+    let charge_cols = table_columns(pool, "receipt_charges").await?;
+    if !charge_cols.is_empty() && !charge_cols.iter().any(|c| c == "description") {
+        tracing::info!("Migrating 'receipt_charges' table: adding 'description' column");
+        pool.execute("ALTER TABLE receipt_charges ADD COLUMN description TEXT")
+            .await?;
+    }
     // A purchase line is priced by its total (`line_total_cents`, the supplier's lot price) with
     // its share of the receipt's extra charges beside it; the per-unit `unit_cost_cents` is gone,
     // so the line has one source of truth. Existing lines get quantity x unit cost and no share.

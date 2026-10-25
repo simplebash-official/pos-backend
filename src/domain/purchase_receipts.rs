@@ -307,6 +307,10 @@ pub struct ReceiptChargeRequest {
     /// `third_party`, refused for `supplier`.
     #[serde(default)]
     pub payee_key: Option<String>,
+    /// What an `other` charge is, in a few words (at most 80 characters). Optional, and refused
+    /// for every other kind.
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 /// How the third-party extra charges are paid, as the receipt is recorded. Same sources as the
@@ -345,6 +349,9 @@ pub struct ReceiptCharge {
     /// The payee a third-party charge was paid to.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payee_key: Option<String>,
+    /// What an `other` charge is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     /// What paid a third-party charge.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payment_kind: Option<PaymentKind>,
