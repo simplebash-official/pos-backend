@@ -59,9 +59,9 @@ use crate::{
 
 /// Upper bound when every receipt of a supplier has to be looked at.
 const ALL_RECEIPTS_LIMIT: i64 = 10_000;
-const REFERENCE_MAX: usize = 60;
+pub(crate) const REFERENCE_MAX: usize = 60;
 const NOTES_MAX: usize = 200;
-const CHARGE_DESCRIPTION_MAX: usize = 80;
+pub(crate) const CHARGE_DESCRIPTION_MAX: usize = 80;
 /// The system category a third-party charge is filed under (stock cost, not an operating expense).
 const STOCK_CHARGES_CATEGORY: &str = "Stock charges";
 

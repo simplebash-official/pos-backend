@@ -232,6 +232,8 @@ const NOT_LOCAL_CHANGES: &[&str] = &[
     "/api/sync/state",
     "/api/sync/blocks",
     "/api/logs",
+    // Live calculations store nothing.
+    "/api/calc",
 ];
 
 /// Middleware: after every successful write request, tell the local event

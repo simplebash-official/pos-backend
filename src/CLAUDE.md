@@ -125,6 +125,18 @@ Every field on a sale-completion item (`CreateSaleItemRequest`) that's reachable
 
 **`src/bin/`** — standalone binaries sharing the lib's config/Mongo plumbing, run via `cargo run --bin <name>`, not part of the HTTP server.
 
+## Live calculations (`modules/calc/`)
+
+Every number a screen shows while someone types is worked out here, once; the frontend only sends what was typed and renders the reply (see the frontend CLAUDE.md, "Live calculations come from the server"). Rules:
+
+- **Pure engines next to their domain, thin routes in `calc/`.** Money maths lives in no-I/O modules (`purchases/charges.rs`, `purchases/pricing.rs`; billing, quotations, cash and repairs follow the same shape). `calc/<area>.rs` shapes the request/reply and calls them; `calc/routes.rs` checks the **same permission as the write it previews** (so cost data stays admin-only) and wraps the reply in `ApiResponse`.
+- **The save path calls the same engine** as the preview, so a preview can never disagree with what is stored. Do not copy a formula into a service; call the engine.
+- **Integer cents, `i128` intermediates, checked narrowing** (`AppError::validation` when a value does not fit). No `f64` in money paths; percentages and margins travel as whole numbers (margin per mille, discounts in basis points). Round half up like `Math.round` via `round_half_up`.
+- **Half-typed input is normal.** Fields still being typed are `Option` in the request; a figure that cannot be worked out yet is `None`/0 in the reply (documented on the field). Only malformed or out-of-range input is a 400. Bound list sizes and amounts (`check_bounds`) so no sum can overflow.
+- **Blockers are codes** (`BlockerCode`), in the order the form should say them; the frontend turns them into words and Save stays off until the list is empty.
+- **Not a write**: `/api/calc` is exempt from the idempotency layer, from the sync wake-up (`local_write_tick`), and has its own rate-limit bucket (`RATE_LIMIT_LIVE_BURST`/`RATE_LIMIT_LIVE_REFILL_PER_SEC`, default 400 / 100 per s) because it fires on every keystroke; CORS answers preflights with `Access-Control-Max-Age: 86400`. Keep new calculators under `/api/calc`.
+- **Tests**: unit-test the engine with the vectors (including the edge cases), and add a request/reply pair to `tests/golden/calc/` through `tests/calc_test.rs` (re-record with `UPDATE_GOLDEN=1 cargo test --test calc_test`, then review the diff). No Mongo is needed: calc reads nothing.
+
 ## MongoDB Aggregation Pipelines
 
 Use an aggregation pipeline wherever the driver supports one and it collapses multiple round trips

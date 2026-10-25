@@ -1,0 +1,110 @@
+{
+  "request": {
+    "supplierKey": "sup_1",
+    "referenceNo": "INV-1",
+    "date": "2026-10-26",
+    "lines": [
+      {
+        "productKey": "prod_a",
+        "serialized": false,
+        "quantity": 10,
+        "costMode": "unit",
+        "costCents": 5000,
+        "pricingMode": "margin",
+        "sellingPriceCents": 0,
+        "marginTenths": 250,
+        "stepCents": 100,
+        "serialNumbers": []
+      },
+      {
+        "productKey": "prod_b",
+        "serialized": false,
+        "quantity": 3,
+        "costMode": "lot",
+        "costCents": 1000,
+        "pricingMode": "price",
+        "sellingPriceCents": 500,
+        "marginTenths": null,
+        "stepCents": null,
+        "serialNumbers": []
+      }
+    ],
+    "charges": [
+      {
+        "kind": "shipping",
+        "amountCents": 3000,
+        "billedBy": "third_party",
+        "allocation": "value",
+        "description": ""
+      },
+      {
+        "kind": "discount",
+        "amountCents": 200,
+        "billedBy": "supplier",
+        "allocation": "quantity",
+        "description": ""
+      }
+    ],
+    "chargesPayment": {
+      "source": "drawer",
+      "paidOn": ""
+    },
+    "payment": {
+      "mode": "part",
+      "source": "bank",
+      "partCents": 20000,
+      "paidOn": "2026-10-26",
+      "categoryKey": "ccat_1"
+    }
+  },
+  "reply": {
+    "lines": [
+      {
+        "goodsCents": 50000,
+        "landedCents": 52787,
+        "unitCostCents": 5279,
+        "costAsUnitCents": 5000,
+        "costAsLotCents": 50000,
+        "sellingPriceCents": 7100,
+        "priceWithoutRoundingCents": 7039,
+        "priceRoundedUp": true,
+        "margin": {
+          "profitEachCents": 1821,
+          "lotProfitCents": 18213,
+          "marginTenths": 257,
+          "belowCost": false
+        },
+        "marginTenthsIfSwitched": 257
+      },
+      {
+        "goodsCents": 1000,
+        "landedCents": 1013,
+        "unitCostCents": 338,
+        "costAsUnitCents": null,
+        "costAsLotCents": 1000,
+        "sellingPriceCents": 500,
+        "priceWithoutRoundingCents": null,
+        "priceRoundedUp": false,
+        "margin": {
+          "profitEachCents": 162,
+          "lotProfitCents": 487,
+          "marginTenths": 325,
+          "belowCost": false
+        },
+        "marginTenthsIfSwitched": 325
+      }
+    ],
+    "summary": {
+      "goodsCents": 51000,
+      "extraBilledCents": -200,
+      "totalCents": 50800,
+      "paidToOthersCents": 3000,
+      "payingNowCents": 20000,
+      "leftOwedCents": 30800,
+      "cashOutTodayCents": 23000
+    },
+    "chargesIncomplete": false,
+    "involvesCash": true,
+    "blockers": []
+  }
+}

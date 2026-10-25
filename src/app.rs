@@ -91,6 +91,9 @@ pub fn build_router(state: AppState) -> Router {
             Method::DELETE,
         ])
         .allow_headers(tower_http::cors::Any)
+        // Live calculations send a JSON POST per keystroke; without this Chromium repeats the
+        // preflight every 5 seconds, which doubles the round trips of a figure that is waiting.
+        .max_age(std::time::Duration::from_secs(86_400))
         // A recorded label print answers with its PDF, so the job's key rides in a
         // header the browser must be allowed to read across origins (desktop app).
         .expose_headers([axum::http::HeaderName::from_static(
@@ -159,6 +162,10 @@ pub fn build_router(state: AppState) -> Router {
         .nest(
             &format!("/{}", mod_names::BILLING),
             modules::billing::routes::router(),
+        )
+        .nest(
+            &format!("/{}", mod_names::CALC),
+            modules::calc::routes::router(),
         )
         .nest(
             &format!("/{}", mod_names::CUSTOMERS),

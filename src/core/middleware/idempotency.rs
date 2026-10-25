@@ -99,6 +99,8 @@ fn is_idempotency_exempt(path: &str) -> bool {
         || path == "/api/system/setup"
         || path == "/api/backup"
         || path.starts_with("/api/backup/")
+        // Live calculations store nothing, so a repeat is harmless and a key is not sent.
+        || path.starts_with("/api/calc/")
 }
 
 /// Identifies the bucket an `Idempotency-Key` is scoped to: the verified

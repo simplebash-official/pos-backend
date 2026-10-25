@@ -1,6 +1,7 @@
 /// Standard feature module names and OpenAPI tags used across the application.
 pub const AUTH: &str = "auth";
 pub const BILLING: &str = "billing";
+pub const CALC: &str = "calc";
 pub const CUSTOMERS: &str = "customers";
 pub const INVENTORY: &str = "inventory";
 pub const PRINT_JOBS: &str = "print_jobs";

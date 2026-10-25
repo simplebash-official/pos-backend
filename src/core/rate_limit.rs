@@ -127,6 +127,9 @@ impl TokenBuckets {
 pub struct RequestLimits {
     general: TokenBuckets,
     sensitive: TokenBuckets,
+    /// Live calculations (`/api/calc`): one request per keystroke, so a bucket of their own that
+    /// neither starves nor is starved by the rest of the API.
+    live: TokenBuckets,
 }
 
 fn env_f64(name: &str, default: f64) -> f64 {
@@ -138,15 +141,17 @@ fn env_f64(name: &str, default: f64) -> f64 {
 }
 
 impl RequestLimits {
-    pub fn new(general: (f64, f64), sensitive: (f64, f64)) -> Self {
+    pub fn new(general: (f64, f64), sensitive: (f64, f64), live: (f64, f64)) -> Self {
         Self {
             general: TokenBuckets::new(general.0, general.1),
             sensitive: TokenBuckets::new(sensitive.0, sensitive.1),
+            live: TokenBuckets::new(live.0, live.1),
         }
     }
 
     /// Defaults, overridable with `RATE_LIMIT_BURST`, `RATE_LIMIT_REFILL_PER_SEC`,
-    /// `RATE_LIMIT_SENSITIVE_BURST` and `RATE_LIMIT_SENSITIVE_REFILL_PER_SEC`.
+    /// `RATE_LIMIT_SENSITIVE_BURST`, `RATE_LIMIT_SENSITIVE_REFILL_PER_SEC`,
+    /// `RATE_LIMIT_LIVE_BURST` and `RATE_LIMIT_LIVE_REFILL_PER_SEC`.
     pub fn from_env() -> Self {
         Self::new(
             (
@@ -157,11 +162,18 @@ impl RequestLimits {
                 env_f64("RATE_LIMIT_SENSITIVE_BURST", 20.0),
                 env_f64("RATE_LIMIT_SENSITIVE_REFILL_PER_SEC", 0.5),
             ),
+            (
+                env_f64("RATE_LIMIT_LIVE_BURST", 400.0),
+                env_f64("RATE_LIMIT_LIVE_REFILL_PER_SEC", 100.0),
+            ),
         )
     }
 
     fn allow(&self, client: &str, path: &str) -> bool {
         let now = Instant::now();
+        if path.starts_with("/api/calc") {
+            return self.live.take(client, now);
+        }
         let sensitive = ["/api/auth", "/api/system", "/api/internal"]
             .iter()
             .any(|p| path.starts_with(p));
@@ -233,8 +245,17 @@ mod tests {
     }
 
     #[test]
+    fn live_calculations_have_their_own_bucket() {
+        let limits = RequestLimits::new((1.0, 0.0), (1.0, 0.0), (2.0, 0.0));
+        assert!(limits.allow("a", "/api/calc/receipt"));
+        assert!(limits.allow("a", "/api/calc/receipt"));
+        assert!(!limits.allow("a", "/api/calc/receipt"), "live burst spent");
+        assert!(limits.allow("a", "/api/billing"), "general bucket untouched");
+    }
+
+    #[test]
     fn sensitive_paths_are_limited_harder_and_per_client() {
-        let limits = RequestLimits::new((100.0, 0.0), (2.0, 0.0));
+        let limits = RequestLimits::new((100.0, 0.0), (2.0, 0.0), (3.0, 0.0));
         assert!(limits.allow("a", "/api/auth/login"));
         assert!(limits.allow("a", "/api/auth/login"));
         assert!(
@@ -265,7 +286,7 @@ mod tests {
         use axum::{Router, body::Body, http::Request, routing::get};
         use tower::ServiceExt;
 
-        let limits = std::sync::Arc::new(RequestLimits::new((100.0, 0.0), (1.0, 0.0)));
+        let limits = std::sync::Arc::new(RequestLimits::new((100.0, 0.0), (1.0, 0.0), (3.0, 0.0)));
         let app = Router::new()
             .route("/api/auth/shop/x", get(|| async { "ok" }))
             .layer(axum::middleware::from_fn_with_state(limits, limit_requests));

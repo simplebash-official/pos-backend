@@ -885,6 +885,45 @@
       "description": "Sale completion (invoice + payment creation), invoice reads, payment recording/history, invoice cancellation, and on-demand invoice PDF documents (A4 invoice / thermal receipt, rendered via the external document-server and cached). `/invoices` is the real \"list\" entry point — `GET /` stays the placeholder module-status stub since billing's root has no natural single-collection meaning the way `/invoices` does."
     },
     {
+      "name": "Calc",
+      "item": [
+        {
+          "name": "Calculate Receive Stock Form",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/calc/receipt",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "calc",
+                "receipt"
+              ]
+            },
+            "description": "Live figures for the Receive Stock form as typed so far: each line's landed cost, selling price, margin and the other side of the unit/lot and price/margin toggles, the receipt summary and `blockers` (what still stops Save, in order). Nothing is stored. Fields still being typed are `null`; an amount not typed yet is 0. **Requires an Admin token** (same as recording the receipt). Out-of-range amounts or too many lines are 400.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"supplierKey\": \"{{supplierKey}}\",\n  \"referenceNo\": \"INV-1042\",\n  \"date\": \"2026-10-26\",\n  \"lines\": [\n    {\n      \"productKey\": \"{{productKey}}\",\n      \"serialized\": false,\n      \"quantity\": 10,\n      \"costMode\": \"unit\",\n      \"costCents\": 5000,\n      \"pricingMode\": \"margin\",\n      \"sellingPriceCents\": 0,\n      \"marginTenths\": 250,\n      \"stepCents\": 100,\n      \"serialNumbers\": []\n    }\n  ],\n  \"charges\": [\n    {\n      \"kind\": \"shipping\",\n      \"amountCents\": 3000,\n      \"billedBy\": \"third_party\",\n      \"allocation\": null,\n      \"description\": \"\"\n    }\n  ],\n  \"chargesPayment\": {\n    \"source\": \"drawer\",\n    \"paidOn\": \"\"\n  },\n  \"payment\": {\n    \"mode\": \"full\",\n    \"source\": \"bank\",\n    \"partCents\": 0,\n    \"paidOn\": \"2026-10-26\",\n    \"categoryKey\": \"{{cashCategoryKey}}\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "Customers",
       "item": [
         {
