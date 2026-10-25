@@ -98,6 +98,7 @@ fn unique_columns(resource: &str) -> &'static [&'static str] {
         "registerSessions" => &["session_number"],
         "cashMovements" => &["movement_number"],
         "expenses" => &["expense_number"],
+        "purchaseReceipts" => &["receipt_number"],
         _ => &[],
     }
 }

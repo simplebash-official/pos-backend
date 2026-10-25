@@ -223,6 +223,10 @@ pub struct CashMovementDocument {
     pub recorded_late: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub original_variance_session_key: Option<String>,
+    /// The supplier receipt this movement was recorded with (paid on delivery, or the own-pocket
+    /// pair), when it was; later payments against a receipt do not carry it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt_key: Option<String>,
     #[serde(default = "default_version")]
     pub version: i64,
     #[serde(default = "BsonDateTime::now")]
@@ -279,6 +283,7 @@ impl CashMovementDocument {
             reversed_by_key,
             recorded_late: self.recorded_late,
             original_variance_session_key: self.original_variance_session_key,
+            receipt_key: self.receipt_key,
             version: self.version,
             created_at: self.created_at.to_chrono(),
             updated_at: self.updated_at.to_chrono(),

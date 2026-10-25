@@ -10,6 +10,7 @@ use crate::{
         db::Db,
         sqlite::{bson_to_iso, generate_id_hex, to_bson_datetime},
         tenant_db::{ScopedCollection, TenantDatabase},
+        uow::{Backend, Unit},
     },
     core::error::{AppError, AppResult},
     domain::expenses::PaidFrom,
@@ -68,14 +69,18 @@ fn payment_from_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<ExpensePaymentDo
 }
 
 /// Inserts a new expense.
-pub(crate) async fn insert_expense(db: &Db, mut document: ExpenseDocument) -> AppResult<ExpenseDocument> {
-    match db {
-        Db::Mongo(db) => {
-            let res = expenses(db).insert_one(&document).await?;
+pub(crate) async fn insert_expense(
+    unit: impl Into<Unit<'_>>,
+    mut document: ExpenseDocument,
+) -> AppResult<ExpenseDocument> {
+    let mut unit = unit.into();
+    match unit.backend().await? {
+        Backend::Mongo(db, session) => {
+            let res = expenses(db).insert_one_in(&document, session).await?;
             document.id = res.inserted_id.as_object_id();
             Ok(document)
         }
-        Db::Sqlite(pool) => {
+        Backend::Sqlite(mut conn) => {
             let id = document.id.map(|o| o.to_hex()).unwrap_or_else(generate_id_hex);
             sqlx::query(
                 "INSERT INTO expenses (
@@ -100,7 +105,7 @@ pub(crate) async fn insert_expense(db: &Db, mut document: ExpenseDocument) -> Ap
             .bind(document.version)
             .bind(bson_to_iso(&document.created_at))
             .bind(bson_to_iso(&document.updated_at))
-            .execute(pool)
+            .execute(&mut *conn)
             .await?;
             document.id = ObjectId::parse_str(&id).ok();
             Ok(document)
@@ -110,16 +115,17 @@ pub(crate) async fn insert_expense(db: &Db, mut document: ExpenseDocument) -> Ap
 
 /// Inserts a payment against an expense.
 pub(crate) async fn insert_payment(
-    db: &Db,
+    unit: impl Into<Unit<'_>>,
     mut document: ExpensePaymentDocument,
 ) -> AppResult<ExpensePaymentDocument> {
-    match db {
-        Db::Mongo(db) => {
-            let res = payments(db).insert_one(&document).await?;
+    let mut unit = unit.into();
+    match unit.backend().await? {
+        Backend::Mongo(db, session) => {
+            let res = payments(db).insert_one_in(&document, session).await?;
             document.id = res.inserted_id.as_object_id();
             Ok(document)
         }
-        Db::Sqlite(pool) => {
+        Backend::Sqlite(mut conn) => {
             let id = document.id.map(|o| o.to_hex()).unwrap_or_else(generate_id_hex);
             sqlx::query(
                 "INSERT INTO expense_payments (
@@ -140,7 +146,7 @@ pub(crate) async fn insert_payment(
             .bind(document.version)
             .bind(bson_to_iso(&document.created_at))
             .bind(bson_to_iso(&document.updated_at))
-            .execute(pool)
+            .execute(&mut *conn)
             .await?;
             document.id = ObjectId::parse_str(&id).ok();
             Ok(document)

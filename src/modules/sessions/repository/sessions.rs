@@ -9,6 +9,7 @@ use crate::{
         db::Db,
         sqlite::{bson_to_iso, generate_id_hex, to_bson_datetime},
         tenant_db::{ScopedCollection, TenantDatabase},
+        uow::{Backend, Unit},
     },
     core::error::AppResult,
     domain::sessions::{CashMovementType, SessionListQuery, SessionStatus},
@@ -557,7 +558,7 @@ pub async fn increment_session_refunds(
 }
 
 pub async fn increment_session_movements(
-    db: &Db,
+    unit: impl Into<Unit<'_>>,
     session_key: &str,
     movement_type: CashMovementType,
     amount_cents: i64,
@@ -574,20 +575,22 @@ pub async fn increment_session_movements(
         CashMovementType::NoSale => return Ok(()),
     };
 
-    match db {
-        Db::Mongo(mongo_db) => {
-            sessions_col(mongo_db)
-                .update_one(
+    let mut unit = unit.into();
+    match unit.backend().await? {
+        Backend::Mongo(mongo_db, session) => {
+            crate::in_session!(
+                sessions_col(mongo_db).update_one(
                     doc! { "key": session_key },
                     doc! {
                         "$inc": { col_name: amount_cents, "version": 1 },
                         "$set": { "updated_at": now },
                     },
-                )
-                .await?;
+                ),
+                session
+            )?;
             Ok(())
         }
-        Db::Sqlite(pool) => {
+        Backend::Sqlite(mut conn) => {
             let updated_at_iso = bson_to_iso(&now);
             let sql = format!(
                 r#"
@@ -603,7 +606,7 @@ pub async fn increment_session_movements(
                 .bind(amount_cents)
                 .bind(&updated_at_iso)
                 .bind(session_key)
-                .execute(pool)
+                .execute(&mut *conn)
                 .await?;
             Ok(())
         }

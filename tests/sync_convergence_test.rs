@@ -624,7 +624,12 @@ const SYNCED: &[&str] = &[
     "stock_batches",
     "supplier_products",
     "customers",
+    "purchase_receipts",
     "purchases",
+    "receipt_settlements",
+    "supplier_credits",
+    "expenses",
+    "expense_payments",
     "stock_movements",
     "invoices",
     "payments",
@@ -1011,13 +1016,32 @@ async fn concurrent_serial_sale_is_flagged_and_both_invoices_survive() {
         .await;
     let supplier_key = supplier["data"]["key"].as_str().unwrap().to_string();
     let serial = format!("SN-{}", Uuid::new_v4());
+    // Part paid from the bank, with a credit against it: a receipt, a settlement, a credit and a
+    // ledger expense with its payment, all of which must reach the cloud and the other device.
+    let receipt = devices[0]
+        .api(
+            "POST",
+            "/api/purchase-receipts",
+            Some(json!({
+                "supplierKey": supplier_key, "date": chrono::Utc::now().to_rfc3339(),
+                "lines": [{ "productKey": product_key, "quantity": 1, "unitCostCents": 50000, "sellingPriceCents": 80000, "serialNumbers": [serial] }],
+                "payment": {
+                    "source": "bank", "amountCents": 30000, "paidOn": "2026-09-06",
+                    "categoryKey": simplebash_pos_backend::domain::cash_categories::category_key(
+                        simplebash_pos_backend::domain::sessions::CashMovementType::SupplierPayment,
+                        "Stock purchase (cash on delivery)",
+                    ),
+                },
+            })),
+        )
+        .await;
     devices[0]
         .api(
             "POST",
-            "/api/purchases",
+            "/api/supplier-credits",
             Some(json!({
-                "supplierKey": supplier_key, "productKey": product_key, "quantity": 1, "unitCostCents": 50000,
-                "sellingPriceCents": 80000, "date": chrono::Utc::now().to_rfc3339(), "serialNumbers": [serial]
+                "supplierKey": supplier_key, "receiptKey": receipt["data"]["key"],
+                "amountCents": 5000, "reason": "price_difference",
             })),
         )
         .await;

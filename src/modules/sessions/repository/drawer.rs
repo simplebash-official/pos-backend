@@ -8,6 +8,7 @@ use crate::{
         db::Db,
         sqlite::{bson_to_iso, now_utc_iso, to_bson_datetime},
         tenant_db::{ScopedCollection, TenantDatabase},
+        uow::{Backend, Unit},
     },
     core::error::AppResult,
     modules::sessions::model::DrawerStateDocument,
@@ -92,36 +93,31 @@ pub async fn upsert_drawer_state(
 }
 
 pub async fn update_drawer_balance(
-    db: &Db,
+    unit: impl Into<Unit<'_>>,
     terminal_id: &str,
     delta_cents: i64,
-) -> AppResult<DrawerStateDocument> {
+) -> AppResult<()> {
     let now = BsonDateTime::now();
-    match db {
-        Db::Mongo(mongo_db) => {
-            let doc = drawer_state_col(mongo_db)
-                .find_one_and_update(
-                    doc! { "terminal_id": terminal_id },
-                    doc! {
-                        "$inc": { "current_balance_cents": delta_cents },
-                        "$set": { "updated_at": now },
-                        // A first-ever movement on a terminal creates the row; it must be a complete drawer state.
-                        "$setOnInsert": { "last_closing_float_cents": 0_i64 },
-                    },
-                )
-                .upsert(true)
-                .return_document(mongodb::options::ReturnDocument::After)
-                .await?;
-
-            Ok(doc.unwrap_or(DrawerStateDocument {
-                terminal_id: terminal_id.to_string(),
-                current_balance_cents: delta_cents,
-                last_session_key: None,
-                last_closing_float_cents: 0,
-                updated_at: now,
-            }))
+    let mut unit = unit.into();
+    match unit.backend().await? {
+        Backend::Mongo(mongo_db, session) => {
+            crate::in_session!(
+                drawer_state_col(mongo_db)
+                    .find_one_and_update(
+                        doc! { "terminal_id": terminal_id },
+                        doc! {
+                            "$inc": { "current_balance_cents": delta_cents },
+                            "$set": { "updated_at": now },
+                            // A first-ever movement on a terminal creates the row; it must be a complete drawer state.
+                            "$setOnInsert": { "last_closing_float_cents": 0_i64 },
+                        },
+                    )
+                    .upsert(true),
+                session
+            )?;
+            Ok(())
         }
-        Db::Sqlite(pool) => {
+        Backend::Sqlite(mut conn) => {
             let now_iso = now_utc_iso();
             sqlx::query(
                 r#"
@@ -135,17 +131,9 @@ pub async fn update_drawer_balance(
             .bind(terminal_id)
             .bind(delta_cents)
             .bind(&now_iso)
-            .execute(pool)
+            .execute(&mut *conn)
             .await?;
-
-            let loaded = get_drawer_state(db, terminal_id).await?;
-            Ok(loaded.unwrap_or(DrawerStateDocument {
-                terminal_id: terminal_id.to_string(),
-                current_balance_cents: delta_cents,
-                last_session_key: None,
-                last_closing_float_cents: 0,
-                updated_at: now,
-            }))
+            Ok(())
         }
     }
 }

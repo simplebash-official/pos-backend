@@ -1097,6 +1097,7 @@ mod schema_drift_tests {
                 approved_by_name_snapshot: None,
                 recorded_late: false,
                 original_variance_session_key: None,
+                receipt_key: None,
                 created_at: "2026-10-21T10:15:00Z".parse().unwrap(),
                 updated_at: "2026-10-21T10:15:00Z".parse().unwrap(),
                 version: 1,

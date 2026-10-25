@@ -22,7 +22,10 @@ use crate::{
             product_serial as inventory_product_serial, stock as inventory_stock,
         },
         print_jobs::service as print_jobs_service,
-        purchases::service::purchase as purchases_service,
+        purchases::service::{
+            credit as purchases_credit_service, purchase as purchases_service,
+            receipt as purchases_receipt_service, settlement as purchases_settlement_service,
+        },
         quotations::service as quotations_service,
         repairs::service as repairs_service,
         supplier_products::service::link as supplier_products_service,
@@ -136,6 +139,20 @@ pub(crate) async fn hydrate(
             supplier_products_service::hydrate_sync_documents(documents)?,
         )?,
         "purchases" => to_values(purchases_service::hydrate_sync_documents(db, documents).await?)?,
+        "purchaseReceipts" | "purchase_receipts" => {
+            to_values(purchases_receipt_service::hydrate_sync_documents(documents)?)?
+        }
+        "receiptSettlements" | "receipt_settlements" => {
+            to_values(purchases_settlement_service::hydrate_sync_documents(documents)?)?
+        }
+        "supplierCredits" | "supplier_credits" => {
+            to_values(purchases_credit_service::hydrate_sync_documents(documents)?)?
+        }
+        // The expense ledger has no read-time enrichment on its stored rows, so the wire shape is
+        // the stored fields in camelCase.
+        "expenses" | "expensePayments" | "expense_payments" => {
+            documents.into_iter().map(stored_fields_to_json).collect()
+        }
         "stockMovements" | "stock_movements" => {
             to_values(inventory_stock::hydrate_sync_documents(documents)?)?
         }
@@ -176,6 +193,55 @@ pub(crate) async fn hydrate(
         _ => Vec::new(),
     };
     Ok(values)
+}
+
+/// A stored document as the camelCase JSON a device applies: `_id` becomes `id`, dates become
+/// RFC 3339 text, and the tenant marker (`tenant_id`) never leaves the cloud.
+fn stored_fields_to_json(document: Document) -> Value {
+    fn camel(snake: &str) -> String {
+        let mut out = String::with_capacity(snake.len());
+        let mut upper = false;
+        for c in snake.chars() {
+            if c == '_' {
+                upper = true;
+            } else if upper {
+                out.extend(c.to_uppercase());
+                upper = false;
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    }
+    fn convert(value: mongodb::bson::Bson) -> Value {
+        use mongodb::bson::Bson;
+        match value {
+            Bson::ObjectId(id) => Value::String(id.to_hex()),
+            Bson::DateTime(date) => Value::String(date.to_chrono().to_rfc3339()),
+            Bson::Document(inner) => Value::Object(
+                inner.into_iter().map(|(k, v)| (camel(&k), convert(v))).collect(),
+            ),
+            Bson::Array(items) => Value::Array(items.into_iter().map(convert).collect()),
+            Bson::String(text) => Value::String(text),
+            Bson::Boolean(flag) => Value::Bool(flag),
+            Bson::Int32(n) => Value::from(n),
+            Bson::Int64(n) => Value::from(n),
+            Bson::Double(n) => Value::from(n),
+            // The ledger rows hold only text, numbers, booleans, dates and ids; anything else
+            // would be a field this conversion has not been taught.
+            _ => Value::Null,
+        }
+    }
+    Value::Object(
+        document
+            .into_iter()
+            .filter(|(key, _)| key != crate::core::tenancy::TENANT_FIELD)
+            .map(|(key, value)| {
+                let name = if key == "_id" { "id".to_string() } else { camel(&key) };
+                (name, convert(value))
+            })
+            .collect(),
+    )
 }
 
 fn to_values<T: serde::Serialize>(items: Vec<T>) -> AppResult<Vec<Value>> {

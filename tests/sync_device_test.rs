@@ -200,10 +200,32 @@ async fn shop(dev: &Device) -> Value {
         Some(json!({ "supplierKey": supplier_key, "productKey": product_key, "costPriceCents": 29000 })),
     )
     .await;
+    // A receipt part paid from the bank, with a supplier credit against it: five rows of the new
+    // receipt resources (receipt, settlement, credit, and the ledger expense and payment).
+    let receipt = dev
+        .api(
+            "POST",
+            "/api/purchase-receipts",
+            Some(json!({
+                "supplierKey": supplier_key, "date": "2026-09-06T00:00:00Z",
+                "lines": [{ "productKey": product_key, "quantity": 5, "unitCostCents": 29000, "sellingPriceCents": 50000 }],
+                "payment": {
+                    "source": "bank", "amountCents": 100000, "paidOn": "2026-09-06",
+                    "categoryKey": simplebash_pos_backend::domain::cash_categories::category_key(
+                        simplebash_pos_backend::domain::sessions::CashMovementType::SupplierPayment,
+                        "Stock purchase (cash on delivery)",
+                    ),
+                },
+            })),
+        )
+        .await;
     dev.api(
         "POST",
-        "/api/purchases",
-        Some(json!({ "supplierKey": supplier_key, "productKey": product_key, "quantity": 5, "unitCostCents": 29000, "sellingPriceCents": 50000, "date": "2026-09-06T00:00:00Z" })),
+        "/api/supplier-credits",
+        Some(json!({
+            "supplierKey": supplier_key, "receiptKey": receipt["data"]["key"],
+            "amountCents": 5000, "reason": "damaged",
+        })),
     )
     .await;
 
@@ -271,7 +293,12 @@ const SYNCED: &[&str] = &[
     "products",
     "supplier_products",
     "customers",
+    "purchase_receipts",
     "purchases",
+    "receipt_settlements",
+    "supplier_credits",
+    "expenses",
+    "expense_payments",
     "stock_movements",
     "invoices",
     "payments",

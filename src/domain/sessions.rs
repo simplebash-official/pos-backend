@@ -262,6 +262,9 @@ pub struct CashMovement {
     pub recorded_late: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub original_variance_session_key: Option<String>,
+    /// The supplier receipt this movement was recorded with, when it was.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receipt_key: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub version: i64,
@@ -366,6 +369,10 @@ pub struct CreateCashMovementRequest {
     /// Set to record a rent or bill payment for a month that is already paid.
     #[serde(default)]
     pub confirm_duplicate: bool,
+    /// For a supplier payment: the supplier receipts (invoices) this payment pays, and how much
+    /// of it each. What is not allocated stays on the supplier's account.
+    #[serde(default)]
+    pub settlements: Vec<crate::domain::purchase_receipts::ReceiptSettlementRequest>,
 }
 
 /// Body for `POST /sessions/movements/{key}/reverse`.

@@ -7,7 +7,7 @@ use chrono::NaiveDate;
 use mongodb::bson::DateTime as BsonDateTime;
 
 use crate::{
-    clients::db::Db,
+    clients::{db::Db, uow::Tx},
     core::{
         constants::{codes, prefixes},
         error::{AppError, AppResult},
@@ -16,6 +16,7 @@ use crate::{
     },
     domain::{
         cash_categories::PayeeType,
+        purchase_receipts::PaymentKind,
         recurring_expenses::PeriodStatusQuery,
         sequences::ReserveSequenceRequest,
         sessions::{
@@ -24,7 +25,9 @@ use crate::{
         },
     },
     modules::{
-        cash_categories, cash_settings, payees, recurring_expenses, sequences,
+        cash_categories, cash_settings, payees,
+        purchases::service::settlement,
+        recurring_expenses, sequences,
         sessions::{
             model::CashMovementDocument,
             repository::{drawer, movements, sessions},
@@ -101,6 +104,83 @@ pub async fn record_movement(
     device_id: Option<String>,
 ) -> AppResult<CashMovement> {
     tracked("cash_movement.recorded", async move {
+        let requested = body.settlements.clone();
+        if !requested.is_empty() && body.movement_type != CashMovementType::SupplierPayment {
+            return Err(AppError::validation(
+                "Receipts can only be paid by a supplier payment.",
+            ));
+        }
+        let document =
+            prepare_movement(db, recorded_by_user_id, recorded_by_name, body, device_id, None, 0)
+                .await?;
+        // The payee is a resolved supplier by now; its receipts are checked before anything is written.
+        let settlements = if requested.is_empty() {
+            None
+        } else {
+            let supplier_key = document.payee_key.as_deref().ok_or_else(|| {
+                AppError::internal("A supplier payment must have a supplier")
+            })?;
+            Some(
+                settlement::prepare_settlements(db, supplier_key, document.amount_cents, &requested)
+                    .await?,
+            )
+        };
+        let mut tx = db.begin().await?;
+        let inserted = write_movement(&mut tx, document).await?;
+        if let Some(prepared) = settlements {
+            settlement::write_settlements(
+                &mut tx,
+                prepared,
+                PaymentKind::CashMovement,
+                &inserted.key,
+            )
+            .await?;
+        }
+        tx.commit().await?;
+        one_movement(db, inserted).await
+    })
+    .await
+}
+
+/// Books a validated movement on the shift and the drawer, in the caller's transaction, so the
+/// row, the shift's totals and the drawer's cash move together or not at all.
+pub(crate) async fn write_movement(
+    tx: &mut Tx,
+    document: CashMovementDocument,
+) -> AppResult<CashMovementDocument> {
+    let session_key = document.session_key.clone();
+    let terminal_id = document.terminal_id.clone();
+    let movement_type = document.movement_type;
+    let amount_cents = document.amount_cents;
+
+    let inserted = movements::insert_cash_movement(&mut *tx, document).await?;
+    if let Some(session_key) = &session_key {
+        sessions::increment_session_movements(&mut *tx, session_key, movement_type, amount_cents)
+            .await?;
+    }
+    // The drawer balance survives across shifts, so it moves with every movement.
+    let delta = drawer_delta(movement_type, amount_cents);
+    if delta != 0 {
+        drawer::update_drawer_balance(&mut *tx, &terminal_id, delta).await?;
+    }
+    Ok(inserted)
+}
+
+/// Everything `record_movement` checks, with nothing written: the shift, the amount, the
+/// category, the fields this type needs, the payee, the drawer limit and any manager PIN, and
+/// the movement number taken. Returns the row ready to insert. `receipt_key` marks a movement
+/// recorded together with a supplier receipt; `cash_added_cents` is cash that goes into the
+/// drawer earlier in the same save (the owner's own money), counted when checking the drawer limit.
+pub(crate) async fn prepare_movement(
+    db: &Db,
+    recorded_by_user_id: String,
+    recorded_by_name: String,
+    body: CreateCashMovementRequest,
+    device_id: Option<String>,
+    receipt_key: Option<String>,
+    cash_added_cents: i64,
+) -> AppResult<CashMovementDocument> {
+    {
         let movement_type = body.movement_type;
         if body.terminal_id.trim().is_empty() {
             return Err(AppError::validation("terminalId is required"));
@@ -118,11 +198,12 @@ pub async fn record_movement(
                     codes::NO_ACTIVE_SESSION,
                 ));
             }
-            session.calculate_expected_cash()
+            session.calculate_expected_cash() + cash_added_cents
         } else {
             drawer::get_drawer_state(db, &body.terminal_id)
                 .await?
                 .map_or(0, |state| state.current_balance_cents)
+                + cash_added_cents
         };
 
         if movement_type == CashMovementType::NoSale {
@@ -296,52 +377,37 @@ pub async fn record_movement(
         );
 
         let now = BsonDateTime::now();
-        let inserted = movements::insert_cash_movement(
-            db,
-            CashMovementDocument {
-                id: None,
-                key: generate_id(prefixes::CASH_MOVEMENT),
-                movement_number,
-                movement_type,
-                direction: movement_type.direction(),
-                amount_cents: body.amount_cents,
-                session_key: body.session_key.clone(),
-                terminal_id: body.terminal_id.clone(),
-                category_key: category.key.clone(),
-                custom_label,
-                payee_key,
-                payee_name,
-                period_start: period.as_ref().map(|p| p.0.clone()),
-                period_end: period.map(|p| p.1),
-                reference_no,
-                note,
-                recorded_by_user_id,
-                recorded_by_name_snapshot: recorded_by_name,
-                approved_by_user_id: approved_by_id,
-                approved_by_name_snapshot: approved_by_name,
-                approval_reason: if over_drawer { override_reason } else { None },
-                reverses_key: None,
-                recorded_late: false,
-                original_variance_session_key: None,
-                version: 1,
-                created_at: now,
-                updated_at: now,
-            },
-        )
-        .await?;
-
-        if let Some(session_key) = &body.session_key {
-            sessions::increment_session_movements(db, session_key, movement_type, body.amount_cents).await?;
-        }
-        // The drawer balance survives across shifts, so it moves with every movement.
-        let delta = drawer_delta(movement_type, body.amount_cents);
-        if delta != 0 {
-            drawer::update_drawer_balance(db, &body.terminal_id, delta).await?;
-        }
-
-        one_movement(db, inserted).await
-    })
-    .await
+        Ok(CashMovementDocument {
+            id: None,
+            key: generate_id(prefixes::CASH_MOVEMENT),
+            movement_number,
+            movement_type,
+            direction: movement_type.direction(),
+            amount_cents: body.amount_cents,
+            session_key: body.session_key.clone(),
+            terminal_id: body.terminal_id.clone(),
+            category_key: category.key.clone(),
+            custom_label,
+            payee_key,
+            payee_name,
+            period_start: period.as_ref().map(|p| p.0.clone()),
+            period_end: period.map(|p| p.1),
+            reference_no,
+            note,
+            recorded_by_user_id,
+            recorded_by_name_snapshot: recorded_by_name,
+            approved_by_user_id: approved_by_id,
+            approved_by_name_snapshot: approved_by_name,
+            approval_reason: if over_drawer { override_reason } else { None },
+            reverses_key: None,
+            recorded_late: false,
+            original_variance_session_key: None,
+            receipt_key,
+            version: 1,
+            created_at: now,
+            updated_at: now,
+        })
+    }
 }
 
 /// How a movement changes the cash in the drawer: added cash raises it, every payout and drop lowers it.
@@ -393,103 +459,175 @@ pub async fn reverse_movement(
                 codes::MOVEMENT_NOT_REVERSIBLE,
             ));
         }
-        let reversal_key = format!("{key}_rev");
-        if movements::find_cash_movement_by_key(db, &reversal_key).await?.is_some() {
-            return Err(AppError::conflict(
-                codes::MOVEMENT_ALREADY_REVERSED,
-                "This movement was already reversed.",
-            ));
-        }
-        if let Some(session_key) = &original.session_key {
-            let session = sessions::find_session_by_key(db, session_key)
-                .await?
-                .ok_or_else(|| AppError::not_found_with_code("Register session not found", codes::SESSION_NOT_FOUND))?;
-            if !matches!(session.status, SessionStatus::Open | SessionStatus::Reopened) {
-                return Err(AppError::validation_with_code(
-                    "That shift is closed. Reopen it first to reverse this movement.",
-                    codes::NO_ACTIVE_SESSION,
-                ));
+
+        // A payment made with a supplier receipt is undone together with what was recorded with
+        // it (the owner's own money put in first), so the drawer is never left half-undone.
+        let mut members = vec![original.clone()];
+        if let Some(receipt_key) = &original.receipt_key {
+            for sibling in movements::list_movements_by_receipt_key(db, receipt_key).await? {
+                if sibling.key != original.key && sibling.reverses_key.is_none() {
+                    members.push(sibling);
+                }
             }
         }
 
-        let age = chrono::Utc::now() - original.created_at.to_chrono();
-        let own_undo = original.recorded_by_user_id == user_id && age.num_seconds() <= cash_settings::service::undo_window_seconds(db).await?;
-        let reason = clean_text("The reason", body.reason.as_deref(), NOTE_MAX)?;
-        if !own_undo {
-            if !can_reverse {
-                return Err(AppError::forbidden_with_code(
-                    "Only a manager can reverse this now.",
-                    codes::PERMISSION_DENIED,
-                ));
+        let mut reversals = Vec::with_capacity(members.len());
+        let mut original_reversal_key = None;
+        for member in &members {
+            let is_original = member.key == original.key;
+            if !is_original
+                && movements::find_cash_movement_by_key(db, &format!("{}_rev", member.key))
+                    .await?
+                    .is_some()
+            {
+                continue; // that part was already undone on its own
             }
-            if reason.is_none() {
-                return Err(AppError::validation("Please say why this is being reversed."));
+            let reversal = prepare_reversal(
+                db,
+                member,
+                user_id.clone(),
+                user_name.clone(),
+                can_reverse,
+                body.reason.as_deref(),
+                device_id.clone(),
+            )
+            .await?;
+            if is_original {
+                original_reversal_key = Some(reversal.key.clone());
             }
+            reversals.push(reversal);
         }
 
-        let reservation = sequences::service::reserve_sequence(
-            db,
-            "cash_movement".to_string(),
-            ReserveSequenceRequest { block_size: Some(1), device_id },
-        )
-        .await?;
-        let movement_number = format!(
-            "{}{:0width$}",
-            reservation.prefix,
-            reservation.start,
-            width = reservation.padding
-        );
-        let now = BsonDateTime::now();
-        let reversal = movements::insert_cash_movement(
-            db,
-            CashMovementDocument {
-                id: None,
-                key: reversal_key,
-                movement_number,
-                movement_type: original.movement_type,
-                // The opposite way round, so totals by direction cancel out.
-                direction: match original.direction {
-                    CashDirection::Out => CashDirection::In,
-                    CashDirection::In => CashDirection::Out,
-                    CashDirection::Neutral => CashDirection::Neutral,
-                },
-                amount_cents: original.amount_cents,
-                session_key: original.session_key.clone(),
-                terminal_id: original.terminal_id.clone(),
-                category_key: original.category_key.clone(),
-                custom_label: original.custom_label.clone(),
-                payee_key: original.payee_key.clone(),
-                payee_name: original.payee_name.clone(),
-                period_start: None,
-                period_end: None,
-                reference_no: None,
-                note: Some(format!("Reversal of {}", original.movement_number)),
-                recorded_by_user_id: user_id,
-                recorded_by_name_snapshot: user_name,
-                approved_by_user_id: None,
-                approved_by_name_snapshot: None,
-                approval_reason: reason,
-                reverses_key: Some(original.key.clone()),
-                recorded_late: false,
-                original_variance_session_key: None,
-                version: 1,
-                created_at: now,
-                updated_at: now,
-            },
-        )
-        .await?;
-
-        if let Some(session_key) = &original.session_key {
-            sessions::increment_session_movements(db, session_key, original.movement_type, -original.amount_cents)
-                .await?;
+        let mut tx = db.begin().await?;
+        let mut requested = None;
+        for reversal in reversals {
+            let is_requested = original_reversal_key.as_deref() == Some(reversal.key.as_str());
+            let inserted = write_reversal(&mut tx, reversal).await?;
+            if is_requested {
+                requested = Some(inserted);
+            }
         }
-        let delta = -drawer_delta(original.movement_type, original.amount_cents);
-        if delta != 0 {
-            drawer::update_drawer_balance(db, &original.terminal_id, delta).await?;
-        }
-        one_movement(db, reversal).await
+        tx.commit().await?;
+        let requested = requested
+            .ok_or_else(|| AppError::internal("The reversal that was asked for was not written"))?;
+        one_movement(db, requested).await
     })
     .await
+}
+
+/// Checks that one movement can be reversed by this person now and builds its opposite.
+async fn prepare_reversal(
+    db: &Db,
+    original: &CashMovementDocument,
+    user_id: String,
+    user_name: String,
+    can_reverse: bool,
+    reason: Option<&str>,
+    device_id: Option<String>,
+) -> AppResult<CashMovementDocument> {
+    let reversal_key = format!("{}_rev", original.key);
+    if movements::find_cash_movement_by_key(db, &reversal_key).await?.is_some() {
+        return Err(AppError::conflict(
+            codes::MOVEMENT_ALREADY_REVERSED,
+            "This movement was already reversed.",
+        ));
+    }
+    if let Some(session_key) = &original.session_key {
+        let session = sessions::find_session_by_key(db, session_key)
+            .await?
+            .ok_or_else(|| AppError::not_found_with_code("Register session not found", codes::SESSION_NOT_FOUND))?;
+        if !matches!(session.status, SessionStatus::Open | SessionStatus::Reopened) {
+            return Err(AppError::validation_with_code(
+                "That shift is closed. Reopen it first to reverse this movement.",
+                codes::NO_ACTIVE_SESSION,
+            ));
+        }
+    }
+
+    let age = chrono::Utc::now() - original.created_at.to_chrono();
+    let own_undo = original.recorded_by_user_id == user_id
+        && age.num_seconds() <= cash_settings::service::undo_window_seconds(db).await?;
+    let reason = clean_text("The reason", reason, NOTE_MAX)?;
+    if !own_undo {
+        if !can_reverse {
+            return Err(AppError::forbidden_with_code(
+                "Only a manager can reverse this now.",
+                codes::PERMISSION_DENIED,
+            ));
+        }
+        if reason.is_none() {
+            return Err(AppError::validation("Please say why this is being reversed."));
+        }
+    }
+
+    let reservation = sequences::service::reserve_sequence(
+        db,
+        "cash_movement".to_string(),
+        ReserveSequenceRequest { block_size: Some(1), device_id },
+    )
+    .await?;
+    let movement_number = format!(
+        "{}{:0width$}",
+        reservation.prefix,
+        reservation.start,
+        width = reservation.padding
+    );
+    let now = BsonDateTime::now();
+    Ok(CashMovementDocument {
+        id: None,
+        key: reversal_key,
+        movement_number,
+        movement_type: original.movement_type,
+        // The opposite way round, so totals by direction cancel out.
+        direction: match original.direction {
+            CashDirection::Out => CashDirection::In,
+            CashDirection::In => CashDirection::Out,
+            CashDirection::Neutral => CashDirection::Neutral,
+        },
+        amount_cents: original.amount_cents,
+        session_key: original.session_key.clone(),
+        terminal_id: original.terminal_id.clone(),
+        category_key: original.category_key.clone(),
+        custom_label: original.custom_label.clone(),
+        payee_key: original.payee_key.clone(),
+        payee_name: original.payee_name.clone(),
+        period_start: None,
+        period_end: None,
+        reference_no: None,
+        note: Some(format!("Reversal of {}", original.movement_number)),
+        recorded_by_user_id: user_id,
+        recorded_by_name_snapshot: user_name,
+        approved_by_user_id: None,
+        approved_by_name_snapshot: None,
+        approval_reason: reason,
+        reverses_key: Some(original.key.clone()),
+        recorded_late: false,
+        original_variance_session_key: None,
+        receipt_key: None,
+        version: 1,
+        created_at: now,
+        updated_at: now,
+    })
+}
+
+/// Writes a reversal and takes the amount back out of the shift and the drawer.
+async fn write_reversal(
+    tx: &mut Tx,
+    reversal: CashMovementDocument,
+) -> AppResult<CashMovementDocument> {
+    let session_key = reversal.session_key.clone();
+    let terminal_id = reversal.terminal_id.clone();
+    let movement_type = reversal.movement_type;
+    let amount_cents = reversal.amount_cents;
+    let inserted = movements::insert_cash_movement(&mut *tx, reversal).await?;
+    if let Some(session_key) = &session_key {
+        sessions::increment_session_movements(&mut *tx, session_key, movement_type, -amount_cents).await?;
+    }
+    let delta = -drawer_delta(movement_type, amount_cents);
+    if delta != 0 {
+        drawer::update_drawer_balance(&mut *tx, &terminal_id, delta).await?;
+    }
+    Ok(inserted)
 }
 
 /// One stored row as the API shape.

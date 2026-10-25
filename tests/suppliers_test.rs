@@ -711,24 +711,30 @@ async fn record_purchase_increments_stock_and_writes_movement() {
     let (status, body) = send_authed(
         &app.router,
         "POST",
-        "/api/purchases",
+        "/api/purchase-receipts",
         Some(json!({
             "supplierKey": supplier_key,
-            "productKey": product_key,
-            "quantity": 25,
-            "unitCostCents": 1500,
-            "sellingPriceCents": 2500,
             "date": "2026-01-15T10:00:00Z",
             "referenceNo": "INV-TEST-1",
+            "lines": [{
+                "productKey": product_key,
+                "quantity": 25,
+                "unitCostCents": 1500,
+                "sellingPriceCents": 2500,
+            }],
         })),
         &token,
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
-    assert_eq!(body["data"]["totalCostCents"], 25 * 1500);
+    assert_eq!(body["data"]["totalCents"], 25 * 1500);
+    assert_eq!(body["data"]["referenceNo"], "INV-TEST-1");
     assert_eq!(body["data"]["supplier"]["key"], supplier_key);
-    assert_eq!(body["data"]["product"]["key"], product_key);
-    let purchase_key = body["data"]["key"].as_str().unwrap().to_string();
+    let line = &body["data"]["lines"][0];
+    assert_eq!(line["totalCostCents"], 25 * 1500);
+    assert_eq!(line["product"]["key"], product_key);
+    assert_eq!(line["receiptKey"], body["data"]["key"]);
+    let purchase_key = line["key"].as_str().unwrap().to_string();
 
     let (status, body) = send_authed(
         &app.router,
@@ -781,20 +787,28 @@ async fn record_purchase_requires_auth_and_validates_quantity() {
 
     let payload = json!({
         "supplierKey": supplier_key,
-        "productKey": product_key,
-        "quantity": 5,
-        "unitCostCents": 1000,
-        "sellingPriceCents": 2500,
         "date": "2026-01-15T10:00:00Z",
+        "lines": [{
+            "productKey": product_key,
+            "quantity": 5,
+            "unitCostCents": 1000,
+            "sellingPriceCents": 2500,
+        }],
     });
 
-    let (status, _) = send(&app.router, "POST", "/api/purchases", Some(payload.clone())).await;
+    let (status, _) = send(&app.router, "POST", "/api/purchase-receipts", Some(payload.clone())).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
-    let mut invalid = payload;
-    invalid["quantity"] = json!(0);
+    let mut invalid = payload.clone();
+    invalid["lines"][0]["quantity"] = json!(0);
     let (status, _) =
-        send_authed(&app.router, "POST", "/api/purchases", Some(invalid), &token).await;
+        send_authed(&app.router, "POST", "/api/purchase-receipts", Some(invalid), &token).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let mut empty = payload;
+    empty["lines"] = json!([]);
+    let (status, _) =
+        send_authed(&app.router, "POST", "/api/purchase-receipts", Some(empty), &token).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
@@ -811,14 +825,16 @@ async fn list_purchases_without_keys_returns_paginated_collection() {
     let (status, body) = send_authed(
         &app.router,
         "POST",
-        "/api/purchases",
+        "/api/purchase-receipts",
         Some(json!({
             "supplierKey": supplier_key,
-            "productKey": product_key,
-            "quantity": 3,
-            "unitCostCents": 1500,
-            "sellingPriceCents": 2500,
             "date": "2026-01-15T10:00:00Z",
+            "lines": [{
+                "productKey": product_key,
+                "quantity": 3,
+                "unitCostCents": 1500,
+                "sellingPriceCents": 2500,
+            }],
         })),
         &token,
     )
@@ -858,14 +874,16 @@ async fn deleting_a_supplier_with_purchase_history_is_blocked() {
     send_authed(
         &app.router,
         "POST",
-        "/api/purchases",
+        "/api/purchase-receipts",
         Some(json!({
             "supplierKey": supplier_key,
-            "productKey": product_key,
-            "quantity": 5,
-            "unitCostCents": 1000,
-            "sellingPriceCents": 2500,
             "date": "2026-01-15T10:00:00Z",
+            "lines": [{
+                "productKey": product_key,
+                "quantity": 5,
+                "unitCostCents": 1000,
+                "sellingPriceCents": 2500,
+            }],
         })),
         &token,
     )

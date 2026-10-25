@@ -3,4 +3,8 @@
 // `suppliers::service`/`inventory::service` for all Mongo access, returning
 // domain types (never BSON/`ObjectId`) to `routes`.
 
+pub mod credit;
 pub mod purchase;
+pub mod receipt;
+pub mod receipt_migration;
+pub mod settlement;

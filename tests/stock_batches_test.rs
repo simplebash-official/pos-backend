@@ -142,20 +142,22 @@ impl Shop {
         let (status, body) = send(
             &self.router,
             "POST",
-            "/api/purchases",
+            "/api/purchase-receipts",
             Some(json!({
                 "supplierKey": self.supplier_key,
-                "productKey": self.product_key,
-                "quantity": quantity,
-                "unitCostCents": cost,
-                "sellingPriceCents": price,
                 "date": date,
+                "lines": [{
+                    "productKey": self.product_key,
+                    "quantity": quantity,
+                    "unitCostCents": cost,
+                    "sellingPriceCents": price,
+                }],
             })),
             &self.admin,
         )
         .await;
         assert_eq!(status, StatusCode::CREATED, "{body}");
-        assert_eq!(body["data"]["sellingPriceCents"], price);
+        assert_eq!(body["data"]["lines"][0]["sellingPriceCents"], price);
     }
 
     async fn sell(&self, lines: &[(i64, i64)]) -> (StatusCode, Value) {

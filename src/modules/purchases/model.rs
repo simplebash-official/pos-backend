@@ -5,7 +5,11 @@
 use mongodb::bson::{DateTime as BsonDateTime, oid::ObjectId};
 use serde::{Deserialize, Serialize};
 
-use crate::domain::purchases::{ProductSummary, Purchase, SupplierSummary};
+use crate::domain::{
+    purchase_receipts::{PaymentKind, PurchaseReceipt, ReceiptSettlement, ReceiptStatus},
+    supplier_credits::{CreditReason, SupplierCredit},
+    purchases::{ProductSummary, Purchase, SupplierSummary},
+};
 
 /// A single stock-intake record. References `suppliers`/inventory
 /// `products` via their immutable `key`s (`supplier_key`/`product_key`),
@@ -31,12 +35,8 @@ pub struct PurchaseDocument {
     pub selling_price_cents: i64,
     /// Date when the stock purchase occurred.
     pub date: BsonDateTime,
-    /// Supplier invoice or purchase order reference number.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reference_no: Option<String>,
-    /// Optional remarks or notes regarding the purchase.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub notes: Option<String>,
+    /// Foreign key referencing the receipt (supplier invoice) this line belongs to.
+    pub receipt_key: String,
     /// Concurrency version counter for optimistic locking.
     #[serde(default = "default_version")]
     pub version: i64,
@@ -82,8 +82,7 @@ impl PurchaseDocument {
             selling_price_cents: self.selling_price_cents,
             total_cost_cents: self.quantity * self.unit_cost_cents,
             date: self.date.to_chrono(),
-            reference_no: self.reference_no,
-            notes: self.notes,
+            receipt_key: self.receipt_key,
             supplier,
             product,
             created_at: self.created_at.to_chrono(),
@@ -91,6 +90,198 @@ impl PurchaseDocument {
             version: self.version,
             deleted_at: self.deleted_at.map(|d| d.to_chrono()),
             updated_by_device: self.updated_by_device,
+        }
+    }
+}
+
+/// The header of one supplier invoice: who it came from, when, and the supplier's own invoice
+/// number. Immutable once saved. Its lines are `PurchaseDocument`s pointing back at `key`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PurchaseReceiptDocument {
+    /// MongoDB internal document identifier.
+    #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
+    pub id: Option<ObjectId>,
+    /// Unique business key (`prc_...`).
+    pub key: String,
+    /// Running number shown to people (`PUR-000001`).
+    pub receipt_number: String,
+    /// Foreign key referencing the supplier.
+    pub supplier_key: String,
+    /// The supplier's invoice or delivery-note number.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reference_no: Option<String>,
+    /// Day the stock was received.
+    pub date: BsonDateTime,
+    /// Optional remarks.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    #[serde(default = "default_version")]
+    pub version: i64,
+    #[serde(default = "BsonDateTime::now")]
+    pub created_at: BsonDateTime,
+    #[serde(default = "BsonDateTime::now")]
+    pub updated_at: BsonDateTime,
+    /// Device identifier that last updated this record.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_by_device: Option<String>,
+}
+
+/// What the service works out about a receipt from the records that point at it.
+pub struct ReceiptFigures {
+    /// Taken off the bill by supplier credits.
+    pub credited_cents: i64,
+    /// The payments counted against the receipt, reversed ones included (marked as such).
+    pub settlements: Vec<ReceiptSettlement>,
+}
+
+impl PurchaseReceiptDocument {
+    /// The supplier, the lines and the figures are resolved by the service layer; this stays a
+    /// pure mapping. What is paid, what is due and the status follow from them.
+    pub fn into_receipt(
+        self,
+        supplier: Option<SupplierSummary>,
+        lines: Vec<Purchase>,
+        figures: ReceiptFigures,
+    ) -> PurchaseReceipt {
+        let total_cents: i64 = lines.iter().map(|line| line.total_cost_cents).sum();
+        let paid_cents: i64 = figures
+            .settlements
+            .iter()
+            .filter(|s| !s.reversed)
+            .map(|s| s.amount_cents)
+            .sum();
+        let due_cents = total_cents - figures.credited_cents - paid_cents;
+        PurchaseReceipt {
+            id: self
+                .id
+                .expect("persisted receipt document must have an id")
+                .to_hex(),
+            key: self.key,
+            receipt_number: self.receipt_number,
+            supplier_key: self.supplier_key,
+            reference_no: self.reference_no,
+            date: self.date.to_chrono(),
+            notes: self.notes,
+            supplier,
+            total_cents,
+            credited_cents: figures.credited_cents,
+            paid_cents,
+            due_cents,
+            status: ReceiptStatus::of(due_cents, figures.credited_cents + paid_cents),
+            settlements: figures.settlements,
+            lines,
+            created_at: self.created_at.to_chrono(),
+            updated_at: self.updated_at.to_chrono(),
+            version: self.version,
+            updated_by_device: self.updated_by_device,
+        }
+    }
+}
+
+/// One payment, or part of one, counted against a receipt. Immutable: a payment that is
+/// reversed is not edited here, the settlement stops counting because its payment was reversed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReceiptSettlementDocument {
+    /// MongoDB internal document identifier.
+    #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
+    pub id: Option<ObjectId>,
+    /// Unique business key (`rset_...`).
+    pub key: String,
+    /// Foreign key referencing the receipt that was paid.
+    pub receipt_key: String,
+    /// Foreign key referencing the supplier the receipt belongs to.
+    pub supplier_key: String,
+    pub amount_cents: i64,
+    pub payment_kind: PaymentKind,
+    /// Key of the cash movement or expense payment that paid.
+    pub payment_key: String,
+    #[serde(default = "default_version")]
+    pub version: i64,
+    #[serde(default = "BsonDateTime::now")]
+    pub created_at: BsonDateTime,
+    #[serde(default = "BsonDateTime::now")]
+    pub updated_at: BsonDateTime,
+    /// Device identifier that last updated this record.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_by_device: Option<String>,
+}
+
+impl ReceiptSettlementDocument {
+    /// `reversed` is worked out by the service from the payment's own reversal.
+    pub fn into_settlement(self, reversed: bool) -> ReceiptSettlement {
+        ReceiptSettlement {
+            id: self
+                .id
+                .expect("persisted settlement document must have an id")
+                .to_hex(),
+            key: self.key,
+            receipt_key: self.receipt_key,
+            supplier_key: self.supplier_key,
+            amount_cents: self.amount_cents,
+            payment_kind: self.payment_kind,
+            payment_key: self.payment_key,
+            reversed,
+            created_at: self.created_at.to_chrono(),
+            updated_at: self.updated_at.to_chrono(),
+            version: self.version,
+        }
+    }
+}
+
+/// A credit a supplier gave: an amount taken off what the shop owes. Immutable; a wrong credit
+/// is voided by a reversing entry (`reverses_key`) whose key is derived from the original's.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SupplierCreditDocument {
+    /// MongoDB internal document identifier.
+    #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
+    pub id: Option<ObjectId>,
+    /// Unique business key (`scr_...`).
+    pub key: String,
+    pub supplier_key: String,
+    /// The receipt this credit is against, when it is against one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receipt_key: Option<String>,
+    pub amount_cents: i64,
+    pub reason: CreditReason,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    /// Set on a voiding entry: the credit it cancels.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reverses_key: Option<String>,
+    pub recorded_by_user_id: String,
+    pub recorded_by_name_snapshot: String,
+    #[serde(default = "default_version")]
+    pub version: i64,
+    #[serde(default = "BsonDateTime::now")]
+    pub created_at: BsonDateTime,
+    #[serde(default = "BsonDateTime::now")]
+    pub updated_at: BsonDateTime,
+    /// Device identifier that last updated this record.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_by_device: Option<String>,
+}
+
+impl SupplierCreditDocument {
+    /// `voided_by_key` is worked out by the service from the voiding entry.
+    pub fn into_credit(self, voided_by_key: Option<String>) -> SupplierCredit {
+        SupplierCredit {
+            id: self
+                .id
+                .expect("persisted credit document must have an id")
+                .to_hex(),
+            key: self.key,
+            supplier_key: self.supplier_key,
+            receipt_key: self.receipt_key,
+            amount_cents: self.amount_cents,
+            reason: self.reason,
+            note: self.note,
+            reverses_key: self.reverses_key,
+            voided_by_key,
+            recorded_by_user_id: self.recorded_by_user_id,
+            recorded_by_name_snapshot: self.recorded_by_name_snapshot,
+            created_at: self.created_at.to_chrono(),
+            updated_at: self.updated_at.to_chrono(),
+            version: self.version,
         }
     }
 }

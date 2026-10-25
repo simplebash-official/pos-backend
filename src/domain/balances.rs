@@ -52,6 +52,9 @@ pub struct SupplierBalance {
     /// Paid from the drawer, the bank, a card or online since the opening day.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub paid_cents: Option<i64>,
+    /// Taken off by supplier credits (short or damaged goods, price differences) since the opening day.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub credited_cents: Option<i64>,
     /// What is owed; negative when the shop has paid ahead.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub balance_cents: Option<i64>,

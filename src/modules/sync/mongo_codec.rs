@@ -36,6 +36,18 @@ fn enrichment_fields(resource: &str) -> &'static [&'static str] {
     match resource {
         "products" => &["category", "subcategory", "priceTiers"],
         "purchases" => &["product", "supplier", "totalCostCents"],
+        "receiptSettlements" => &["reversed"],
+        "supplierCredits" => &["voidedByKey"],
+        "purchaseReceipts" => &[
+            "supplier",
+            "lines",
+            "totalCents",
+            "creditedCents",
+            "paidCents",
+            "dueCents",
+            "status",
+            "settlements",
+        ],
         "employees" => &["login"],
         "invoices" | "repairs" | "printJobs" => &["isOverdue"],
         "supplierProducts" => &["addedAt"],
@@ -178,7 +190,7 @@ pub(crate) fn encode_generic(
             // Absent optional fields are simply not stored.
             continue;
         } else if DATETIME_FIELDS.contains(&snake.as_str())
-            || (name == "purchases" && snake == "date")
+            || (matches!(name, "purchases" | "purchaseReceipts") && snake == "date")
         {
             Bson::DateTime(parse_datetime(&snake, value)?)
         } else if name == "stockMovements" && snake == "product_id" {

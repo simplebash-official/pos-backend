@@ -115,6 +115,16 @@ pub const SYNC_RESOURCES: &[ResourceSpec] = &[
         phase: Phase::P3a,
     },
     ResourceSpec {
+        name: "purchaseReceipts",
+        table: "purchase_receipts",
+        class: MergeClass::AppendOnly,
+        soft_delete: false,
+        derived: &[],
+        local_only: &[],
+        order: 65,
+        phase: Phase::P3a,
+    },
+    ResourceSpec {
         name: "purchases",
         table: "purchases",
         class: MergeClass::Lww,
@@ -351,6 +361,26 @@ pub const SYNC_RESOURCES: &[ResourceSpec] = &[
         order: 159,
         phase: Phase::P3a,
     },
+    ResourceSpec {
+        name: "receiptSettlements",
+        table: "receipt_settlements",
+        class: MergeClass::AppendOnly,
+        soft_delete: false,
+        derived: &[],
+        local_only: &[],
+        order: 160,
+        phase: Phase::P3a,
+    },
+    ResourceSpec {
+        name: "supplierCredits",
+        table: "supplier_credits",
+        class: MergeClass::AppendOnly,
+        soft_delete: false,
+        derived: &[],
+        local_only: &[],
+        order: 161,
+        phase: Phase::P3a,
+    },
 ];
 
 /// Payload fields that travel between a device and the cloud but must never be
@@ -392,7 +422,8 @@ pub fn label_column(table: &str) -> Option<&'static str> {
         "credit_notes" => Some("credit_note_number"),
         "quotations" => Some("quotation_number"),
         "repairs" | "print_jobs" => Some("ticket_number"),
-        "purchases" => Some("reference_no"),
+        "purchases" => Some("receipt_key"),
+        "purchase_receipts" => Some("receipt_number"),
         "products" | "customers" | "suppliers" | "employees" | "categories" | "users" => {
             Some("name")
         }
@@ -401,6 +432,8 @@ pub fn label_column(table: &str) -> Option<&'static str> {
         "cash_movements" => Some("movement_number"),
         "cash_categories" | "payees" => Some("name"),
         "expenses" => Some("expense_number"),
+        "receipt_settlements" => Some("payment_key"),
+        "supplier_credits" => Some("key"),
         _ => None,
     }
 }

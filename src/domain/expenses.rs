@@ -173,6 +173,10 @@ pub struct CreateExpenseRequest {
     pub reference_no: Option<String>,
     #[serde(default)]
     pub note: Option<String>,
+    /// For a supplier payment paid on entry: the supplier receipts (invoices) it pays, and how
+    /// much of it each.
+    #[serde(default)]
+    pub settlements: Vec<crate::domain::purchase_receipts::ReceiptSettlementRequest>,
 }
 
 /// Body for `POST /expenses/{key}/payments`.

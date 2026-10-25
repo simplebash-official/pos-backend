@@ -9,6 +9,7 @@ use crate::{
         db::Db,
         sqlite::{bson_to_iso, generate_id_hex, to_bson_datetime},
         tenant_db::{ScopedCollection, TenantDatabase},
+        uow::{Backend, Unit},
     },
     core::error::{AppError, AppResult},
     domain::sessions::{CashDirection, CashMovementListQuery, CashMovementType},
@@ -58,6 +59,7 @@ pub(crate) fn movement_from_sqlite_row(row: &sqlx::sqlite::SqliteRow) -> AppResu
         reverses_key: row.get("reverses_key"),
         recorded_late: recorded_late_int != 0,
         original_variance_session_key: row.get("original_variance_session_key"),
+        receipt_key: row.get("receipt_key"),
         version: row.get("version"),
         created_at: to_bson_datetime(&created_at_str),
         updated_at: to_bson_datetime(&updated_at_str),
@@ -66,16 +68,19 @@ pub(crate) fn movement_from_sqlite_row(row: &sqlx::sqlite::SqliteRow) -> AppResu
 
 /// Inserts one movement row (append-only: movements are never edited or deleted).
 pub async fn insert_cash_movement(
-    db: &Db,
+    unit: impl Into<Unit<'_>>,
     mut doc: CashMovementDocument,
 ) -> AppResult<CashMovementDocument> {
-    match db {
-        Db::Mongo(mongo_db) => {
-            let res = cash_movements_col(mongo_db).insert_one(&doc).await?;
+    let mut unit = unit.into();
+    match unit.backend().await? {
+        Backend::Mongo(mongo_db, session) => {
+            let res = cash_movements_col(mongo_db)
+                .insert_one_in(&doc, session)
+                .await?;
             doc.id = res.inserted_id.as_object_id();
             Ok(doc)
         }
-        Db::Sqlite(pool) => {
+        Backend::Sqlite(mut conn) => {
             let id = doc
                 .id
                 .map(|oid| oid.to_hex())
@@ -92,10 +97,10 @@ pub async fn insert_cash_movement(
                     recorded_by_user_id, recorded_by_name_snapshot,
                     approved_by_user_id, approved_by_name_snapshot,
                     approval_reason, reverses_key,
-                    recorded_late, original_variance_session_key,
+                    recorded_late, original_variance_session_key, receipt_key,
                     version, created_at, updated_at
                 ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 "#
             )
@@ -123,10 +128,11 @@ pub async fn insert_cash_movement(
             .bind(&doc.reverses_key)
             .bind(if doc.recorded_late { 1 } else { 0 })
             .bind(&doc.original_variance_session_key)
+            .bind(&doc.receipt_key)
             .bind(doc.version)
             .bind(&created_at_iso)
             .bind(&updated_at_iso)
-            .execute(pool)
+            .execute(&mut *conn)
             .await?;
 
             doc.id = ObjectId::parse_str(&id).ok();
@@ -454,6 +460,33 @@ pub async fn find_reversals_of(db: &Db, keys: &[String]) -> AppResult<Vec<(Strin
             }
             let rows = query.fetch_all(pool).await?;
             Ok(rows.iter().map(|r| (r.get("reverses_key"), r.get("key"))).collect())
+        }
+    }
+}
+
+/// The movements recorded with one supplier receipt (the payment, and the owner's capital put in
+/// for it), reversals left out.
+pub async fn list_movements_by_receipt_key(
+    db: &Db,
+    receipt_key: &str,
+) -> AppResult<Vec<CashMovementDocument>> {
+    match db {
+        Db::Mongo(mongo_db) => {
+            let mut cursor = cash_movements_col(mongo_db)
+                .find(doc! { "receipt_key": receipt_key })
+                .await?;
+            let mut out = Vec::new();
+            while let Some(item) = cursor.try_next().await? {
+                out.push(item);
+            }
+            Ok(out)
+        }
+        Db::Sqlite(pool) => {
+            let rows = sqlx::query("SELECT * FROM cash_movements WHERE receipt_key = ?")
+                .bind(receipt_key)
+                .fetch_all(pool)
+                .await?;
+            rows.iter().map(movement_from_sqlite_row).collect()
         }
     }
 }

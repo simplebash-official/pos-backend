@@ -457,6 +457,14 @@ pub async fn spawn_app_isolated() -> TestApp {
 /// implicitly conflicts with a concurrent one doing the same ("namespace is already in use").
 /// Only these are created, because every collection counts against Atlas's 500 per cluster.
 const TRANSACTIONAL_COLLECTIONS: &[&str] = &[
+    "purchase_receipts",
+    "receipt_settlements",
+    "supplier_credits",
+    "cash_movements",
+    "drawer_state",
+    "register_sessions",
+    "expenses",
+    "expense_payments",
     "purchases",
     "stock_batches",
     "stock_movements",
@@ -477,7 +485,9 @@ async fn start_up_once(db: &Database, db_handle: &simplebash_pos_backend::client
         let existing = db.list_collection_names().await.expect("list collections");
         for name in TRANSACTIONAL_COLLECTIONS {
             if !existing.iter().any(|e| e == name) {
-                db.create_collection(*name).await.expect("create collection");
+                db.create_collection(*name)
+                    .await
+                    .expect("create collection");
             }
         }
         simplebash_pos_backend::modules::cash_categories::service::ensure_system_categories(
@@ -660,7 +670,7 @@ pub fn mint_device_token(config: &Config, tid: &str, device_id: &str) -> String 
 pub async fn registered_device_token(app: &TestApp, tid: &str, device_id: &str) -> String {
     use tower::ServiceExt;
     let token = mint_device_token(&app.config, tid, device_id);
-    let body = json!({ "deviceId": device_id, "deviceName": "Test PC", "appVersion": "1.14.0" });
+    let body = json!({ "deviceId": device_id, "deviceName": "Test PC", "appVersion": "1.23.0" });
     let request = axum::http::Request::builder()
         .method("POST")
         .uri("/api/sync/devices/register")

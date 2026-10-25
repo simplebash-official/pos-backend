@@ -251,6 +251,64 @@ pub fn index_specs(multi_tenant: bool) -> Vec<IndexSpec> {
     );
     // The expense ledger (`modules::expenses`): payments are read per expense, and the list
     // is read by date.
+    // Supplier receipts (`modules::purchases`): looked up by key, by supplier plus invoice number
+    // (the duplicate check), and a receipt's lines are read by `receipt_key`.
+    specs.add(
+        "purchase_receipts",
+        "purchase_receipts_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    specs.add(
+        "purchase_receipts",
+        "purchase_receipts_supplier_reference",
+        doc! { "supplier_key": 1, "reference_no": 1 },
+        false,
+    );
+    specs.add(
+        "purchases",
+        "purchases_receipt_key",
+        doc! { "receipt_key": 1 },
+        false,
+    );
+    // A receipt's settlements are read by `receipt_key`; a payment's by `payment_key`.
+    specs.add(
+        "receipt_settlements",
+        "receipt_settlements_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    specs.add(
+        "receipt_settlements",
+        "receipt_settlements_receipt_key",
+        doc! { "receipt_key": 1 },
+        false,
+    );
+    specs.add(
+        "receipt_settlements",
+        "receipt_settlements_payment_key",
+        doc! { "payment_key": 1 },
+        false,
+    );
+    // A supplier's credits, and a receipt's.
+    specs.add(
+        "supplier_credits",
+        "supplier_credits_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    specs.add(
+        "supplier_credits",
+        "supplier_credits_supplier_key",
+        doc! { "supplier_key": 1 },
+        false,
+    );
+    specs.add(
+        "supplier_credits",
+        "supplier_credits_receipt_key",
+        doc! { "receipt_key": 1 },
+        false,
+    );
     specs.add("expenses", "expenses_key_unique", doc! { "key": 1 }, true);
     specs.add(
         "recurring_expenses",
@@ -470,8 +528,9 @@ mod tests {
         // + stock_batches product_key + shop_profiles + document_template_settings
         // + label_templates + label_print_jobs key/created_at + invoices session_key
         // + cash_categories key/type-name + payees key/type-name + cash_movements category/payee
-        // + expenses key/date + expense_payments expense_key + incomes key/date + account_openings key + balance_openings key + advance_recoveries key/employee_key + attachments key/owner + cash_settings key.
-        assert_eq!(specs.len(), 57);
+        // + expenses key/date + expense_payments expense_key + incomes key/date + account_openings key + balance_openings key + advance_recoveries key/employee_key + attachments key/owner + cash_settings key + purchase_receipts key/supplier-reference + purchases receipt_key
+        // + receipt_settlements key/receipt_key/payment_key + supplier_credits key/supplier_key/receipt_key.
+        assert_eq!(specs.len(), 66);
         assert!(specs.iter().all(|s| s.keys.get(TENANT_FIELD).is_none()));
         assert!(names(&specs).contains(&"products.sync_updated_at_key".to_string()));
         assert!(names(&specs).contains(&"idempotency_keys.idempotency_ttl".to_string()));
@@ -488,6 +547,9 @@ mod tests {
                 "product_serials_serial_number_unique",
                 "cash_categories_key_unique",
                 "payees_key_unique",
+                "purchase_receipts_key_unique",
+                "receipt_settlements_key_unique",
+                "supplier_credits_key_unique",
                 "expenses_key_unique",
                 "recurring_expenses_key_unique",
                 "incomes_key_unique",

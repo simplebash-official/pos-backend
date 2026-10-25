@@ -212,6 +212,14 @@ pub fn build_router(state: AppState) -> Router {
             modules::purchases::routes::router(),
         )
         .nest(
+            &format!("/{}", mod_names::PURCHASE_RECEIPTS.replace('_', "-")),
+            modules::purchases::routes::receipts_router(),
+        )
+        .nest(
+            &format!("/{}", mod_names::SUPPLIER_CREDITS.replace('_', "-")),
+            modules::purchases::routes::credits_router(),
+        )
+        .nest(
             &format!("/{}", mod_names::SEQUENCES),
             modules::sequences::routes::router(),
         )

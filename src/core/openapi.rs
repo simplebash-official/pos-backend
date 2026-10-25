@@ -27,6 +27,8 @@ use utoipa::{
         (name = "suppliers", description = "Suppliers"),
         (name = "supplier_products", description = "Supplier-product links"),
         (name = "purchases", description = "Supplier purchase/stock-intake history"),
+        (name = "supplier_credits", description = "What a supplier takes off the bill for short or damaged goods and price differences"),
+        (name = "purchase_receipts", description = "Supplier invoices: the stock received on one visit or delivery, and what has been paid against it"),
         (name = "users", description = "User accounts & role management"),
         (name = "backup", description = "Data backup and restore"),
         (name = "system", description = "Initial installation, onboarding and system setup"),

@@ -1,144 +1,26 @@
-// Business rules for recording and listing supplier purchases: the
-// quantity/cost/price invariants, resolving both sides of a purchase
-// (supplier, product) before it's ever written, and the fact that recording
-// a purchase always brings its units in as a new stock batch (own cost, own
-// selling price) with a `PurchaseReceipt` movement — see
-// `inventory::service::stock_batch::create_batch`, which this reuses.
+// Business rules for reading supplier purchase lines. A line is created only as part of a
+// receipt (`super::receipt`), which resolves both sides (supplier, product) before anything is
+// written and brings the units in as a new stock batch. This file lists and enriches lines.
 
 use std::collections::HashMap;
 
-use mongodb::bson::{DateTime as BsonDateTime, doc, oid::ObjectId};
+use mongodb::bson::doc;
 
 use crate::{
     clients::db::Db,
-    core::{
-        constants::prefixes,
-        error::{AppError, AppResult},
-        id::generate_id,
-    },
+    core::error::{AppError, AppResult},
     domain::{
-        inventory::{BatchSource, PaginationMeta, StockMovementType},
+        inventory::PaginationMeta,
         purchases::{
-            CreatePurchaseRequest, ProductSummary, Purchase, PurchaseListQuery,
-            PurchaseListResponse, SupplierSummary,
+            ProductSummary, Purchase, PurchaseListQuery, PurchaseListResponse, SupplierSummary,
         },
     },
     modules::{
-        inventory::service::{
-            product as inventory_product, product_serial as inventory_product_serial,
-            stock_batch as inventory_stock_batch,
-        },
+        inventory::service::product as inventory_product,
         purchases::{model::PurchaseDocument, repository},
         suppliers::service as supplier_service,
     },
 };
-
-/// Validates the purchase, resolves the supplier/product it references,
-/// records it, then brings its units in as a new stock batch at the
-/// purchase's cost and selling price (with its `PurchaseReceipt` movement) —
-/// reusing the one place stock is ever created rather than duplicating that
-/// invariant here. A serialized product's units are tied to that batch.
-pub async fn record_purchase(db: &Db, body: CreatePurchaseRequest) -> AppResult<Purchase> {
-    crate::core::logging::domain::tracked("purchases.recorded", async move {
-        if body.quantity < 1 {
-            return Err(AppError::validation("Quantity must be at least 1"));
-        }
-        inventory_stock_batch::validate_batch_prices(
-            body.unit_cost_cents,
-            body.selling_price_cents,
-        )?;
-
-        let supplier = supplier_service::get_supplier_by_key(db, &body.supplier_key).await?;
-        let product = inventory_product::get_product_by_key(db, &body.product_key).await?;
-
-        let serial_numbers = body.serial_numbers.clone().unwrap_or_default();
-        if product.is_serialized && serial_numbers.len() as i64 != body.quantity {
-            return Err(AppError::validation(format!(
-                "This product is serialized — provide exactly {} serial number(s), got {}",
-                body.quantity,
-                serial_numbers.len()
-            )));
-        }
-        inventory_product_serial::ensure_serials_untracked(db, &serial_numbers).await?;
-
-        // Purchase, batch, movement, product total and serials commit together
-        // or not at all; everything validated above ran before this point.
-        let mut tx = db.begin().await?;
-        let now = BsonDateTime::now();
-        let key = generate_id(prefixes::PURCHASE);
-        let document = PurchaseDocument {
-            id: None,
-            key: key.clone(),
-            supplier_key: body.supplier_key,
-            product_key: body.product_key,
-            quantity: body.quantity,
-            unit_cost_cents: body.unit_cost_cents,
-            selling_price_cents: body.selling_price_cents,
-            date: BsonDateTime::from_chrono(body.date),
-            reference_no: body.reference_no.clone(),
-            notes: body.notes,
-            version: 1,
-            created_at: now,
-            updated_at: now,
-            deleted_at: None,
-            updated_by_device: None,
-        };
-
-        let inserted = repository::insert_purchase(&mut tx, document).await?;
-
-        let product_object_id = ObjectId::parse_str(&product.id).expect(
-            "Product.id returned from get_product_by_key is always a valid ObjectId hex string",
-        );
-        let batch = inventory_stock_batch::create_batch(
-            &mut tx,
-            inventory_stock_batch::NewBatch {
-                product_id: product_object_id,
-                product_key: product.key.clone(),
-                source: BatchSource::Purchase,
-                purchase_key: Some(key.clone()),
-                supplier_key: Some(supplier.key.clone()),
-                quantity: body.quantity,
-                unit_cost_cents: body.unit_cost_cents,
-                selling_price_cents: body.selling_price_cents,
-                received_at: BsonDateTime::from_chrono(body.date),
-                movement_type: StockMovementType::PurchaseReceipt,
-                reference_id: Some(key),
-                note: body.reference_no,
-            },
-        )
-        .await?;
-
-        if product.is_serialized {
-            inventory_product_serial::create_serials_for_purchase(
-                &mut tx,
-                &product.key,
-                &batch.key,
-                &serial_numbers,
-            )
-            .await?;
-        }
-        tx.commit().await?;
-
-        let supplier_summary = SupplierSummary {
-            id: supplier.id,
-            key: supplier.key,
-            name: supplier.name,
-            contact_person: supplier.contact_person,
-            primary_phone: supplier.primary_phone,
-        };
-        let product_summary = ProductSummary {
-            id: product.id,
-            key: product.key,
-            sku: product.sku,
-            name: product.name,
-            category: product.category,
-            subcategory: product.subcategory,
-        };
-
-        Ok(inserted.into_purchase(Some(supplier_summary), Some(product_summary)))
-    })
-    .await
-}
 
 /// Lists purchases scoped to a supplier, a product, their intersection, or all purchases paginated.
 pub async fn list_purchases(db: &Db, query: PurchaseListQuery) -> AppResult<PurchaseListResponse> {
@@ -163,6 +45,31 @@ pub async fn list_purchases(db: &Db, query: PurchaseListQuery) -> AppResult<Purc
     } else {
         (total as f64 / limit as f64).ceil() as u64
     };
+
+    let items = enrich_purchases(db, documents).await?;
+
+    Ok(PurchaseListResponse {
+        purchases: items.clone(),
+        items,
+        pagination: PaginationMeta {
+            page,
+            limit,
+            total,
+            total_pages,
+        },
+    })
+}
+
+/// Attaches the live supplier and product summaries to purchase lines, with the same two batch
+/// lookups for every caller (list, receipt, sync), so a line carries the same display data
+/// however it is delivered. A reference that no longer resolves is left off, never faked.
+pub(crate) async fn enrich_purchases(
+    db: &Db,
+    documents: Vec<PurchaseDocument>,
+) -> AppResult<Vec<Purchase>> {
+    if documents.is_empty() {
+        return Ok(Vec::new());
+    }
 
     let supplier_keys: Vec<String> = documents
         .iter()
@@ -209,25 +116,14 @@ pub async fn list_purchases(db: &Db, query: PurchaseListQuery) -> AppResult<Purc
             })
             .collect();
 
-    let items: Vec<Purchase> = documents
+    Ok(documents
         .into_iter()
         .map(|document| {
             let supplier = suppliers_by_key.get(&document.supplier_key).cloned();
             let product = products_by_key.get(&document.product_key).cloned();
             document.into_purchase(supplier, product)
         })
-        .collect();
-
-    Ok(PurchaseListResponse {
-        purchases: items.clone(),
-        items,
-        pagination: PaginationMeta {
-            page,
-            limit,
-            total,
-            total_pages,
-        },
-    })
+        .collect())
 }
 
 /// What was bought from a supplier, as `(YYYY-MM-DD, total cost in cents)` per purchase.
@@ -247,77 +143,18 @@ pub(crate) async fn count_purchases_for_supplier(db: &Db, supplier_key: &str) ->
 
 /// Converts a page of raw `purchases` documents — as read by the sync
 /// module's cursor scan — into the `Purchase` shape `GET /purchases`
-/// returns, embedded supplier/product summaries included. The summaries are
-/// resolved with the same batch lookups `list_purchases` uses, so a row that
+/// returns, embedded supplier/product summaries included, so a row that
 /// arrives by delta carries the same display data as one from a snapshot.
 /// See `inventory::service::product::hydrate_sync_documents`.
 pub(crate) async fn hydrate_sync_documents(
     db: &Db,
     documents: Vec<mongodb::bson::Document>,
 ) -> AppResult<Vec<Purchase>> {
-    if documents.is_empty() {
-        return Ok(Vec::new());
-    }
-
     let purchases: Vec<PurchaseDocument> = documents
         .into_iter()
         .map(|document| {
             bson::deserialize_from_document::<PurchaseDocument>(document).map_err(AppError::from)
         })
         .collect::<AppResult<Vec<_>>>()?;
-
-    let supplier_keys: Vec<String> = purchases
-        .iter()
-        .map(|purchase| purchase.supplier_key.clone())
-        .collect();
-    let product_keys: Vec<String> = purchases
-        .iter()
-        .map(|purchase| purchase.product_key.clone())
-        .collect();
-
-    let suppliers_by_key: HashMap<String, SupplierSummary> =
-        supplier_service::get_suppliers_by_keys(db, &supplier_keys)
-            .await?
-            .into_iter()
-            .map(|supplier| {
-                (
-                    supplier.key.clone(),
-                    SupplierSummary {
-                        id: supplier.id,
-                        key: supplier.key,
-                        name: supplier.name,
-                        contact_person: supplier.contact_person,
-                        primary_phone: supplier.primary_phone,
-                    },
-                )
-            })
-            .collect();
-
-    let products_by_key: HashMap<String, ProductSummary> =
-        inventory_product::get_products_by_keys(db, &product_keys)
-            .await?
-            .into_iter()
-            .map(|product| {
-                (
-                    product.key.clone(),
-                    ProductSummary {
-                        id: product.id,
-                        key: product.key,
-                        sku: product.sku,
-                        name: product.name,
-                        category: product.category,
-                        subcategory: product.subcategory,
-                    },
-                )
-            })
-            .collect();
-
-    Ok(purchases
-        .into_iter()
-        .map(|purchase| {
-            let supplier = suppliers_by_key.get(&purchase.supplier_key).cloned();
-            let product = products_by_key.get(&purchase.product_key).cloned();
-            purchase.into_purchase(supplier, product)
-        })
-        .collect())
+    enrich_purchases(db, purchases).await
 }

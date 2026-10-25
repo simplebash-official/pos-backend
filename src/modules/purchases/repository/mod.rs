@@ -5,6 +5,10 @@
 // call in, but the `mod repository;` declaration in `purchases/mod.rs` is
 // private, so none of this is reachable from outside this module tree.
 
+pub(crate) mod credit;
+pub(crate) mod receipt;
+pub(crate) mod settlement;
+
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use futures_util::TryStreamExt;
 use mongodb::bson::{doc, oid::ObjectId};
@@ -41,8 +45,7 @@ fn row_to_purchase_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<PurchaseDocum
         unit_cost_cents: row.get("unit_cost_cents"),
         selling_price_cents: row.get("selling_price_cents"),
         date: to_bson_datetime(&date_str),
-        reference_no: row.get("reference_no"),
-        notes: row.get("notes"),
+        receipt_key: row.get("receipt_key"),
         version: row.get("version"),
         created_at: to_bson_datetime(&created_at_str),
         updated_at: to_bson_datetime(&updated_at_str),
@@ -83,9 +86,9 @@ pub(crate) async fn insert_purchase(
                 r#"
                 INSERT INTO purchases (
                     key, id, supplier_key, product_key, quantity, unit_cost_cents,
-                    selling_price_cents, date, reference_no, notes, version, created_at,
+                    selling_price_cents, date, receipt_key, version, created_at,
                     updated_at, deleted_at, updated_by_device
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(&document.key)
@@ -96,8 +99,7 @@ pub(crate) async fn insert_purchase(
             .bind(document.unit_cost_cents)
             .bind(document.selling_price_cents)
             .bind(&date_iso)
-            .bind(&document.reference_no)
-            .bind(&document.notes)
+            .bind(&document.receipt_key)
             .bind(document.version)
             .bind(&created_at_iso)
             .bind(&updated_at_iso)
@@ -260,6 +262,42 @@ pub(crate) async fn list_purchases_paginated(
                 .collect::<AppResult<Vec<_>>>()?;
 
             Ok((items, total as u64))
+        }
+    }
+}
+
+/// Every live line of the given receipts, oldest first, so a receipt's lines read in the order
+/// they were entered.
+pub(crate) async fn list_purchases_by_receipts(
+    db: &Db,
+    receipt_keys: &[String],
+) -> AppResult<Vec<PurchaseDocument>> {
+    if receipt_keys.is_empty() {
+        return Ok(Vec::new());
+    }
+    match db {
+        Db::Mongo(db) => {
+            let mut cursor = purchases(db)
+                .find(doc! { "receipt_key": { "$in": receipt_keys }, "deleted_at": { "$exists": false } })
+                .sort(doc! { "created_at": 1, "key": 1 })
+                .await?;
+            let mut items = Vec::new();
+            while let Some(document) = cursor.try_next().await? {
+                items.push(document);
+            }
+            Ok(items)
+        }
+        Db::Sqlite(pool) => {
+            let placeholders = vec!["?"; receipt_keys.len()].join(", ");
+            let sql = format!(
+                "SELECT * FROM purchases WHERE receipt_key IN ({placeholders}) AND deleted_at IS NULL ORDER BY created_at ASC, key ASC"
+            );
+            let mut query = sqlx::query(&sql);
+            for key in receipt_keys {
+                query = query.bind(key);
+            }
+            let rows = query.fetch_all(pool).await?;
+            rows.iter().map(row_to_purchase_doc).collect()
         }
     }
 }

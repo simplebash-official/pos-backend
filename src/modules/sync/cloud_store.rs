@@ -143,12 +143,13 @@ pub(crate) async fn ensure_device_active(db: &Db, device_id: &str) -> AppResult<
         .unwrap_or(false))
 }
 
-/// The oldest desktop app that may sync with this cloud: 1.14.0 is the first
-/// release whose data has stock batches (prices per delivery; 1.13.0 shipped the
-/// new screens on the old backend). An older app
-/// would push stock moves tied to no delivery and pull products it has no
-/// price for, so it is held back until it updates.
-pub(crate) const MIN_DESKTOP_APP_VERSION: (u64, u64, u64) = (1, 14, 0);
+/// The oldest desktop app that may sync with this cloud: 1.23.0 is the first
+/// release whose data has supplier receipts (every purchase line belongs to a
+/// receipt, payments can be counted against receipts, and suppliers can give
+/// credit). An older app would push purchases with no receipt and pull receipts
+/// it cannot read, so it is held back until it updates. (1.14.0 was the first
+/// with stock batches.)
+pub(crate) const MIN_DESKTOP_APP_VERSION: (u64, u64, u64) = (1, 23, 0);
 
 /// Refusal for a desktop older than [`MIN_DESKTOP_APP_VERSION`]. A 503 on
 /// purpose: older apps retry a 5xx later and keep their waiting changes,

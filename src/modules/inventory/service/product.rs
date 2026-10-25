@@ -455,24 +455,29 @@ pub async fn create_product(db: &Db, body: CreateProductRequest) -> AppResult<Pr
             )
             .await?;
 
-            crate::modules::purchases::service::purchase::record_purchase(
+            // Each supplier's intake is its own one-line receipt. A brand-new serialized
+            // product's first intake has no way to supply serials here, so it is refused by
+            // the receipt's serial check; receive a serialized product's first stock through
+            // a receipt after creating it.
+            crate::modules::purchases::service::receipt::record_receipt(
                 db,
-                crate::domain::purchases::CreatePurchaseRequest {
+                None,
+                crate::domain::purchase_receipts::CreateReceiptRequest {
                     supplier_key: intake.supplier_key,
-                    product_key: inserted.key.clone(),
-                    quantity: intake.quantity,
-                    unit_cost_cents: intake.cost_price_cents,
-                    selling_price_cents: intake.selling_price_cents,
-                    date: chrono::Utc::now(),
                     reference_no: intake.reference_no,
+                    date: chrono::Utc::now(),
                     notes: intake.notes,
-                    // A brand-new serialized product's initial supplier intake
-                    // has no UI/field for supplying serials yet — creating a
-                    // serialized product with bundled initial stock through
-                    // this path is out of scope; use a separate purchase-intake
-                    // call afterward for a serialized product's first stock.
-                    serial_numbers: None,
+                    lines: vec![crate::domain::purchase_receipts::ReceiptLineRequest {
+                        product_key: inserted.key.clone(),
+                        quantity: intake.quantity,
+                        unit_cost_cents: intake.cost_price_cents,
+                        selling_price_cents: intake.selling_price_cents,
+                        serial_numbers: None,
+                    }],
+                    payment: None,
+                    confirm_duplicate: true,
                 },
+                None,
             )
             .await?;
         }

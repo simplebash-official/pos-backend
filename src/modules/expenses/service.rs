@@ -7,7 +7,7 @@ use chrono::{NaiveDate, Utc};
 use mongodb::bson::DateTime as BsonDateTime;
 
 use crate::{
-    clients::db::Db,
+    clients::{db::Db, uow::Tx},
     core::{
         constants::{codes, prefixes},
         error::{AppError, AppResult},
@@ -15,6 +15,7 @@ use crate::{
         logging::domain::tracked,
     },
     domain::{
+        purchase_receipts::PaymentKind,
         cash_categories::normalize_name,
         expenses::{
             CreateExpensePaymentRequest, CreateExpenseRequest, ExpenseDetail, ExpenseListQuery,
@@ -25,6 +26,7 @@ use crate::{
         sequences::ReserveSequenceRequest,
     },
     modules::{
+        purchases::service::settlement,
         cash_categories::{self, service::ResolvedCategory},
         expenses::{
             model::{ExpenseDocument, ExpensePaymentDocument},
@@ -395,6 +397,76 @@ pub async fn create_expense(
     device_id: Option<String>,
 ) -> AppResult<ExpenseDetail> {
     tracked("expenses.created", async move {
+        let requested = body.settlements.clone();
+        let prepared =
+            prepare_expense(db, recorded_by_user_id, recorded_by_name, body, device_id).await?;
+        let settlements = if requested.is_empty() {
+            None
+        } else {
+            let payment_key = prepared.payment_key().ok_or_else(|| {
+                AppError::validation("Receipts can only be paid by a payment, not a bill still to pay.")
+            })?;
+            let supplier_key = prepared.expense.payee_key.as_deref().ok_or_else(|| {
+                AppError::validation("Pick the supplier whose receipts are being paid.")
+            })?;
+            if !supplier_key.starts_with(prefixes::SUPPLIER) {
+                return Err(AppError::validation("Only a supplier's receipts can be paid."));
+            }
+            Some((
+                settlement::prepare_settlements(db, supplier_key, prepared.expense.amount_cents, &requested)
+                    .await?,
+                payment_key.to_string(),
+            ))
+        };
+        let mut tx = db.begin().await?;
+        let expense = write_expense(&mut tx, prepared).await?;
+        if let Some((prepared_settlements, payment_key)) = settlements {
+            settlement::write_settlements(
+                &mut tx,
+                prepared_settlements,
+                PaymentKind::ExpensePayment,
+                &payment_key,
+            )
+            .await?;
+        }
+        tx.commit().await?;
+        detail_of(db, &expense).await
+    })
+    .await
+}
+
+/// A validated expense, and the payment that settles it when it is paid in full on entry.
+pub(crate) struct PreparedExpense {
+    expense: ExpenseDocument,
+    payment: Option<ExpensePaymentDocument>,
+}
+
+/// Writes a prepared expense and its payment in the caller's transaction.
+pub(crate) async fn write_expense(tx: &mut Tx, prepared: PreparedExpense) -> AppResult<ExpenseDocument> {
+    let expense = repository::insert_expense(&mut *tx, prepared.expense).await?;
+    if let Some(payment) = prepared.payment {
+        repository::insert_payment(&mut *tx, payment).await?;
+    }
+    Ok(expense)
+}
+
+impl PreparedExpense {
+    /// The key of the payment row, when the expense is paid in full on entry.
+    pub(crate) fn payment_key(&self) -> Option<&str> {
+        self.payment.as_ref().map(|p| p.key.as_str())
+    }
+}
+
+/// Everything `create_expense` checks, with nothing written: the account, the amount, the dates,
+/// the category, the payee, and the expense number taken.
+pub(crate) async fn prepare_expense(
+    db: &Db,
+    recorded_by_user_id: String,
+    recorded_by_name: String,
+    body: CreateExpenseRequest,
+    device_id: Option<String>,
+) -> AppResult<PreparedExpense> {
+    {
         if body.paid_from == PaidFrom::Drawer {
             return Err(AppError::validation(
                 "Cash paid from the drawer is recorded as a cash movement. It appears here by itself.",
@@ -440,55 +512,44 @@ pub async fn create_expense(
         );
 
         let now = BsonDateTime::now();
-        let expense = repository::insert_expense(
-            db,
-            ExpenseDocument {
-                id: None,
-                key: generate_id(prefixes::EXPENSE),
-                expense_number,
-                expense_date: body.expense_date.trim().to_string(),
-                category_key: category.key,
-                payee_key,
-                payee_name,
-                amount_cents: body.amount_cents,
-                due_date,
-                reference_no: clean("The reference", body.reference_no.as_deref(), REFERENCE_MAX)?,
-                note: clean("The note", body.note.as_deref(), TEXT_MAX)?,
-                recorded_by_user_id: recorded_by_user_id.clone(),
-                recorded_by_name_snapshot: recorded_by_name.clone(),
-                version: 1,
-                created_at: now,
-                updated_at: now,
-                updated_by_device: None,
-            },
-        )
-        .await?;
+        let expense = ExpenseDocument {
+            id: None,
+            key: generate_id(prefixes::EXPENSE),
+            expense_number,
+            expense_date: body.expense_date.trim().to_string(),
+            category_key: category.key,
+            payee_key,
+            payee_name,
+            amount_cents: body.amount_cents,
+            due_date,
+            reference_no: clean("The reference", body.reference_no.as_deref(), REFERENCE_MAX)?,
+            note: clean("The note", body.note.as_deref(), TEXT_MAX)?,
+            recorded_by_user_id: recorded_by_user_id.clone(),
+            recorded_by_name_snapshot: recorded_by_name.clone(),
+            version: 1,
+            created_at: now,
+            updated_at: now,
+            updated_by_device: None,
+        };
 
-        if body.paid_from.is_account() {
-            repository::insert_payment(
-                db,
-                ExpensePaymentDocument {
-                    id: None,
-                    key: generate_id(prefixes::EXPENSE_PAYMENT),
-                    expense_key: expense.key.clone(),
-                    amount_cents: expense.amount_cents,
-                    paid_from: body.paid_from,
-                    paid_on: expense.expense_date.clone(),
-                    reference_no: expense.reference_no.clone(),
-                    note: None,
-                    recorded_by_user_id,
-                    recorded_by_name_snapshot: recorded_by_name,
-                    version: 1,
-                    created_at: now,
-                    updated_at: now,
-                    updated_by_device: None,
-                },
-            )
-            .await?;
-        }
-        detail_of(db, &expense).await
-    })
-    .await
+        let payment = body.paid_from.is_account().then(|| ExpensePaymentDocument {
+            id: None,
+            key: generate_id(prefixes::EXPENSE_PAYMENT),
+            expense_key: expense.key.clone(),
+            amount_cents: expense.amount_cents,
+            paid_from: body.paid_from,
+            paid_on: expense.expense_date.clone(),
+            reference_no: expense.reference_no.clone(),
+            note: None,
+            recorded_by_user_id,
+            recorded_by_name_snapshot: recorded_by_name,
+            version: 1,
+            created_at: now,
+            updated_at: now,
+            updated_by_device: None,
+        });
+        Ok(PreparedExpense { expense, payment })
+    }
 }
 
 /// Records a payment against a bill, from the bank, a card or online. Never more than is still owed.

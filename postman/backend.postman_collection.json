@@ -1673,10 +1673,10 @@
                 "movements"
               ]
             },
-            "description": "Record one drawer cash event. `movementType` is one of petty_expense | rent_and_bills | staff_payment | supplier_payment | owner_withdrawal | add_cash | cash_drop | no_sale. The category must belong to that kind of payment and be visible; `customLabel` is only for the type's Other category. Each type asks for its own fields and refuses the rest: rent_and_bills needs a vendor `payeeKey` and `periodStart`/`periodEnd` (YYYY-MM-DD); staff_payment a staff `payeeKey`; supplier_payment a supplier `payeeKey`; owner_withdrawal a `payeeName`; no_sale has `amountCents` 0 and no payee. A name typed on a petty_expense is saved to the payee list. A manager or owner `managerPin` is required for owner_withdrawal, staff_payment and any payout above the category's `requiresApprovalOverCents`. `sessionKey` may be omitted only for cash taken out between shifts.\n\n**Requires `cash_movements:create`**; rent_and_bills, staff_payment and supplier_payment also need `cash_movements:create:managed` (Admin and Manager).\n\nA payout (any outgoing kind or a cash drop) bigger than the cash the drawer holds (the open shift's expected cash, or the drawer's running balance between shifts) is refused with 409 `DRAWER_CASH_EXCEEDED` unless a manager or owner `managerPin` and an `overrideReason` are sent; both are kept on the entry (`approvedBy…`, `approvalReason`).\n\nA rent_and_bills payment for a month that is already paid (a regular bill paid in full, or anything recorded for that category and payee when there is no regular bill) is refused with 409 `PERIOD_ALREADY_PAID` unless `confirmDuplicate` is true.",
+            "description": "Record one drawer cash event. `movementType` is one of petty_expense | rent_and_bills | staff_payment | supplier_payment | owner_withdrawal | add_cash | cash_drop | no_sale. The category must belong to that kind of payment and be visible; `customLabel` is only for the type's Other category. Each type asks for its own fields and refuses the rest: rent_and_bills needs a vendor `payeeKey` and `periodStart`/`periodEnd` (YYYY-MM-DD); staff_payment a staff `payeeKey`; supplier_payment a supplier `payeeKey`; owner_withdrawal a `payeeName`; no_sale has `amountCents` 0 and no payee. A name typed on a petty_expense is saved to the payee list. A manager or owner `managerPin` is required for owner_withdrawal, staff_payment and any payout above the category's `requiresApprovalOverCents`. `sessionKey` may be omitted only for cash taken out between shifts.\n\n**Requires `cash_movements:create`**; rent_and_bills, staff_payment and supplier_payment also need `cash_movements:create:managed` (Admin and Manager).\n\nA payout (any outgoing kind or a cash drop) bigger than the cash the drawer holds (the open shift's expected cash, or the drawer's running balance between shifts) is refused with 409 `DRAWER_CASH_EXCEEDED` unless a manager or owner `managerPin` and an `overrideReason` are sent; both are kept on the entry (`approvedBy…`, `approvalReason`).\n\nA rent_and_bills payment for a month that is already paid (a regular bill paid in full, or anything recorded for that category and payee when there is no regular bill) is refused with 409 `PERIOD_ALREADY_PAID` unless `confirmDuplicate` is true.\n\n`settlements` (supplier_payment only): the supplier receipts this payment pays and how much of it goes to each; the parts may not exceed the amount and each may not exceed what its receipt still owes (409 `RECEIPT_OVERPAID`). What is not allocated stays on the supplier's account. Reversing a payment recorded with a receipt also reverses the owner's capital recorded with it.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"movementType\": \"petty_expense\",\n  \"amountCents\": 1500,\n  \"sessionKey\": \"{{sessionKey}}\",\n  \"terminalId\": \"term_front\",\n  \"categoryKey\": \"{{cashCategoryKey}}\",\n  \"customLabel\": null,\n  \"payeeKey\": null,\n  \"payeeName\": \"Corner shop\",\n  \"periodStart\": null,\n  \"periodEnd\": null,\n  \"referenceNo\": null,\n  \"note\": \"Biscuits\",\n  \"managerPin\": null,\n  \"overrideReason\": null,\n  \"confirmDuplicate\": false\n}",
+              "raw": "{\n  \"movementType\": \"petty_expense\",\n  \"amountCents\": 1500,\n  \"sessionKey\": \"{{sessionKey}}\",\n  \"terminalId\": \"term_front\",\n  \"categoryKey\": \"{{cashCategoryKey}}\",\n  \"customLabel\": null,\n  \"payeeKey\": null,\n  \"payeeName\": \"Corner shop\",\n  \"periodStart\": null,\n  \"periodEnd\": null,\n  \"referenceNo\": null,\n  \"note\": \"Biscuits\",\n  \"managerPin\": null,\n  \"overrideReason\": null,\n  \"confirmDuplicate\": false,\n  \"settlements\": [\n    {\n      \"receiptKey\": \"{{receiptKey}}\",\n      \"amountCents\": 800000\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2090,10 +2090,10 @@
                 "expenses"
               ]
             },
-            "description": "Enter a cost paid from the bank, a card or online (`paidFrom` bank | card | online, paid in full on `expenseDate`) or a bill still to pay (`paidFrom: unpaid`, optional `dueDate`). Cash from the drawer is a cash movement, not an entry here (400). The category must count as a business cost. A typed `payeeName` is saved to the payee list.\n\n**Requires `expenses:manage`** (Admin and Manager).",
+            "description": "Enter a cost paid from the bank, a card or online (`paidFrom` bank | card | online, paid in full on `expenseDate`) or a bill still to pay (`paidFrom: unpaid`, optional `dueDate`). Cash from the drawer is a cash movement, not an entry here (400). The category must count as a business cost. A typed `payeeName` is saved to the payee list.\n\n**Requires `expenses:manage`** (Admin and Manager).\n\n`settlements`: for a supplier payment paid on entry (bank, card or online), the supplier receipts it pays and how much of it each.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"expenseDate\": \"2026-10-23\",\n  \"categoryKey\": \"{{cashCategoryKey}}\",\n  \"payeeKey\": null,\n  \"payeeName\": \"Ceylon Electricity Board\",\n  \"amountCents\": 1200000,\n  \"paidFrom\": \"unpaid\",\n  \"dueDate\": \"2026-11-10\",\n  \"referenceNo\": \"BILL-77\",\n  \"note\": \"October\"\n}",
+              "raw": "{\n  \"expenseDate\": \"2026-10-23\",\n  \"categoryKey\": \"{{cashCategoryKey}}\",\n  \"payeeKey\": null,\n  \"payeeName\": \"Ceylon Electricity Board\",\n  \"amountCents\": 1200000,\n  \"paidFrom\": \"unpaid\",\n  \"dueDate\": \"2026-11-10\",\n  \"referenceNo\": \"BILL-77\",\n  \"note\": \"October\",\n  \"settlements\": [\n    {\n      \"receiptKey\": \"{{receiptKey}}\",\n      \"amountCents\": 800000\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6132,12 +6132,80 @@
                 }
               ]
             },
-            "description": "Purchase history scoped to a supplier, a product, or their intersection — enriched with supplier/product display data. At least one of supplierKey/productKey is required (400 otherwise).\n\n**Requires Admin JWT** (`role: admin` claim) — every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
+            "description": "Purchase history scoped to a supplier, a product, or their intersection — enriched with supplier/product display data. At least one of supplierKey/productKey is required (400 otherwise).\n\n**Requires Admin JWT** (`role: admin` claim) — every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token.\n\nEach line carries `receiptKey`; lines are created only through a purchase receipt (POST /api/purchase-receipts). Admin only."
           },
           "response": []
+        }
+      ],
+      "description": "Supplier purchase / stock-intake history — recording a stock receipt also bumps the referenced product's stock in Inventory. Every route (reads included) requires Admin — see the Admin note on each request."
+    },
+    {
+      "name": "Purchase Receipts",
+      "description": "One supplier invoice: the stock received on a single visit or delivery, with what has been paid against it. Admin only. Paying as the stock arrives (cash on delivery, paid at the supplier's shop, part paid, or from the owner's own pocket) is the optional `payment`; leave it out for stock bought on credit.",
+      "item": [
+        {
+          "name": "List Purchase Receipts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/purchase-receipts?supplierKey={{supplierKey}}&open=true&page=1&limit=20",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "purchase-receipts"
+              ],
+              "query": [
+                {
+                  "key": "supplierKey",
+                  "value": "{{supplierKey}}",
+                  "description": "Only this supplier's receipts.",
+                  "disabled": true
+                },
+                {
+                  "key": "open",
+                  "value": "true",
+                  "description": "true: only receipts still owed; false: only settled ones.",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Page number (1-indexed)."
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Items per page (1-500)."
+                }
+              ]
+            },
+            "description": "Receipts newest first, with their lines and the worked-out total, credited, paid, due and status. `open=true` lists only receipts with something still due, oldest first (the order they are paid in); `open=false` only settled ones."
+          }
         },
         {
-          "name": "Record Purchase",
+          "name": "Get Purchase Receipt",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/purchase-receipts/{{receiptKey}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "purchase-receipts",
+                "{{receiptKey}}"
+              ]
+            },
+            "description": "One receipt with its lines, credits, settlements and status."
+          }
+        },
+        {
+          "name": "Record Purchase Receipt",
           "request": {
             "method": "POST",
             "header": [
@@ -6146,31 +6214,129 @@
                 "value": "application/json"
               }
             ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"supplierKey\": \"{{supplierKey}}\",\n  \"productKey\": \"{{productKey}}\",\n  \"quantity\": 50,\n  \"unitCostCents\": 150000,\n  \"sellingPriceCents\": 180000,\n  \"date\": \"2026-07-30T10:00:00Z\",\n  \"referenceNo\": \"INV-1001\",\n  \"notes\": \"Monthly restock\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
             "url": {
-              "raw": "{{backendBaseUrl}}/api/purchases",
+              "raw": "{{backendBaseUrl}}/api/purchase-receipts",
               "host": [
                 "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
-                "purchases"
+                "purchase-receipts"
               ]
             },
-            "description": "Records a stock intake from a supplier. Its units come in as a new stock batch at this purchase's `unitCostCents` and `sellingPriceCents` (both required), with a PurchaseReceipt stock movement (see Inventory > Stock > Product Stock Movements). Both keys must reference existing documents (404 otherwise).\n\n**Requires Admin JWT** (`role: admin` claim) — every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
-          },
-          "response": []
+            "description": "Brings every line into stock as its own batch, and writes the payment, in one all-or-nothing save. `payment.source` is `drawer`, `bank`, `card`, `online` or `owner_pocket`. Cash (drawer, owner_pocket) needs `terminalId` (and `sessionKey` while a shift is open) and no `paidOn`; bank, card and online need `paidOn` (YYYY-MM-DD) and no terminal. `owner_pocket` records the owner's capital put into the drawer and then the payment, so the drawer count is unchanged. A same-supplier, same-`referenceNo` receipt answers 409 `DUPLICATE_RECEIPT` until `confirmDuplicate` is true. More than the receipt total is 409 `RECEIPT_OVERPAID`. A payment needs the same permissions as paying a supplier.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"supplierKey\": \"{{supplierKey}}\",\n  \"referenceNo\": \"INV-2041\",\n  \"date\": \"2026-10-24T00:00:00Z\",\n  \"notes\": \"Delivered by van\",\n  \"lines\": [\n    {\n      \"productKey\": \"{{productKey}}\",\n      \"quantity\": 10,\n      \"unitCostCents\": 150000,\n      \"sellingPriceCents\": 199000\n    },\n    {\n      \"productKey\": \"prod_example_serialized\",\n      \"quantity\": 2,\n      \"unitCostCents\": 4500000,\n      \"sellingPriceCents\": 5200000,\n      \"serialNumbers\": [\n        \"SN-0001\",\n        \"SN-0002\"\n      ]\n    }\n  ],\n  \"payment\": {\n    \"source\": \"drawer\",\n    \"amountCents\": 1500000,\n    \"categoryKey\": \"{{cashCategoryKey}}\",\n    \"terminalId\": \"term_front\",\n    \"sessionKey\": \"{{sessionKey}}\"\n  },\n  \"confirmDuplicate\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
         }
-      ],
-      "description": "Supplier purchase / stock-intake history — recording a stock receipt also bumps the referenced product's stock in Inventory. Every route (reads included) requires Admin — see the Admin note on each request."
+      ]
+    },
+    {
+      "name": "Supplier Credits",
+      "description": "What a supplier takes off the bill for short or damaged goods or a price difference. Moves no stock. A wrong credit is voided by a reversing entry. Admin only.",
+      "item": [
+        {
+          "name": "List Supplier Credits",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/supplier-credits?supplierKey={{supplierKey}}&receiptKey={{receiptKey}}&page=1&limit=20",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "supplier-credits"
+              ],
+              "query": [
+                {
+                  "key": "supplierKey",
+                  "value": "{{supplierKey}}",
+                  "description": "Only this supplier's credits.",
+                  "disabled": true
+                },
+                {
+                  "key": "receiptKey",
+                  "value": "{{receiptKey}}",
+                  "description": "Only credits against this receipt.",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Page number (1-indexed)."
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Items per page (1-500)."
+                }
+              ]
+            },
+            "description": "Credits newest first; a voided credit carries `voidedByKey`."
+          }
+        },
+        {
+          "name": "Record Supplier Credit",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/supplier-credits",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "supplier-credits"
+              ]
+            },
+            "description": "`reason` is `short_delivery`, `damaged`, `price_difference` or `other`. With `receiptKey` it may not exceed what that receipt still owes (409 `RECEIPT_OVERPAID`); without one it is credit on the supplier's account.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"supplierKey\": \"{{supplierKey}}\",\n  \"receiptKey\": \"{{receiptKey}}\",\n  \"amountCents\": 200000,\n  \"reason\": \"short_delivery\",\n  \"note\": \"2 cases missing\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Void Supplier Credit",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/supplier-credits/{{supplierCreditKey}}/void",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "supplier-credits",
+                "{{supplierCreditKey}}",
+                "void"
+              ]
+            },
+            "description": "Records a reversing entry (key `<credit key>_rev`); the amount is owed again. 409 `CREDIT_ALREADY_VOIDED` if already voided."
+          }
+        }
+      ]
     },
     {
       "name": "Sync",
@@ -7292,6 +7458,14 @@
       "key": "attachmentKey",
       "value": "att_example",
       "type": "string"
+    },
+    {
+      "key": "receiptKey",
+      "value": ""
+    },
+    {
+      "key": "supplierCreditKey",
+      "value": ""
     }
   ]
 }

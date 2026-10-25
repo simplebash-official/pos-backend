@@ -371,14 +371,16 @@ async fn test_sqlite_complete_pos_lifecycle() {
     let (status, purch_res) = send_authed(
         &ctx.router,
         "POST",
-        "/api/purchases",
+        "/api/purchase-receipts",
         Some(json!({
             "supplierKey": supplier_key,
-            "productKey": product_key,
-            "quantity": 5,
-            "unitCostCents": 72000,
-            "sellingPriceCents": 99900,
-            "date": "2026-09-06T00:00:00Z"
+            "date": "2026-09-06T00:00:00Z",
+            "lines": [{
+                "productKey": product_key,
+                "quantity": 5,
+                "unitCostCents": 72000,
+                "sellingPriceCents": 99900
+            }]
         })),
         &token,
     )

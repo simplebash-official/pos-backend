@@ -1,10 +1,10 @@
-// A purchase is one unit of work: the purchase row, its stock batch, the stock
-// movement, the product total and the serials commit together or not at all.
-// The failure injected here is a serial number listed twice in one receipt:
-// the pre-check passes (neither copy is tracked yet) and the second insert hits
-// the unique index after the purchase, the batch, the movement and the first
-// serial are already written. Nothing of the receipt may remain. Runs on SQLite
-// and on a throwaway Atlas database.
+// A receipt is one unit of work: the receipt row, its lines, their stock batches, the stock
+// movements, the product totals and the serials commit together or not at all.
+// Two ways a receipt fails are exercised: a serial listed twice (refused before anything is
+// written), and two receipts racing for the same serial number, where the loser passes the
+// pre-check and fails on the unique index after its receipt, line, batch and movement are
+// already written. Nothing of the loser may remain. Runs on SQLite and on a throwaway Atlas
+// database.
 
 mod common;
 
@@ -116,94 +116,36 @@ async fn scenario(app: &common::TestApp) {
     let receive = |serials: Vec<String>| {
         json!({
             "supplierKey": supplier_key,
-            "productKey": product_key,
-            "quantity": serials.len(),
-            "unitCostCents": 30000,
-            "sellingPriceCents": 50000,
             "date": chrono::Utc::now().to_rfc3339(),
-            "serialNumbers": serials,
+            "lines": [{
+                "productKey": product_key,
+                "quantity": serials.len(),
+                "unitCostCents": 30000,
+                "sellingPriceCents": 50000,
+                "serialNumbers": serials,
+            }],
         })
     };
 
-    // The receipt dies on its second serial; everything it wrote must be gone.
+    // A serial listed twice is refused before anything is written.
     let twin = format!("TWIN-{tag}");
     let (status, body) = send(
         router,
         "POST",
-        "/api/purchases",
+        "/api/purchase-receipts",
         Some(receive(vec![twin.clone(), twin.clone()])),
         &admin,
     )
     .await;
-    assert!(
-        !status.is_success(),
-        "a receipt with a repeated serial must fail: {body}"
-    );
-
-    let (status, product) = send(
-        router,
-        "GET",
-        &format!("/api/inventory/products/{product_id}"),
-        None,
-        &admin,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{product}");
-    assert_eq!(product["data"]["stockQuantity"], 0, "stock must not move");
-
-    let (_, batches) = send(
-        router,
-        "GET",
-        &format!("/api/inventory/products/{product_key}/batches"),
-        None,
-        &admin,
-    )
-    .await;
-    assert_eq!(batches["data"]["items"], json!([]), "no batch may remain");
-
-    let (_, serials) = send(
-        router,
-        "GET",
-        &format!("/api/inventory/products/{product_key}/serials"),
-        None,
-        &admin,
-    )
-    .await;
-    assert_eq!(serials["data"]["items"], json!([]), "no serial may remain");
-
-    let (_, movements) = send(
-        router,
-        "GET",
-        &format!("/api/inventory/products/{product_id}/movements"),
-        None,
-        &admin,
-    )
-    .await;
-    assert_eq!(
-        movements["data"]["movements"],
-        json!([]),
-        "no stock movement may remain"
-    );
-
-    let (_, purchases) = send(
-        router,
-        "GET",
-        &format!("/api/purchases?supplierKey={supplier_key}"),
-        None,
-        &admin,
-    )
-    .await;
-    assert_eq!(
-        purchases["data"]["items"],
-        json!([]),
-        "no purchase row may remain"
-    );
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "SERIAL_ALREADY_EXISTS", "{body}");
+    assert_nothing_received(router, &admin, &product_id, &product_key, &supplier_key).await;
 
     // The same serial list without the repeat commits everything.
     let (status, body) = send(
         router,
         "POST",
-        "/api/purchases",
+        "/api/purchase-receipts",
         Some(receive(vec![format!("A-{tag}"), format!("B-{tag}")])),
         &admin,
     )
@@ -227,6 +169,134 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(serials["data"]["items"].as_array().unwrap().len(), 2);
+
+    // Two receipts race for the same serial. Whichever loses may pass the pre-check, so it can
+    // fail only after its receipt, line, batch and movement are written: none of that may stay.
+    let racing = vec![format!("RACE-{tag}")];
+    let (first, second) = tokio::join!(
+        send(
+            router,
+            "POST",
+            "/api/purchase-receipts",
+            Some(receive(racing.clone())),
+            &admin
+        ),
+        send(
+            router,
+            "POST",
+            "/api/purchase-receipts",
+            Some(receive(racing.clone())),
+            &admin
+        ),
+    );
+    let outcomes = [first.0, second.0];
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|s| **s == StatusCode::CREATED)
+            .count(),
+        1,
+        "exactly one racing receipt may win: {outcomes:?} {} {}",
+        first.1,
+        second.1
+    );
+    let (_, product) = send(
+        router,
+        "GET",
+        &format!("/api/inventory/products/{product_id}"),
+        None,
+        &admin,
+    )
+    .await;
+    assert_eq!(
+        product["data"]["stockQuantity"], 3,
+        "the loser must not add stock"
+    );
+    let (_, serials) = send(
+        router,
+        "GET",
+        &format!("/api/inventory/products/{product_key}/serials"),
+        None,
+        &admin,
+    )
+    .await;
+    assert_eq!(serials["data"]["items"].as_array().unwrap().len(), 3);
+    let (_, batches) = send(
+        router,
+        "GET",
+        &format!("/api/inventory/products/{product_key}/batches"),
+        None,
+        &admin,
+    )
+    .await;
+    assert_eq!(batches["data"]["items"].as_array().unwrap().len(), 2);
+    let (_, receipts) = send(
+        router,
+        "GET",
+        &format!("/api/purchase-receipts?supplierKey={supplier_key}"),
+        None,
+        &admin,
+    )
+    .await;
+    assert_eq!(
+        receipts["data"]["items"].as_array().unwrap().len(),
+        2,
+        "the loser's receipt must not remain"
+    );
+}
+
+/// The product has no stock, batch, serial, movement or receipt.
+async fn assert_nothing_received(
+    router: &axum::Router,
+    admin: &str,
+    product_id: &str,
+    product_key: &str,
+    supplier_key: &str,
+) {
+    let (status, product) = send(
+        router,
+        "GET",
+        &format!("/api/inventory/products/{product_id}"),
+        None,
+        admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{product}");
+    assert_eq!(product["data"]["stockQuantity"], 0, "stock must not move");
+    for (path, field, what) in [
+        (
+            format!("/api/inventory/products/{product_key}/batches"),
+            "items",
+            "batch",
+        ),
+        (
+            format!("/api/inventory/products/{product_key}/serials"),
+            "items",
+            "serial",
+        ),
+        (
+            format!("/api/inventory/products/{product_id}/movements"),
+            "movements",
+            "stock movement",
+        ),
+        (
+            format!("/api/purchases?supplierKey={supplier_key}"),
+            "items",
+            "purchase line",
+        ),
+        (
+            format!("/api/purchase-receipts?supplierKey={supplier_key}"),
+            "items",
+            "receipt",
+        ),
+    ] {
+        let (_, body) = send(router, "GET", &path, None, admin).await;
+        assert_eq!(
+            body["data"][field],
+            json!([]),
+            "no {what} may remain: {body}"
+        );
+    }
 }
 
 #[tokio::test]

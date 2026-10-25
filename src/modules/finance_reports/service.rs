@@ -1,7 +1,7 @@
 // Business rules for the money reports: which day range is allowed and how each figure is put
 // together from the ledgers. Nothing is stored; every call reads the current records.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use chrono::{Datelike, NaiveDate, Utc};
 
@@ -18,9 +18,10 @@ use crate::{
             ProfitLossResponse,
         },
         incomes::ReceivedInto,
+        purchase_receipts::ReceiptListQuery,
         sessions::CashMovementType,
     },
-    modules::{balances, billing, cash_categories, expenses, incomes, reports, sessions},
+    modules::{balances, billing, cash_categories, expenses, incomes, purchases, reports, sessions},
 };
 
 /// The longest range a report covers, so one request cannot read years of records.
@@ -313,8 +314,9 @@ pub async fn cash_flow(db: &Db, from: &str, to: &str) -> AppResult<CashFlowRespo
     })
 }
 
-/// What the shop still has to pay today: bills not paid in full, and suppliers it owes. A supplier whose opening
-/// balance was never set is left out (its balance is not known); the Balances screen says so.
+/// What the shop still has to pay today: bills not paid in full, and suppliers it owes. A supplier with an
+/// opening balance is listed by its balance. One without is listed by what its supplier receipts still owe,
+/// so a supplier is never counted both ways.
 pub async fn payables(db: &Db) -> AppResult<PayablesResponse> {
     let mut bills: Vec<PayableBill> = expenses::service::unpaid_rows(db)
         .await?
@@ -351,6 +353,34 @@ pub async fn payables(db: &Db) -> AppResult<PayablesResponse> {
             _ => None,
         })
         .collect();
+    // Suppliers with no opening balance: what their open receipts still owe.
+    let without_opening: HashMap<String, String> = balances::service::list_supplier_balances(db)
+        .await?
+        .suppliers
+        .into_iter()
+        .filter(|s| s.balance_cents.is_none())
+        .map(|s| (s.supplier_key, s.name))
+        .collect();
+    let open_receipts = purchases::service::receipt::list_receipts(
+        db,
+        ReceiptListQuery {
+            open: Some(true),
+            limit: Some(500),
+            ..Default::default()
+        },
+    )
+    .await?
+    .items;
+    let mut due_by_supplier: HashMap<String, i64> = HashMap::new();
+    for receipt in open_receipts {
+        if without_opening.contains_key(&receipt.supplier_key) {
+            *due_by_supplier.entry(receipt.supplier_key).or_insert(0) += receipt.due_cents;
+        }
+    }
+    for (supplier_key, balance_cents) in due_by_supplier {
+        let name = without_opening[&supplier_key].clone();
+        suppliers.push(PayableSupplier { supplier_key, name, balance_cents });
+    }
     suppliers.sort_by(|a, b| b.balance_cents.cmp(&a.balance_cents).then(a.name.cmp(&b.name)));
     let suppliers_cents = suppliers.iter().map(|s| s.balance_cents).sum::<i64>();
 

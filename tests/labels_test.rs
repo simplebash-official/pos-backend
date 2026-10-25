@@ -174,21 +174,24 @@ impl Shop {
         price: i64,
         serials: Option<Vec<String>>,
     ) {
-        let mut body = json!({
-            "supplierKey": self.supplier_key,
+        let mut line = json!({
             "productKey": product_key,
             "quantity": quantity,
             "unitCostCents": price / 2,
             "sellingPriceCents": price,
-            "date": chrono::Utc::now().to_rfc3339(),
         });
         if let Some(serials) = serials {
-            body["serialNumbers"] = json!(serials);
+            line["serialNumbers"] = json!(serials);
         }
+        let body = json!({
+            "supplierKey": self.supplier_key,
+            "date": chrono::Utc::now().to_rfc3339(),
+            "lines": [line],
+        });
         let (status, response) = send(
             &self.router,
             "POST",
-            "/api/purchases",
+            "/api/purchase-receipts",
             Some(body),
             &self.admin,
         )

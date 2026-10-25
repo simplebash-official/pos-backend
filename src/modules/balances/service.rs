@@ -274,6 +274,7 @@ pub async fn list_supplier_balances(db: &Db) -> AppResult<SupplierBalancesRespon
             as_of_date: None,
             purchased_cents: None,
             paid_cents: None,
+            credited_cents: None,
             balance_cents: None,
         };
         if let Some(o) = openings.get(&s.key) {
@@ -289,11 +290,18 @@ pub async fn list_supplier_balances(db: &Db) -> AppResult<SupplierBalancesRespon
                 .filter(|(payee, day, _)| *payee == s.key && day.as_str() >= o.as_of_date.as_str())
                 .map(|(_, _, cents)| cents)
                 .sum();
+            let credited: i64 = purchases::service::credit::credits_of_supplier(db, &s.key)
+                .await?
+                .into_iter()
+                .filter(|(day, _)| day.as_str() >= o.as_of_date.as_str())
+                .map(|(_, cents)| cents)
+                .sum();
             balance.opening_balance_cents = Some(o.opening_balance_cents);
             balance.as_of_date = Some(o.as_of_date.clone());
             balance.purchased_cents = Some(purchased);
             balance.paid_cents = Some(paid);
-            balance.balance_cents = Some(owed(o.opening_balance_cents, purchased, paid));
+            balance.credited_cents = Some(credited);
+            balance.balance_cents = Some(owed(o.opening_balance_cents, purchased, paid + credited));
         }
         out.push(balance);
     }

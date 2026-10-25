@@ -103,8 +103,7 @@ CREATE TABLE IF NOT EXISTS purchases (
     unit_cost_cents INTEGER NOT NULL,
     selling_price_cents INTEGER NOT NULL,
     date TEXT NOT NULL,
-    reference_no TEXT,
-    notes TEXT,
+    receipt_key TEXT NOT NULL,
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -114,7 +113,70 @@ CREATE TABLE IF NOT EXISTS purchases (
 
 CREATE INDEX IF NOT EXISTS idx_purchases_supplier_key ON purchases(supplier_key);
 CREATE INDEX IF NOT EXISTS idx_purchases_product_key ON purchases(product_key);
+CREATE INDEX IF NOT EXISTS idx_purchases_receipt_key ON purchases(receipt_key);
 CREATE INDEX IF NOT EXISTS idx_purchases_sync ON purchases(updated_at, key);
+
+-- One supplier invoice: the header of the purchase lines above (append-only).
+CREATE TABLE IF NOT EXISTS purchase_receipts (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    receipt_number TEXT NOT NULL UNIQUE,
+    supplier_key TEXT NOT NULL,
+    reference_no TEXT,
+    date TEXT NOT NULL,
+    notes TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by_device TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_receipts_supplier_reference ON purchase_receipts(supplier_key, reference_no);
+CREATE INDEX IF NOT EXISTS idx_receipts_date ON purchase_receipts(date);
+CREATE INDEX IF NOT EXISTS idx_receipts_sync ON purchase_receipts(updated_at, key);
+
+-- Which payment paid how much of which receipt (append-only). A payment may settle several
+-- receipts, and a receipt may be settled by several payments.
+CREATE TABLE IF NOT EXISTS receipt_settlements (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    receipt_key TEXT NOT NULL,
+    supplier_key TEXT NOT NULL,
+    amount_cents INTEGER NOT NULL,
+    payment_kind TEXT NOT NULL,
+    payment_key TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by_device TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_settlements_receipt_key ON receipt_settlements(receipt_key);
+CREATE INDEX IF NOT EXISTS idx_settlements_payment_key ON receipt_settlements(payment_key);
+CREATE INDEX IF NOT EXISTS idx_settlements_sync ON receipt_settlements(updated_at, key);
+
+-- What a supplier took off the bill for short or damaged goods or a price difference (append-only;
+-- a void is another row pointing at the one it cancels).
+CREATE TABLE IF NOT EXISTS supplier_credits (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    supplier_key TEXT NOT NULL,
+    receipt_key TEXT,
+    amount_cents INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    note TEXT,
+    reverses_key TEXT,
+    recorded_by_user_id TEXT NOT NULL,
+    recorded_by_name_snapshot TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by_device TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_credits_supplier_key ON supplier_credits(supplier_key);
+CREATE INDEX IF NOT EXISTS idx_credits_receipt_key ON supplier_credits(receipt_key);
+CREATE INDEX IF NOT EXISTS idx_credits_sync ON supplier_credits(updated_at, key);
 
 CREATE TABLE IF NOT EXISTS stock_movements (
     key TEXT PRIMARY KEY,
@@ -781,6 +843,7 @@ CREATE TABLE IF NOT EXISTS cash_movements (
     reverses_key TEXT,
     recorded_late INTEGER NOT NULL DEFAULT 0,
     original_variance_session_key TEXT,
+    receipt_key TEXT,
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,

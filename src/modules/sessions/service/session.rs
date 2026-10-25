@@ -547,6 +547,7 @@ pub async fn convert_variance(
         reverses_key: None,
         recorded_late: true,
         original_variance_session_key: Some(session.key.clone()),
+        receipt_key: None,
         version: 1,
         created_at: now,
         updated_at: now,

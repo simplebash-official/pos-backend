@@ -80,10 +80,10 @@ async fn scenario(app: &common::TestApp) {
     let (status, body) = send(
         app,
         "POST",
-        "/api/purchases",
+        "/api/purchase-receipts",
         Some(json!({
-            "supplierKey": supplier_key, "productKey": product["data"]["key"], "quantity": 10,
-            "unitCostCents": 50_000, "sellingPriceCents": 80_000, "date": chrono::Utc::now().to_rfc3339()
+            "supplierKey": supplier_key, "date": chrono::Utc::now().to_rfc3339(),
+            "lines": [{ "productKey": product["data"]["key"], "quantity": 10, "unitCostCents": 50_000, "sellingPriceCents": 80_000 }]
         })),
         &admin,
     )

@@ -170,18 +170,21 @@ async fn record_purchase(
     serial_numbers: Option<Vec<String>>,
 ) -> (StatusCode, Value) {
     let token = admin_token(&app.config);
-    let mut body = json!({
-        "supplierKey": supplier_key,
+    let mut line = json!({
         "productKey": product_key,
         "quantity": quantity,
         "unitCostCents": unit_cost_cents,
         "sellingPriceCents": SERIAL_PRICE_CENTS,
-        "date": chrono::Utc::now().to_rfc3339(),
     });
     if let Some(serials) = serial_numbers {
-        body["serialNumbers"] = json!(serials);
+        line["serialNumbers"] = json!(serials);
     }
-    send_authed(&app.router, "POST", "/api/purchases", Some(body), &token).await
+    let body = json!({
+        "supplierKey": supplier_key,
+        "date": chrono::Utc::now().to_rfc3339(),
+        "lines": [line],
+    });
+    send_authed(&app.router, "POST", "/api/purchase-receipts", Some(body), &token).await
 }
 
 async fn list_serials(

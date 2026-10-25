@@ -1,5 +1,6 @@
 // Pure business types for the supplier purchase / stock-intake history
-// feature — no I/O, no Mongo/Axum types beyond serde/utoipa derives.
+// feature — no I/O, no Mongo/Axum types beyond serde/utoipa derives. A `Purchase` is one product
+// line of a `PurchaseReceipt` (`domain::purchase_receipts`); lines are created only through a receipt.
 
 use crate::domain::inventory::PaginationMeta;
 use chrono::{DateTime, Utc};
@@ -72,12 +73,8 @@ pub struct Purchase {
     pub total_cost_cents: i64,
     /// Purchase receipt date.
     pub date: DateTime<Utc>,
-    /// Supplier invoice or order reference number.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reference_no: Option<String>,
-    /// Optional remarks or notes.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub notes: Option<String>,
+    /// Foreign key referencing the receipt (supplier invoice) this line belongs to.
+    pub receipt_key: String,
     /// Enriched supplier details.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub supplier: Option<SupplierSummary>,
@@ -101,37 +98,6 @@ pub struct Purchase {
 
 fn default_version() -> i64 {
     1
-}
-
-/// Body for `POST /purchases`. Recording a purchase brings its units into
-/// stock as a new stock batch with this cost and selling price, writing a
-/// `PurchaseReceipt` stock movement (see `service::purchase::record_purchase`).
-#[derive(Debug, Clone, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct CreatePurchaseRequest {
-    /// Foreign key of the supplier.
-    pub supplier_key: String,
-    /// Foreign key of the product.
-    pub product_key: String,
-    /// Quantity of items received.
-    pub quantity: i64,
-    /// Cost price per item in cents.
-    pub unit_cost_cents: i64,
-    /// Price each received unit sells at, in cents.
-    pub selling_price_cents: i64,
-    /// Date when the purchase was received.
-    pub date: DateTime<Utc>,
-    /// Optional shipment or invoice reference number.
-    #[serde(default)]
-    pub reference_no: Option<String>,
-    /// Optional remarks.
-    #[serde(default)]
-    pub notes: Option<String>,
-    /// Serial numbers for each unit received, required (and exact-count
-    /// validated against `quantity`) when the target product is serialized
-    /// (see `Product.is_serialized`); omitted for non-serialized products.
-    #[serde(default)]
-    pub serial_numbers: Option<Vec<String>>,
 }
 
 /// Paginated response for `GET /purchases`. `items` and `purchases` carry the
