@@ -21,6 +21,8 @@ pub struct PayeeDocument {
     pub normalized_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub phone: Option<String>,
+    /// False once hidden from the pickers; the row stays because history points at its key.
+    pub active: bool,
     #[serde(default = "default_version")]
     pub version: i64,
     #[serde(default = "BsonDateTime::now")]

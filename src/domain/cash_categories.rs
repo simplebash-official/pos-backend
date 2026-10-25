@@ -237,6 +237,9 @@ pub struct Payee {
     pub phone: Option<String>,
     /// How many cash movements name this payee; the combobox puts frequent ones first.
     pub usage_count: i64,
+    /// Hidden payees are not offered when paying someone new; their history stays. Suppliers and
+    /// staff are always active here: their own pages decide who is listed.
+    pub active: bool,
 }
 
 /// Body for `POST /payees`.
@@ -249,6 +252,19 @@ pub struct CreatePayeeRequest {
     pub phone: Option<String>,
 }
 
+/// Body for `PATCH /payees/{key}`. Absent fields are left unchanged.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdatePayeeRequest {
+    #[serde(default)]
+    pub name: Option<String>,
+    /// `Some(None)` is not expressible in JSON here, so clearing the phone sends an empty string.
+    #[serde(default)]
+    pub phone: Option<String>,
+    #[serde(default)]
+    pub active: Option<bool>,
+}
+
 /// Query for `GET /payees`.
 #[derive(Debug, Clone, Default, Deserialize, IntoParams)]
 #[serde(rename_all = "camelCase")]
@@ -256,6 +272,8 @@ pub struct CreatePayeeRequest {
 pub struct PayeeListQuery {
     pub payee_type: Option<String>,
     pub search: Option<String>,
+    /// Also list hidden payees (needs `payees:manage`); the pickers never ask for them.
+    pub include_hidden: Option<bool>,
 }
 
 /// Search/uniqueness form of a name: lowercase with all whitespace removed, so

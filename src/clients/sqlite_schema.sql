@@ -1024,6 +1024,7 @@ CREATE TABLE IF NOT EXISTS payees (
     name TEXT NOT NULL,
     normalized_name TEXT NOT NULL,
     phone TEXT,
+    active INTEGER NOT NULL,
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,

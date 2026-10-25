@@ -11,7 +11,9 @@ use crate::{
         logging::domain::tracked,
     },
     domain::{
-        cash_categories::{CreatePayeeRequest, Payee, PayeeListQuery, PayeeType, normalize_name, payee_key},
+        cash_categories::{
+            CreatePayeeRequest, Payee, PayeeListQuery, PayeeType, UpdatePayeeRequest, normalize_name, payee_key,
+        },
         employees::{EmployeeListQuery, EmployeeStatus},
         suppliers::SupplierListQuery,
     },
@@ -53,6 +55,12 @@ pub(crate) async fn resolve_payee(db: &Db, key: &str) -> AppResult<ResolvedPayee
     }
     if key.starts_with(&format!("{}_", prefixes::PAYEE)) {
         let payee = repository::find_by_key(db, key).await?.ok_or_else(not_found)?;
+        if !payee.active {
+            return Err(AppError::conflict(
+                codes::PAYEE_HIDDEN,
+                "This payee is hidden. Show it again in Settings before using it.",
+            ));
+        }
         return Ok(ResolvedPayee { payee_type: payee.payee_type, name: payee.name });
     }
     Err(not_found())
@@ -66,6 +74,7 @@ pub async fn list_payees(db: &Db, query: PayeeListQuery) -> AppResult<Vec<Payee>
         .as_deref()
         .map(|t| PayeeType::parse(t).ok_or_else(|| AppError::validation("Unknown payee type.")))
         .transpose()?;
+    let include_hidden = query.include_hidden.unwrap_or(false);
     let search = query.search.as_deref().map(normalize_name).filter(|s| !s.is_empty());
     let usage: std::collections::HashMap<String, i64> =
         sessions::service::movement_counts_by_payee(db).await?.into_iter().collect();
@@ -80,6 +89,7 @@ pub async fn list_payees(db: &Db, query: PayeeListQuery) -> AppResult<Vec<Payee>
                 payee_type: PayeeType::Supplier,
                 name: s.name,
                 phone: Some(s.primary_phone),
+                active: true,
             });
         }
     }
@@ -97,17 +107,19 @@ pub async fn list_payees(db: &Db, query: PayeeListQuery) -> AppResult<Vec<Payee>
                 payee_type: PayeeType::Staff,
                 name: e.name,
                 phone: Some(e.phone),
+                active: true,
             });
         }
     }
     for p in repository::list_all(db).await? {
-        if wanted.is_none_or(|t| t == p.payee_type) {
+        if wanted.is_none_or(|t| t == p.payee_type) && (include_hidden || p.active) {
             out.push(Payee {
                 usage_count: used(&p.key),
                 key: p.key,
                 payee_type: p.payee_type,
                 name: p.name,
                 phone: p.phone,
+                active: p.active,
             });
         }
     }
@@ -121,6 +133,11 @@ pub async fn list_payees(db: &Db, query: PayeeListQuery) -> AppResult<Vec<Payee>
     Ok(out)
 }
 
+/// A blank phone means none.
+fn clean_phone(raw: Option<&str>) -> Option<String> {
+    raw.map(str::trim).filter(|p| !p.is_empty()).map(str::to_string)
+}
+
 fn new_document(payee_type: PayeeType, name: String, phone: Option<String>) -> PayeeDocument {
     let now = BsonDateTime::now();
     PayeeDocument {
@@ -130,6 +147,7 @@ fn new_document(payee_type: PayeeType, name: String, phone: Option<String>) -> P
         normalized_name: normalize_name(&name),
         name,
         phone,
+        active: true,
         version: 1,
         created_at: now,
         updated_at: now,
@@ -146,17 +164,28 @@ pub async fn create_payee(db: &Db, body: CreatePayeeRequest) -> AppResult<Payee>
             ));
         }
         let name = clean_name(&body.name)?;
-        let phone = body
-            .phone
-            .as_deref()
-            .map(str::trim)
-            .filter(|p| !p.is_empty())
-            .map(str::to_string);
+        let phone = clean_phone(body.phone.as_deref());
         let document = new_document(body.payee_type, name, phone);
+        if let Some(existing) = repository::list_all(db)
+            .await?
+            .iter()
+            .find(|p| p.payee_type == document.payee_type && p.normalized_name == document.normalized_name)
+        {
+            return Err(if existing.active {
+                AppError::conflict(codes::PAYEE_NAME_TAKEN, "Someone with this name is already in the list.")
+            } else {
+                AppError::conflict(
+                    codes::PAYEE_HIDDEN,
+                    "Someone with this name exists but is hidden. Show them again instead of adding them.",
+                )
+            });
+        }
+        // The key is derived from the name at creation and never changes, so a renamed payee
+        // still owns its old key.
         if repository::find_by_key(db, &document.key).await?.is_some() {
             return Err(AppError::conflict(
                 codes::PAYEE_NAME_TAKEN,
-                "Someone with this name is already in the list.",
+                "This name was used by someone who has since been renamed. Please choose a different name.",
             ));
         }
         let inserted = repository::insert(db, document).await?;
@@ -166,6 +195,7 @@ pub async fn create_payee(db: &Db, body: CreatePayeeRequest) -> AppResult<Payee>
             name: inserted.name,
             phone: inserted.phone,
             usage_count: 0,
+            active: inserted.active,
         })
     })
     .await
@@ -179,4 +209,64 @@ pub(crate) async fn ensure_other_payee(db: &Db, raw_name: &str) -> AppResult<Pay
         return Ok(existing);
     }
     repository::insert(db, document).await
+}
+
+async fn require_payee(db: &Db, key: &str) -> AppResult<PayeeDocument> {
+    repository::find_by_key(db, key)
+        .await?
+        .ok_or_else(|| AppError::not_found_with_code("Payee not found.", codes::PAYEE_NOT_FOUND))
+}
+
+/// Renames, edits the phone of, or hides/shows a landlord, company or saved name. Suppliers and
+/// staff are changed on their own pages, so only stored payees (`pye_…`) are found here.
+pub async fn update_payee(db: &Db, key: &str, body: UpdatePayeeRequest) -> AppResult<Payee> {
+    tracked("payees.updated", async move {
+        if key.starts_with(&format!("{}_", prefixes::SUPPLIER)) || key.starts_with(&format!("{}_", prefixes::EMPLOYEE)) {
+            return Err(AppError::validation(
+                "Suppliers and staff are changed on their own pages.",
+            ));
+        }
+        let mut doc = require_payee(db, key).await?;
+
+        if let Some(raw) = &body.name {
+            let name = clean_name(raw)?;
+            let normalized = normalize_name(&name);
+            if repository::list_all(db)
+                .await?
+                .iter()
+                .any(|p| p.key != doc.key && p.payee_type == doc.payee_type && p.normalized_name == normalized)
+            {
+                return Err(AppError::conflict(
+                    codes::PAYEE_NAME_TAKEN,
+                    "Someone with this name is already in the list.",
+                ));
+            }
+            doc.name = name;
+            doc.normalized_name = normalized;
+        }
+        if let Some(raw) = &body.phone {
+            doc.phone = clean_phone(Some(raw));
+        }
+        if let Some(active) = body.active {
+            doc.active = active;
+        }
+
+        doc.version += 1;
+        doc.updated_at = BsonDateTime::now();
+        repository::save(db, &doc).await?;
+        let usage = sessions::service::movement_counts_by_payee(db)
+            .await?
+            .into_iter()
+            .find(|(k, _)| *k == doc.key)
+            .map_or(0, |(_, n)| n);
+        Ok(Payee {
+            key: doc.key,
+            payee_type: doc.payee_type,
+            name: doc.name,
+            phone: doc.phone,
+            usage_count: usage,
+            active: doc.active,
+        })
+    })
+    .await
 }

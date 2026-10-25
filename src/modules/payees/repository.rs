@@ -29,6 +29,7 @@ fn from_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<PayeeDocument> {
         name: row.get("name"),
         normalized_name: row.get("normalized_name"),
         phone: row.get("phone"),
+        active: row.get::<i64, _>("active") != 0,
         version: row.get("version"),
         created_at: to_bson_datetime(&row.get::<String, _>("created_at")),
         updated_at: to_bson_datetime(&row.get::<String, _>("updated_at")),
@@ -79,8 +80,8 @@ pub(crate) async fn insert(db: &Db, mut document: PayeeDocument) -> AppResult<Pa
         Db::Sqlite(pool) => {
             let id = document.id.map(|o| o.to_hex()).unwrap_or_else(generate_id_hex);
             sqlx::query(
-                "INSERT INTO payees (key, id, payee_type, name, normalized_name, phone, version, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO payees (key, id, payee_type, name, normalized_name, phone, active, version, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&document.key)
             .bind(&id)
@@ -88,6 +89,7 @@ pub(crate) async fn insert(db: &Db, mut document: PayeeDocument) -> AppResult<Pa
             .bind(&document.name)
             .bind(&document.normalized_name)
             .bind(&document.phone)
+            .bind(i64::from(document.active))
             .bind(document.version)
             .bind(bson_to_iso(&document.created_at))
             .bind(bson_to_iso(&document.updated_at))
@@ -95,6 +97,32 @@ pub(crate) async fn insert(db: &Db, mut document: PayeeDocument) -> AppResult<Pa
             .await?;
             document.id = ObjectId::parse_str(&id).ok();
             Ok(document)
+        }
+    }
+}
+
+/// Writes every editable field of an existing payee back (the service has already bumped `version`/`updated_at`).
+pub(crate) async fn save(db: &Db, document: &PayeeDocument) -> AppResult<()> {
+    match db {
+        Db::Mongo(db) => {
+            payees(db).replace_one(doc! { "key": &document.key }, document).await?;
+            Ok(())
+        }
+        Db::Sqlite(pool) => {
+            sqlx::query(
+                "UPDATE payees SET name = ?, normalized_name = ?, phone = ?, active = ?, version = ?, updated_at = ?
+                 WHERE key = ?",
+            )
+            .bind(&document.name)
+            .bind(&document.normalized_name)
+            .bind(&document.phone)
+            .bind(i64::from(document.active))
+            .bind(document.version)
+            .bind(bson_to_iso(&document.updated_at))
+            .bind(&document.key)
+            .execute(pool)
+            .await?;
+            Ok(())
         }
     }
 }

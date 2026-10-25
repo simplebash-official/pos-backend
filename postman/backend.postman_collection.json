@@ -1837,7 +1837,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{backendBaseUrl}}/api/payees?payeeType=vendor&search=landlord",
+              "raw": "{{backendBaseUrl}}/api/payees?payeeType=vendor&search=landlord&includeHidden=true",
               "host": [
                 "{{backendBaseUrl}}"
               ],
@@ -1857,10 +1857,16 @@
                   "value": "landlord",
                   "description": "Matches name or phone, ignoring case and spacing",
                   "disabled": true
+                },
+                {
+                  "key": "includeHidden",
+                  "value": "true",
+                  "description": "Also list hidden payees (for the Settings page). Needs `payees:manage`; the pickers never send it.",
+                  "disabled": true
                 }
               ]
             },
-            "description": "The shared payee directory: suppliers and active staff (read live from their own modules) plus saved vendors and free-typed payees, most used first.\n\n**Requires `cash_movements:view`** (all roles)."
+            "description": "The shared payee directory: suppliers and active staff (read live from their own modules) plus saved vendors and free-typed payees, most used first. Hidden payees are left out unless `includeHidden=true`.\n\n**Requires `cash_movements:view`** (all roles)."
           },
           "response": []
         },
@@ -1884,7 +1890,7 @@
                 "payees"
               ]
             },
-            "description": "Add a landlord, utility company or other payee. Suppliers and staff are added on their own pages (400). The same name twice is 409 `PAYEE_NAME_TAKEN`.\n\n**Requires `payees:manage`** (Admin and Manager).",
+            "description": "Add a landlord, utility company or other payee. Suppliers and staff are added on their own pages (400). The same name twice is 409 `PAYEE_NAME_TAKEN`; a name that exists but is hidden is 409 `PAYEE_HIDDEN`.\n\n**Requires `payees:manage`** (Admin and Manager).",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"payeeType\": \"vendor\",\n  \"name\": \"Mr. Landlord\",\n  \"phone\": \"0771234567\"\n}",
@@ -1911,6 +1917,40 @@
               }
             }
           ]
+        },
+        {
+          "name": "Update Payee",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/payees/{{payeeKey}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payees",
+                "{{payeeKey}}"
+              ]
+            },
+            "description": "Rename a landlord, company or saved name, change or clear its phone (a blank string clears it), or hide / show it with `active`. Absent fields are left unchanged. The key never changes, so history keeps pointing at the same payee. Suppliers and staff are changed on their own pages (400). A name already in the list is 409 `PAYEE_NAME_TAKEN`; an unknown key is 404 `PAYEE_NOT_FOUND`. A hidden payee cannot be used on a new movement, expense, income or regular bill (409 `PAYEE_HIDDEN`), but existing regular bills keep showing its name.\n\n**Requires `payees:manage`** (Admin and Manager).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Mrs. Landlady\",\n  \"phone\": \"0771234567\",\n  \"active\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
         }
       ]
     },

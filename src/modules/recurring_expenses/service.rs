@@ -120,8 +120,9 @@ fn status_for(
     }
 }
 
+/// Names for every payee including hidden ones: a bill keeps working after its payee is hidden.
 async fn payee_names(db: &Db) -> AppResult<HashMap<String, String>> {
-    Ok(payees::service::list_payees(db, PayeeListQuery::default())
+    Ok(payees::service::list_payees(db, PayeeListQuery { include_hidden: Some(true), ..Default::default() })
         .await?
         .into_iter()
         .map(|p| (p.key, p.name))
