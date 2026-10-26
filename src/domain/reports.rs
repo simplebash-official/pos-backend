@@ -963,3 +963,122 @@ pub struct EngineInvalidateResponse {
     pub invalidated_keys_count: usize,
     pub message: String,
 }
+
+// ---------------------------------------------------------------------------
+// Dashboard pulse
+// ---------------------------------------------------------------------------
+
+/// How many jobs sit at one stage of a pipeline, and their share of everything tracked.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PulseStage {
+    /// `received`, `diagnosing`, `in_repair`, `ready` or `delivered`.
+    pub stage: String,
+    pub count: i64,
+    /// Whole percent of every job tracked in the pipeline, rounded half up.
+    pub percent: i64,
+}
+
+/// One technician or printer operator's load.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PulseTechnician {
+    pub employee_key: String,
+    pub name: String,
+    /// `technician` or `printer`.
+    pub role: String,
+    pub active_jobs_count: i64,
+    pub completed_today_count: i64,
+    /// Five active jobs is full (100).
+    pub capacity_percent: i64,
+    /// `available`, `busy` or `overloaded`.
+    pub status: String,
+    /// The first active job: its device and ticket.
+    pub current_device_model: Option<String>,
+    pub current_ticket_number: Option<String>,
+}
+
+/// A product selling today.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PulseFastMover {
+    pub product_key: Option<String>,
+    pub name: String,
+    pub sold_today_units: i64,
+    pub selling_price_cents: i64,
+    /// The product's own figures; absent when the product no longer exists.
+    pub category: Option<String>,
+    pub remaining_stock: Option<i64>,
+    pub min_threshold: Option<i64>,
+}
+
+/// A product at or below its low-stock line.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PulseLowStock {
+    pub product_id: String,
+    pub reference: String,
+    pub name: String,
+    pub stock_quantity: i64,
+    /// The line it is measured against.
+    pub threshold: i64,
+    pub out_of_stock: bool,
+    pub updated_at: DateTime<Utc>,
+    /// Whole days since the product last changed.
+    pub days_since_update: i64,
+}
+
+/// A repair ready for pickup and still waiting.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PulseReadyRepair {
+    pub id: String,
+    pub ticket_number: String,
+    pub device_model: String,
+    pub customer_name: String,
+    pub customer_phone: String,
+    pub created_at: DateTime<Utc>,
+    pub days_waiting: i64,
+    /// `critical` after three days, otherwise `warning`.
+    pub severity: String,
+    /// What the customer will be asked for.
+    pub amount_cents: i64,
+}
+
+/// One line of the live activity stream, newest first.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PulseActivity {
+    /// `sale`, `repair` or `print`.
+    pub kind: String,
+    pub id: String,
+    /// Invoice number or ticket number.
+    pub reference: String,
+    pub amount_cents: i64,
+    pub created_at: DateTime<Utc>,
+    pub payment_method: Option<String>,
+    pub cashier_name: Option<String>,
+    pub status: Option<String>,
+    pub device_model: Option<String>,
+    pub customer_name: Option<String>,
+    pub job_type: Option<String>,
+    pub quantity: Option<i64>,
+}
+
+/// Response of `GET /reports/dashboard-pulse`: everything the dashboard groups and totals.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardPulse {
+    pub active_repairs_count: i64,
+    pub ready_repairs_count: i64,
+    /// Estimate plus parts of every repair waiting for pickup.
+    pub uncollected_ready_value_cents: i64,
+    pub active_print_jobs_count: i64,
+    pub repair_pipeline: Vec<PulseStage>,
+    pub print_pipeline: Vec<PulseStage>,
+    pub technicians: Vec<PulseTechnician>,
+    pub fast_movers: Vec<PulseFastMover>,
+    pub low_stock: Vec<PulseLowStock>,
+    pub ready_repairs: Vec<PulseReadyRepair>,
+    pub recent_activity: Vec<PulseActivity>,
+}

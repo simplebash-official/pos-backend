@@ -7,13 +7,16 @@ use chrono::{Datelike, NaiveDate, Utc};
 
 use crate::{
     clients::db::Db,
-    core::error::{AppError, AppResult},
+    core::{
+        calculations::share_basis_points,
+        error::{AppError, AppResult},
+    },
     domain::{
         accounts::AccountKind,
         cash_categories::{ReportGroup, category_key},
         expenses::PaidFrom,
         finance_reports::{
-            AccountCashFlow, CashFlowLine, CashFlowResponse, CategoryBreakdown, CategoryTotal,
+            AccountCashFlow, CashFlowLine, CashFlowResponse, CategoryBreakdown, ChartSeries, CategoryTotal,
             ExpenseBreakdownResponse, ExpenseGroupTotal, MonthTotal, PayableBill, PayableSupplier, PayablesResponse,
             ProfitLossResponse,
         },
@@ -140,6 +143,9 @@ fn months_between(start: NaiveDate, end: NaiveDate) -> Vec<String> {
     out
 }
 
+/// How many of the biggest categories get their own band in the monthly chart; the rest join one "other" band.
+const CHART_CATEGORIES: usize = 5;
+
 /// What was spent per category and month. Includes supplier stock payments (they are money spent), and counts a
 /// rent or pay payment in the month it covers, like the Regular bills do.
 pub async fn expense_breakdown(db: &Db, from: &str, to: &str) -> AppResult<ExpenseBreakdownResponse> {
@@ -166,6 +172,7 @@ pub async fn expense_breakdown(db: &Db, from: &str, to: &str) -> AppResult<Expen
             category_name: name,
             report_group: group,
             total_cents: per_month.values().sum(),
+            share_percent: 0,
             months: months
                 .iter()
                 .map(|m| MonthTotal { month: m.clone(), total_cents: per_month.get(m).copied().unwrap_or(0) })
@@ -173,10 +180,29 @@ pub async fn expense_breakdown(db: &Db, from: &str, to: &str) -> AppResult<Expen
         })
         .collect();
     categories.sort_by(|a, b| b.total_cents.cmp(&a.total_cents).then(a.category_name.cmp(&b.category_name)));
+    let total_cents: i64 = by_month.values().sum();
+    for c in &mut categories {
+        c.share_percent = (share_basis_points(c.total_cents, total_cents) + 50) / 100;
+    }
+    let mut chart: Vec<ChartSeries> = categories
+        .iter()
+        .take(CHART_CATEGORIES)
+        .map(|c| ChartSeries { name: c.category_name.clone(), is_other: false, months: c.months.clone() })
+        .collect();
+    if categories.len() > CHART_CATEGORIES {
+        let months = (0..months.len())
+            .map(|i| MonthTotal {
+                month: months[i].clone(),
+                total_cents: categories[CHART_CATEGORIES..].iter().map(|c| c.months[i].total_cents).sum(),
+            })
+            .collect();
+        chart.push(ChartSeries { name: String::new(), is_other: true, months });
+    }
     Ok(ExpenseBreakdownResponse {
         from: day(start),
         to: day(end),
-        total_cents: by_month.values().sum(),
+        total_cents,
+        chart,
         categories,
         months: by_month.into_iter().map(|(month, total_cents)| MonthTotal { month, total_cents }).collect(),
     })

@@ -153,6 +153,9 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(body["data"]["totalCents"], 220_000);
     assert_eq!(body["data"]["categories"][0]["categoryName"], "Electricity");
     assert_eq!(body["data"]["categories"][0]["totalCents"], 120_000);
+    assert_eq!(body["data"]["categories"][0]["sharePercent"], 55);
+    assert_eq!(body["data"]["chart"][0]["name"], "Electricity");
+    assert_eq!(body["data"]["chart"][0]["isOther"], false);
     assert_eq!(body["data"]["months"].as_array().unwrap().len(), 1);
 
     // Cash flow per account.

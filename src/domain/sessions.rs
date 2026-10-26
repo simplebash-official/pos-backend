@@ -541,4 +541,60 @@ pub struct ZReportResponse {
     pub generated_at: DateTime<Utc>,
 }
 
+// ---------------------------------------------------------------------------
+// Drawer rules: the one copy, used by the cash movement save, the shift open/close save and the
+// live calculations (`modules::calc::cash`). Integer cents, no I/O.
+// ---------------------------------------------------------------------------
 
+/// Small variance (Rs 5.00) a cashier can close a shift with on a note alone.
+pub const VARIANCE_TOLERANCE_CENTS: i64 = 500;
+
+impl CashMovementType {
+    /// Whether the payment takes cash out of the drawer: every payout and a cash drop.
+    pub fn takes_cash_out(&self) -> bool {
+        self.direction() == CashDirection::Out || *self == CashMovementType::CashDrop
+    }
+
+    /// How the movement changes the cash in the drawer: added cash raises it, a payout or drop lowers it.
+    pub fn drawer_delta_cents(&self, amount_cents: i64) -> i64 {
+        match self {
+            CashMovementType::AddCash => amount_cents,
+            _ if self.takes_cash_out() => -amount_cents,
+            _ => 0,
+        }
+    }
+
+    /// A payout bigger than the cash the drawer holds.
+    pub fn is_over_drawer(&self, amount_cents: i64, cash_in_drawer_cents: i64) -> bool {
+        self.takes_cash_out() && amount_cents > cash_in_drawer_cents
+    }
+
+    /// Whether a manager or owner PIN is needed: always for owner drawings and staff pay, above the
+    /// category's own limit or the shop-wide one (cash leaving the drawer only), and to go over the drawer.
+    pub fn needs_manager_pin(
+        &self,
+        amount_cents: i64,
+        category_limit_cents: Option<i64>,
+        shop_limit_cents: Option<i64>,
+        over_drawer: bool,
+    ) -> bool {
+        let shop_limit = if self.takes_cash_out() {
+            shop_limit_cents
+        } else {
+            None
+        };
+        over_drawer
+            || matches!(
+                self,
+                CashMovementType::OwnerWithdrawal | CashMovementType::StaffPayment
+            )
+            || [category_limit_cents, shop_limit]
+                .into_iter()
+                .flatten()
+                .any(|limit| amount_cents > limit)
+    }
+}
+
+/// The notes and coins the drawer is counted in, largest first. `id` is the rupee value, which is
+/// also the key of a stored denomination count.
+pub const DENOMINATION_RUPEES: [i64; 10] = [5000, 1000, 500, 100, 50, 20, 10, 5, 2, 1];

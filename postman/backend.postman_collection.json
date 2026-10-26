@@ -920,6 +920,372 @@
             }
           },
           "response": []
+        },
+        {
+          "name": "Calculate Checkout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/calc/checkout",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "calc",
+                "checkout"
+              ]
+            },
+            "description": "Live figures for the cart (each line carries a client `key` that its answer echoes) and payment panel: every line's gross/discount/total (a line's `discount` is what was typed: `percentage` of the line, 0-100, or `fixed` cents; `null` for none), subtotal, order discount (`type` `percentage` 0-100 or `fixed` in cents; omit for none), total, retail/repairs/print split, the payment state (change due, short by, split allocation, credit deposit and the customer's balance after) and the quick-tender buttons. Nothing is stored. **Requires the `billing:write` permission.** Out-of-range amounts or too many lines are 400.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"key\": \"line-1\",\n      \"unitPriceCents\": 490,\n      \"quantity\": 1,\n      \"discount\": null,\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"key\": \"line-2\",\n      \"unitPriceCents\": 1000,\n      \"quantity\": 3,\n      \"discount\": {\n        \"type\": \"percentage\",\n        \"value\": 10\n      },\n      \"sourceType\": \"retail\"\n    },\n    {\n      \"key\": \"line-3\",\n      \"unitPriceCents\": 2500,\n      \"quantity\": 1,\n      \"discount\": {\n        \"type\": \"fixed\",\n        \"value\": 100\n      },\n      \"sourceType\": \"repair\"\n    }\n  ],\n  \"orderDiscount\": {\n    \"type\": \"percentage\",\n    \"value\": 7.5\n  },\n  \"payment\": {\n    \"method\": \"cash\",\n    \"tenderedCents\": 5000,\n    \"splitLegsCents\": [],\n    \"customerBalanceCents\": 0,\n    \"isCredit\": false,\n    \"creditDepositCents\": 0\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Calculate Credit Note",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/calc/credit-note",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "calc",
+                "credit-note"
+              ]
+            },
+            "description": "Live figures for the Return screen: what each returned unit is worth back (the line's net total divided by the units sold, to the cent below), the return and exchange subtotals, the net, how much goes back as cash (capped at what was paid on the invoice) and what only reduces the balance, the default refund legs (in proportion to the invoice's payments when it was paid in several), and whether the sale is past the return window (`RETURN_WINDOW_DAYS`). For a return with no receipt send `invoiceKey: null` and `noReceipt` instead of `returned`. Reads the invoice, writes nothing. **Requires the `billing:write` permission.**",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"invoiceKey\": \"{{invoiceKey}}\",\n  \"returned\": [\n    {\n      \"lineIndex\": 0,\n      \"quantity\": 1\n    }\n  ],\n  \"noReceipt\": null,\n  \"exchanged\": [\n    {\n      \"unitPriceCents\": 500,\n      \"quantity\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Calculate Quotation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/calc/quotation",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "calc",
+                "quotation"
+              ]
+            },
+            "description": "Live figures for the quotation form: each line's discount (as typed: `percentage` of the line, or `fixed` cents off each unit or the whole line) and total, the subtotal, the order discount and the total, plus `blockers` (what still stops the quotation being created, in order). Nothing is stored; the create request still sends each line's `discountCents`, taken from this answer. **Requires the `quotations:manage` permission.**",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerKey\": \"cus_1\",\n  \"customerName\": \"\",\n  \"lines\": [\n    {\n      \"key\": \"q1\",\n      \"name\": \"Case\",\n      \"unitPriceCents\": 1000,\n      \"quantity\": 3,\n      \"discount\": {\n        \"type\": \"fixed\",\n        \"scope\": \"per_unit\",\n        \"value\": 150\n      }\n    },\n    {\n      \"key\": \"q2\",\n      \"name\": \"Cable\",\n      \"unitPriceCents\": 650,\n      \"quantity\": 1,\n      \"discount\": {\n        \"type\": \"percentage\",\n        \"scope\": \"total\",\n        \"value\": 10\n      }\n    }\n  ],\n  \"orderDiscount\": {\n    \"type\": \"percentage\",\n    \"value\": 5\n  },\n  \"validUntil\": \"2099-01-01\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Calculate Cash Movement",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/calc/cash-movement",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "calc",
+                "cash-movement"
+              ]
+            },
+            "description": "Live figures for the cash payment form: the cash in the drawer now (the open shift's expected cash, or the terminal's running balance between shifts), the drawer after this payment, whether it goes over the drawer, whether a manager PIN is needed (owner and staff payments, the category's limit, the shop-wide limit for cash out, going over the drawer), and `blockers` (what still stops the payment being saved, in order). `pinEntered`/`pinVerified`/`overrideReasonEntered` say what the person has done; the PIN itself is never sent. Nothing is stored. **Requires `cash_movements:create` (plus `cash_movements:create:managed` for rent, staff and supplier payments).**",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"movementType\": \"petty_expense\",\n  \"amountCents\": 30000,\n  \"categoryKey\": \"{{cashCategoryKey}}\",\n  \"sessionKey\": \"{{sessionKey}}\",\n  \"terminalId\": \"term_front\",\n  \"payeeKey\": null,\n  \"payeeName\": \"\",\n  \"period\": null,\n  \"settlementAmountsCents\": [],\n  \"pinEntered\": false,\n  \"pinVerified\": false,\n  \"overrideReasonEntered\": false,\n  \"confirmDuplicate\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Calculate Cash Count",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/calc/cash-count",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "calc",
+                "cash-count"
+              ]
+            },
+            "description": "Adds up a count of notes and coins. `counts` is keyed by rupee value (\"5000\" ... \"1\"); the reply lists every denomination, largest first, with its subtotal, and the total. Nothing is stored. **Requires `register_sessions:view`.**",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"counts\": {\n    \"5000\": 1,\n    \"1000\": 3,\n    \"5\": 2\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Calculate Shift Count",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/calc/shift-count",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "calc",
+                "shift-count"
+              ]
+            },
+            "description": "Compares a counted amount with what the drawer should hold. Give `sessionKey` when closing (expected cash of the shift; optional `closingFloatCents` gives the safe deposit) or `terminalId` when opening (the drawer's running balance). The reply has the difference, whether a reason is needed (any difference) and whether a manager PIN is (any difference at open, one over Rs 5.00 at close). Nothing is stored. **Requires `register_sessions:manage`.**",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sessionKey\": \"{{sessionKey}}\",\n  \"terminalId\": null,\n  \"countedCents\": 199000,\n  \"closingFloatCents\": 100000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Calculate Job Earnings",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/calc/earnings",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "calc",
+                "earnings"
+              ]
+            },
+            "description": "Live figures for a repair or print job form: the profit (price less parts, never below zero), the assigned employee's commission (a `percentage` of the profit, or a `fixed` amount in cents cut down to the profit), whether a fixed commission was cut down (`capped`) and what the shop keeps. `priceCents` is absent until a price is typed; `splitType` is absent when no employee is assigned. The commission reports use the same rule. Nothing is stored. **Requires `repairs:write`, `print_jobs:write` or `employees:read`.**",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"priceCents\": 1000000,\n  \"materialCostCents\": 400000,\n  \"splitType\": \"percentage\",\n  \"splitValue\": 30\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Calculate Supplier Payment Settlement",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/calc/settlement",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "calc",
+                "settlement"
+              ]
+            },
+            "description": "Counts a supplier payment against the supplier's open bills: what they owe together (`owedCents`), the payment spread over them oldest first (`oldestFirst`), every bill paid in full (`payEverything`), and `blockers` for a split made by hand (`bill_not_owed`, `amount_missing`, `over_bill`, `bill_repeated`, `over_payment`). Nothing is stored. **Requires `cash_movements:create:managed` or `expenses:manage`.**",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"supplierKey\": \"{{supplierKey}}\",\n  \"paymentCents\": 50000,\n  \"settlements\": [\n    {\n      \"receiptKey\": \"{{receiptKey}}\",\n      \"amountCents\": 30000\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Calculate Invoice Balance",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/calc/invoice-balance",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "calc",
+                "invoice-balance"
+              ]
+            },
+            "description": "What has been paid on an invoice (`paidCents`: checkout deposit and later payments) and what is still owed (`balanceDueCents`: a credit invoice's total less paid less returned, never below zero; nothing for a sale paid at the till). Same rule as the printed invoice and the payment check. Reads the invoice and its payments; stores nothing. Any signed-in user.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"invoiceKey\": \"{{invoiceKey}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Calculate Bar Shares",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/calc/shares",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "calc",
+                "shares"
+              ]
+            },
+            "description": "Each part's share of its whole (null whole = the total of all parts sent), in basis points and whole percent, capped at 100. Any signed-in user.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"parts\": [\n    {\n      \"key\": \"cash\",\n      \"cents\": 30000,\n      \"wholeCents\": null\n    },\n    {\n      \"key\": \"bill\",\n      \"cents\": 15000,\n      \"wholeCents\": 10000\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Calculate Shift Totals",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/calc/shift-totals",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "calc",
+                "shift-totals"
+              ]
+            },
+            "description": "Totals over the shifts a list shows: how many, how many still running, cash sales together and the closed ones' net cash difference. Needs register_sessions:view.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sessionKeys\": [\n    \"{{sessionKey}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
         }
       ]
     },
@@ -5102,6 +5468,26 @@
               ]
             },
             "description": "Overdue and due-soon credit invoices and repair/print jobs for the dashboard attention list."
+          },
+          "response": []
+        },
+        {
+          "name": "Dashboard Pulse",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/reports/dashboard-pulse",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "dashboard-pulse"
+              ]
+            },
+            "description": "Dashboard groupings: repair and print pipelines, technician load, fast movers, low stock, repairs waiting for pickup and the activity stream. Any signed-in user; technicians need employees:read and stock needs inventory:read, or those parts come back empty."
           },
           "response": []
         },

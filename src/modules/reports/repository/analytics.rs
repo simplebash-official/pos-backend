@@ -450,7 +450,7 @@ pub(crate) async fn aggregate_commission_series(
 ) -> AppResult<std::collections::BTreeMap<i64, i64>> {
     match db {
         Db::Mongo(db) => {
-            use crate::modules::reports::repository::commissions::compute_earned_cents;
+            use crate::core::calculations::commission_cents;
 
             let unit = granularity.as_mongo_unit();
             let mut out: std::collections::BTreeMap<i64, i64> = std::collections::BTreeMap::new();
@@ -488,7 +488,7 @@ pub(crate) async fn aggregate_commission_series(
                     };
                     let revenue = get_i64_flexible(&row, "estimated_cost_cents");
                     let material = get_i64_flexible(&row, "material_cost_cents");
-                    let profit = (revenue - material).max(0);
+                    let profit = crate::core::calculations::job_profit_cents(revenue, material);
                     let split_type = row.get_str("split_type").ok();
                     let split_value = row
                         .get_f64("split_value")
@@ -496,7 +496,7 @@ pub(crate) async fn aggregate_commission_series(
                         .or_else(|| row.get_i64("split_value").ok().map(|v| v as f64))
                         .or_else(|| row.get_i32("split_value").ok().map(|v| v as f64))
                         .unwrap_or(0.0);
-                    let earned = compute_earned_cents(profit, split_type, split_value);
+                    let earned = commission_cents(profit, split_type, split_value);
                     *out.entry(ts.timestamp_millis()).or_insert(0) += earned;
                 }
             }
@@ -504,7 +504,7 @@ pub(crate) async fn aggregate_commission_series(
             Ok(out)
         }
         Db::Sqlite(pool) => {
-            use crate::modules::reports::repository::commissions::compute_earned_cents;
+            use crate::core::calculations::commission_cents;
             let start_iso = start.to_rfc3339();
             let end_iso = end.to_rfc3339();
             let mut out: std::collections::BTreeMap<i64, i64> = std::collections::BTreeMap::new();
@@ -529,7 +529,7 @@ pub(crate) async fn aggregate_commission_series(
                     let bucket_start = align_bucket_instant(created_at, granularity);
                     let revenue = get_i64_flexible(&doc, "estimated_cost_cents");
                     let material = get_i64_flexible(&doc, "material_cost_cents");
-                    let profit = (revenue - material).max(0);
+                    let profit = crate::core::calculations::job_profit_cents(revenue, material);
                     let split_type = doc.get_str("split_type").ok();
                     let split_value = doc
                         .get_f64("split_value")
@@ -537,7 +537,7 @@ pub(crate) async fn aggregate_commission_series(
                         .or_else(|| doc.get_i64("split_value").ok().map(|v| v as f64))
                         .or_else(|| doc.get_i32("split_value").ok().map(|v| v as f64))
                         .unwrap_or(0.0);
-                    let earned = compute_earned_cents(profit, split_type, split_value);
+                    let earned = commission_cents(profit, split_type, split_value);
                     *out.entry(bucket_start.timestamp_millis()).or_insert(0) += earned;
                 }
             }

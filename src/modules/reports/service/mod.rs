@@ -9,6 +9,7 @@ pub(crate) mod employee_earnings;
 pub(crate) mod inventory;
 pub(crate) mod monthly_profit;
 pub(crate) mod outstanding;
+pub(crate) mod pulse;
 pub(crate) mod reminders;
 pub(crate) mod report_payload;
 

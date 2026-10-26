@@ -25,7 +25,7 @@ use crate::{
         employees::EmployeeEarningsResponse,
         reports::{
             AnalyticsPaymentMethodsResponse, AnalyticsRangeQuery, AnalyticsSummaryResponse,
-            CashierPerformanceResponse, DailySalesQuery, DailySalesReportResponse,
+            CashierPerformanceResponse, DailySalesQuery, DashboardPulse, DailySalesReportResponse,
             DiscountAnalyticsResponse, EmployeeCommissionsQuery, EmployeeCommissionsReportResponse,
             EngineFeedQuery, EngineFeedResponse, EngineInvalidateResponse,
             InventoryValuationResponse, MonthlyProfitQuery, MonthlyProfitReportResponse,
@@ -59,6 +59,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         // Receivables & Outstanding credit
         .routes(routes!(get_outstanding_receivables))
         .routes(routes!(get_reminders))
+        .routes(routes!(get_dashboard_pulse))
         // Employee commissions & performance
         .routes(routes!(get_employee_commissions))
         .routes(routes!(get_employee_earnings_items))
@@ -288,6 +289,33 @@ async fn get_reminders(
     Ok(Json(ApiResponse::success(
         response,
         "Reminders retrieved successfully",
+    )))
+}
+
+#[utoipa::path(
+    get,
+    path = "/dashboard-pulse",
+    tag = modules::REPORTS,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Dashboard groupings: pipelines, technician load, fast movers, low stock, repairs waiting for pickup and the activity stream", body = ApiResponse<DashboardPulse>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+    )
+)]
+/// Any signed-in user; technicians need `employees:read` and stock needs `inventory:read`, or those parts come back empty.
+async fn get_dashboard_pulse(
+    user: CurrentUser,
+    State(state): State<AppState>,
+) -> AppResult<Json<ApiResponse<DashboardPulse>>> {
+    let response = service::pulse::get_dashboard_pulse(
+        &state.db,
+        user.has_permission(perm::EMPLOYEES_READ),
+        user.has_permission(perm::INVENTORY_READ),
+    )
+    .await?;
+    Ok(Json(ApiResponse::success(
+        response,
+        "Dashboard pulse retrieved successfully",
     )))
 }
 

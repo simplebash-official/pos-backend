@@ -69,6 +69,20 @@ pub struct CategoryBreakdown {
     pub category_name: String,
     pub report_group: ReportGroup,
     pub total_cents: i64,
+    /// Share of the period's total cost, whole percent rounded half up.
+    pub share_percent: i64,
+    pub months: Vec<MonthTotal>,
+}
+
+/// One band of the monthly bar chart.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ChartSeries {
+    /// The category's name; empty for the "everything else" band, which the screen names.
+    pub name: String,
+    /// True for the band that adds up every category outside the biggest few.
+    pub is_other: bool,
+    /// Every month in the period, oldest first.
     pub months: Vec<MonthTotal>,
 }
 
@@ -81,6 +95,8 @@ pub struct ExpenseBreakdownResponse {
     pub total_cents: i64,
     /// Biggest first.
     pub categories: Vec<CategoryBreakdown>,
+    /// The biggest categories, then one "other" band for the rest: what the monthly chart stacks.
+    pub chart: Vec<ChartSeries>,
     /// Every month in the period, including months with no cost, oldest first.
     pub months: Vec<MonthTotal>,
 }

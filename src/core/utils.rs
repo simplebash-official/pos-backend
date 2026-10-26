@@ -48,22 +48,25 @@ pub fn calculate_pagination(
     (page, limit, skip)
 }
 
-/// Returns the `[start, end)` UTC bounds of "today", for dashboard "today's
-/// X" stats endpoints (billing/repairs/print-jobs). No per-shop timezone is
-/// configured anywhere in this app (single-deployment POS), so this
-/// intentionally uses UTC-midnight-to-UTC-midnight — the same boundary every
-/// `created_at` is already stored against. This can disagree with a
-/// browser's *local* "today" near midnight; that's an accepted limitation,
-/// not an oversight.
-pub fn today_utc_range() -> (DateTime<Utc>, DateTime<Utc>) {
-    let now = Utc::now();
-    let start = now
+/// The shop's local time zone. Sri Lanka is permanently UTC+05:30 (no DST since 2006), so a fixed
+/// offset is exact. Everything is stored in UTC; this only decides where a day starts and ends.
+pub const SHOP_TZ_OFFSET_SECS: i32 = 5 * 3600 + 30 * 60;
+
+/// The shop-local calendar day that `at` falls on.
+pub fn shop_day(at: DateTime<Utc>) -> chrono::NaiveDate {
+    at.with_timezone(&chrono::FixedOffset::east_opt(SHOP_TZ_OFFSET_SECS).expect("valid fixed offset"))
         .date_naive()
+}
+
+/// Returns the `[start, end)` bounds, as UTC instants, of the shop-local "today" (midnight to
+/// midnight in `SHOP_TZ_OFFSET_SECS`), for the "today's X" stats and list filters.
+pub fn shop_today_range() -> (DateTime<Utc>, DateTime<Utc>) {
+    let start = shop_day(Utc::now())
         .and_hms_opt(0, 0, 0)
         .expect("00:00:00 is always a valid time")
-        .and_utc();
-    let end = start + Duration::days(1);
-    (start, end)
+        .and_utc()
+        - Duration::seconds(i64::from(SHOP_TZ_OFFSET_SECS));
+    (start, start + Duration::days(1))
 }
 
 /// Creates a standard success response for a feature module's status endpoint.

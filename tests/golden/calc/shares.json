@@ -1,0 +1,41 @@
+{
+  "request": {
+    "parts": [
+      {
+        "key": "cash",
+        "cents": 30000,
+        "wholeCents": null
+      },
+      {
+        "key": "card",
+        "cents": 10000,
+        "wholeCents": null
+      },
+      {
+        "key": "bill",
+        "cents": 15000,
+        "wholeCents": 10000
+      }
+    ]
+  },
+  "reply": {
+    "totalCents": 55000,
+    "parts": [
+      {
+        "key": "cash",
+        "basisPoints": 5455,
+        "percent": 55
+      },
+      {
+        "key": "card",
+        "basisPoints": 1818,
+        "percent": 18
+      },
+      {
+        "key": "bill",
+        "basisPoints": 10000,
+        "percent": 100
+      }
+    ]
+  }
+}

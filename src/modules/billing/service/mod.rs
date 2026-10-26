@@ -19,7 +19,7 @@ use crate::{
     core::{
         constants::codes,
         error::{AppError, AppResult},
-        utils::{build_bson_regex, calculate_pagination, today_utc_range},
+        utils::{build_bson_regex, calculate_pagination, shop_today_range},
     },
     domain::billing::{BillingStats, Invoice, InvoiceListQuery, InvoiceListResponse},
     modules::billing::{model::InvoiceDocument, repository},
@@ -89,7 +89,7 @@ pub async fn list_invoices(db: &Db, query: InvoiceListQuery) -> AppResult<Invoic
         and_clauses.push(doc! { "session_key": session_key.trim() });
     }
     if query.date_preset.as_deref() == Some("today") {
-        let (today_start, today_end) = today_utc_range();
+        let (today_start, today_end) = shop_today_range();
         and_clauses.push(doc! {
             "created_at": {
                 "$gte": BsonDateTime::from_chrono(today_start),
@@ -119,9 +119,9 @@ pub async fn list_invoices(db: &Db, query: InvoiceListQuery) -> AppResult<Invoic
 }
 
 /// Computes the 4 dashboard KPI cards for the Sales & Invoices History
-/// screen. See `today_utc_range` for how "today" is bounded.
+/// screen. See `shop_today_range` for how "today" is bounded.
 pub async fn get_billing_stats(db: &Db) -> AppResult<BillingStats> {
-    let (today_start, today_end) = today_utc_range();
+    let (today_start, today_end) = shop_today_range();
     let agg = repository::aggregate_stats(db, today_start, today_end).await?;
 
     let avg_basket_cents = if agg.today_invoice_count > 0 {

@@ -18,7 +18,10 @@ use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
 
 use crate::{
     clients::{db::Db, sqlite::map_sqlite_row_to_document},
-    core::error::AppResult,
+    core::{
+        calculations::{commission_cents, job_profit_cents},
+        error::AppResult,
+    },
     domain::reports::EmployeePerformanceEntry,
 };
 
@@ -44,21 +47,6 @@ pub(crate) fn get_i64_flexible(doc: &Document, key: &str) -> i64 {
         .unwrap_or(0)
 }
 
-/// Shared commission formula — reused by `employee_earnings`'s itemized
-/// per-ticket listing so the two views can never silently disagree on how a
-/// commission is computed.
-pub(crate) fn compute_earned_cents(
-    profit_cents: i64,
-    split_type: Option<&str>,
-    split_value: f64,
-) -> i64 {
-    match split_type {
-        Some("percentage") => ((profit_cents as f64 * split_value) / 100.0).round() as i64,
-        Some("fixed") => split_value.round() as i64,
-        _ => 0,
-    }
-}
-
 /// Accumulates one repair/print-job document's profit/commission figures
 /// into `perf_map`, bucketed by `assigned_employee_id` (or the fixed
 /// unassigned sentinel for that job type). `employee_name` is left blank
@@ -81,7 +69,7 @@ fn accumulate(
 
     let revenue = get_i64_flexible(doc, "estimated_cost_cents");
     let material_cost = get_i64_flexible(doc, "material_cost_cents");
-    let profit = (revenue - material_cost).max(0);
+    let profit = job_profit_cents(revenue, material_cost);
 
     let split_type = doc.get_str("split_type").ok();
     let split_val = doc
@@ -91,7 +79,7 @@ fn accumulate(
         .or_else(|| doc.get_i32("split_value").ok().map(|v| v as f64))
         .unwrap_or(0.0);
 
-    let earned = compute_earned_cents(profit, split_type, split_val);
+    let earned = commission_cents(profit, split_type, split_val);
     let net_contribution = (profit - earned).max(0);
 
     let is_unassigned = bucket_key == unassigned_sentinel;

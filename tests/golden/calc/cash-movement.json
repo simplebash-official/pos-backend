@@ -1,0 +1,27 @@
+{
+  "request": {
+    "movementType": "petty_expense",
+    "amountCents": 30000,
+    "categoryKey": "ccat_petty_expense_db5d55a5860e",
+    "sessionKey": "ses_golden",
+    "terminalId": "term_calc",
+    "payeeKey": null,
+    "payeeName": "",
+    "period": null,
+    "settlementAmountsCents": [],
+    "pinEntered": false,
+    "pinVerified": false,
+    "overrideReasonEntered": false,
+    "confirmDuplicate": false
+  },
+  "reply": {
+    "takesCashOut": true,
+    "cashInDrawerCents": 200000,
+    "cashAfterCents": 170000,
+    "drawerDeltaCents": -30000,
+    "overDrawer": false,
+    "pinRequired": false,
+    "periodAlreadyPaid": false,
+    "blockers": []
+  }
+}

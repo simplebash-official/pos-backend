@@ -48,6 +48,27 @@ pub fn requires_managed_permission(movement_type: CashMovementType) -> bool {
     )
 }
 
+/// The cash the drawer holds right now: the open shift's expected cash, or, between shifts, the
+/// drawer's own running balance.
+pub(crate) async fn cash_in_drawer(db: &Db, session_key: Option<&str>, terminal_id: &str) -> AppResult<i64> {
+    if let Some(session_key) = session_key {
+        let session = sessions::find_session_by_key(db, session_key)
+            .await?
+            .ok_or_else(|| AppError::not_found_with_code("Register session not found", codes::SESSION_NOT_FOUND))?;
+        if !matches!(session.status, SessionStatus::Open | SessionStatus::Reopened) {
+            return Err(AppError::validation_with_code(
+                "This shift is not open, so cash cannot be recorded on it.",
+                codes::NO_ACTIVE_SESSION,
+            ));
+        }
+        Ok(session.calculate_expected_cash())
+    } else {
+        Ok(drawer::get_drawer_state(db, terminal_id)
+            .await?
+            .map_or(0, |state| state.current_balance_cents))
+    }
+}
+
 /// Movements per category key (including none merged), for ranking the category picker.
 pub(crate) async fn movement_counts_by_category(db: &Db) -> AppResult<Vec<(String, i64)>> {
     movements::count_movements_by_category(db).await
@@ -186,25 +207,8 @@ pub(crate) async fn prepare_movement(
             return Err(AppError::validation("terminalId is required"));
         }
 
-        // The cash the drawer holds right now: the open shift's expected cash, or, between shifts, the
-        // drawer's own running balance.
-        let cash_in_drawer = if let Some(session_key) = &body.session_key {
-            let session = sessions::find_session_by_key(db, session_key)
-                .await?
-                .ok_or_else(|| AppError::not_found_with_code("Register session not found", codes::SESSION_NOT_FOUND))?;
-            if !matches!(session.status, SessionStatus::Open | SessionStatus::Reopened) {
-                return Err(AppError::validation_with_code(
-                    "This shift is not open, so cash cannot be recorded on it.",
-                    codes::NO_ACTIVE_SESSION,
-                ));
-            }
-            session.calculate_expected_cash() + cash_added_cents
-        } else {
-            drawer::get_drawer_state(db, &body.terminal_id)
-                .await?
-                .map_or(0, |state| state.current_balance_cents)
-                + cash_added_cents
-        };
+        let cash_in_drawer =
+            cash_in_drawer(db, body.session_key.as_deref(), &body.terminal_id).await? + cash_added_cents;
 
         if movement_type == CashMovementType::NoSale {
             if body.amount_cents != 0 {
@@ -320,8 +324,8 @@ pub(crate) async fn prepare_movement(
         }
 
         // A payout bigger than the cash in the drawer is allowed only when a manager says why.
-        let takes_cash_out = movement_type.direction() == CashDirection::Out || movement_type == T::CashDrop;
-        let over_drawer = takes_cash_out && body.amount_cents > cash_in_drawer;
+        let takes_cash_out = movement_type.takes_cash_out();
+        let over_drawer = movement_type.is_over_drawer(body.amount_cents, cash_in_drawer);
         let override_reason = clean_text("The reason", body.override_reason.as_deref(), NOTE_MAX)?;
         if over_drawer {
             if body.manager_pin.is_none() || override_reason.is_none() {
@@ -347,13 +351,15 @@ pub(crate) async fn prepare_movement(
         // shop-wide one, and to go over the drawer.
         // The shop-wide limit is about cash leaving the drawer; cash put in never needs it.
         let shop_limit = if takes_cash_out { cash_settings::service::approval_threshold_cents(db).await? } else { None };
-        let over_limit = [category.requires_approval_over_cents, shop_limit]
-            .into_iter()
-            .flatten()
-            .any(|limit| body.amount_cents > limit);
+        let pin_needed = movement_type.needs_manager_pin(
+            body.amount_cents,
+            category.requires_approval_over_cents,
+            shop_limit,
+            over_drawer,
+        );
         let mut approved_by_id = None;
         let mut approved_by_name = None;
-        if matches!(movement_type, T::OwnerWithdrawal | T::StaffPayment) || over_limit || over_drawer {
+        if pin_needed {
             let pin = body.manager_pin.as_deref().ok_or_else(|| {
                 AppError::forbidden_with_code(
                     "A manager or owner PIN is required for this payment",

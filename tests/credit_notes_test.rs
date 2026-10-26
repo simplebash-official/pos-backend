@@ -611,6 +611,26 @@ async fn credit_note_refund_is_capped_at_amount_actually_paid_on_partially_paid_
 
     // Full return of the item (value Rs. 250.00) — only Rs. 150.00 was actually paid,
     // so refund_cash_cents must cap at 15000 and the remaining 10000 reduces the balance.
+    let (preview_status, preview) = send_authed(
+        &app.router,
+        "POST",
+        "/api/calc/credit-note",
+        Some(json!({
+            "invoiceKey": invoice_key,
+            "returned": [{ "lineIndex": 0, "quantity": 1 }],
+            "noReceipt": null,
+            "exchanged": []
+        })),
+        &token,
+    )
+    .await;
+    assert_eq!(preview_status, StatusCode::OK, "{preview}");
+    assert_eq!(preview["data"]["netRefundCents"], price_cents);
+    assert_eq!(preview["data"]["refundCashCents"], 15000);
+    assert_eq!(
+        preview["data"]["balanceReductionCents"],
+        price_cents - 15000
+    );
     let (cn_status, cn_body) = send_authed(
         &app.router,
         "POST",
@@ -671,6 +691,21 @@ async fn credit_note_refund_breakdown_defaults_proportionally_for_split_paid_inv
     assert_eq!(sale_status, StatusCode::OK, "{sale_body}");
     let invoice_key = sale_body["data"]["invoice"]["key"].as_str().unwrap();
 
+    let (_, preview) = send_authed(
+        &app.router,
+        "POST",
+        "/api/calc/credit-note",
+        Some(json!({
+            "invoiceKey": invoice_key,
+            "returned": [{ "lineIndex": 0, "quantity": 1 }],
+            "noReceipt": null,
+            "exchanged": []
+        })),
+        &token,
+    )
+    .await;
+    let preview_legs = preview["data"]["refundLegs"].as_array().unwrap().clone();
+
     let (cn_status, cn_body) = send_authed(
         &app.router,
         "POST",
@@ -690,6 +725,14 @@ async fn credit_note_refund_breakdown_defaults_proportionally_for_split_paid_inv
     assert_eq!(cn_status, StatusCode::OK, "Credit note body: {cn_body}");
     let breakdown = cn_body["data"]["refundBreakdown"].as_array().unwrap();
     assert_eq!(breakdown.len(), 2);
+    // The preview showed exactly these legs.
+    for leg in breakdown {
+        assert!(
+            preview_legs
+                .iter()
+                .any(|p| p["method"] == leg["method"] && p["amountCents"] == leg["amountCents"])
+        );
+    }
     let total: i64 = breakdown
         .iter()
         .map(|l| l["amountCents"].as_i64().unwrap())
@@ -1214,8 +1257,9 @@ async fn credit_note_document_accepts_a_design_for_one_print() {
     let get = |query: &'static str| {
         let router = app.router.clone();
         let token = token.clone();
-        let uri =
-            format!("/api/billing/credit-notes/{credit_note_key}/documents/credit-note?design=current{query}");
+        let uri = format!(
+            "/api/billing/credit-notes/{credit_note_key}/documents/credit-note?design=current{query}"
+        );
         async move {
             let response = router
                 .oneshot(
@@ -1319,4 +1363,127 @@ async fn credit_note_document_returns_pdf() {
         .unwrap();
     let bad_response = app.router.clone().oneshot(bad_request).await.unwrap();
     assert_eq!(bad_response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn credit_note_preview_shows_the_refund_the_server_issues_for_a_discounted_line() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    // 3 units at Rs. 4.00 with Rs. 2.00 off the line: Rs. 10.00 net, which is 333 cents a unit
+    // to the cent below. Returning 2 units refunds 666 cents, not a prorated 667.
+    let (_id, prod_key, _price) = seed_product(&app, "Discounted Line Item", 400, 20).await;
+    let (sale_status, sale_body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/billing/sales",
+        Some(json!({
+            "staff": { "cashierName": "Cashier Alice" },
+            "items": [{
+                "productKey": prod_key,
+                "sellingPriceCents": 400,
+                "quantity": 3,
+                "discountCents": 200,
+                "sourceType": "retail"
+            }],
+            "payment": { "paymentMethod": "cash", "isCredit": false, "amountReceivedCents": 1000 },
+            "shopProfileSnapshot": { "tradingName": "Tech Shop" }
+        })),
+        &token,
+    )
+    .await;
+    assert_eq!(sale_status, StatusCode::OK, "{sale_body}");
+    let invoice_key = sale_body["data"]["invoice"]["key"].as_str().unwrap();
+
+    let (preview_status, preview) = send_authed(
+        &app.router,
+        "POST",
+        "/api/calc/credit-note",
+        Some(json!({
+            "invoiceKey": invoice_key,
+            "returned": [{ "lineIndex": 0, "quantity": 2 }],
+            "noReceipt": null,
+            "exchanged": [{ "unitPriceCents": 100, "quantity": 1 }]
+        })),
+        &token,
+    )
+    .await;
+    assert_eq!(preview_status, StatusCode::OK, "{preview}");
+    assert_eq!(preview["data"]["lines"][0]["unitCents"], 333);
+    assert_eq!(preview["data"]["returnSubtotalCents"], 666);
+    assert_eq!(preview["data"]["exchangeSubtotalCents"], 100);
+    assert_eq!(preview["data"]["netRefundCents"], 566);
+    assert_eq!(preview["data"]["pastReturnWindow"], false);
+
+    // Too many units, a line that is not there, and both kinds of return at once are refused.
+    for bad in [
+        json!({ "invoiceKey": invoice_key, "returned": [{ "lineIndex": 0, "quantity": 4 }], "noReceipt": null, "exchanged": [] }),
+        json!({ "invoiceKey": invoice_key, "returned": [{ "lineIndex": 9, "quantity": 1 }], "noReceipt": null, "exchanged": [] }),
+        json!({ "invoiceKey": invoice_key, "returned": [], "noReceipt": { "unitPriceCents": 1, "quantity": 1 }, "exchanged": [] }),
+    ] {
+        let (status, _) = send_authed(
+            &app.router,
+            "POST",
+            "/api/calc/credit-note",
+            Some(bad),
+            &token,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+    let (status, _) = send_authed(
+        &app.router,
+        "POST",
+        "/api/calc/credit-note",
+        Some(json!({ "invoiceKey": "inv_missing", "returned": [], "noReceipt": null, "exchanged": [] })),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // The credit note issued for the same return refunds exactly what was previewed.
+    let (cn_status, cn_body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/billing/credit-notes",
+        Some(json!({
+            "invoiceKey": invoice_key,
+            "returnedItems": [{
+                "productKey": prod_key,
+                "quantity": 2,
+                "reason": "customer_changed_mind",
+                "condition": "resalable"
+            }]
+        })),
+        &token,
+    )
+    .await;
+    assert_eq!(cn_status, StatusCode::OK, "{cn_body}");
+    assert_eq!(cn_body["data"]["returnSubtotalCents"], 666);
+}
+
+#[tokio::test]
+async fn credit_note_preview_flags_a_sale_past_the_return_window() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+    let (_id, prod_key, _price) = seed_product(&app, "Old Sale Item", 1000, 5).await;
+    let invoice_key = complete_simple_sale(&app, &token, &prod_key, 1, 1000, None).await;
+    backdate_invoice(&app.db, &invoice_key, 45).await;
+    let (status, preview) = send_authed(
+        &app.router,
+        "POST",
+        "/api/calc/credit-note",
+        Some(json!({
+            "invoiceKey": invoice_key,
+            "returned": [{ "lineIndex": 0, "quantity": 1 }],
+            "noReceipt": null,
+            "exchanged": []
+        })),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert_eq!(preview["data"]["pastReturnWindow"], true);
+    assert!(preview["data"]["daysSinceSale"].as_i64().unwrap() >= 45);
+    assert_eq!(preview["data"]["returnWindowDays"], 30);
 }

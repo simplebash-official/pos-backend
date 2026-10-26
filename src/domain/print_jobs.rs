@@ -182,7 +182,7 @@ pub struct PrintJobListQuery {
     /// Filter by status.
     pub status: Option<String>,
     /// Only `"today"` is meaningful — scopes to `created_at` within
-    /// `today_utc_range()`. Any other value (or absence) means all time.
+    /// `shop_today_range()`. Any other value (or absence) means all time.
     pub date_preset: Option<String>,
     /// Page number (1-indexed).
     pub page: Option<u64>,

@@ -1,0 +1,113 @@
+{
+  "request": {
+    "items": [
+      {
+        "key": "line-1",
+        "unitPriceCents": 490,
+        "quantity": 1,
+        "discount": null,
+        "sourceType": "retail"
+      },
+      {
+        "key": "line-2",
+        "unitPriceCents": 650,
+        "quantity": 2,
+        "discount": {
+          "type": "fixed",
+          "value": 100
+        },
+        "sourceType": "retail"
+      },
+      {
+        "key": "line-3",
+        "unitPriceCents": 1000,
+        "quantity": 3,
+        "discount": {
+          "type": "percentage",
+          "value": 10
+        },
+        "sourceType": "retail"
+      },
+      {
+        "key": "line-4",
+        "unitPriceCents": 2500,
+        "quantity": 1,
+        "discount": null,
+        "sourceType": "repair"
+      }
+    ],
+    "orderDiscount": {
+      "type": "percentage",
+      "value": 7.5
+    },
+    "payment": {
+      "method": "cash",
+      "tenderedCents": 5000,
+      "splitLegsCents": [],
+      "customerBalanceCents": 0,
+      "isCredit": false,
+      "creditDepositCents": 0
+    }
+  },
+  "reply": {
+    "items": [
+      {
+        "key": "line-1",
+        "grossCents": 490,
+        "discountCents": 0,
+        "totalCents": 490
+      },
+      {
+        "key": "line-2",
+        "grossCents": 1300,
+        "discountCents": 100,
+        "totalCents": 1200
+      },
+      {
+        "key": "line-3",
+        "grossCents": 3000,
+        "discountCents": 300,
+        "totalCents": 2700
+      },
+      {
+        "key": "line-4",
+        "grossCents": 2500,
+        "discountCents": 0,
+        "totalCents": 2500
+      }
+    ],
+    "itemCount": 4,
+    "totalUnitCount": 7,
+    "subtotalCents": 6890,
+    "orderDiscountCents": 517,
+    "totalCents": 6373,
+    "sourceBreakdown": {
+      "retailCents": 4390,
+      "repairsCents": 2500,
+      "printCents": 0
+    },
+    "payment": {
+      "effectiveTenderedCents": 5000,
+      "changeDueCents": 0,
+      "shortByCents": 1373,
+      "isCashShort": true,
+      "isCardShort": false,
+      "isFullyPaid": false,
+      "splitAllocatedCents": 0,
+      "splitRemainingCents": 6373,
+      "isSplitValid": false,
+      "newCustomerBalanceCents": 0,
+      "creditPaidNowCents": 0,
+      "creditRemainderCents": 0,
+      "amountReceivedCents": 5000,
+      "maxCreditDepositCents": 6372
+    },
+    "quickTenderCents": [
+      6373,
+      6400,
+      10000,
+      50000,
+      100000
+    ]
+  }
+}

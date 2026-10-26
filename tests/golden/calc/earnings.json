@@ -1,0 +1,15 @@
+{
+  "request": {
+    "priceCents": 1000000,
+    "materialCostCents": 400000,
+    "splitType": "percentage",
+    "splitValue": 30.0
+  },
+  "reply": {
+    "priceEntered": true,
+    "profitCents": 600000,
+    "commissionCents": 180000,
+    "capped": false,
+    "shopKeepsCents": 420000
+  }
+}

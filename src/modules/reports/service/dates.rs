@@ -14,7 +14,7 @@ use crate::core::error::{AppError, AppResult};
 /// The older endpoints (`dashboard`, `daily-sales`, `monthly-profit`, …) stay
 /// on the UTC `parse_date_range` below — they are almost always "today" /
 /// "this_month" where the boundary barely moves.
-pub(crate) const REPORT_TZ_OFFSET_SECS: i32 = 5 * 3600 + 30 * 60;
+pub(crate) const REPORT_TZ_OFFSET_SECS: i32 = crate::core::utils::SHOP_TZ_OFFSET_SECS;
 
 /// The same offset as a string MongoDB's date operators accept in their
 /// `timezone` field.

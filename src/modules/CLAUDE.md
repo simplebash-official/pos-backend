@@ -18,4 +18,4 @@ Swagger UI: `http://localhost:8080/docs`. Raw OpenAPI 3.1 JSON: `http://localhos
 
 ## Live-calculation routes (`modules/calc/`)
 
-A new calculator is a pure engine in its domain module plus a route in `calc/` (see `src/CLAUDE.md`, "Live calculations"). Besides the usual `utoipa` + `routes!()` wiring and Postman entry (folder `Calc`), it must: require the same permission as the write it previews, use `Option` for fields still being typed, return blockers as codes, never read or write the database, and add a golden request/reply pair in `tests/calc_test.rs`.
+A new calculator is a pure engine in its domain module plus a route in `calc/` (see `src/CLAUDE.md`, "Live calculations"). Besides the usual `utoipa` + `routes!()` wiring and Postman entry (folder `Calc`), it must: require the same permission as the write it previews, use `Option` for fields still being typed, return blockers as codes, never write the database (reading what it depends on, such as the drawer or an invoice, is fine), and add a golden request/reply pair in `tests/calc_test.rs`.

@@ -1,0 +1,57 @@
+{
+  "request": {
+    "customerKey": "cus_1",
+    "customerName": "",
+    "lines": [
+      {
+        "key": "q1",
+        "name": "Case",
+        "unitPriceCents": 1000,
+        "quantity": 3,
+        "discount": {
+          "type": "fixed",
+          "scope": "per_unit",
+          "value": 150
+        }
+      },
+      {
+        "key": "q2",
+        "name": "Cable",
+        "unitPriceCents": 650,
+        "quantity": 1,
+        "discount": {
+          "type": "percentage",
+          "scope": "total",
+          "value": 10
+        }
+      }
+    ],
+    "orderDiscount": {
+      "type": "percentage",
+      "value": 5
+    },
+    "validUntil": "2099-01-01"
+  },
+  "reply": {
+    "lines": [
+      {
+        "key": "q1",
+        "grossCents": 3000,
+        "discountCents": 450,
+        "totalCents": 2550
+      },
+      {
+        "key": "q2",
+        "grossCents": 650,
+        "discountCents": 65,
+        "totalCents": 585
+      }
+    ],
+    "grossSubtotalCents": 3650,
+    "lineDiscountsCents": 515,
+    "subtotalCents": 3135,
+    "discountCents": 157,
+    "totalCents": 2978,
+    "blockers": []
+  }
+}

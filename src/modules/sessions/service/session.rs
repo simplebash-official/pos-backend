@@ -16,7 +16,7 @@ use crate::{
         sessions::{
             CashMovement, CashMovementType, CloseSessionRequest, ConvertVarianceRequest,
             OpenSessionRequest, RegisterSession, ReopenSessionRequest, SessionListQuery,
-            SessionListResponse, SessionStatus, SubmitBlindCountRequest,
+            SessionListResponse, SessionStatus, SubmitBlindCountRequest, VARIANCE_TOLERANCE_CENTS,
         },
         users::Role,
     },
@@ -30,8 +30,12 @@ use crate::{
     },
 };
 
-/// Small variance tolerance in cents (e.g. Rs 5.00 / 500 cents) that cashiers can submit with note only.
-pub const VARIANCE_TOLERANCE_CENTS: i64 = 500;
+
+/// What the drawer should hold when a shift opens: its running balance. A terminal that has never
+/// held cash has nothing to compare the count with, so the count itself stands.
+pub(crate) fn expected_opening_float(state: Option<&DrawerStateDocument>, counted_cents: i64) -> i64 {
+    state.map_or(counted_cents, |s| s.current_balance_cents)
+}
 
 pub async fn open_session(
     db: &Db,
@@ -71,10 +75,8 @@ pub async fn open_session(
 
     // Ledger check: inspect drawer balance from previous close / outside movements
     let drawer_state = drawer::get_drawer_state(db, &body.terminal_id).await?;
-    let expected_opening_float = drawer_state
-        .as_ref()
-        .map(|s| s.current_balance_cents)
-        .unwrap_or(body.opening_float_cents);
+    let expected_opening_float =
+        expected_opening_float(drawer_state.as_ref(), body.opening_float_cents);
 
     let discrepancy = body.opening_float_cents - expected_opening_float;
     let mut approved_by_id = None;

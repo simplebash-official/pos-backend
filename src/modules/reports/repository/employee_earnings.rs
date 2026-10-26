@@ -1,6 +1,6 @@
 // MongoDB-only itemized commission listing for one employee — the
 // server-computed replacement for the frontend's former mock earnings
-// ledger. Reuses `commissions.rs`'s `compute_earned_cents` formula so the
+// ledger. Reuses `core::calculations::commission_cents` so the
 // aggregated and itemized views can never silently disagree. Lives here
 // (not in `modules::employees`) because it reads raw `repairs`/`print_jobs`
 // documents directly, the same cross-collection financial-aggregation
@@ -13,9 +13,12 @@ use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
 
 use crate::{
     clients::{db::Db, sqlite::map_sqlite_row_to_document},
-    core::error::AppResult,
+    core::{
+        calculations::{commission_cents, job_profit_cents},
+        error::AppResult,
+    },
     domain::employees::EmployeeEarningRecord,
-    modules::reports::repository::commissions::{compute_earned_cents, get_i64_flexible},
+    modules::reports::repository::commissions::get_i64_flexible,
 };
 
 fn repairs(db: &TenantDatabase) -> ScopedCollection<Document> {
@@ -33,7 +36,7 @@ fn to_record(
 ) -> EmployeeEarningRecord {
     let revenue = get_i64_flexible(doc, "estimated_cost_cents");
     let material_cost = get_i64_flexible(doc, "material_cost_cents");
-    let profit = (revenue - material_cost).max(0);
+    let profit = job_profit_cents(revenue, material_cost);
 
     let split_type = doc.get_str("split_type").ok();
     let split_val = doc
@@ -42,7 +45,7 @@ fn to_record(
         .or_else(|| doc.get_i64("split_value").ok().map(|v| v as f64))
         .or_else(|| doc.get_i32("split_value").ok().map(|v| v as f64))
         .unwrap_or(0.0);
-    let earned = compute_earned_cents(profit, split_type, split_val);
+    let earned = commission_cents(profit, split_type, split_val);
 
     let status = if doc.get_str("status").ok() == Some("delivered") {
         "completed"

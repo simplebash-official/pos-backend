@@ -1,0 +1,19 @@
+{
+  "request": {
+    "sessionKey": "ses_golden",
+    "terminalId": null,
+    "countedCents": 199000,
+    "closingFloatCents": 100000
+  },
+  "reply": {
+    "countedCents": 199000,
+    "expectedCents": 200000,
+    "varianceCents": -1000,
+    "reasonRequired": true,
+    "pinRequired": true,
+    "varianceToleranceCents": 500,
+    "closingFloatCents": 100000,
+    "keepOpeningFloatCents": 199000,
+    "safeDepositCents": 99000
+  }
+}

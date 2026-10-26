@@ -54,12 +54,12 @@ fn formatted_date_time(invoice: &Invoice) -> (String, String) {
 /// is the sum of every payment row (checkout deposit + later installments);
 /// callers that don't have it can pass `invoice.amount_received_cents`.
 fn paid_and_balance(invoice: &Invoice, paid_so_far_cents: i64) -> (i64, i64) {
-    if invoice.is_credit {
-        let balance = (invoice.total_cents - paid_so_far_cents - invoice.refunded_cents).max(0);
-        (paid_so_far_cents, balance)
-    } else {
-        (invoice.total_cents, 0)
-    }
+    crate::core::calculations::invoice_paid_and_balance(
+        invoice.is_credit,
+        invoice.total_cents,
+        paid_so_far_cents,
+        invoice.refunded_cents,
+    )
 }
 
 /// Builds `data` for the "A4 Invoice" template — field-for-field the

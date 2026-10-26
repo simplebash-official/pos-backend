@@ -1,7 +1,7 @@
 use super::dates;
 use crate::{
     clients::db::Db,
-    core::{error::AppResult, utils::today_utc_range},
+    core::{error::AppResult, utils::shop_today_range},
     domain::reports::{DailySalesQuery, DailySalesReportResponse, PaymentMethodBreakdown},
     modules::reports::repository,
 };
@@ -18,7 +18,7 @@ pub(crate) async fn get_daily_sales_report(
     } else if query.from.is_some() || query.to.is_some() {
         dates::parse_date_range(None, query.from.as_deref(), query.to.as_deref())?
     } else {
-        today_utc_range()
+        shop_today_range()
     };
 
     let summaries = repository::sales::aggregate_daily_sales(db, start, end).await?;

@@ -11,7 +11,7 @@ use crate::{
         constants::{codes, prefixes},
         error::{AppError, AppResult},
         id::generate_id,
-        utils::{build_bson_regex, calculate_pagination, today_utc_range},
+        utils::{build_bson_regex, calculate_pagination, shop_today_range},
     },
     domain::{
         repairs::{
@@ -152,7 +152,7 @@ pub async fn list_repairs(db: &Db, query: RepairListQuery) -> AppResult<RepairLi
         and_clauses.push(doc! { "status": status.trim() });
     }
     if query.date_preset.as_deref() == Some("today") {
-        let (today_start, today_end) = today_utc_range();
+        let (today_start, today_end) = shop_today_range();
         and_clauses.push(doc! {
             "created_at": {
                 "$gte": BsonDateTime::from_chrono(today_start),
@@ -181,10 +181,10 @@ pub async fn list_repairs(db: &Db, query: RepairListQuery) -> AppResult<RepairLi
     })
 }
 
-/// Computes the KPI cards for the Repair Jobs screen. See `today_utc_range`
+/// Computes the KPI cards for the Repair Jobs screen. See `shop_today_range`
 /// for how "today" is bounded.
 pub async fn get_repair_stats(db: &Db) -> AppResult<RepairStats> {
-    let (today_start, today_end) = today_utc_range();
+    let (today_start, today_end) = shop_today_range();
     let agg = repository::aggregate_stats(db, today_start, today_end).await?;
 
     let avg_job_value_cents = if agg.today_job_count > 0 {

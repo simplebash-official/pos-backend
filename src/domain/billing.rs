@@ -604,7 +604,7 @@ pub struct InvoiceListQuery {
     /// Exact match on payment method ("cash", "card", "online", "split").
     pub payment_method: Option<String>,
     /// Only `"today"` is meaningful — scopes to `created_at` within
-    /// `today_utc_range()`. Any other value (or absence) means all time.
+    /// `shop_today_range()`. Any other value (or absence) means all time.
     pub date_preset: Option<String>,
     /// Filter by register shift session key.
     pub session_key: Option<String>,

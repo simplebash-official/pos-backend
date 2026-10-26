@@ -1,0 +1,26 @@
+{
+  "request": {
+    "supplierKey": "sup_none",
+    "paymentCents": 50000,
+    "settlements": [
+      {
+        "receiptKey": "prc_missing",
+        "amountCents": 10000
+      }
+    ]
+  },
+  "reply": {
+    "owedCents": 0,
+    "allocatedCents": 0,
+    "oldestFirst": [],
+    "payEverything": [],
+    "ifTicked": [],
+    "blockers": [
+      {
+        "code": "bill_not_owed",
+        "receiptKey": "prc_missing",
+        "dueCents": null
+      }
+    ]
+  }
+}

@@ -13,11 +13,12 @@ use mongodb::bson::{DateTime as BsonDateTime, Document, doc, oid::ObjectId};
 use crate::{
     clients::db::Db,
     core::{
+        calculations,
         config::Config,
         constants::{codes, prefixes},
         error::{AppError, AppResult},
         id::generate_id,
-        utils::{build_bson_regex, calculate_pagination, today_utc_range},
+        utils::{build_bson_regex, calculate_pagination, shop_today_range},
     },
     domain::{
         billing::{
@@ -143,27 +144,6 @@ async fn resolve_no_receipt_item(
     })
 }
 
-/// Splits `total` across `weights` proportionally, rounding down per leg and
-/// handing the last leg whatever remainder rounding left over — guarantees
-/// the returned amounts sum to exactly `total` (required so a generated
-/// `refund_breakdown` always reconciles to `refund_cash_cents`).
-fn proportional_split(total: i64, weights: &[i64]) -> Vec<i64> {
-    let weight_sum: i64 = weights.iter().sum();
-    if weight_sum <= 0 || weights.is_empty() {
-        return vec![total];
-    }
-    let mut amounts: Vec<i64> = weights
-        .iter()
-        .map(|w| (total as i128 * *w as i128 / weight_sum as i128) as i64)
-        .collect();
-    let allocated: i64 = amounts.iter().sum();
-    let remainder = total - allocated;
-    if let Some(last) = amounts.last_mut() {
-        *last += remainder;
-    }
-    amounts
-}
-
 /// The refund/exchange computation shared by both `create_credit_note`
 /// paths — pure computation over reads only (exchange-item/ticket
 /// resolution, the invoice's existing payment legs for a proportional
@@ -221,12 +201,8 @@ async fn compute_refund_shape(
     // The partial-payment cap only applies to a positive cashback against a
     // real invoice — a no-receipt return has no invoice to cap against, and
     // a negative net (customer pays extra) is never capped.
-    let (refund_cash_cents, balance_reduction_cents) = if net_refund_cents > 0 && !no_receipt {
-        let cash = net_refund_cents.min(already_paid_cents.max(0));
-        (cash, net_refund_cents - cash)
-    } else {
-        (net_refund_cents, 0)
-    };
+    let (refund_cash_cents, balance_reduction_cents) =
+        calculations::refund_amounts(net_refund_cents, already_paid_cents, no_receipt);
 
     let refund_breakdown: Vec<RefundBreakdownLeg> = if refund_cash_cents == 0 {
         Vec::new()
@@ -254,27 +230,21 @@ async fn compute_refund_shape(
         let split_payments = repository::list_payments_for_invoice(db, invoice_key.unwrap_or(""))
             .await
             .unwrap_or_default();
-        let positive_legs: Vec<&PaymentDocument> = split_payments
-            .iter()
-            .filter(|p| p.amount_cents > 0)
-            .collect();
-        if invoice_key.is_some() && positive_legs.len() > 1 {
-            let weights: Vec<i64> = positive_legs.iter().map(|p| p.amount_cents).collect();
-            let amounts = proportional_split(refund_cash_cents, &weights);
-            positive_legs
+        let invoice_legs: Vec<(String, i64)> = if invoice_key.is_some() {
+            split_payments
                 .iter()
-                .zip(amounts)
-                .map(|(leg, amount_cents)| RefundBreakdownLeg {
-                    method: leg.payment_method.clone(),
-                    amount_cents,
-                })
+                .map(|p| (p.payment_method.clone(), p.amount_cents))
                 .collect()
         } else {
-            vec![RefundBreakdownLeg {
-                method: payment_method.to_string(),
-                amount_cents: refund_cash_cents,
-            }]
-        }
+            Vec::new()
+        };
+        calculations::default_refund_legs(refund_cash_cents, &invoice_legs, payment_method)
+            .into_iter()
+            .map(|(method, amount_cents)| RefundBreakdownLeg {
+                method,
+                amount_cents,
+            })
+            .collect()
     } else {
         vec![RefundBreakdownLeg {
             method: payment_method.to_string(),
@@ -621,11 +591,11 @@ pub async fn create_credit_note(
                     ));
                 }
 
-                let unit_price_cents = if inv_item.quantity > 0 {
-                    inv_item.total_cents / inv_item.quantity
-                } else {
-                    inv_item.unit_price_cents
-                };
+                let unit_price_cents = calculations::returned_unit_price_cents(
+                    inv_item.total_cents,
+                    inv_item.quantity,
+                    inv_item.unit_price_cents,
+                );
                 let line_total_cents = unit_price_cents * item_req.quantity;
                 return_subtotal_cents += line_total_cents;
                 // Units go back into the batches this line sold them from,
@@ -956,22 +926,26 @@ async fn finish_create_credit_note(
                 .map(|l| l.amount_cents)
                 .sum();
             if cash_refunded > 0
-                && let Some(ref s_key) = resolved_session_key {
-                    let _ = crate::modules::sessions::repository::sessions::increment_session_refunds(
+                && let Some(ref s_key) = resolved_session_key
+            {
+                let _ = crate::modules::sessions::repository::sessions::increment_session_refunds(
+                    db,
+                    s_key,
+                    cash_refunded,
+                )
+                .await;
+                if let Ok(Some(sess)) =
+                    crate::modules::sessions::repository::sessions::find_session_by_key(db, s_key)
+                        .await
+                {
+                    let _ = crate::modules::sessions::repository::drawer::update_drawer_balance(
                         db,
-                        s_key,
-                        cash_refunded,
+                        &sess.terminal_id,
+                        -cash_refunded,
                     )
                     .await;
-                    if let Ok(Some(sess)) = crate::modules::sessions::repository::sessions::find_session_by_key(db, s_key).await {
-                        let _ = crate::modules::sessions::repository::drawer::update_drawer_balance(
-                            db,
-                            &sess.terminal_id,
-                            -cash_refunded,
-                        )
-                        .await;
-                    }
                 }
+            }
         }
     }
 
@@ -1220,7 +1194,7 @@ pub async fn list_credit_notes(
         and_clauses.push(doc! { "customer_key": customer_key.trim() });
     }
     if query.date_preset.as_deref() == Some("today") {
-        let (today_start, today_end) = today_utc_range();
+        let (today_start, today_end) = shop_today_range();
         and_clauses.push(doc! {
             "created_at": {
                 "$gte": BsonDateTime::from_chrono(today_start),
@@ -1315,4 +1289,14 @@ pub(crate) fn line_match(
         }
         sole_line_and_sole_return
     })
+}
+
+/// What an invoice has been paid so far, one entry per payment (method, cents), refunds being
+/// negative. The refund preview caps the cash refund at their sum and splits it across them.
+pub async fn invoice_payment_legs(db: &Db, invoice_key: &str) -> AppResult<Vec<(String, i64)>> {
+    Ok(repository::list_payments_for_invoice(db, invoice_key)
+        .await?
+        .into_iter()
+        .map(|p| (p.payment_method, p.amount_cents))
+        .collect())
 }

@@ -55,7 +55,13 @@ pub async fn record_payment(
 
         let existing_payments = repository::list_payments_for_invoice(db, invoice_key).await?;
         let already_paid: i64 = existing_payments.iter().map(|p| p.amount_cents).sum();
-        let outstanding = invoice.total_cents - already_paid;
+        // A payment is only taken against what is owed (total less paid less returned).
+        let (_, outstanding) = crate::core::calculations::invoice_paid_and_balance(
+            true,
+            invoice.total_cents,
+            already_paid,
+            invoice.refunded_cents,
+        );
         if body.amount_cents > outstanding {
             return Err(AppError::conflict_with_details(
                 codes::PAYMENT_EXCEEDS_BALANCE,
