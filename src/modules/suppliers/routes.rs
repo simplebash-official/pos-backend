@@ -9,6 +9,8 @@
 // from day one, so there's no unused path left for a status ping. Every
 // route — reads included — requires `AdminUser`: supplier data (pricing,
 // contacts) is treated as business-sensitive, not general shop-floor data.
+// The one exception is `POST /` (register a supplier), which needs the
+// `suppliers:create` permission so a Manager can add one from the cash window.
 use axum::{
     Json,
     extract::{Path, Query, State},
@@ -20,9 +22,9 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 use crate::{
     app::AppState,
     core::{
-        constants::modules,
+        constants::{modules, permissions as perm},
         error::AppResult,
-        middleware::auth::AdminUser,
+        middleware::auth::{AdminUser, CurrentUser},
         response::{ApiResponse, ErrorResponse},
         utils::parse_object_id as parse_mongo_id,
     },
@@ -95,14 +97,15 @@ async fn list_suppliers(
         (status = 201, description = "Supplier created", body = ApiResponse<Supplier>),
         (status = 400, description = "Validation error", body = ErrorResponse),
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
-        (status = 403, description = "Admin access required", body = ErrorResponse),
+        (status = 403, description = "Missing the suppliers:create permission", body = ErrorResponse),
     )
 )]
 async fn create_supplier(
-    _admin: AdminUser,
+    current_user: CurrentUser,
     State(state): State<AppState>,
     Json(body): Json<CreateSupplierRequest>,
 ) -> AppResult<(StatusCode, Json<ApiResponse<Supplier>>)> {
+    current_user.require_permission(perm::SUPPLIERS_CREATE)?;
     let supplier = service::create_supplier(&state.db, body).await?;
 
     Ok((

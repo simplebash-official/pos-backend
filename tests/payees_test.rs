@@ -202,3 +202,94 @@ async fn payees_can_be_renamed_hidden_and_shown_on_mongo() {
     scenario(&app).await;
     app.db.drop().await.ok();
 }
+
+// A Manager registers a supplier from the cash window; it is listed as a payee at once and a
+// supplier payment may name it, though the Manager still cannot read the supplier list itself.
+async fn manager_registered_supplier_scenario(app: &common::TestApp) {
+    let staff = common::mint_token(
+        &app.config,
+        Some(Role::Staff),
+        roles::default_permissions(Role::Staff),
+    );
+    let manager = common::mint_token(
+        &app.config,
+        Some(Role::Manager),
+        roles::default_permissions(Role::Manager),
+    );
+    let name = format!(
+        "Kandy Traders {}",
+        &uuid::Uuid::new_v4().simple().to_string()[..8]
+    );
+
+    let (status, body) = send(
+        app,
+        "POST",
+        "/api/suppliers",
+        Some(json!({
+            "name": name,
+            "contactPerson": "Nimal",
+            "primaryPhone": "077 123 4567",
+            "address": "1 Temple Road, Kandy",
+            "suppliedCategories": ["Phone Parts"],
+        })),
+        &manager,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let supplier_key = body["data"]["key"].as_str().unwrap().to_string();
+
+    let (status, body) = send(app, "GET", "/api/payees?payeeType=supplier", None, &manager).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let listed = body["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["key"] == supplier_key.as_str())
+        .unwrap_or_else(|| panic!("new supplier missing from payees: {body}"));
+    assert_eq!(listed["name"], name.as_str());
+    assert_eq!(listed["payeeType"], "supplier");
+
+    let (status, _) = send(app, "GET", "/api/suppliers", None, &manager).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, body) = send(
+        app,
+        "POST",
+        "/api/sessions/movements",
+        Some(json!({
+            "movementType": "add_cash", "amountCents": 5_000_000, "terminalId": "term_sup",
+            "categoryKey": category_key(CashMovementType::AddCash, "Opening float")
+        })),
+        &staff,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let (status, body) = send(
+        app,
+        "POST",
+        "/api/sessions/movements",
+        Some(json!({
+            "movementType": "supplier_payment", "amountCents": 30_000, "terminalId": "term_sup",
+            "categoryKey": category_key(CashMovementType::SupplierPayment, "Other"),
+            "payeeKey": supplier_key
+        })),
+        &manager,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["data"]["payeeKey"], supplier_key.as_str());
+    assert_eq!(body["data"]["payeeName"], name.as_str());
+}
+
+#[tokio::test]
+async fn a_manager_can_register_a_supplier_and_pay_it_on_sqlite() {
+    let app = common::spawn_app_sqlite().await;
+    manager_registered_supplier_scenario(&app).await;
+}
+
+#[tokio::test]
+async fn a_manager_can_register_a_supplier_and_pay_it_on_mongo() {
+    let app = common::spawn_app_isolated().await;
+    manager_registered_supplier_scenario(&app).await;
+    app.db.drop().await.ok();
+}

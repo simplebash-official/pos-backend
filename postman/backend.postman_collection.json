@@ -6188,7 +6188,7 @@
                 "suppliers"
               ]
             },
-            "description": "Create a new supplier. `key` is server-generated, never client-supplied. The response's `key` is what Supplier Products/Purchases requests reference — copy it into the `supplierKey` collection variable (and the `id` into `supplierId`).\n\n**Requires Admin JWT** (`role: admin` claim) — every route in this module, reads included, requires `AdminUser`, not just any authenticated caller. The API returns 401 with no/invalid token, or 403 `ADMIN_REQUIRED` for a non-admin token."
+            "description": "Create a new supplier. `key` is server-generated, never client-supplied. The response's `key` is what Supplier Products/Purchases requests reference — copy it into the `supplierKey` collection variable (and the `id` into `supplierId`).\n\n**Requires the `suppliers:create` permission** (Admin and Manager hold it; Staff do not). This is the one supplier route a Manager may call: list, get, replace, update and delete still require an Admin JWT (`role: admin` claim, 403 `ADMIN_REQUIRED` otherwise). The API returns 401 with no/invalid token, or 403 `PERMISSION_DENIED` without `suppliers:create`. A newly registered supplier appears in `GET /api/payees?payeeType=supplier` at once."
           },
           "response": []
         },

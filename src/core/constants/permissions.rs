@@ -57,6 +57,9 @@ pub const INCOME_VIEW: &str = "income:view";
 pub const INCOME_MANAGE: &str = "income:manage";
 /// Adding landlords/vendors and other payees to the shared payee directory.
 pub const PAYEES_MANAGE: &str = "payees:manage";
+/// Registering a new supplier (`POST /api/suppliers`), e.g. from the cash window's supplier
+/// payment. Admin and Manager. Every other supplier route stays `AdminUser`.
+pub const SUPPLIERS_CREATE: &str = "suppliers:create";
 
 /// Read access to the catalog, stock levels, the stock-movement audit trail
 /// and the category tree — every `GET` under `/api/inventory` except the
@@ -80,7 +83,8 @@ pub const CUSTOMERS_WRITE: &str = "customers:write";
 // and `modules::inventory` already establish.
 // (`suppliers`/`supplier_products`/`purchases` are deliberately *not* here —
 // those modules are gated by `AdminUser` directly, not a permission, since
-// only Admin may touch them at all.)
+// only Admin may touch them at all. The one exception is `POST /api/suppliers`,
+// gated by `SUPPLIERS_CREATE`.)
 pub const BILLING_WRITE: &str = "billing:write";
 pub const REPAIRS_WRITE: &str = "repairs:write";
 pub const PRINT_JOBS_WRITE: &str = "print_jobs:write";

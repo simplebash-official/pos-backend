@@ -73,21 +73,24 @@ async fn send_authed(
     execute(router, request).await
 }
 
-/// Mints an Admin-role JWT — every `suppliers`/`supplier_products`/
-/// `purchases` route requires `AdminUser`, which only checks `role`, never
-/// `permissions`, so an empty permission list is correct here.
+/// Mints an Admin-role JWT carrying its real permission set. Every
+/// `suppliers`/`supplier_products`/`purchases` route requires `AdminUser`
+/// (role only), except `POST /api/suppliers`, which needs `suppliers:create`;
+/// the inventory API used to seed product fixtures gates on `inventory:write`.
 fn admin_token(config: &Config) -> String {
-    common::mint_token(config, Some(Role::Admin), &[])
-}
-
-/// Admin token carrying its *real* permission set, unlike `admin_token`'s
-/// empty one — needed only to seed product fixtures through the inventory
-/// API, whose routes gate on `inventory:write` rather than on the role.
-fn inventory_write_token(config: &Config) -> String {
     common::mint_token(
         config,
         Some(Role::Admin),
         roles::default_permissions(Role::Admin),
+    )
+}
+
+/// A Manager's real token: may register a supplier, nothing else here.
+fn manager_token(config: &Config) -> String {
+    common::mint_token(
+        config,
+        Some(Role::Manager),
+        roles::default_permissions(Role::Manager),
     )
 }
 
@@ -155,7 +158,7 @@ async fn create_product(app: &common::TestApp, stock_quantity: i64) -> (String, 
                 "quantity": stock_quantity, "unitCostCents": 1000, "sellingPriceCents": 2000,
             })),
         })),
-        &inventory_write_token(&app.config),
+        &admin_token(&app.config),
     )
     .await;
     assert_eq!(
@@ -228,6 +231,59 @@ async fn suppliers_endpoints_require_admin_role() {
     let (status, body) = send_authed(&app.router, "GET", "/api/suppliers", None, &non_admin).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
     assert_eq!(body["code"], "ADMIN_REQUIRED");
+}
+
+#[tokio::test]
+async fn manager_can_register_a_supplier_but_not_read_or_change_one() {
+    let app = common::spawn_app().await;
+    let manager = manager_token(&app.config);
+
+    let (_, key, created) = create_supplier(&app.router, &manager).await;
+    assert!(key.starts_with("sup_"), "{created}");
+
+    let id = created["id"].as_str().unwrap();
+    for (method, uri, body) in [
+        ("GET", "/api/suppliers".to_string(), None),
+        ("GET", format!("/api/suppliers/{id}"), None),
+        (
+            "PATCH",
+            format!("/api/suppliers/{id}"),
+            Some(json!({ "notes": "x" })),
+        ),
+        ("DELETE", format!("/api/suppliers/{id}"), None),
+    ] {
+        let (status, body) = send_authed(&app.router, method, &uri, body, &manager).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{method} {uri}: {body}");
+        assert_eq!(body["code"], "ADMIN_REQUIRED", "{method} {uri}");
+    }
+}
+
+#[tokio::test]
+async fn staff_cannot_register_a_supplier() {
+    let app = common::spawn_app().await;
+    let staff = common::mint_token(
+        &app.config,
+        Some(Role::Staff),
+        roles::default_permissions(Role::Staff),
+    );
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/suppliers",
+        Some(sample_supplier_payload()),
+        &staff,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["code"], "PERMISSION_DENIED");
+}
+
+#[test]
+fn only_admin_and_manager_hold_suppliers_create() {
+    use simplebash_pos_backend::core::constants::permissions::SUPPLIERS_CREATE;
+    assert!(roles::default_permissions(Role::Admin).contains(&SUPPLIERS_CREATE));
+    assert!(roles::default_permissions(Role::Manager).contains(&SUPPLIERS_CREATE));
+    assert!(!roles::default_permissions(Role::Staff).contains(&SUPPLIERS_CREATE));
 }
 
 #[tokio::test]
@@ -743,7 +799,7 @@ async fn record_purchase_increments_stock_and_writes_movement() {
         "GET",
         &format!("/api/inventory/products/{product_id}"),
         None,
-        &inventory_write_token(&app.config),
+        &admin_token(&app.config),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -754,7 +810,7 @@ async fn record_purchase_increments_stock_and_writes_movement() {
         "GET",
         &format!("/api/inventory/products/{product_id}/movements"),
         None,
-        &inventory_write_token(&app.config),
+        &admin_token(&app.config),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
