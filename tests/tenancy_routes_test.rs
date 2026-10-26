@@ -21,6 +21,20 @@ use simplebash_pos_backend::{core::constants::roles, domain::users::Role};
 use tower::ServiceExt;
 use uuid::Uuid;
 
+/// The route walks send more GETs per token than the default rate limit allows, and CI is fast
+/// enough that the refill does not cover it. `Once` keeps the tests from racing on the environment.
+async fn spawn_unthrottled() -> common::TestApp {
+    static LIFT: std::sync::Once = std::sync::Once::new();
+    LIFT.call_once(|| {
+        // SAFETY: runs once, before any test in this binary has built a router.
+        unsafe {
+            std::env::set_var("RATE_LIMIT_BURST", "1000000");
+            std::env::set_var("RATE_LIMIT_REFILL_PER_SEC", "1000000");
+        }
+    });
+    common::spawn_app_multi_tenant().await
+}
+
 // The four tests each spin up a throwaway database and run heavy analytics
 // pipelines; run concurrently they exhaust the shared Atlas tier and time out
 // (500s after ~40s). One at a time is fast enough (about 95s) and reliable.
@@ -332,7 +346,7 @@ async fn tenant_b_sees_nothing_of_tenant_a_on_any_get_route() {
         eprintln!("MONGODB_URI not set - skipping");
         return;
     }
-    let app = common::spawn_app_multi_tenant().await;
+    let app = spawn_unthrottled().await;
     let token_a = admin_token(&app, Some("tenant_a"));
     let token_b = admin_token(&app, Some("tenant_b"));
 
@@ -415,7 +429,7 @@ async fn cross_tenant_mutations_fail_with_404_and_leave_data_intact() {
         eprintln!("MONGODB_URI not set - skipping");
         return;
     }
-    let app = common::spawn_app_multi_tenant().await;
+    let app = spawn_unthrottled().await;
     let token_a = admin_token(&app, Some("tenant_a"));
     let token_b = admin_token(&app, Some("tenant_b"));
     let seed = seed_tenant_a(&app, &token_a).await;
@@ -515,7 +529,7 @@ async fn token_without_tenant_is_rejected_and_no_document_is_unstamped() {
         eprintln!("MONGODB_URI not set - skipping");
         return;
     }
-    let app = common::spawn_app_multi_tenant().await;
+    let app = spawn_unthrottled().await;
     let token_a = admin_token(&app, Some("tenant_a"));
     let no_tenant = admin_token(&app, None);
     seed_tenant_a(&app, &token_a).await;
@@ -571,7 +585,7 @@ async fn aggregates_and_cached_reports_are_tenant_scoped() {
         eprintln!("MONGODB_URI not set - skipping");
         return;
     }
-    let app = common::spawn_app_multi_tenant().await;
+    let app = spawn_unthrottled().await;
     let token_a = admin_token(&app, Some("tenant_a"));
     let token_b = admin_token(&app, Some("tenant_b"));
     seed_tenant_a(&app, &token_a).await;
