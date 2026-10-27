@@ -83,7 +83,8 @@ pub(crate) async fn apply_stock_delta(
             if let Some(batch_key) = batch_key
                 && delta != 0
             {
-                repository::stock_batch::adjust_batch_remaining(&mut unit, batch_key, -delta).await?;
+                repository::stock_batch::adjust_batch_remaining(&mut unit, batch_key, -delta)
+                    .await?;
             }
             failed?;
             let existing = repository::product::find_product_by_id(&mut unit, id)

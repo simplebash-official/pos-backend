@@ -929,8 +929,12 @@ pub(crate) async fn find_session_invoices_and_payments(
 ///
 /// shortcut: the Mongo side sums in memory over the payments of the range; a shop's payments fit,
 /// upgrade to a `$group` pipeline when a shop passes hundreds of thousands.
-pub(crate) async fn payment_totals_by_method(db: &Db, since: &str) -> AppResult<Vec<(String, i64, i64)>> {
-    let mut totals: std::collections::BTreeMap<String, (i64, i64)> = std::collections::BTreeMap::new();
+pub(crate) async fn payment_totals_by_method(
+    db: &Db,
+    since: &str,
+) -> AppResult<Vec<(String, i64, i64)>> {
+    let mut totals: std::collections::BTreeMap<String, (i64, i64)> =
+        std::collections::BTreeMap::new();
     let mut add = |method: String, amount: i64| {
         let entry = totals.entry(method).or_default();
         if amount >= 0 {
@@ -948,7 +952,9 @@ pub(crate) async fn payment_totals_by_method(db: &Db, since: &str) -> AppResult<
                 .and_utc();
             let voided: std::collections::HashSet<String> = {
                 let mut cursor = invoices(db)
-                    .find(doc! { "$or": [{ "status": "voided" }, { "voided_at": { "$ne": null } }] })
+                    .find(
+                        doc! { "$or": [{ "status": "voided" }, { "voided_at": { "$ne": null } }] },
+                    )
                     .await?;
                 let mut keys = std::collections::HashSet::new();
                 while let Some(invoice) = cursor.try_next().await? {
@@ -979,5 +985,8 @@ pub(crate) async fn payment_totals_by_method(db: &Db, since: &str) -> AppResult<
             }
         }
     }
-    Ok(totals.into_iter().map(|(method, (received, refunded))| (method, received, refunded)).collect())
+    Ok(totals
+        .into_iter()
+        .map(|(method, (received, refunded))| (method, received, refunded))
+        .collect())
 }

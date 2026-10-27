@@ -11,7 +11,6 @@ use crate::{
     },
 };
 
-
 fn default_version() -> i64 {
     1
 }
@@ -107,9 +106,7 @@ pub struct RegisterSessionDocument {
 
 impl RegisterSessionDocument {
     pub fn calculate_expected_cash(&self) -> i64 {
-        self.opening_float_cents
-            + self.total_cash_sales_cents
-            + self.total_pay_in_cents
+        self.opening_float_cents + self.total_cash_sales_cents + self.total_pay_in_cents
             - self.total_pay_out_cents
             - self.total_cash_refunds_cents
             - self.total_owner_withdrawals_cents
@@ -278,7 +275,9 @@ impl CashMovementDocument {
             undo_until: (self.reverses_key.is_none()
                 && reversed_by_key.is_none()
                 && self.movement_type != CashMovementType::NoSale)
-                .then(|| self.created_at.to_chrono() + chrono::Duration::seconds(undo_window_seconds)),
+                .then(|| {
+                    self.created_at.to_chrono() + chrono::Duration::seconds(undo_window_seconds)
+                }),
             reverses_key: self.reverses_key,
             reversed_by_key,
             recorded_late: self.recorded_late,

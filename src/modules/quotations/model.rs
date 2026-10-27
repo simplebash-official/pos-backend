@@ -23,8 +23,15 @@ pub struct QuotationDocument {
     pub key: String,
     /// Sequential number (e.g. `QUO-0001`).
     pub quotation_number: String,
-    /// `active` or `cancelled`; expiry is derived from `valid_until`.
+    /// `active`, `fulfilled` or `cancelled`; expiry is derived from `valid_until`.
     pub status: String,
+    /// True when this quotation was created with items that were out of stock.
+    #[serde(default)]
+    pub has_out_of_stock_items: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fulfilled_by_invoice_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fulfilled_at: Option<BsonDateTime>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub customer_key: Option<String>,
     /// Customer name frozen at creation.
@@ -89,6 +96,9 @@ impl QuotationDocument {
             key,
             quotation_number: self.quotation_number,
             status: self.status,
+            has_out_of_stock_items: self.has_out_of_stock_items,
+            fulfilled_by_invoice_key: self.fulfilled_by_invoice_key,
+            fulfilled_at: self.fulfilled_at.map(|d| d.to_chrono()),
             customer_key: self.customer_key,
             customer_name: self.customer_name,
             customer_phone: self.customer_phone,
@@ -128,7 +138,10 @@ impl QuotationDocument {
             key,
             quotation_number: self.quotation_number,
             status: self.status,
+            has_out_of_stock_items: self.has_out_of_stock_items,
             is_expired,
+            fulfilled_by_invoice_key: self.fulfilled_by_invoice_key,
+            fulfilled_at: self.fulfilled_at.map(|d| d.to_chrono()),
             customer_key: self.customer_key,
             customer_name: self.customer_name,
             customer_phone: self.customer_phone,

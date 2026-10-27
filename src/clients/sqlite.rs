@@ -196,8 +196,10 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
                 .await?;
         }
         if !purchase_cols.iter().any(|c| c == "line_total_cents") {
-            tx.execute("ALTER TABLE purchases ADD COLUMN line_total_cents INTEGER NOT NULL DEFAULT 0")
-                .await?;
+            tx.execute(
+                "ALTER TABLE purchases ADD COLUMN line_total_cents INTEGER NOT NULL DEFAULT 0",
+            )
+            .await?;
             tx.execute(
                 "ALTER TABLE purchases ADD COLUMN charges_share_cents INTEGER NOT NULL DEFAULT 0",
             )
@@ -281,7 +283,9 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .await;
     }
 
-    let credit_note_cols = table_columns(pool, "credit_notes").await.unwrap_or_default();
+    let credit_note_cols = table_columns(pool, "credit_notes")
+        .await
+        .unwrap_or_default();
     if !credit_note_cols.is_empty() && !credit_note_cols.iter().any(|n| n == "session_key") {
         tracing::info!("Migrating 'credit_notes' table: adding 'session_key' column");
         let _ = pool
@@ -292,9 +296,17 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .await;
     }
 
-    let shop_profile_cols = table_columns(pool, "shop_profiles").await.unwrap_or_default();
-    if !shop_profile_cols.is_empty() && !shop_profile_cols.iter().any(|n| n == "allow_shared_user_sessions") {
-        tracing::info!("Migrating 'shop_profiles' table: adding 'allow_shared_user_sessions' column");
+    let shop_profile_cols = table_columns(pool, "shop_profiles")
+        .await
+        .unwrap_or_default();
+    if !shop_profile_cols.is_empty()
+        && !shop_profile_cols
+            .iter()
+            .any(|n| n == "allow_shared_user_sessions")
+    {
+        tracing::info!(
+            "Migrating 'shop_profiles' table: adding 'allow_shared_user_sessions' column"
+        );
         let _ = pool
             .execute("ALTER TABLE shop_profiles ADD COLUMN allow_shared_user_sessions INTEGER NOT NULL DEFAULT 0")
             .await;
@@ -343,12 +355,18 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         }
         // Which design rendered the PDF (nullable: rows from before designs
         // were recorded keep NULL).
-        for column in ["template_ref TEXT", "template_title TEXT", "template_version INTEGER"] {
+        for column in [
+            "template_ref TEXT",
+            "template_title TEXT",
+            "template_version INTEGER",
+        ] {
             let name = column.split(' ').next().expect("column name");
             if !gen_doc_cols.iter().any(|(_, existing)| existing == name) {
                 tracing::info!("Migrating 'generated_documents' table: adding '{name}' column");
-                pool.execute(format!("ALTER TABLE generated_documents ADD COLUMN {column}").as_str())
-                    .await?;
+                pool.execute(
+                    format!("ALTER TABLE generated_documents ADD COLUMN {column}").as_str(),
+                )
+                .await?;
             }
         }
         let _ = pool
@@ -393,6 +411,18 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
                 "updated_by_device",
                 "ALTER TABLE quotations ADD COLUMN updated_by_device TEXT",
             ),
+            (
+                "fulfilled_by_invoice_key",
+                "ALTER TABLE quotations ADD COLUMN fulfilled_by_invoice_key TEXT",
+            ),
+            (
+                "fulfilled_at",
+                "ALTER TABLE quotations ADD COLUMN fulfilled_at TEXT",
+            ),
+            (
+                "has_out_of_stock_items",
+                "ALTER TABLE quotations ADD COLUMN has_out_of_stock_items INTEGER NOT NULL DEFAULT 0",
+            ),
         ] {
             if !quotation_cols.iter().any(|(_, name)| name == column) {
                 tracing::info!("Migrating 'quotations' table: adding '{column}' column");
@@ -407,8 +437,14 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     let movement_columns = table_columns(pool, "cash_movements").await?;
     if !movement_columns.is_empty() {
         for (column, ddl) in [
-            ("approval_reason", "ALTER TABLE cash_movements ADD COLUMN approval_reason TEXT"),
-            ("reverses_key", "ALTER TABLE cash_movements ADD COLUMN reverses_key TEXT"),
+            (
+                "approval_reason",
+                "ALTER TABLE cash_movements ADD COLUMN approval_reason TEXT",
+            ),
+            (
+                "reverses_key",
+                "ALTER TABLE cash_movements ADD COLUMN reverses_key TEXT",
+            ),
         ] {
             if !movement_columns.iter().any(|c| c == column) {
                 pool.execute(ddl).await?;

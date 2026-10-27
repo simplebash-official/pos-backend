@@ -10,11 +10,7 @@ use axum::{
 use serde_json::{Value, json};
 use simplebash_pos_backend::{
     core::constants::roles,
-    domain::{
-        cash_categories::category_key,
-        sessions::CashMovementType,
-        users::Role,
-    },
+    domain::{cash_categories::category_key, sessions::CashMovementType, users::Role},
 };
 
 /// Key of a built-in cash category, the way the app derives it.
@@ -427,11 +423,19 @@ async fn session_full_lifecycle_and_z_report() {
     // The shift's movements totalled by kind and category: cash added in, a payout and the owner's drawing out.
     let summary = body["data"]["movementSummary"].as_array().unwrap();
     let total = |direction: &str| -> i64 {
-        summary.iter().filter(|g| g["direction"] == direction).map(|g| g["totalCents"].as_i64().unwrap()).sum()
+        summary
+            .iter()
+            .filter(|g| g["direction"] == direction)
+            .map(|g| g["totalCents"].as_i64().unwrap())
+            .sum()
     };
     assert_eq!(total("in"), 5000, "{summary:?}");
     assert_eq!(total("out"), 2000 + 60000, "{summary:?}");
-    assert!(summary.iter().all(|g| g["count"].as_u64().unwrap() >= 1 && g["categoryName"].is_string()));
+    assert!(
+        summary
+            .iter()
+            .all(|g| g["count"].as_u64().unwrap() >= 1 && g["categoryName"].is_string())
+    );
     assert_eq!(body["data"]["totalInvoicesCount"], 1);
     assert_eq!(body["data"]["discountCents"], 0);
     let cash_pm = body["data"]["paymentMethods"]
@@ -607,7 +611,10 @@ async fn session_full_lifecycle_and_z_report() {
     .await;
     assert_eq!(status, StatusCode::OK, "Body: {body}");
     assert_eq!(body["data"]["status"], "reopened");
-    assert!(body["data"]["closedAt"].is_null(), "closedAt must be null upon reopen");
+    assert!(
+        body["data"]["closedAt"].is_null(),
+        "closedAt must be null upon reopen"
+    );
 
     // 10b. Verify current session endpoint resolves the reopened session for the terminal
     let (status, body) = send_authed(
@@ -649,7 +656,10 @@ async fn session_full_lifecycle_and_z_report() {
     .await;
     assert_eq!(status, StatusCode::OK, "Body: {body}");
     assert_eq!(body["data"]["status"], "closed");
-    assert!(!body["data"]["closedAt"].is_null(), "closedAt must be set upon close");
+    assert!(
+        !body["data"]["closedAt"].is_null(),
+        "closedAt must be set upon close"
+    );
 
     // 11. Test listing sessions with search query
     let (status, body) = send_authed(
@@ -1750,7 +1760,8 @@ async fn cancel_close_returns_a_counted_shift_to_open() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "Body: {closed}");
-    let (status, refused) = send_authed(&app.router, "POST", &cancel_path, None, &staff_token).await;
+    let (status, refused) =
+        send_authed(&app.router, "POST", &cancel_path, None, &staff_token).await;
     assert_eq!(status, StatusCode::CONFLICT, "Body: {refused}");
 
     // Unknown shift.

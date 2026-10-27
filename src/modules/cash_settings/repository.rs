@@ -24,8 +24,9 @@ fn from_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<CashSettingsDocument> {
         key: row.get("key"),
         undo_window_seconds: row.get("undo_window_seconds"),
         approval_threshold_cents: row.get("approval_threshold_cents"),
-        quick_amounts_cents: serde_json::from_str(&chips)
-            .map_err(|e| AppError::internal(format!("Unreadable quick amounts in database: {e}")))?,
+        quick_amounts_cents: serde_json::from_str(&chips).map_err(|e| {
+            AppError::internal(format!("Unreadable quick amounts in database: {e}"))
+        })?,
         float_target_cents: row.get("float_target_cents"),
         updated_by_name_snapshot: row.get("updated_by_name_snapshot"),
         version: row.get("version"),
@@ -50,7 +51,10 @@ pub(crate) async fn find(db: &Db, key: &str) -> AppResult<Option<CashSettingsDoc
 }
 
 /// Inserts the row.
-pub(crate) async fn insert(db: &Db, mut document: CashSettingsDocument) -> AppResult<CashSettingsDocument> {
+pub(crate) async fn insert(
+    db: &Db,
+    mut document: CashSettingsDocument,
+) -> AppResult<CashSettingsDocument> {
     match db {
         Db::Mongo(db) => {
             let res = settings(db).insert_one(&document).await?;
@@ -58,7 +62,10 @@ pub(crate) async fn insert(db: &Db, mut document: CashSettingsDocument) -> AppRe
             Ok(document)
         }
         Db::Sqlite(pool) => {
-            let id = document.id.map(|o| o.to_hex()).unwrap_or_else(generate_id_hex);
+            let id = document
+                .id
+                .map(|o| o.to_hex())
+                .unwrap_or_else(generate_id_hex);
             sqlx::query(
                 "INSERT INTO cash_settings (
                     key, id, undo_window_seconds, approval_threshold_cents, quick_amounts_cents,
@@ -87,7 +94,9 @@ pub(crate) async fn insert(db: &Db, mut document: CashSettingsDocument) -> AppRe
 pub(crate) async fn save(db: &Db, document: &CashSettingsDocument) -> AppResult<()> {
     match db {
         Db::Mongo(db) => {
-            settings(db).replace_one(doc! { "key": &document.key }, document).await?;
+            settings(db)
+                .replace_one(doc! { "key": &document.key }, document)
+                .await?;
             Ok(())
         }
         Db::Sqlite(pool) => {

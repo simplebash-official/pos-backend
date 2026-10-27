@@ -250,7 +250,10 @@ mod tests {
         assert!(limits.allow("a", "/api/calc/receipt"));
         assert!(limits.allow("a", "/api/calc/receipt"));
         assert!(!limits.allow("a", "/api/calc/receipt"), "live burst spent");
-        assert!(limits.allow("a", "/api/billing"), "general bucket untouched");
+        assert!(
+            limits.allow("a", "/api/billing"),
+            "general bucket untouched"
+        );
     }
 
     #[test]

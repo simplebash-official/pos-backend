@@ -139,18 +139,18 @@ pub(crate) async fn hydrate(
             supplier_products_service::hydrate_sync_documents(documents)?,
         )?,
         "purchases" => to_values(purchases_service::hydrate_sync_documents(db, documents).await?)?,
-        "purchaseReceipts" | "purchase_receipts" => {
-            to_values(purchases_receipt_service::hydrate_sync_documents(documents)?)?
-        }
-        "receiptSettlements" | "receipt_settlements" => {
-            to_values(purchases_settlement_service::hydrate_sync_documents(documents)?)?
-        }
+        "purchaseReceipts" | "purchase_receipts" => to_values(
+            purchases_receipt_service::hydrate_sync_documents(documents)?,
+        )?,
+        "receiptSettlements" | "receipt_settlements" => to_values(
+            purchases_settlement_service::hydrate_sync_documents(documents)?,
+        )?,
         "supplierCredits" | "supplier_credits" => {
             to_values(purchases_credit_service::hydrate_sync_documents(documents)?)?
         }
-        "receiptCharges" | "receipt_charges" => {
-            to_values(purchases_receipt_service::hydrate_charge_documents(documents)?)?
-        }
+        "receiptCharges" | "receipt_charges" => to_values(
+            purchases_receipt_service::hydrate_charge_documents(documents)?,
+        )?,
         // The expense ledger has no read-time enrichment on its stored rows, so the wire shape is
         // the stored fields in camelCase.
         "expenses" | "expensePayments" | "expense_payments" => {
@@ -191,7 +191,8 @@ pub(crate) async fn hydrate(
             crate::modules::sessions::service::hydrate_session_sync_documents(documents)?,
         )?,
         "cashMovements" | "cash_movements" => to_values(
-            crate::modules::sessions::service::hydrate_movement_sync_documents(db, documents).await?,
+            crate::modules::sessions::service::hydrate_movement_sync_documents(db, documents)
+                .await?,
         )?,
         _ => Vec::new(),
     };
@@ -222,7 +223,10 @@ fn stored_fields_to_json(document: Document) -> Value {
             Bson::ObjectId(id) => Value::String(id.to_hex()),
             Bson::DateTime(date) => Value::String(date.to_chrono().to_rfc3339()),
             Bson::Document(inner) => Value::Object(
-                inner.into_iter().map(|(k, v)| (camel(&k), convert(v))).collect(),
+                inner
+                    .into_iter()
+                    .map(|(k, v)| (camel(&k), convert(v)))
+                    .collect(),
             ),
             Bson::Array(items) => Value::Array(items.into_iter().map(convert).collect()),
             Bson::String(text) => Value::String(text),
@@ -240,7 +244,11 @@ fn stored_fields_to_json(document: Document) -> Value {
             .into_iter()
             .filter(|(key, _)| key != crate::core::tenancy::TENANT_FIELD)
             .map(|(key, value)| {
-                let name = if key == "_id" { "id".to_string() } else { camel(&key) };
+                let name = if key == "_id" {
+                    "id".to_string()
+                } else {
+                    camel(&key)
+                };
                 (name, convert(value))
             })
             .collect(),

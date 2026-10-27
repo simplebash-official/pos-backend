@@ -16,15 +16,17 @@ use crate::{
         cash_categories::{ReportGroup, category_key},
         expenses::PaidFrom,
         finance_reports::{
-            AccountCashFlow, CashFlowLine, CashFlowResponse, CategoryBreakdown, ChartSeries, CategoryTotal,
-            ExpenseBreakdownResponse, ExpenseGroupTotal, MonthTotal, PayableBill, PayableSupplier, PayablesResponse,
-            ProfitLossResponse,
+            AccountCashFlow, CashFlowLine, CashFlowResponse, CategoryBreakdown, CategoryTotal,
+            ChartSeries, ExpenseBreakdownResponse, ExpenseGroupTotal, MonthTotal, PayableBill,
+            PayableSupplier, PayablesResponse, ProfitLossResponse,
         },
         incomes::ReceivedInto,
         purchase_receipts::ReceiptListQuery,
         sessions::CashMovementType,
     },
-    modules::{balances, billing, cash_categories, expenses, incomes, purchases, reports, sessions},
+    modules::{
+        balances, billing, cash_categories, expenses, incomes, purchases, reports, sessions,
+    },
 };
 
 /// The longest range a report covers, so one request cannot read years of records.
@@ -42,10 +44,14 @@ fn parse_day(label: &str, value: &str) -> AppResult<NaiveDate> {
 fn parse_range(from: &str, to: &str) -> AppResult<(NaiveDate, NaiveDate)> {
     let (start, end) = (parse_day("start date", from)?, parse_day("end date", to)?);
     if end < start {
-        return Err(AppError::validation("The end date cannot be before the start date."));
+        return Err(AppError::validation(
+            "The end date cannot be before the start date.",
+        ));
     }
     if (end - start).num_days() > MAX_DAYS {
-        return Err(AppError::validation("Please pick a period of at most two years."));
+        return Err(AppError::validation(
+            "Please pick a period of at most two years.",
+        ));
     }
     Ok((start, end))
 }
@@ -64,10 +70,18 @@ type CategorySums = BTreeMap<String, (String, i64)>;
 fn sorted_totals(map: CategorySums) -> Vec<CategoryTotal> {
     let mut list: Vec<CategoryTotal> = map
         .into_iter()
-        .map(|(key, (name, total))| CategoryTotal { category_key: key, category_name: name, total_cents: total })
+        .map(|(key, (name, total))| CategoryTotal {
+            category_key: key,
+            category_name: name,
+            total_cents: total,
+        })
         .filter(|c| c.total_cents != 0)
         .collect();
-    list.sort_by(|a, b| b.total_cents.cmp(&a.total_cents).then(a.category_name.cmp(&b.category_name)));
+    list.sort_by(|a, b| {
+        b.total_cents
+            .cmp(&a.total_cents)
+            .then(a.category_name.cmp(&b.category_name))
+    });
     list
 }
 
@@ -76,16 +90,26 @@ fn sorted_totals(map: CategorySums) -> Vec<CategoryTotal> {
 /// payments, owner drawings, cash moves and loan repayments are not costs (see `ReportGroup`).
 pub async fn profit_loss(db: &Db, from: &str, to: &str) -> AppResult<ProfitLossResponse> {
     let (start, end) = parse_range(from, to)?;
-    let after_end = end.succ_opt().ok_or_else(|| AppError::validation("Please pick a valid end date."))?;
+    let after_end = end
+        .succ_opt()
+        .ok_or_else(|| AppError::validation("Please pick a valid end date."))?;
     let (sales_cents, cost_of_goods_cents, refunds_cents) =
-        reports::service::monthly_profit::sales_cost_and_refunds(db, start_of(start), start_of(after_end)).await?;
+        reports::service::monthly_profit::sales_cost_and_refunds(
+            db,
+            start_of(start),
+            start_of(after_end),
+        )
+        .await?;
     let net_sales_cents = sales_cents - refunds_cents;
     let gross_profit_cents = net_sales_cents - cost_of_goods_cents;
 
     let mut income = CategorySums::new();
     for row in incomes::service::rows_between(db, from, to).await? {
         if row.report_group == ReportGroup::OtherIncome {
-            income.entry(row.category_key).or_insert((row.category_name, 0)).1 += row.amount_cents;
+            income
+                .entry(row.category_key)
+                .or_insert((row.category_name, 0))
+                .1 += row.amount_cents;
         }
     }
     let other_income = sorted_totals(income);
@@ -93,7 +117,10 @@ pub async fn profit_loss(db: &Db, from: &str, to: &str) -> AppResult<ProfitLossR
 
     let mut groups: BTreeMap<&'static str, (ReportGroup, CategorySums)> = BTreeMap::new();
     for row in expenses::service::rows_between(db, from, to).await? {
-        if matches!(row.report_group, ReportGroup::OperatingExpense | ReportGroup::Payroll) {
+        if matches!(
+            row.report_group,
+            ReportGroup::OperatingExpense | ReportGroup::Payroll
+        ) {
             groups
                 .entry(row.report_group.as_str())
                 .or_insert((row.report_group, CategorySums::new()))
@@ -107,7 +134,11 @@ pub async fn profit_loss(db: &Db, from: &str, to: &str) -> AppResult<ProfitLossR
         .into_values()
         .map(|(group, categories)| {
             let categories = sorted_totals(categories);
-            ExpenseGroupTotal { group, total_cents: categories.iter().map(|c| c.total_cents).sum(), categories }
+            ExpenseGroupTotal {
+                group,
+                total_cents: categories.iter().map(|c| c.total_cents).sum(),
+                categories,
+            }
         })
         .collect();
     let expenses_cents = expense_groups.iter().map(|g| g.total_cents).sum::<i64>();
@@ -148,15 +179,22 @@ const CHART_CATEGORIES: usize = 5;
 
 /// What was spent per category and month. Includes supplier stock payments (they are money spent), and counts a
 /// rent or pay payment in the month it covers, like the Regular bills do.
-pub async fn expense_breakdown(db: &Db, from: &str, to: &str) -> AppResult<ExpenseBreakdownResponse> {
+pub async fn expense_breakdown(
+    db: &Db,
+    from: &str,
+    to: &str,
+) -> AppResult<ExpenseBreakdownResponse> {
     let (start, end) = parse_range(from, to)?;
     let months = months_between(start, end);
-    let mut by_category: BTreeMap<String, (String, ReportGroup, BTreeMap<String, i64>)> = BTreeMap::new();
+    let mut by_category: BTreeMap<String, (String, ReportGroup, BTreeMap<String, i64>)> =
+        BTreeMap::new();
     let mut by_month: BTreeMap<String, i64> = months.iter().map(|m| (m.clone(), 0)).collect();
     for row in expenses::service::rows_between(db, from, to).await? {
         let month = expenses::service::counted_month(&row).to_string();
         // A period the row names can fall outside the asked range (rent for last month paid today).
-        let Some(slot) = by_month.get_mut(&month) else { continue };
+        let Some(slot) = by_month.get_mut(&month) else {
+            continue;
+        };
         *slot += row.amount_cents;
         *by_category
             .entry(row.category_key)
@@ -175,11 +213,18 @@ pub async fn expense_breakdown(db: &Db, from: &str, to: &str) -> AppResult<Expen
             share_percent: 0,
             months: months
                 .iter()
-                .map(|m| MonthTotal { month: m.clone(), total_cents: per_month.get(m).copied().unwrap_or(0) })
+                .map(|m| MonthTotal {
+                    month: m.clone(),
+                    total_cents: per_month.get(m).copied().unwrap_or(0),
+                })
                 .collect(),
         })
         .collect();
-    categories.sort_by(|a, b| b.total_cents.cmp(&a.total_cents).then(a.category_name.cmp(&b.category_name)));
+    categories.sort_by(|a, b| {
+        b.total_cents
+            .cmp(&a.total_cents)
+            .then(a.category_name.cmp(&b.category_name))
+    });
     let total_cents: i64 = by_month.values().sum();
     for c in &mut categories {
         c.share_percent = (share_basis_points(c.total_cents, total_cents) + 50) / 100;
@@ -187,16 +232,27 @@ pub async fn expense_breakdown(db: &Db, from: &str, to: &str) -> AppResult<Expen
     let mut chart: Vec<ChartSeries> = categories
         .iter()
         .take(CHART_CATEGORIES)
-        .map(|c| ChartSeries { name: c.category_name.clone(), is_other: false, months: c.months.clone() })
+        .map(|c| ChartSeries {
+            name: c.category_name.clone(),
+            is_other: false,
+            months: c.months.clone(),
+        })
         .collect();
     if categories.len() > CHART_CATEGORIES {
         let months = (0..months.len())
             .map(|i| MonthTotal {
                 month: months[i].clone(),
-                total_cents: categories[CHART_CATEGORIES..].iter().map(|c| c.months[i].total_cents).sum(),
+                total_cents: categories[CHART_CATEGORIES..]
+                    .iter()
+                    .map(|c| c.months[i].total_cents)
+                    .sum(),
             })
             .collect();
-        chart.push(ChartSeries { name: String::new(), is_other: true, months });
+        chart.push(ChartSeries {
+            name: String::new(),
+            is_other: true,
+            months,
+        });
     }
     Ok(ExpenseBreakdownResponse {
         from: day(start),
@@ -204,7 +260,10 @@ pub async fn expense_breakdown(db: &Db, from: &str, to: &str) -> AppResult<Expen
         total_cents,
         chart,
         categories,
-        months: by_month.into_iter().map(|(month, total_cents)| MonthTotal { month, total_cents }).collect(),
+        months: by_month
+            .into_iter()
+            .map(|(month, total_cents)| MonthTotal { month, total_cents })
+            .collect(),
     })
 }
 
@@ -214,17 +273,36 @@ where
     F: Fn(String) -> Fut,
     Fut: std::future::Future<Output = AppResult<T>>,
 {
-    Ok((read(from.to_string()).await?, read(after_to.to_string()).await?))
+    Ok((
+        read(from.to_string()).await?,
+        read(after_to.to_string()).await?,
+    ))
 }
 
 fn line(code: &str, in_cents: i64, out_cents: i64) -> CashFlowLine {
-    CashFlowLine { code: code.to_string(), in_cents, out_cents }
+    CashFlowLine {
+        code: code.to_string(),
+        in_cents,
+        out_cents,
+    }
 }
 
 fn flow(kind: AccountKind, lines: Vec<CashFlowLine>) -> AccountCashFlow {
-    let lines: Vec<CashFlowLine> = lines.into_iter().filter(|l| l.in_cents != 0 || l.out_cents != 0).collect();
-    let (in_cents, out_cents) = (lines.iter().map(|l| l.in_cents).sum::<i64>(), lines.iter().map(|l| l.out_cents).sum::<i64>());
-    AccountCashFlow { kind, in_cents, out_cents, net_cents: in_cents - out_cents, lines }
+    let lines: Vec<CashFlowLine> = lines
+        .into_iter()
+        .filter(|l| l.in_cents != 0 || l.out_cents != 0)
+        .collect();
+    let (in_cents, out_cents) = (
+        lines.iter().map(|l| l.in_cents).sum::<i64>(),
+        lines.iter().map(|l| l.out_cents).sum::<i64>(),
+    );
+    AccountCashFlow {
+        kind,
+        in_cents,
+        out_cents,
+        net_cents: in_cents - out_cents,
+        lines,
+    }
 }
 
 /// Money in and out of each account over a period, with the reasons. A cash drop to the bank is money out of the
@@ -232,7 +310,9 @@ fn flow(kind: AccountKind, lines: Vec<CashFlowLine>) -> AccountCashFlow {
 /// shop's own settlement into the bank is not recorded).
 pub async fn cash_flow(db: &Db, from: &str, to: &str) -> AppResult<CashFlowResponse> {
     let (start, end) = parse_range(from, to)?;
-    let after_end = day(end.succ_opt().ok_or_else(|| AppError::validation("Please pick a valid end date."))?);
+    let after_end = day(end
+        .succ_opt()
+        .ok_or_else(|| AppError::validation("Please pick a valid end date."))?);
     let from_day = day(start);
 
     // Sales and refunds by method.
@@ -242,7 +322,9 @@ pub async fn cash_flow(db: &Db, from: &str, to: &str) -> AppResult<CashFlowRespo
     .await?;
     let sales = |method: &str| -> (i64, i64) {
         let pick = |rows: &[(String, i64, i64)]| {
-            rows.iter().filter(|(m, _, _)| m == method).fold((0, 0), |acc, (_, r, f)| (acc.0 + r, acc.1 + f))
+            rows.iter()
+                .filter(|(m, _, _)| m == method)
+                .fold((0, 0), |acc, (_, r, f)| (acc.0 + r, acc.1 + f))
         };
         let (x, y) = (pick(&a), pick(&b));
         (x.0 - y.0, x.1 - y.1)
@@ -254,7 +336,12 @@ pub async fn cash_flow(db: &Db, from: &str, to: &str) -> AppResult<CashFlowRespo
     })
     .await?;
     let paid = |from_account: PaidFrom| -> i64 {
-        let sum = |rows: &[(PaidFrom, i64)]| rows.iter().filter(|(f, _)| *f == from_account).map(|(_, c)| c).sum::<i64>();
+        let sum = |rows: &[(PaidFrom, i64)]| {
+            rows.iter()
+                .filter(|(f, _)| *f == from_account)
+                .map(|(_, c)| c)
+                .sum::<i64>()
+        };
         sum(&pa) - sum(&pb)
     };
     let (ra, rb) = between(&from_day, &after_end, |d| async move {
@@ -262,14 +349,26 @@ pub async fn cash_flow(db: &Db, from: &str, to: &str) -> AppResult<CashFlowRespo
     })
     .await?;
     let received = |into: ReceivedInto| -> i64 {
-        let sum = |rows: &[(ReceivedInto, i64)]| rows.iter().filter(|(i, _)| *i == into).map(|(_, c)| c).sum::<i64>();
+        let sum = |rows: &[(ReceivedInto, i64)]| {
+            rows.iter()
+                .filter(|(i, _)| *i == into)
+                .map(|(_, c)| c)
+                .sum::<i64>()
+        };
         sum(&ra) - sum(&rb)
     };
 
     // The drawer's own movements, and the bank deposits among them.
-    let deposit = cash_categories::service::keys_including_merged(db, &category_key(CashMovementType::CashDrop, BANK_DEPOSIT)).await?;
-    let withdrawal =
-        cash_categories::service::keys_including_merged(db, &category_key(CashMovementType::AddCash, BANK_WITHDRAWAL)).await?;
+    let deposit = cash_categories::service::keys_including_merged(
+        db,
+        &category_key(CashMovementType::CashDrop, BANK_DEPOSIT),
+    )
+    .await?;
+    let withdrawal = cash_categories::service::keys_including_merged(
+        db,
+        &category_key(CashMovementType::AddCash, BANK_WITHDRAWAL),
+    )
+    .await?;
     let (mut cash_added, mut paid_out, mut owner, mut to_bank_or_safe) = (0, 0, 0, 0);
     let (mut deposited, mut withdrawn) = (0, 0);
     for m in sessions::service::movements_between(db, &from_day, &day(end)).await? {
@@ -366,16 +465,22 @@ pub async fn payables(db: &Db) -> AppResult<PayablesResponse> {
         (None, None) => a.number.cmp(&b.number),
     });
     let bills_cents = bills.iter().map(|b| b.balance_cents).sum::<i64>();
-    let overdue_cents = bills.iter().filter(|b| b.is_overdue).map(|b| b.balance_cents).sum::<i64>();
+    let overdue_cents = bills
+        .iter()
+        .filter(|b| b.is_overdue)
+        .map(|b| b.balance_cents)
+        .sum::<i64>();
 
     let mut suppliers: Vec<PayableSupplier> = balances::service::list_supplier_balances(db)
         .await?
         .suppliers
         .into_iter()
         .filter_map(|s| match s.balance_cents {
-            Some(balance) if balance > 0 => {
-                Some(PayableSupplier { supplier_key: s.supplier_key, name: s.name, balance_cents: balance })
-            }
+            Some(balance) if balance > 0 => Some(PayableSupplier {
+                supplier_key: s.supplier_key,
+                name: s.name,
+                balance_cents: balance,
+            }),
             _ => None,
         })
         .collect();
@@ -405,9 +510,17 @@ pub async fn payables(db: &Db) -> AppResult<PayablesResponse> {
     }
     for (supplier_key, balance_cents) in due_by_supplier {
         let name = without_opening[&supplier_key].clone();
-        suppliers.push(PayableSupplier { supplier_key, name, balance_cents });
+        suppliers.push(PayableSupplier {
+            supplier_key,
+            name,
+            balance_cents,
+        });
     }
-    suppliers.sort_by(|a, b| b.balance_cents.cmp(&a.balance_cents).then(a.name.cmp(&b.name)));
+    suppliers.sort_by(|a, b| {
+        b.balance_cents
+            .cmp(&a.balance_cents)
+            .then(a.name.cmp(&b.name))
+    });
     let suppliers_cents = suppliers.iter().map(|s| s.balance_cents).sum::<i64>();
 
     Ok(PayablesResponse {

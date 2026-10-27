@@ -49,6 +49,10 @@ pub struct Product {
     /// stored), so it is a read-time enrichment on the sync wire as well.
     /// Empty when nothing is in stock.
     pub price_tiers: Vec<PriceTier>,
+    /// Most recent unit selling price recorded on historical batches.
+    /// Present even when current stock is 0. None only if product never had batches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_selling_price_cents: Option<i64>,
     /// Current count of items in stock (the sum of every batch's remaining
     /// quantity — derived from the stock-movement ledger).
     pub stock_quantity: i64,

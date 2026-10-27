@@ -45,7 +45,10 @@ fn income_from_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<IncomeDocument> {
 }
 
 /// Inserts a new income.
-pub(crate) async fn insert_income(db: &Db, mut document: IncomeDocument) -> AppResult<IncomeDocument> {
+pub(crate) async fn insert_income(
+    db: &Db,
+    mut document: IncomeDocument,
+) -> AppResult<IncomeDocument> {
     match db {
         Db::Mongo(db) => {
             let res = incomes(db).insert_one(&document).await?;
@@ -53,7 +56,10 @@ pub(crate) async fn insert_income(db: &Db, mut document: IncomeDocument) -> AppR
             Ok(document)
         }
         Db::Sqlite(pool) => {
-            let id = document.id.map(|o| o.to_hex()).unwrap_or_else(generate_id_hex);
+            let id = document
+                .id
+                .map(|o| o.to_hex())
+                .unwrap_or_else(generate_id_hex);
             sqlx::query(
                 "INSERT INTO incomes (
                     key, id, income_number, income_date, category_key, payee_key, payee_name,
@@ -114,7 +120,11 @@ pub(crate) async fn list_incomes(
             if let Some(to) = to {
                 range.insert("$lte", to);
             }
-            let filter = if range.is_empty() { doc! {} } else { doc! { "income_date": range } };
+            let filter = if range.is_empty() {
+                doc! {}
+            } else {
+                doc! { "income_date": range }
+            };
             let mut cursor = incomes(db).find(filter).await?;
             let mut out = Vec::new();
             while let Some(d) = cursor.try_next().await? {
@@ -137,7 +147,12 @@ pub(crate) async fn list_incomes(
             if let Some(to) = to {
                 query = query.bind(to);
             }
-            query.fetch_all(pool).await?.iter().map(income_from_row).collect()
+            query
+                .fetch_all(pool)
+                .await?
+                .iter()
+                .map(income_from_row)
+                .collect()
         }
     }
 }

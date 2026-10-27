@@ -24,10 +24,10 @@ use crate::{
         earnings::{self, CalcEarningsReply, CalcEarningsRequest},
         invoice_balance::{self, CalcInvoiceBalanceReply, CalcInvoiceBalanceRequest},
         quotation::{self, CalcQuotationReply, CalcQuotationRequest},
+        receipt::{self, CalcReceiptReply, CalcReceiptRequest},
         settlement::{self, CalcSettlementReply, CalcSettlementRequest, OpenBill},
         shares::{self, CalcSharesReply, CalcSharesRequest},
         shift_totals::{self, CalcShiftTotalsReply, CalcShiftTotalsRequest, ShiftFigures},
-        receipt::{self, CalcReceiptReply, CalcReceiptRequest},
     },
 };
 
@@ -69,7 +69,11 @@ async fn calc_earnings(
     user: CurrentUser,
     Json(body): Json<CalcEarningsRequest>,
 ) -> AppResult<Json<ApiResponse<CalcEarningsReply>>> {
-    user.require_any_permission(&[perm::REPAIRS_WRITE, perm::PRINT_JOBS_WRITE, perm::EMPLOYEES_READ])?;
+    user.require_any_permission(&[
+        perm::REPAIRS_WRITE,
+        perm::PRINT_JOBS_WRITE,
+        perm::EMPLOYEES_READ,
+    ])?;
     let reply = earnings::compute(&body)?;
     Ok(Json(ApiResponse::success(reply, "Calculated")))
 }
@@ -131,7 +135,10 @@ async fn calc_shift_totals(
             cash_variance_cents: session.cash_variance_cents,
         });
     }
-    Ok(Json(ApiResponse::success(shift_totals::compute(&shifts), "Calculated")))
+    Ok(Json(ApiResponse::success(
+        shift_totals::compute(&shifts),
+        "Calculated",
+    )))
 }
 
 // ============================================================================

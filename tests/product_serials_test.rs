@@ -184,7 +184,14 @@ async fn record_purchase(
         "date": chrono::Utc::now().to_rfc3339(),
         "lines": [line],
     });
-    send_authed(&app.router, "POST", "/api/purchase-receipts", Some(body), &token).await
+    send_authed(
+        &app.router,
+        "POST",
+        "/api/purchase-receipts",
+        Some(body),
+        &token,
+    )
+    .await
 }
 
 async fn list_serials(

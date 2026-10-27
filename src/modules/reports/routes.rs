@@ -25,7 +25,7 @@ use crate::{
         employees::EmployeeEarningsResponse,
         reports::{
             AnalyticsPaymentMethodsResponse, AnalyticsRangeQuery, AnalyticsSummaryResponse,
-            CashierPerformanceResponse, DailySalesQuery, DashboardPulse, DailySalesReportResponse,
+            CashierPerformanceResponse, DailySalesQuery, DailySalesReportResponse, DashboardPulse,
             DiscountAnalyticsResponse, EmployeeCommissionsQuery, EmployeeCommissionsReportResponse,
             EngineFeedQuery, EngineFeedResponse, EngineInvalidateResponse,
             InventoryValuationResponse, MonthlyProfitQuery, MonthlyProfitReportResponse,
@@ -311,6 +311,7 @@ async fn get_dashboard_pulse(
         &state.db,
         user.has_permission(perm::EMPLOYEES_READ),
         user.has_permission(perm::INVENTORY_READ),
+        user.has_permission(perm::QUOTATIONS_MANAGE),
     )
     .await?;
     Ok(Json(ApiResponse::success(

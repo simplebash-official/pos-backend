@@ -743,7 +743,10 @@ async fn payment_scenario(app: &common::TestApp) {
     assert_eq!(row["amountCents"], 8_000);
     // No day, or a terminal, or a PIN: refused for a bank payment.
     for (payment, approval) in [
-        (json!({ "source": "bank", "amountCents": 8_000, "categoryKey": cod }), None),
+        (
+            json!({ "source": "bank", "amountCents": 8_000, "categoryKey": cod }),
+            None,
+        ),
         (bank(json!({ "terminalId": terminal })), None),
         (bank(json!({})), Some(json!({ "managerPin": "1234" }))),
     ] {
@@ -946,7 +949,10 @@ async fn payment_scenario(app: &common::TestApp) {
     assert_eq!(second["data"]["settlements"].as_array().unwrap().len(), 2);
     // No day, or a terminal, or a PIN: refused for a bank payment.
     for (payment, approval) in [
-        (json!({ "source": "bank", "amountCents": 8_000, "categoryKey": cod }), None),
+        (
+            json!({ "source": "bank", "amountCents": 8_000, "categoryKey": cod }),
+            None,
+        ),
         (bank(json!({ "terminalId": terminal })), None),
         (bank(json!({})), Some(json!({ "managerPin": "1234" }))),
     ] {

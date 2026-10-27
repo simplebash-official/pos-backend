@@ -29,8 +29,9 @@ fn from_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<RecurringExpenseDocument
         amount_cents: row.get("amount_cents"),
         due_day: row.get("due_day"),
         remind_days_before: row.get("remind_days_before"),
-        paid_from: PaidFrom::parse(&from)
-            .ok_or_else(|| AppError::internal(format!("Unknown account '{from}' on a regular bill")))?,
+        paid_from: PaidFrom::parse(&from).ok_or_else(|| {
+            AppError::internal(format!("Unknown account '{from}' on a regular bill"))
+        })?,
         note: row.get("note"),
         active: row.get::<i64, _>("active") != 0,
         version: row.get("version"),
@@ -52,7 +53,9 @@ pub(crate) async fn list_all(db: &Db) -> AppResult<Vec<RecurringExpenseDocument>
             Ok(out)
         }
         Db::Sqlite(pool) => {
-            let rows = sqlx::query("SELECT * FROM recurring_expenses").fetch_all(pool).await?;
+            let rows = sqlx::query("SELECT * FROM recurring_expenses")
+                .fetch_all(pool)
+                .await?;
             rows.iter().map(from_row).collect()
         }
     }
@@ -84,7 +87,10 @@ pub(crate) async fn insert(
             Ok(document)
         }
         Db::Sqlite(pool) => {
-            let id = document.id.map(|o| o.to_hex()).unwrap_or_else(generate_id_hex);
+            let id = document
+                .id
+                .map(|o| o.to_hex())
+                .unwrap_or_else(generate_id_hex);
             sqlx::query(
                 "INSERT INTO recurring_expenses (
                     key, id, category_key, payee_key, amount_cents, due_day, remind_days_before,
@@ -116,7 +122,9 @@ pub(crate) async fn insert(
 pub(crate) async fn save(db: &Db, document: &RecurringExpenseDocument) -> AppResult<()> {
     match db {
         Db::Mongo(db) => {
-            templates(db).replace_one(doc! { "key": &document.key }, document).await?;
+            templates(db)
+                .replace_one(doc! { "key": &document.key }, document)
+                .await?;
             Ok(())
         }
         Db::Sqlite(pool) => {

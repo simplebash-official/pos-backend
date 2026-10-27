@@ -16,7 +16,9 @@ use crate::{
         middleware::auth::CurrentUser,
         response::{ApiResponse, ErrorResponse},
     },
-    domain::attachments::{Attachment, AttachmentListQuery, AttachmentOwner, UploadAttachmentRequest},
+    domain::attachments::{
+        Attachment, AttachmentListQuery, AttachmentOwner, UploadAttachmentRequest,
+    },
     modules::attachments::service,
 };
 
@@ -44,7 +46,11 @@ fn require_owner_access(user: &CurrentUser, kind: AttachmentOwner, write: bool) 
         AttachmentOwner::Expense => (perm::EXPENSES_VIEW, perm::EXPENSES_MANAGE),
         AttachmentOwner::Income => (perm::INCOME_VIEW, perm::INCOME_MANAGE),
     };
-    user.require_permission(if write { perm::ATTACHMENTS_CREATE } else { perm::ATTACHMENTS_VIEW })?;
+    user.require_permission(if write {
+        perm::ATTACHMENTS_CREATE
+    } else {
+        perm::ATTACHMENTS_VIEW
+    })?;
     user.require_permission(if write { record } else { view })
 }
 
@@ -67,7 +73,10 @@ async fn list_attachments(
 ) -> AppResult<Json<ApiResponse<Vec<Attachment>>>> {
     require_owner_access(&current_user, query.owner_kind, false)?;
     let list = service::list_for(&state.db, query.owner_kind, &query.owner_key).await?;
-    Ok(Json(ApiResponse::success(list, "Photos retrieved successfully")))
+    Ok(Json(ApiResponse::success(
+        list,
+        "Photos retrieved successfully",
+    )))
 }
 
 #[utoipa::path(
@@ -91,7 +100,10 @@ async fn get_attachment_content(
     Ok((
         [
             (header::CONTENT_TYPE, doc.content_type),
-            (header::CACHE_CONTROL, "private, max-age=31536000, immutable".to_string()),
+            (
+                header::CACHE_CONTROL,
+                "private, max-age=31536000, immutable".to_string(),
+            ),
         ],
         bytes,
     )
@@ -118,5 +130,8 @@ async fn upload_attachment(
     require_owner_access(&current_user, body.owner_kind, true)?;
     let name = current_user.resolve_name(&state.db).await;
     let saved = service::upload(&state.db, current_user.user_id, name, body).await?;
-    Ok((StatusCode::CREATED, Json(ApiResponse::success(saved, "Photo attached successfully"))))
+    Ok((
+        StatusCode::CREATED,
+        Json(ApiResponse::success(saved, "Photo attached successfully")),
+    ))
 }

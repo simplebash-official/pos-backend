@@ -16,8 +16,11 @@ pub(crate) async fn sales_cost_and_refunds(
     end: chrono::DateTime<Utc>,
 ) -> AppResult<(i64, i64, i64)> {
     let sales = repository::sales::aggregate_sales_summary(db, start, end).await?;
-    let commissions = repository::commissions::aggregate_employee_commissions(db, start, end, None).await?;
-    let refunds = repository::refunds::aggregate_refund_totals(db, start, end).await?.net_refund_cents;
+    let commissions =
+        repository::commissions::aggregate_employee_commissions(db, start, end, None).await?;
+    let refunds = repository::refunds::aggregate_refund_totals(db, start, end)
+        .await?
+        .net_refund_cents;
     let cost = commissions.values().map(|e| e.estimated_cost_cents).sum();
     Ok((sales.total_sales_cents, cost, refunds))
 }

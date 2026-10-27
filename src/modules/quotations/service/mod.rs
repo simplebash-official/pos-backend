@@ -2,6 +2,8 @@
 // and the frozen shop-profile snapshot. A quotation never calls into stock,
 // payments, invoices or reports — it is a record of an offer, nothing more.
 
+use std::collections::HashMap;
+
 use chrono::{NaiveDate, Utc};
 use mongodb::bson::{self, DateTime as BsonDateTime, Document};
 
@@ -16,6 +18,7 @@ use crate::{
     },
     domain::{
         billing::PricingAdjustments,
+        inventory::Product,
         quotations::{
             CreateQuotationItem, CreateQuotationRequest, Quotation, QuotationItem,
             QuotationListQuery, QuotationListResponse, STATUS_ACTIVE, SyncQuotation,
@@ -107,12 +110,20 @@ async fn resolve_item(db: &Db, line: CreateQuotationItem) -> AppResult<Quotation
                     product.name
                 ))
             })?;
-            // A quotation never touches stock, but it may only offer a price
-            // the product is actually in stock at right now.
-            if !product
-                .price_tiers
-                .iter()
-                .any(|tier| tier.selling_price_cents == price)
+            if price <= 0 {
+                return Err(AppError::validation(format!(
+                    "Item '{}' needs a price",
+                    product.name
+                )));
+            }
+            // A quotation never touches stock. If the product has in-stock
+            // tiers, it must match one of them; if out of stock, any valid
+            // positive price is allowed.
+            if !product.price_tiers.is_empty()
+                && !product
+                    .price_tiers
+                    .iter()
+                    .any(|tier| tier.selling_price_cents == price)
             {
                 return Err(AppError::conflict_with_details(
                     codes::PRICE_TIER_UNAVAILABLE,
@@ -219,6 +230,28 @@ pub async fn create_quotation(
         for line in body.items {
             items.push(resolve_item(db, line).await?);
         }
+
+        let mut has_out_of_stock_items = false;
+        let product_keys: Vec<String> = items
+            .iter()
+            .filter_map(|item| item.product_key.clone())
+            .collect();
+        if !product_keys.is_empty() {
+            let products =
+                inventory::service::product::get_products_by_keys(db, &product_keys).await?;
+            let product_map: HashMap<String, Product> =
+                products.into_iter().map(|p| (p.key.clone(), p)).collect();
+            for item in &items {
+                if let Some(key) = &item.product_key
+                    && let Some(p) = product_map.get(key)
+                    && p.stock_quantity < item.quantity
+                {
+                    has_out_of_stock_items = true;
+                    break;
+                }
+            }
+        }
+
         let subtotal_cents: i64 = items.iter().map(|i| i.total_cents).sum();
         let (discount_type, discount_value, discount_cents) =
             compute_order_discount(subtotal_cents, body.pricing_adjustments.as_ref());
@@ -252,6 +285,9 @@ pub async fn create_quotation(
                 key: generate_id(prefixes::QUOTATION),
                 quotation_number,
                 status: STATUS_ACTIVE.to_string(),
+                has_out_of_stock_items,
+                fulfilled_by_invoice_key: None,
+                fulfilled_at: None,
                 customer_key,
                 customer_name,
                 customer_phone,
@@ -362,6 +398,29 @@ pub async fn cancel_quotation(
             None => Err(AppError::conflict(
                 codes::QUOTATION_ALREADY_CANCELLED,
                 "This quotation is already cancelled",
+            )),
+        }
+    })
+    .await
+}
+
+/// Fulfills an active quotation upon converting it to a sale invoice.
+pub async fn fulfill_quotation(
+    db: &Db,
+    id_or_key: &str,
+    invoice_key: &str,
+    device_id: Option<String>,
+) -> AppResult<Quotation> {
+    crate::core::logging::domain::tracked("quotations.fulfilled", async move {
+        let existing = find_document(db, id_or_key).await?;
+        let object_id = existing
+            .id
+            .expect("persisted quotation document must have an _id");
+        match repository::fulfill(db, object_id, invoice_key, device_id).await? {
+            Some(updated) => Ok(updated.into_quotation(&today())),
+            None => Err(AppError::conflict(
+                codes::QUOTATION_ALREADY_CANCELLED,
+                "This quotation is not active and cannot be fulfilled",
             )),
         }
     })

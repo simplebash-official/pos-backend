@@ -30,10 +30,12 @@ use crate::{
     },
 };
 
-
 /// What the drawer should hold when a shift opens: its running balance. A terminal that has never
 /// held cash has nothing to compare the count with, so the count itself stands.
-pub(crate) fn expected_opening_float(state: Option<&DrawerStateDocument>, counted_cents: i64) -> i64 {
+pub(crate) fn expected_opening_float(
+    state: Option<&DrawerStateDocument>,
+    counted_cents: i64,
+) -> i64 {
     state.map_or(counted_cents, |s| s.current_balance_cents)
 }
 
@@ -52,7 +54,9 @@ pub async fn open_session(
     }
 
     // Guard: only 1 open session per terminal
-    if let Some(existing) = sessions::find_active_session_for_terminal(db, &body.terminal_id).await? {
+    if let Some(existing) =
+        sessions::find_active_session_for_terminal(db, &body.terminal_id).await?
+    {
         return Err(AppError::conflict(
             codes::SESSION_ALREADY_OPEN,
             format!(
@@ -83,7 +87,13 @@ pub async fn open_session(
     let mut approved_by_name = None;
 
     if discrepancy != 0 {
-        if body.discrepancy_reason.as_deref().unwrap_or("").trim().is_empty() {
+        if body
+            .discrepancy_reason
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .is_empty()
+        {
             return Err(AppError::validation_with_code(
                 format!(
                     "Counted float ({} cents) differs from drawer balance ({} cents). A discrepancy reason is required.",
@@ -208,9 +218,14 @@ pub async fn submit_blind_count(
 
     let mut session = sessions::find_session_by_key(db, session_key)
         .await?
-        .ok_or_else(|| AppError::not_found_with_code("Register session not found", codes::SESSION_NOT_FOUND))?;
+        .ok_or_else(|| {
+            AppError::not_found_with_code("Register session not found", codes::SESSION_NOT_FOUND)
+        })?;
 
-    if session.status != SessionStatus::Open && session.status != SessionStatus::Closing && session.status != SessionStatus::Reopened {
+    if session.status != SessionStatus::Open
+        && session.status != SessionStatus::Closing
+        && session.status != SessionStatus::Reopened
+    {
         return Err(AppError::conflict(
             codes::SESSION_ALREADY_CLOSED,
             "Cannot submit count for an already closed session",
@@ -238,7 +253,9 @@ pub async fn submit_blind_count(
 pub async fn cancel_close(db: &Db, session_key: &str) -> AppResult<RegisterSession> {
     let mut session = sessions::find_session_by_key(db, session_key)
         .await?
-        .ok_or_else(|| AppError::not_found_with_code("Register session not found", codes::SESSION_NOT_FOUND))?;
+        .ok_or_else(|| {
+            AppError::not_found_with_code("Register session not found", codes::SESSION_NOT_FOUND)
+        })?;
 
     match session.status {
         SessionStatus::Open | SessionStatus::Reopened => return Ok(session.into_register_session()),
@@ -283,7 +300,9 @@ pub async fn close_session(
     }
     let safe_deposit = body.cash_drop_to_safe_cents.unwrap_or(0);
     if safe_deposit < 0 {
-        return Err(AppError::validation("cashDropToSafeCents cannot be negative"));
+        return Err(AppError::validation(
+            "cashDropToSafeCents cannot be negative",
+        ));
     }
 
     if body.closing_float_cents + safe_deposit != body.counted_cash_cents {
@@ -295,7 +314,9 @@ pub async fn close_session(
 
     let mut session = sessions::find_session_by_key(db, session_key)
         .await?
-        .ok_or_else(|| AppError::not_found_with_code("Register session not found", codes::SESSION_NOT_FOUND))?;
+        .ok_or_else(|| {
+            AppError::not_found_with_code("Register session not found", codes::SESSION_NOT_FOUND)
+        })?;
 
     if session.status == SessionStatus::Closed {
         return Err(AppError::conflict(
@@ -310,7 +331,13 @@ pub async fn close_session(
     let mut variance_approved_by_name = None;
 
     if variance != 0 {
-        if body.variance_reason.as_deref().unwrap_or("").trim().is_empty() {
+        if body
+            .variance_reason
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .is_empty()
+        {
             return Err(AppError::validation_with_code(
                 format!(
                     "Cash variance of {} cents requires a variance explanation reason",
@@ -396,7 +423,9 @@ pub async fn reopen_session(
 
     let mut session = sessions::find_session_by_key(db, session_key)
         .await?
-        .ok_or_else(|| AppError::not_found_with_code("Register session not found", codes::SESSION_NOT_FOUND))?;
+        .ok_or_else(|| {
+            AppError::not_found_with_code("Register session not found", codes::SESSION_NOT_FOUND)
+        })?;
 
     if session.status != SessionStatus::Closed {
         return Err(AppError::conflict(
@@ -406,7 +435,8 @@ pub async fn reopen_session(
     }
 
     // Ensure no other active session has been opened on this terminal
-    if let Some(existing) = sessions::find_active_session_for_terminal(db, &session.terminal_id).await?
+    if let Some(existing) =
+        sessions::find_active_session_for_terminal(db, &session.terminal_id).await?
         && existing.key != session.key
     {
         return Err(AppError::conflict(
@@ -419,7 +449,8 @@ pub async fn reopen_session(
     }
 
     // Ensure this cashier does not already have another active session
-    if let Some(existing) = sessions::find_active_session_for_cashier(db, &session.cashier_id).await?
+    if let Some(existing) =
+        sessions::find_active_session_for_cashier(db, &session.cashier_id).await?
         && existing.key != session.key
     {
         return Err(AppError::conflict(
@@ -489,7 +520,9 @@ pub async fn convert_variance(
 
     let mut session = sessions::find_session_by_key(db, session_key)
         .await?
-        .ok_or_else(|| AppError::not_found_with_code("Register session not found", codes::SESSION_NOT_FOUND))?;
+        .ok_or_else(|| {
+            AppError::not_found_with_code("Register session not found", codes::SESSION_NOT_FOUND)
+        })?;
 
     let variance = session.cash_variance_cents.unwrap_or(0);
     if variance >= 0 {
@@ -533,14 +566,19 @@ pub async fn convert_variance(
         amount_cents: shortage_amount,
         session_key: Some(session.key.clone()),
         terminal_id: session.terminal_id.clone(),
-        category_key: cash_categories::service::other_category_key(CashMovementType::OwnerWithdrawal),
+        category_key: cash_categories::service::other_category_key(
+            CashMovementType::OwnerWithdrawal,
+        ),
         custom_label: None,
         payee_key: None,
         payee_name: Some(body.recipient),
         period_start: None,
         period_end: None,
         reference_no: None,
-        note: Some(format!("Late-recorded owner withdrawal from variance: {}", body.reason)),
+        note: Some(format!(
+            "Late-recorded owner withdrawal from variance: {}",
+            body.reason
+        )),
         recorded_by_user_id,
         recorded_by_name_snapshot: recorded_by_name,
         approved_by_user_id: Some(approver.id),
@@ -572,12 +610,13 @@ pub async fn convert_variance(
 pub async fn populate_missing_cashier_name(db: &Db, session: &mut RegisterSession) {
     if session.cashier_name_snapshot.trim().is_empty()
         && let Ok(oid) = mongodb::bson::oid::ObjectId::parse_str(&session.cashier_id)
-            && let Ok(user) = users::service::get_user(db, oid).await {
-                let trimmed = user.name.trim();
-                if !trimmed.is_empty() {
-                    session.cashier_name_snapshot = trimmed.to_string();
-                }
-            }
+        && let Ok(user) = users::service::get_user(db, oid).await
+    {
+        let trimmed = user.name.trim();
+        if !trimmed.is_empty() {
+            session.cashier_name_snapshot = trimmed.to_string();
+        }
+    }
     if let Some(ref closing_id) = session.closing_cashier_id
         && session
             .closing_cashier_name_snapshot
@@ -585,19 +624,22 @@ pub async fn populate_missing_cashier_name(db: &Db, session: &mut RegisterSessio
             .unwrap_or("")
             .trim()
             .is_empty()
-            && let Ok(oid) = mongodb::bson::oid::ObjectId::parse_str(closing_id)
-                && let Ok(user) = users::service::get_user(db, oid).await {
-                    let trimmed = user.name.trim();
-                    if !trimmed.is_empty() {
-                        session.closing_cashier_name_snapshot = Some(trimmed.to_string());
-                    }
-                }
+        && let Ok(oid) = mongodb::bson::oid::ObjectId::parse_str(closing_id)
+        && let Ok(user) = users::service::get_user(db, oid).await
+    {
+        let trimmed = user.name.trim();
+        if !trimmed.is_empty() {
+            session.closing_cashier_name_snapshot = Some(trimmed.to_string());
+        }
+    }
 }
 
 pub async fn get_session(db: &Db, key: &str) -> AppResult<RegisterSession> {
     let session = sessions::find_session_by_id_or_key(db, key)
         .await?
-        .ok_or_else(|| AppError::not_found_with_code("Register session not found", codes::SESSION_NOT_FOUND))?;
+        .ok_or_else(|| {
+            AppError::not_found_with_code("Register session not found", codes::SESSION_NOT_FOUND)
+        })?;
     let mut reg = session.into_register_session();
     populate_missing_cashier_name(db, &mut reg).await;
     Ok(reg)
@@ -633,10 +675,7 @@ pub async fn get_active_session_for_cashier(
     }
 }
 
-pub async fn list_sessions(
-    db: &Db,
-    query: SessionListQuery,
-) -> AppResult<SessionListResponse> {
+pub async fn list_sessions(db: &Db, query: SessionListQuery) -> AppResult<SessionListResponse> {
     let page = query.page.unwrap_or(1).max(1);
     let limit = query.limit.unwrap_or(20).min(100);
     let (docs, total) = sessions::list_sessions(db, &query).await?;

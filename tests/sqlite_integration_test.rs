@@ -597,7 +597,9 @@ async fn test_sqlite_complete_pos_lifecycle() {
     let (status, headers, cn_bytes) = send_authed_raw(
         &ctx.router,
         "GET",
-        &format!("/api/billing/credit-notes/{credit_note_key}/documents/credit-note?design=current"),
+        &format!(
+            "/api/billing/credit-notes/{credit_note_key}/documents/credit-note?design=current"
+        ),
         &token,
     )
     .await;
@@ -609,7 +611,9 @@ async fn test_sqlite_complete_pos_lifecycle() {
     let (status, headers, cn_cached_bytes) = send_authed_raw(
         &ctx.router,
         "GET",
-        &format!("/api/billing/credit-notes/{credit_note_number}/documents/credit-note?design=current"),
+        &format!(
+            "/api/billing/credit-notes/{credit_note_number}/documents/credit-note?design=current"
+        ),
         &token,
     )
     .await;

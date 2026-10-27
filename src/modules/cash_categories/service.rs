@@ -14,9 +14,9 @@ use crate::{
     },
     domain::{
         cash_categories::{
-            CashCategory, CashCategoryListQuery, CreateCashCategoryRequest, MergeCashCategoryRequest,
-            ReportGroup, ReviewStatus, SimilarCashCategoryQuery, UpdateCashCategoryRequest,
-            category_key, normalize_name,
+            CashCategory, CashCategoryListQuery, CreateCashCategoryRequest,
+            MergeCashCategoryRequest, ReportGroup, ReviewStatus, SimilarCashCategoryQuery,
+            UpdateCashCategoryRequest, category_key, normalize_name,
         },
         sessions::CashMovementType,
     },
@@ -46,7 +46,9 @@ const CASHIER_TYPES: &[CashMovementType] = &[
 /// The report group a new category inherits from its movement type.
 fn inherited_report_group(movement_type: CashMovementType) -> ReportGroup {
     match movement_type {
-        CashMovementType::PettyExpense | CashMovementType::RentAndBills => ReportGroup::OperatingExpense,
+        CashMovementType::PettyExpense | CashMovementType::RentAndBills => {
+            ReportGroup::OperatingExpense
+        }
         CashMovementType::StaffPayment => ReportGroup::Payroll,
         CashMovementType::SupplierPayment => ReportGroup::Purchases,
         CashMovementType::OwnerWithdrawal => ReportGroup::OwnerEquity,
@@ -93,7 +95,11 @@ async fn usage_by_key(db: &Db) -> AppResult<HashMap<String, i64>> {
 }
 
 /// Usage of a category including everything merged into it.
-fn usage_of(doc: &CashCategoryDocument, all: &[CashCategoryDocument], usage: &HashMap<String, i64>) -> i64 {
+fn usage_of(
+    doc: &CashCategoryDocument,
+    all: &[CashCategoryDocument],
+    usage: &HashMap<String, i64>,
+) -> i64 {
     let own = usage.get(&doc.key).copied().unwrap_or(0);
     let merged: i64 = all
         .iter()
@@ -105,17 +111,26 @@ fn usage_of(doc: &CashCategoryDocument, all: &[CashCategoryDocument], usage: &Ha
 
 /// Categories for the picker and the management screen, best first: pinned, then most
 /// used by this shop, then the shop's own order. Merged-away categories never appear.
-pub async fn list_categories(db: &Db, query: CashCategoryListQuery) -> AppResult<Vec<CashCategory>> {
+pub async fn list_categories(
+    db: &Db,
+    query: CashCategoryListQuery,
+) -> AppResult<Vec<CashCategory>> {
     let movement_type = query
         .movement_type
         .as_deref()
-        .map(|t| CashMovementType::parse(t).ok_or_else(|| AppError::validation("Unknown movement type.")))
+        .map(|t| {
+            CashMovementType::parse(t).ok_or_else(|| AppError::validation("Unknown movement type."))
+        })
         .transpose()?;
     let include_hidden = query.include_hidden.unwrap_or(false);
     let needs_review = query.needs_review.unwrap_or(false);
     let only_costs = query.for_expenses.unwrap_or(false);
     let only_income = query.for_income.unwrap_or(false);
-    let search = query.search.as_deref().map(normalize_name).filter(|s| !s.is_empty());
+    let search = query
+        .search
+        .as_deref()
+        .map(normalize_name)
+        .filter(|s| !s.is_empty());
 
     let all = repository::list_all(db).await?;
     let usage = usage_by_key(db).await?;
@@ -131,7 +146,9 @@ pub async fn list_categories(db: &Db, query: CashCategoryListQuery) -> AppResult
         .filter(|c| {
             search.as_ref().is_none_or(|q| {
                 c.normalized_name.contains(q.as_str())
-                    || c.name_si.as_deref().is_some_and(|si| normalize_name(si).contains(q.as_str()))
+                    || c.name_si
+                        .as_deref()
+                        .is_some_and(|si| normalize_name(si).contains(q.as_str()))
             })
         })
         .cloned()
@@ -331,7 +348,9 @@ pub async fn merge_category(
 ) -> AppResult<CashCategory> {
     tracked("cash_categories.merged", async move {
         if key == body.target_key {
-            return Err(AppError::validation("Pick a different category to merge into."));
+            return Err(AppError::validation(
+                "Pick a different category to merge into.",
+            ));
         }
         let mut source = require_category(db, key).await?;
         let target = require_category(db, &body.target_key).await?;
@@ -414,7 +433,10 @@ fn names_are_similar(a: &str, b: &str) -> bool {
 }
 
 /// Existing categories whose name is close to a typed one, so the cashier can use one instead of adding a near-duplicate.
-pub async fn similar_categories(db: &Db, query: SimilarCashCategoryQuery) -> AppResult<Vec<CashCategory>> {
+pub async fn similar_categories(
+    db: &Db,
+    query: SimilarCashCategoryQuery,
+) -> AppResult<Vec<CashCategory>> {
     let movement_type = CashMovementType::parse(&query.movement_type)
         .ok_or_else(|| AppError::validation("Unknown movement type."))?;
     let typed = normalize_name(&query.name);
@@ -485,12 +507,17 @@ pub(crate) async fn resolve_categories(
         })?;
         while let Some(next) = current.merged_into_key.as_ref() {
             current = all.get(next).ok_or_else(|| {
-                AppError::internal(format!("Category '{key}' was merged into the missing category '{next}'"))
+                AppError::internal(format!(
+                    "Category '{key}' was merged into the missing category '{next}'"
+                ))
             })?;
         }
         out.insert(
             key.clone(),
-            ResolvedCategory { name: current.name.clone(), report_group: current.report_group },
+            ResolvedCategory {
+                name: current.name.clone(),
+                report_group: current.report_group,
+            },
         );
     }
     Ok(out)
@@ -627,7 +654,10 @@ mod tests {
 
     #[test]
     fn names_are_cleaned_and_bounded() {
-        assert_eq!(clean_name("  Generator   diesel ").unwrap(), "Generator diesel");
+        assert_eq!(
+            clean_name("  Generator   diesel ").unwrap(),
+            "Generator diesel"
+        );
         assert!(clean_name("a").is_err());
         assert!(clean_name(&"x".repeat(41)).is_err());
         assert_eq!(clean_name_si("   ").unwrap(), None);
@@ -644,7 +674,9 @@ mod tests {
             CashMovementType::NoSale,
         ] {
             assert!(
-                SYSTEM_CATEGORIES.iter().any(|(ty, n, _)| *ty == t && *n == OTHER_NAME),
+                SYSTEM_CATEGORIES
+                    .iter()
+                    .any(|(ty, n, _)| *ty == t && *n == OTHER_NAME),
                 "{t:?} needs an Other category"
             );
         }
@@ -654,7 +686,10 @@ mod tests {
     fn seeded_names_are_unique_per_type() {
         let mut seen = std::collections::HashSet::new();
         for (t, n, _) in SYSTEM_CATEGORIES {
-            assert!(seen.insert((t.as_str(), normalize_name(n))), "duplicate {n} for {t:?}");
+            assert!(
+                seen.insert((t.as_str(), normalize_name(n))),
+                "duplicate {n} for {t:?}"
+            );
         }
     }
 }

@@ -9,21 +9,30 @@ use axum::{
     http::{Request, StatusCode, header::AUTHORIZATION},
 };
 use serde_json::Value;
-use simplebash_pos_backend::{
-    core::constants::roles,
-    domain::users::Role,
-};
+use simplebash_pos_backend::{core::constants::roles, domain::users::Role};
 use tower::ServiceExt;
 
 async fn get(app: &common::TestApp, token: Option<&str>) -> (StatusCode, Value) {
-    let mut request = Request::builder().method("GET").uri("/api/reports/dashboard-pulse");
+    let mut request = Request::builder()
+        .method("GET")
+        .uri("/api/reports/dashboard-pulse");
     if let Some(token) = token {
         request = request.header(AUTHORIZATION, format!("Bearer {token}"));
     }
-    let response = app.router.clone().oneshot(request.body(Body::empty()).unwrap()).await.unwrap();
+    let response = app
+        .router
+        .clone()
+        .oneshot(request.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
     let status = response.status();
-    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
 }
 
 #[tokio::test]
@@ -32,7 +41,11 @@ async fn an_empty_shop_gets_empty_groups_and_a_signed_out_caller_is_refused() {
     let (status, _) = get(&app, None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
-    let admin = common::mint_token(&app.config, Some(Role::Admin), roles::default_permissions(Role::Admin));
+    let admin = common::mint_token(
+        &app.config,
+        Some(Role::Admin),
+        roles::default_permissions(Role::Admin),
+    );
     let (status, body) = get(&app, Some(&admin)).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let data = &body["data"];

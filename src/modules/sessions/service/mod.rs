@@ -8,19 +8,24 @@ pub use movement::*;
 pub use session::*;
 pub use z_report::*;
 
-use mongodb::bson::Document;
 use crate::{
     clients::db::Db,
     core::error::AppResult,
     domain::sessions::{CashMovement, RegisterSession},
     modules::sessions::model::{CashMovementDocument, RegisterSessionDocument},
 };
+use mongodb::bson::Document;
 
-pub(crate) fn hydrate_session_sync_documents(documents: Vec<Document>) -> AppResult<Vec<RegisterSession>> {
+pub(crate) fn hydrate_session_sync_documents(
+    documents: Vec<Document>,
+) -> AppResult<Vec<RegisterSession>> {
     documents
         .into_iter()
         .map(|document| {
-            Ok(bson::deserialize_from_document::<RegisterSessionDocument>(document)?.into_register_session())
+            Ok(
+                bson::deserialize_from_document::<RegisterSessionDocument>(document)?
+                    .into_register_session(),
+            )
         })
         .collect()
 }
@@ -32,7 +37,11 @@ pub(crate) async fn hydrate_movement_sync_documents(
 ) -> AppResult<Vec<CashMovement>> {
     let docs = documents
         .into_iter()
-        .map(|document| Ok(bson::deserialize_from_document::<CashMovementDocument>(document)?))
+        .map(|document| {
+            Ok(bson::deserialize_from_document::<CashMovementDocument>(
+                document,
+            )?)
+        })
         .collect::<AppResult<Vec<_>>>()?;
     to_movements(db, docs).await
 }

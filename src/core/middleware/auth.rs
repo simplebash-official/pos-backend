@@ -76,12 +76,13 @@ impl CurrentUser {
             }
         }
         if let Ok(oid) = mongodb::bson::oid::ObjectId::parse_str(&self.user_id)
-            && let Ok(user) = crate::modules::users::service::get_user(db, oid).await {
-                let trimmed = user.name.trim();
-                if !trimmed.is_empty() {
-                    return trimmed.to_string();
-                }
+            && let Ok(user) = crate::modules::users::service::get_user(db, oid).await
+        {
+            let trimmed = user.name.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
             }
+        }
         "Cashier".to_string()
     }
 

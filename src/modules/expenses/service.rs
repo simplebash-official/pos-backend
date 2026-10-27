@@ -15,24 +15,25 @@ use crate::{
         logging::domain::tracked,
     },
     domain::{
-        purchase_receipts::PaymentKind,
         cash_categories::normalize_name,
         expenses::{
             CreateExpensePaymentRequest, CreateExpenseRequest, ExpenseDetail, ExpenseListQuery,
             ExpenseListResponse, ExpensePayment, ExpenseRow, ExpenseSource, ExpenseStats,
             ExpenseStatus, PaidFrom,
         },
+        purchase_receipts::PaymentKind,
         recurring_expenses::PeriodPayment,
         sequences::ReserveSequenceRequest,
     },
     modules::{
-        purchases::service::settlement,
         cash_categories::{self, service::ResolvedCategory},
         expenses::{
             model::{ExpenseDocument, ExpensePaymentDocument},
             repository,
         },
-        payees, sequences,
+        payees,
+        purchases::service::settlement,
+        sequences,
         sessions::{self, model::CashMovementDocument},
     },
 };
@@ -51,7 +52,9 @@ fn clean(label: &str, value: Option<&str>, max: usize) -> AppResult<Option<Strin
         return Ok(None);
     };
     if text.chars().count() > max {
-        return Err(AppError::validation(format!("{label} can have up to {max} letters.")));
+        return Err(AppError::validation(format!(
+            "{label} can have up to {max} letters."
+        )));
     }
     Ok(Some(text.to_string()))
 }
@@ -158,7 +161,10 @@ async fn all_rows(db: &Db, from: Option<&str>, to: Option<&str>) -> AppResult<Ve
     let payments = repository::list_all_payments(db).await?;
     let mut by_expense: HashMap<&str, Vec<&ExpensePaymentDocument>> = HashMap::new();
     for p in &payments {
-        by_expense.entry(p.expense_key.as_str()).or_default().push(p);
+        by_expense
+            .entry(p.expense_key.as_str())
+            .or_default()
+            .push(p);
     }
 
     let mut keys: Vec<String> = expenses
@@ -174,7 +180,9 @@ async fn all_rows(db: &Db, from: Option<&str>, to: Option<&str>) -> AppResult<Ve
     let mut rows: Vec<ExpenseRow> = expenses
         .iter()
         .map(|e| {
-            let paid = by_expense.get(e.key.as_str()).map_or(&[][..], Vec::as_slice);
+            let paid = by_expense
+                .get(e.key.as_str())
+                .map_or(&[][..], Vec::as_slice);
             ledger_row(e, paid, &categories[&e.category_key], &day)
         })
         .collect();
@@ -182,7 +190,9 @@ async fn all_rows(db: &Db, from: Option<&str>, to: Option<&str>) -> AppResult<Ve
     rows.extend(
         movements
             .iter()
-            .filter(|m| cash_categories::service::is_expense_group(categories[&m.category_key].report_group))
+            .filter(|m| {
+                cash_categories::service::is_expense_group(categories[&m.category_key].report_group)
+            })
             .map(|m| drawer_row(m, &categories[&m.category_key])),
     );
     rows.sort_by(|a, b| b.date.cmp(&a.date).then(b.created_at.cmp(&a.created_at)));
@@ -196,7 +206,11 @@ pub(crate) async fn rows_between(db: &Db, from: &str, to: &str) -> AppResult<Vec
 
 /// Every cost with something still to pay, whenever it was dated, for the payables report.
 pub(crate) async fn unpaid_rows(db: &Db) -> AppResult<Vec<ExpenseRow>> {
-    Ok(all_rows(db, None, None).await?.into_iter().filter(|r| r.balance_cents > 0).collect())
+    Ok(all_rows(db, None, None)
+        .await?
+        .into_iter()
+        .filter(|r| r.balance_cents > 0)
+        .collect())
 }
 
 /// The month (`YYYY-MM`) a cost counts towards: the period a drawer payment names, else its own date.
@@ -242,7 +256,8 @@ pub(crate) struct LedgerPayout {
 /// Every payment made against a ledger expense (bank, card or online), with who it was for and what for.
 pub(crate) async fn ledger_payouts(db: &Db) -> AppResult<Vec<LedgerPayout>> {
     let expenses = repository::list_expenses(db, None, None).await?;
-    let by_key: HashMap<&str, &ExpenseDocument> = expenses.iter().map(|e| (e.key.as_str(), e)).collect();
+    let by_key: HashMap<&str, &ExpenseDocument> =
+        expenses.iter().map(|e| (e.key.as_str(), e)).collect();
     Ok(repository::list_all_payments(db)
         .await?
         .iter()
@@ -261,7 +276,10 @@ pub(crate) async fn ledger_payouts(db: &Db) -> AppResult<Vec<LedgerPayout>> {
 
 /// What was paid out of the bank, a card or online on or after `since` (`YYYY-MM-DD`), as `(account, cents)`
 /// per payment. Drawer payments are cash movements and not counted here.
-pub(crate) async fn account_payments_since(db: &Db, since: &str) -> AppResult<Vec<(PaidFrom, i64)>> {
+pub(crate) async fn account_payments_since(
+    db: &Db,
+    since: &str,
+) -> AppResult<Vec<(PaidFrom, i64)>> {
     Ok(repository::list_all_payments(db)
         .await?
         .into_iter()
@@ -293,7 +311,11 @@ pub async fn list_expenses(db: &Db, query: ExpenseListQuery) -> AppResult<Expens
         Some(key) => Some(cash_categories::service::keys_including_merged(db, key).await?),
         None => None,
     };
-    let search = query.search.as_deref().map(normalize_name).filter(|s| !s.is_empty());
+    let search = query
+        .search
+        .as_deref()
+        .map(normalize_name)
+        .filter(|s| !s.is_empty());
 
     let page = query.page.unwrap_or(1).max(1);
     let limit = query.limit.unwrap_or(50).min(200);
@@ -302,8 +324,17 @@ pub async fn list_expenses(db: &Db, query: ExpenseListQuery) -> AppResult<Expens
         .await?
         .into_iter()
         .filter(|r| source.is_none_or(|s| r.source == s))
-        .filter(|r| category_keys.as_ref().is_none_or(|keys| keys.contains(&r.category_key)))
-        .filter(|r| query.payee_key.as_ref().is_none_or(|k| r.payee_key.as_ref() == Some(k)))
+        .filter(|r| {
+            category_keys
+                .as_ref()
+                .is_none_or(|keys| keys.contains(&r.category_key))
+        })
+        .filter(|r| {
+            query
+                .payee_key
+                .as_ref()
+                .is_none_or(|k| r.payee_key.as_ref() == Some(k))
+        })
         .filter(|r| match query.status.as_deref() {
             Some("unpaid") => r.balance_cents > 0,
             Some("overdue") => r.is_overdue,
@@ -370,8 +401,11 @@ pub async fn get_stats(db: &Db) -> AppResult<ExpenseStats> {
 
 async fn detail_of(db: &Db, expense: &ExpenseDocument) -> AppResult<ExpenseDetail> {
     let payments = repository::list_payments_for(db, &expense.key).await?;
-    let categories =
-        cash_categories::service::resolve_categories(db, std::slice::from_ref(&expense.category_key)).await?;
+    let categories = cash_categories::service::resolve_categories(
+        db,
+        std::slice::from_ref(&expense.category_key),
+    )
+    .await?;
     let refs: Vec<&ExpensePaymentDocument> = payments.iter().collect();
     Ok(ExpenseDetail {
         expense: ledger_row(expense, &refs, &categories[&expense.category_key], &today()),
@@ -381,9 +415,11 @@ async fn detail_of(db: &Db, expense: &ExpenseDocument) -> AppResult<ExpenseDetai
 
 /// One ledger expense with its payments.
 pub async fn get_expense(db: &Db, key: &str) -> AppResult<ExpenseDetail> {
-    let expense = repository::find_expense_by_key(db, key).await?.ok_or_else(|| {
-        AppError::not_found_with_code("Expense not found.", codes::EXPENSE_NOT_FOUND)
-    })?;
+    let expense = repository::find_expense_by_key(db, key)
+        .await?
+        .ok_or_else(|| {
+            AppError::not_found_with_code("Expense not found.", codes::EXPENSE_NOT_FOUND)
+        })?;
     detail_of(db, &expense).await
 }
 
@@ -404,17 +440,26 @@ pub async fn create_expense(
             None
         } else {
             let payment_key = prepared.payment_key().ok_or_else(|| {
-                AppError::validation("Receipts can only be paid by a payment, not a bill still to pay.")
+                AppError::validation(
+                    "Receipts can only be paid by a payment, not a bill still to pay.",
+                )
             })?;
             let supplier_key = prepared.expense.payee_key.as_deref().ok_or_else(|| {
                 AppError::validation("Pick the supplier whose receipts are being paid.")
             })?;
             if !supplier_key.starts_with(prefixes::SUPPLIER) {
-                return Err(AppError::validation("Only a supplier's receipts can be paid."));
+                return Err(AppError::validation(
+                    "Only a supplier's receipts can be paid.",
+                ));
             }
             Some((
-                settlement::prepare_settlements(db, supplier_key, prepared.expense.amount_cents, &requested)
-                    .await?,
+                settlement::prepare_settlements(
+                    db,
+                    supplier_key,
+                    prepared.expense.amount_cents,
+                    &requested,
+                )
+                .await?,
                 payment_key.to_string(),
             ))
         };
@@ -442,7 +487,10 @@ pub(crate) struct PreparedExpense {
 }
 
 /// Writes a prepared expense and its payment in the caller's transaction.
-pub(crate) async fn write_expense(tx: &mut Tx, prepared: PreparedExpense) -> AppResult<ExpenseDocument> {
+pub(crate) async fn write_expense(
+    tx: &mut Tx,
+    prepared: PreparedExpense,
+) -> AppResult<ExpenseDocument> {
     let expense = repository::insert_expense(&mut *tx, prepared.expense).await?;
     if let Some(payment) = prepared.payment {
         repository::insert_payment(&mut *tx, payment).await?;
@@ -473,17 +521,22 @@ pub(crate) async fn prepare_expense(
             ));
         }
         if body.amount_cents <= 0 {
-            return Err(AppError::validation("Please enter an amount greater than zero."));
+            return Err(AppError::validation(
+                "Please enter an amount greater than zero.",
+            ));
         }
         parse_day("expense date", &body.expense_date)?;
         let due_date = clean("The due date", body.due_date.as_deref(), 10)?;
         if let Some(due) = &due_date {
             if body.paid_from != PaidFrom::Unpaid {
-                return Err(AppError::validation("A due date only applies to a bill that is not paid yet."));
+                return Err(AppError::validation(
+                    "A due date only applies to a bill that is not paid yet.",
+                ));
             }
             parse_day("due date", due)?;
         }
-        let category = cash_categories::service::category_for_expense(db, &body.category_key).await?;
+        let category =
+            cash_categories::service::category_for_expense(db, &body.category_key).await?;
 
         let typed = clean("The name", body.payee_name.as_deref(), NAME_MAX)?;
         let (payee_key, payee_name) = match (&body.payee_key, typed) {
@@ -501,7 +554,10 @@ pub(crate) async fn prepare_expense(
         let reservation = sequences::service::reserve_sequence(
             db,
             "expense".to_string(),
-            ReserveSequenceRequest { block_size: Some(1), device_id },
+            ReserveSequenceRequest {
+                block_size: Some(1),
+                device_id,
+            },
         )
         .await?;
         let expense_number = format!(

@@ -17,7 +17,13 @@ use simplebash_pos_backend::{
 };
 use tower::ServiceExt;
 
-async fn send(app: &common::TestApp, method: &str, uri: &str, body: Option<Value>, token: &str) -> (StatusCode, Value) {
+async fn send(
+    app: &common::TestApp,
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+    token: &str,
+) -> (StatusCode, Value) {
     let mut builder = Request::builder()
         .method(method)
         .uri(uri)
@@ -31,8 +37,14 @@ async fn send(app: &common::TestApp, method: &str, uri: &str, body: Option<Value
     };
     let response = app.router.clone().oneshot(request).await.unwrap();
     let status = response.status();
-    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let json = if bytes.is_empty() { Value::Null } else { serde_json::from_slice(&bytes).unwrap() };
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes).unwrap()
+    };
     (status, json)
 }
 
@@ -41,12 +53,23 @@ fn cat(t: CashMovementType, name: &str) -> String {
 }
 
 fn today() -> String {
-    chrono::Utc::now().date_naive().format("%Y-%m-%d").to_string()
+    chrono::Utc::now()
+        .date_naive()
+        .format("%Y-%m-%d")
+        .to_string()
 }
 
 async fn scenario(app: &common::TestApp) {
-    let staff = common::mint_token(&app.config, Some(Role::Staff), roles::default_permissions(Role::Staff));
-    let manager = common::mint_token(&app.config, Some(Role::Manager), roles::default_permissions(Role::Manager));
+    let staff = common::mint_token(
+        &app.config,
+        Some(Role::Staff),
+        roles::default_permissions(Role::Staff),
+    );
+    let manager = common::mint_token(
+        &app.config,
+        Some(Role::Manager),
+        roles::default_permissions(Role::Manager),
+    );
 
     // A cashier sees the drawer's movements, not the shop's costs.
     for (method, uri) in [("GET", "/api/expenses"), ("GET", "/api/expenses/stats")] {
@@ -85,7 +108,10 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(paid["source"], "ledger");
     assert_eq!(paid["categoryName"], "Electricity");
     assert_eq!(body["data"]["payments"].as_array().unwrap().len(), 1);
-    assert!(paid["payeeKey"].as_str().unwrap().starts_with("pye_other_"), "the typed name is saved for next time");
+    assert!(
+        paid["payeeKey"].as_str().unwrap().starts_with("pye_other_"),
+        "the typed name is saved for next time"
+    );
 
     // A bill still to pay, already past its due date.
     let (status, body) = send(
@@ -109,17 +135,34 @@ async fn scenario(app: &common::TestApp) {
     // What can and cannot be entered.
     let bad = |extra: Value| {
         let mut base = json!({ "expenseDate": today(), "categoryKey": electricity, "amountCents": 100, "paidFrom": "bank" });
-        base.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        base.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
         base
     };
     for (what, extra) in [
-        ("drawer cash is a cash movement", json!({ "paidFrom": "drawer" })),
+        (
+            "drawer cash is a cash movement",
+            json!({ "paidFrom": "drawer" }),
+        ),
         ("no amount", json!({ "amountCents": 0 })),
         ("a made-up date", json!({ "expenseDate": "2026-02-30" })),
-        ("a due date on a paid bill", json!({ "dueDate": "2026-12-01" })),
-        ("owner drawings are not a cost", json!({ "categoryKey": cat(CashMovementType::OwnerWithdrawal, "Personal use") })),
-        ("added cash is not a cost", json!({ "categoryKey": cat(CashMovementType::AddCash, "Owner capital") })),
-        ("a loan instalment is not a cost", json!({ "categoryKey": cat(CashMovementType::RentAndBills, "Loan or lease installment") })),
+        (
+            "a due date on a paid bill",
+            json!({ "dueDate": "2026-12-01" }),
+        ),
+        (
+            "owner drawings are not a cost",
+            json!({ "categoryKey": cat(CashMovementType::OwnerWithdrawal, "Personal use") }),
+        ),
+        (
+            "added cash is not a cost",
+            json!({ "categoryKey": cat(CashMovementType::AddCash, "Owner capital") }),
+        ),
+        (
+            "a loan instalment is not a cost",
+            json!({ "categoryKey": cat(CashMovementType::RentAndBills, "Loan or lease installment") }),
+        ),
     ] {
         let (status, body) = send(app, "POST", "/api/expenses", Some(bad(extra)), &manager).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{what}: {body}");
@@ -127,12 +170,29 @@ async fn scenario(app: &common::TestApp) {
 
     // Paying a bill in parts, never more than is owed.
     let pay = |amount: i64| json!({ "amountCents": amount, "paidFrom": "online", "paidOn": today(), "referenceNo": "TXN-1" });
-    let (status, body) = send(app, "POST", &format!("/api/expenses/{bill_key}/payments"), Some(pay(40_000)), &manager).await;
+    let (status, body) = send(
+        app,
+        "POST",
+        &format!("/api/expenses/{bill_key}/payments"),
+        Some(pay(40_000)),
+        &manager,
+    )
+    .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
     assert_eq!(body["data"]["expense"]["status"], "part_paid");
     assert_eq!(body["data"]["expense"]["balanceCents"], 60_000);
-    assert_eq!(body["data"]["expense"]["isOverdue"], true, "still overdue until it is paid in full");
-    let (status, body) = send(app, "POST", &format!("/api/expenses/{bill_key}/payments"), Some(pay(60_001)), &manager).await;
+    assert_eq!(
+        body["data"]["expense"]["isOverdue"], true,
+        "still overdue until it is paid in full"
+    );
+    let (status, body) = send(
+        app,
+        "POST",
+        &format!("/api/expenses/{bill_key}/payments"),
+        Some(pay(60_001)),
+        &manager,
+    )
+    .await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_eq!(body["code"], "EXPENSE_OVERPAID");
     let (status, _) = send(
@@ -144,7 +204,14 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    let (status, body) = send(app, "POST", &format!("/api/expenses/{bill_key}/payments"), Some(pay(60_000)), &manager).await;
+    let (status, body) = send(
+        app,
+        "POST",
+        &format!("/api/expenses/{bill_key}/payments"),
+        Some(pay(60_000)),
+        &manager,
+    )
+    .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
     assert_eq!(body["data"]["expense"]["status"], "paid");
     assert_eq!(body["data"]["expense"]["isOverdue"], false);
@@ -220,8 +287,18 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(body["data"]["total"], 0, "the water bill is settled now");
     let (_, body) = send(app, "GET", "/api/expenses?search=water", None, &manager).await;
     assert_eq!(body["data"]["total"], 1);
-    let (_, body) = send(app, "GET", "/api/expenses?source=ledger&from=2026-01-01", None, &manager).await;
-    assert_eq!(body["data"]["total"], 1, "only the electricity bill is dated this year");
+    let (_, body) = send(
+        app,
+        "GET",
+        "/api/expenses?source=ledger&from=2026-01-01",
+        None,
+        &manager,
+    )
+    .await;
+    assert_eq!(
+        body["data"]["total"], 1,
+        "only the electricity bill is dated this year"
+    );
     let (status, _) = send(app, "GET", "/api/expenses?status=late", None, &manager).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 

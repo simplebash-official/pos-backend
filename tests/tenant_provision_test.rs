@@ -166,8 +166,16 @@ async fn provisioning_creates_the_shop_and_an_owner_who_can_log_in_with_the_same
 
     // The new shop starts with the drawer's built-in cash categories, once, even if provisioning is replayed.
     let built_in = simplebash_pos_backend::seeds::cash_categories::SYSTEM_CATEGORIES.len() as u64;
-    let categories = app.db.collection::<mongodb::bson::Document>("cash_categories");
-    assert_eq!(categories.count_documents(doc! { "tenant_id": TENANT_A }).await.unwrap(), built_in);
+    let categories = app
+        .db
+        .collection::<mongodb::bson::Document>("cash_categories");
+    assert_eq!(
+        categories
+            .count_documents(doc! { "tenant_id": TENANT_A })
+            .await
+            .unwrap(),
+        built_in
+    );
     let (status, _) = post(
         &app.router,
         "/api/internal/provision",
@@ -176,7 +184,13 @@ async fn provisioning_creates_the_shop_and_an_owner_who_can_log_in_with_the_same
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(categories.count_documents(doc! { "tenant_id": TENANT_A }).await.unwrap(), built_in);
+    assert_eq!(
+        categories
+            .count_documents(doc! { "tenant_id": TENANT_A })
+            .await
+            .unwrap(),
+        built_in
+    );
 
     let _ = app.db.drop().await;
 }

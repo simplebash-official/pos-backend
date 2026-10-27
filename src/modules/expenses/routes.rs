@@ -56,7 +56,10 @@ async fn list_expenses(
 ) -> AppResult<Json<ApiResponse<ExpenseListResponse>>> {
     current_user.require_permission(perm::EXPENSES_VIEW)?;
     let response = service::list_expenses(&state.db, query).await?;
-    Ok(Json(ApiResponse::success(response, "Expenses retrieved successfully")))
+    Ok(Json(ApiResponse::success(
+        response,
+        "Expenses retrieved successfully",
+    )))
 }
 
 #[utoipa::path(
@@ -72,7 +75,10 @@ async fn get_expense_stats(
 ) -> AppResult<Json<ApiResponse<ExpenseStats>>> {
     current_user.require_permission(perm::EXPENSES_VIEW)?;
     let stats = service::get_stats(&state.db).await?;
-    Ok(Json(ApiResponse::success(stats, "Expense stats retrieved successfully")))
+    Ok(Json(ApiResponse::success(
+        stats,
+        "Expense stats retrieved successfully",
+    )))
 }
 
 #[utoipa::path(
@@ -93,7 +99,10 @@ async fn get_expense(
 ) -> AppResult<Json<ApiResponse<ExpenseDetail>>> {
     current_user.require_permission(perm::EXPENSES_VIEW)?;
     let detail = service::get_expense(&state.db, &key).await?;
-    Ok(Json(ApiResponse::success(detail, "Expense retrieved successfully")))
+    Ok(Json(ApiResponse::success(
+        detail,
+        "Expense retrieved successfully",
+    )))
 }
 
 #[utoipa::path(
@@ -115,8 +124,15 @@ async fn create_expense(
 ) -> AppResult<(StatusCode, Json<ApiResponse<ExpenseDetail>>)> {
     current_user.require_permission(perm::EXPENSES_MANAGE)?;
     let name = current_user.resolve_name(&state.db).await;
-    let detail = service::create_expense(&state.db, current_user.user_id, name, body, device_id.0).await?;
-    Ok((StatusCode::CREATED, Json(ApiResponse::success(detail, "Expense recorded successfully"))))
+    let detail =
+        service::create_expense(&state.db, current_user.user_id, name, body, device_id.0).await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(ApiResponse::success(
+            detail,
+            "Expense recorded successfully",
+        )),
+    ))
 }
 
 #[utoipa::path(
@@ -140,5 +156,11 @@ async fn add_expense_payment(
     current_user.require_permission(perm::EXPENSES_MANAGE)?;
     let name = current_user.resolve_name(&state.db).await;
     let detail = service::add_payment(&state.db, &key, current_user.user_id, name, body).await?;
-    Ok((StatusCode::CREATED, Json(ApiResponse::success(detail, "Payment recorded successfully"))))
+    Ok((
+        StatusCode::CREATED,
+        Json(ApiResponse::success(
+            detail,
+            "Payment recorded successfully",
+        )),
+    ))
 }

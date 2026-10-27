@@ -47,7 +47,10 @@ async fn list_accounts(
 ) -> AppResult<Json<ApiResponse<AccountsResponse>>> {
     current_user.require_permission(perm::ACCOUNTS_VIEW)?;
     let accounts = service::list_accounts(&state.db).await?;
-    Ok(Json(ApiResponse::success(accounts, "Accounts retrieved successfully")))
+    Ok(Json(ApiResponse::success(
+        accounts,
+        "Accounts retrieved successfully",
+    )))
 }
 
 #[utoipa::path(
@@ -72,5 +75,8 @@ async fn set_account_opening(
     let kind = AccountKind::parse(&kind).ok_or_else(|| AppError::validation("Unknown account."))?;
     let name = current_user.resolve_name(&state.db).await;
     let summary = service::set_opening(&state.db, kind, name, body).await?;
-    Ok(Json(ApiResponse::success(summary, "Opening balance saved successfully")))
+    Ok(Json(ApiResponse::success(
+        summary,
+        "Opening balance saved successfully",
+    )))
 }

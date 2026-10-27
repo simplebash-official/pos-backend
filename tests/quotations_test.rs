@@ -207,7 +207,11 @@ async fn only_admin_and_manager_can_use_quotations() {
             ("POST", "/api/quotations".to_string(), Some(valid_body())),
             ("GET", format!("/api/quotations/{key}"), None),
             ("POST", format!("/api/quotations/{key}/cancel"), None),
-            ("GET", format!("/api/quotations/{key}/document?design=current"), None),
+            (
+                "GET",
+                format!("/api/quotations/{key}/document?design=current"),
+                None,
+            ),
         ] {
             let (status, _, bytes) = request(&ctx.router, method, &uri, body, Some(tok)).await;
             assert_eq!(status, StatusCode::FORBIDDEN, "{method} {uri}");
@@ -870,6 +874,212 @@ async fn a_database_from_before_sync_gains_the_sync_columns_and_keeps_its_quotat
     let _ = std::fs::remove_file(&path);
     let _ = std::fs::remove_file(path.with_extension("db-shm"));
     let _ = std::fs::remove_file(path.with_extension("db-wal"));
+}
+
+#[tokio::test]
+async fn out_of_stock_quotation_creation_replenishment_and_fulfillment() {
+    let ctx = setup().await;
+    let tok = token(&ctx.config, Role::Admin);
+
+    // 1. Create Category and Subcategory
+    let (_, cat) = call(
+        &ctx.router,
+        "POST",
+        "/api/inventory/categories",
+        Some(json!({ "name": "Audio", "icon": "headphones", "color": "purple" })),
+        &tok,
+    )
+    .await;
+    let category_key = cat["data"]["key"].as_str().unwrap().to_string();
+    let (_, sub) = call(
+        &ctx.router,
+        "POST",
+        &format!("/api/inventory/categories/{category_key}/subcategories"),
+        Some(json!({ "name": "Earbuds" })),
+        &tok,
+    )
+    .await;
+    let subcategory_key = sub["data"]["subcategories"][0]["key"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // 2. Create product with initial opening stock of 1 @ 15,000 cents
+    let (status, product) = call(
+        &ctx.router,
+        "POST",
+        "/api/inventory/products",
+        Some(json!({
+            "name": "Wireless Buds Pro",
+            "categoryKey": category_key,
+            "subcategoryKey": subcategory_key,
+            "minStockThreshold": 2,
+            "openingStock": { "quantity": 1, "unitCostCents": 10000, "sellingPriceCents": 15000 }
+        })),
+        &tok,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{product}");
+    let product_key = product["data"]["key"].as_str().unwrap().to_string();
+    let product_id = product["data"]["id"].as_str().unwrap().to_string();
+
+    // 3. Sell that 1 item so stock drops to 0
+    let (status, sale1) = call(
+        &ctx.router,
+        "POST",
+        "/api/billing/sales",
+        Some(json!({
+            "staff": { "cashierName": "Alice" },
+            "items": [{
+                "productKey": product_key,
+                "quantity": 1,
+                "sellingPriceCents": 15000,
+                "discountCents": 0,
+                "sourceType": "retail"
+            }],
+            "payment": { "paymentMethod": "cash", "isCredit": false, "amountReceivedCents": 15000 },
+            "shopProfileSnapshot": { "tradingName": "TechFix Repairs" }
+        })),
+        &tok,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sale1}");
+
+    // Verify product is out of stock (stock_quantity = 0), and has lastSellingPriceCents = 15000
+    let (status, prod_res) = call(
+        &ctx.router,
+        "GET",
+        &format!("/api/inventory/products/{product_id}"),
+        None,
+        &tok,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{prod_res}");
+    assert_eq!(prod_res["data"]["stockQuantity"], 0);
+    assert_eq!(prod_res["data"]["lastSellingPriceCents"], 15000);
+
+    // 4. Create a quotation quoting 2 units of the out-of-stock product
+    let (status, quo_res) = create(
+        &ctx.router,
+        &tok,
+        json!({
+            "customer": { "customerName": "Kamal Gunaratne", "customerPhone": "0779998888" },
+            "items": [{
+                "productKey": product_key,
+                "quantity": 2,
+                "sellingPriceCents": 15000
+            }],
+            "validUntil": date_in(7)
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{quo_res}");
+    let quotation_key = quo_res["data"]["key"].as_str().unwrap().to_string();
+    assert_eq!(quo_res["data"]["status"], "active");
+    assert_eq!(quo_res["data"]["hasOutOfStockItems"], true);
+
+    // 5. Verify pulse report flags this quotation as pending stock with isReadyToFill = false
+    let (status, pulse_res) = call(&ctx.router, "GET", "/api/reports/dashboard-pulse", None, &tok).await;
+    assert_eq!(status, StatusCode::OK, "{pulse_res}");
+    let pending = pulse_res["data"]["pendingStockQuotations"]
+        .as_array()
+        .expect("pendingStockQuotations array");
+    let found = pending.iter().find(|q| q["key"] == quotation_key);
+    assert!(found.is_some(), "Quotation should be in pendingStockQuotations");
+    assert_eq!(found.unwrap()["isReadyToFill"], false);
+
+    // 6. Replenish stock via purchase receipt:
+    let (_, supplier) = call(
+        &ctx.router,
+        "POST",
+        "/api/suppliers",
+        Some(json!({
+            "name": "Audio World",
+            "contactPerson": "Sam",
+            "primaryPhone": "0771234567",
+            "address": "Colombo",
+            "suppliedCategories": [category_key]
+        })),
+        &tok,
+    )
+    .await;
+    let supplier_key = supplier["data"]["key"].as_str().unwrap().to_string();
+
+    let (status, rcp_res) = call(
+        &ctx.router,
+        "POST",
+        "/api/purchase-receipts",
+        Some(json!({
+            "supplierKey": supplier_key,
+            "date": "2026-03-01T00:00:00Z",
+            "lines": [{
+                "productKey": product_key,
+                "quantity": 5,
+                "lineTotalCents": 50000,
+                "sellingPriceCents": 15000
+            }],
+            "confirmDuplicate": false
+        })),
+        &tok,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{rcp_res}");
+
+    // 7. Pulse now shows isReadyToFill = true!
+    let (status, pulse_res2) = call(&ctx.router, "GET", "/api/reports/dashboard-pulse", None, &tok).await;
+    assert_eq!(status, StatusCode::OK, "{pulse_res2}");
+    let pending2 = pulse_res2["data"]["pendingStockQuotations"]
+        .as_array()
+        .expect("pendingStockQuotations array");
+    let found2 = pending2.iter().find(|q| q["key"] == quotation_key).unwrap();
+    assert_eq!(found2["isReadyToFill"], true);
+
+    // 8. Fulfill the quotation by completing a sale with quotationKey
+    let (status, sale2) = call(
+        &ctx.router,
+        "POST",
+        "/api/billing/sales",
+        Some(json!({
+            "staff": { "cashierName": "Alice" },
+            "customer": { "customerName": "Kamal Gunaratne", "customerPhone": "0779998888" },
+            "items": [{
+                "productKey": product_key,
+                "quantity": 2,
+                "sellingPriceCents": 15000,
+                "discountCents": 0,
+                "sourceType": "retail"
+            }],
+            "payment": { "paymentMethod": "cash", "isCredit": false, "amountReceivedCents": 30000 },
+            "quotationKey": quotation_key,
+            "shopProfileSnapshot": { "tradingName": "TechFix Repairs" }
+        })),
+        &tok,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sale2}");
+    let invoice_key = sale2["data"]["invoice"]["key"].as_str().unwrap().to_string();
+
+    // 9. Verify quotation is now fulfilled
+    let (status, quo_after) = call(
+        &ctx.router,
+        "GET",
+        &format!("/api/quotations/{quotation_key}"),
+        None,
+        &tok,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{quo_after}");
+    assert_eq!(quo_after["data"]["status"], "fulfilled");
+    assert_eq!(quo_after["data"]["fulfilledByInvoiceKey"], invoice_key);
+    assert!(quo_after["data"]["fulfilledAt"].as_str().is_some());
+
+    // 10. Pulse no longer lists this quotation because it is fulfilled!
+    let (status, pulse_res3) = call(&ctx.router, "GET", "/api/reports/dashboard-pulse", None, &tok).await;
+    assert_eq!(status, StatusCode::OK, "{pulse_res3}");
+    let pending3 = pulse_res3["data"]["pendingStockQuotations"]
+        .as_array()
+        .expect("pendingStockQuotations array");
+    assert!(!pending3.iter().any(|q| q["key"] == quotation_key));
 }
 
 // ============================================================================

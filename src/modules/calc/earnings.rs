@@ -122,30 +122,60 @@ mod tests {
     #[test]
     fn a_percentage_is_taken_of_the_profit() {
         // Rs 10,000 job, Rs 4,000 of parts: Rs 6,000 profit, 30% is Rs 1,800.
-        let reply = compute(&request(Some(1_000_000), 400_000, Some(SplitKind::Percentage), 30.0))
-            .unwrap();
-        assert_eq!((reply.profit_cents, reply.commission_cents), (600_000, 180_000));
+        let reply = compute(&request(
+            Some(1_000_000),
+            400_000,
+            Some(SplitKind::Percentage),
+            30.0,
+        ))
+        .unwrap();
+        assert_eq!(
+            (reply.profit_cents, reply.commission_cents),
+            (600_000, 180_000)
+        );
         assert_eq!(reply.shop_keeps_cents, 420_000);
         assert!(!reply.capped);
     }
 
     #[test]
     fn a_fixed_commission_is_cut_down_to_the_profit() {
-        let reply =
-            compute(&request(Some(100_000), 70_000, Some(SplitKind::Fixed), 50_000.0)).unwrap();
-        assert_eq!((reply.profit_cents, reply.commission_cents), (30_000, 30_000));
+        let reply = compute(&request(
+            Some(100_000),
+            70_000,
+            Some(SplitKind::Fixed),
+            50_000.0,
+        ))
+        .unwrap();
+        assert_eq!(
+            (reply.profit_cents, reply.commission_cents),
+            (30_000, 30_000)
+        );
         assert!(reply.capped);
         assert_eq!(reply.shop_keeps_cents, 0);
-        let enough =
-            compute(&request(Some(100_000), 70_000, Some(SplitKind::Fixed), 20_000.0)).unwrap();
+        let enough = compute(&request(
+            Some(100_000),
+            70_000,
+            Some(SplitKind::Fixed),
+            20_000.0,
+        ))
+        .unwrap();
         assert_eq!(enough.commission_cents, 20_000);
         assert!(!enough.capped);
     }
 
     #[test]
     fn a_loss_earns_no_commission_and_no_split_means_none() {
-        let loss = compute(&request(Some(50_000), 80_000, Some(SplitKind::Fixed), 10_000.0)).unwrap();
-        assert_eq!((loss.profit_cents, loss.commission_cents, loss.capped), (0, 0, false));
+        let loss = compute(&request(
+            Some(50_000),
+            80_000,
+            Some(SplitKind::Fixed),
+            10_000.0,
+        ))
+        .unwrap();
+        assert_eq!(
+            (loss.profit_cents, loss.commission_cents, loss.capped),
+            (0, 0, false)
+        );
         let none = compute(&request(Some(50_000), 0, None, 0.0)).unwrap();
         assert_eq!((none.profit_cents, none.commission_cents), (50_000, 0));
     }

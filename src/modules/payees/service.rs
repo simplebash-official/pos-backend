@@ -12,13 +12,16 @@ use crate::{
     },
     domain::{
         cash_categories::{
-            CreatePayeeRequest, Payee, PayeeListQuery, PayeeType, UpdatePayeeRequest, normalize_name, payee_key,
+            CreatePayeeRequest, Payee, PayeeListQuery, PayeeType, UpdatePayeeRequest,
+            normalize_name, payee_key,
         },
         employees::{EmployeeListQuery, EmployeeStatus},
         suppliers::SupplierListQuery,
     },
     modules::{
-        employees, payees::{model::PayeeDocument, repository}, sessions, suppliers,
+        employees,
+        payees::{model::PayeeDocument, repository},
+        sessions, suppliers,
     },
 };
 
@@ -47,21 +50,32 @@ pub(crate) async fn resolve_payee(db: &Db, key: &str) -> AppResult<ResolvedPayee
     let not_found = || AppError::not_found_with_code("Payee not found.", codes::PAYEE_NOT_FOUND);
     if key.starts_with(&format!("{}_", prefixes::SUPPLIER)) {
         let supplier = suppliers::service::get_supplier_by_key(db, key).await?;
-        return Ok(ResolvedPayee { payee_type: PayeeType::Supplier, name: supplier.name });
+        return Ok(ResolvedPayee {
+            payee_type: PayeeType::Supplier,
+            name: supplier.name,
+        });
     }
     if key.starts_with(&format!("{}_", prefixes::EMPLOYEE)) {
         let employee = employees::service::get_employee_by_key(db, key).await?;
-        return Ok(ResolvedPayee { payee_type: PayeeType::Staff, name: employee.name });
+        return Ok(ResolvedPayee {
+            payee_type: PayeeType::Staff,
+            name: employee.name,
+        });
     }
     if key.starts_with(&format!("{}_", prefixes::PAYEE)) {
-        let payee = repository::find_by_key(db, key).await?.ok_or_else(not_found)?;
+        let payee = repository::find_by_key(db, key)
+            .await?
+            .ok_or_else(not_found)?;
         if !payee.active {
             return Err(AppError::conflict(
                 codes::PAYEE_HIDDEN,
                 "This payee is hidden. Show it again in Settings before using it.",
             ));
         }
-        return Ok(ResolvedPayee { payee_type: payee.payee_type, name: payee.name });
+        return Ok(ResolvedPayee {
+            payee_type: payee.payee_type,
+            name: payee.name,
+        });
     }
     Err(not_found())
 }
@@ -75,14 +89,24 @@ pub async fn list_payees(db: &Db, query: PayeeListQuery) -> AppResult<Vec<Payee>
         .map(|t| PayeeType::parse(t).ok_or_else(|| AppError::validation("Unknown payee type.")))
         .transpose()?;
     let include_hidden = query.include_hidden.unwrap_or(false);
-    let search = query.search.as_deref().map(normalize_name).filter(|s| !s.is_empty());
+    let search = query
+        .search
+        .as_deref()
+        .map(normalize_name)
+        .filter(|s| !s.is_empty());
     let usage: std::collections::HashMap<String, i64> =
-        sessions::service::movement_counts_by_payee(db).await?.into_iter().collect();
+        sessions::service::movement_counts_by_payee(db)
+            .await?
+            .into_iter()
+            .collect();
     let used = |key: &str| usage.get(key).copied().unwrap_or(0);
 
     let mut out: Vec<Payee> = Vec::new();
     if wanted.is_none_or(|t| t == PayeeType::Supplier) {
-        for s in suppliers::service::list_suppliers(db, SupplierListQuery::default()).await?.suppliers {
+        for s in suppliers::service::list_suppliers(db, SupplierListQuery::default())
+            .await?
+            .suppliers
+        {
             out.push(Payee {
                 usage_count: used(&s.key),
                 key: s.key,
@@ -96,7 +120,10 @@ pub async fn list_payees(db: &Db, query: PayeeListQuery) -> AppResult<Vec<Payee>
     if wanted.is_none_or(|t| t == PayeeType::Staff) {
         let staff = employees::service::list_employees(
             db,
-            EmployeeListQuery { status: Some(EmployeeStatus::Active), ..Default::default() },
+            EmployeeListQuery {
+                status: Some(EmployeeStatus::Active),
+                ..Default::default()
+            },
         )
         .await?
         .employees;
@@ -126,7 +153,9 @@ pub async fn list_payees(db: &Db, query: PayeeListQuery) -> AppResult<Vec<Payee>
     if let Some(q) = &search {
         out.retain(|p| {
             normalize_name(&p.name).contains(q.as_str())
-                || p.phone.as_deref().is_some_and(|ph| normalize_name(ph).contains(q.as_str()))
+                || p.phone
+                    .as_deref()
+                    .is_some_and(|ph| normalize_name(ph).contains(q.as_str()))
         });
     }
     out.sort_by(|a, b| b.usage_count.cmp(&a.usage_count).then(a.name.cmp(&b.name)));
@@ -135,7 +164,9 @@ pub async fn list_payees(db: &Db, query: PayeeListQuery) -> AppResult<Vec<Payee>
 
 /// A blank phone means none.
 fn clean_phone(raw: Option<&str>) -> Option<String> {
-    raw.map(str::trim).filter(|p| !p.is_empty()).map(str::to_string)
+    raw.map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(str::to_string)
 }
 
 fn new_document(payee_type: PayeeType, name: String, phone: Option<String>) -> PayeeDocument {
@@ -221,7 +252,9 @@ async fn require_payee(db: &Db, key: &str) -> AppResult<PayeeDocument> {
 /// staff are changed on their own pages, so only stored payees (`pye_…`) are found here.
 pub async fn update_payee(db: &Db, key: &str, body: UpdatePayeeRequest) -> AppResult<Payee> {
     tracked("payees.updated", async move {
-        if key.starts_with(&format!("{}_", prefixes::SUPPLIER)) || key.starts_with(&format!("{}_", prefixes::EMPLOYEE)) {
+        if key.starts_with(&format!("{}_", prefixes::SUPPLIER))
+            || key.starts_with(&format!("{}_", prefixes::EMPLOYEE))
+        {
             return Err(AppError::validation(
                 "Suppliers and staff are changed on their own pages.",
             ));
@@ -231,11 +264,11 @@ pub async fn update_payee(db: &Db, key: &str, body: UpdatePayeeRequest) -> AppRe
         if let Some(raw) = &body.name {
             let name = clean_name(raw)?;
             let normalized = normalize_name(&name);
-            if repository::list_all(db)
-                .await?
-                .iter()
-                .any(|p| p.key != doc.key && p.payee_type == doc.payee_type && p.normalized_name == normalized)
-            {
+            if repository::list_all(db).await?.iter().any(|p| {
+                p.key != doc.key
+                    && p.payee_type == doc.payee_type
+                    && p.normalized_name == normalized
+            }) {
                 return Err(AppError::conflict(
                     codes::PAYEE_NAME_TAKEN,
                     "Someone with this name is already in the list.",

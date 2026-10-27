@@ -18,7 +18,13 @@ use simplebash_pos_backend::{
 };
 use tower::ServiceExt;
 
-async fn send(app: &common::TestApp, method: &str, uri: &str, body: Option<Value>, token: &str) -> (StatusCode, Value) {
+async fn send(
+    app: &common::TestApp,
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+    token: &str,
+) -> (StatusCode, Value) {
     let mut builder = Request::builder()
         .method(method)
         .uri(uri)
@@ -32,30 +38,73 @@ async fn send(app: &common::TestApp, method: &str, uri: &str, body: Option<Value
     };
     let response = app.router.clone().oneshot(request).await.unwrap();
     let status = response.status();
-    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let json = if bytes.is_empty() { Value::Null } else { serde_json::from_slice(&bytes).unwrap() };
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes).unwrap()
+    };
     (status, json)
 }
 
 fn today() -> String {
-    chrono::Utc::now().date_naive().format("%Y-%m-%d").to_string()
+    chrono::Utc::now()
+        .date_naive()
+        .format("%Y-%m-%d")
+        .to_string()
 }
 
 fn supplier_row<'a>(body: &'a Value, key: &str) -> &'a Value {
-    body["data"]["suppliers"].as_array().unwrap().iter().find(|s| s["supplierKey"] == key).unwrap()
+    body["data"]["suppliers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["supplierKey"] == key)
+        .unwrap()
 }
 
 async fn scenario(app: &common::TestApp) {
-    let staff = common::mint_token(&app.config, Some(Role::Staff), roles::default_permissions(Role::Staff));
-    let manager = common::mint_token(&app.config, Some(Role::Manager), roles::default_permissions(Role::Manager));
-    let admin = common::mint_token(&app.config, Some(Role::Admin), roles::default_permissions(Role::Admin));
+    let staff = common::mint_token(
+        &app.config,
+        Some(Role::Staff),
+        roles::default_permissions(Role::Staff),
+    );
+    let manager = common::mint_token(
+        &app.config,
+        Some(Role::Manager),
+        roles::default_permissions(Role::Manager),
+    );
+    let admin = common::mint_token(
+        &app.config,
+        Some(Role::Admin),
+        roles::default_permissions(Role::Admin),
+    );
     let tag = &uuid::Uuid::new_v4().simple().to_string()[..8];
 
     // A supplier, a product, and 10 units bought at Rs. 500 each.
-    let (_, category) = send(app, "POST", "/api/inventory/categories", Some(json!({ "name": format!("Bal Cat {tag}"), "icon": "box", "color": "blue" })), &admin).await;
+    let (_, category) = send(
+        app,
+        "POST",
+        "/api/inventory/categories",
+        Some(json!({ "name": format!("Bal Cat {tag}"), "icon": "box", "color": "blue" })),
+        &admin,
+    )
+    .await;
     let category_key_ = category["data"]["key"].as_str().unwrap().to_string();
-    let (_, sub) = send(app, "POST", &format!("/api/inventory/categories/{category_key_}/subcategories"), Some(json!({ "name": "Items" })), &admin).await;
-    let subcategory_key = sub["data"]["subcategories"][0]["key"].as_str().unwrap().to_string();
+    let (_, sub) = send(
+        app,
+        "POST",
+        &format!("/api/inventory/categories/{category_key_}/subcategories"),
+        Some(json!({ "name": "Items" })),
+        &admin,
+    )
+    .await;
+    let subcategory_key = sub["data"]["subcategories"][0]["key"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let (status, supplier) = send(
         app,
         "POST",
@@ -100,22 +149,56 @@ async fn scenario(app: &common::TestApp) {
     let (status, body) = send(app, "GET", "/api/balances/suppliers", None, &manager).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let row = supplier_row(&body, &supplier_key);
-    assert!(row.get("balanceCents").is_none() && row.get("openingBalanceCents").is_none(), "{row}");
+    assert!(
+        row.get("balanceCents").is_none() && row.get("openingBalanceCents").is_none(),
+        "{row}"
+    );
 
     let opening = |cents: i64| json!({ "openingBalanceCents": cents, "asOfDate": today() });
     for (what, uri, body, expected) in [
-        ("unknown kind", "/api/balances/cheque/x/opening".to_string(), opening(1), StatusCode::BAD_REQUEST),
-        ("unknown supplier", "/api/balances/supplier/sup_nope/opening".to_string(), opening(1), StatusCode::NOT_FOUND),
-        ("future date", format!("/api/balances/supplier/{supplier_key}/opening"), json!({ "openingBalanceCents": 1, "asOfDate": "2999-01-01" }), StatusCode::BAD_REQUEST),
-        ("a cashier", format!("/api/balances/supplier/{supplier_key}/opening"), opening(1), StatusCode::FORBIDDEN),
+        (
+            "unknown kind",
+            "/api/balances/cheque/x/opening".to_string(),
+            opening(1),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            "unknown supplier",
+            "/api/balances/supplier/sup_nope/opening".to_string(),
+            opening(1),
+            StatusCode::NOT_FOUND,
+        ),
+        (
+            "future date",
+            format!("/api/balances/supplier/{supplier_key}/opening"),
+            json!({ "openingBalanceCents": 1, "asOfDate": "2999-01-01" }),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            "a cashier",
+            format!("/api/balances/supplier/{supplier_key}/opening"),
+            opening(1),
+            StatusCode::FORBIDDEN,
+        ),
     ] {
-        let token = if what == "a cashier" { &staff } else { &manager };
+        let token = if what == "a cashier" {
+            &staff
+        } else {
+            &manager
+        };
         let (status, body) = send(app, "PUT", &uri, Some(body), token).await;
         assert_eq!(status, expected, "{what}: {body}");
     }
 
     // The shop owed Rs. 1,000 before; stock worth Rs. 5,000 arrived today.
-    let (status, body) = send(app, "PUT", &format!("/api/balances/supplier/{supplier_key}/opening"), Some(opening(100_000)), &manager).await;
+    let (status, body) = send(
+        app,
+        "PUT",
+        &format!("/api/balances/supplier/{supplier_key}/opening"),
+        Some(opening(100_000)),
+        &manager,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let (_, body) = send(app, "GET", "/api/balances/suppliers", None, &manager).await;
     let row = supplier_row(&body, &supplier_key);
@@ -205,12 +288,18 @@ async fn scenario(app: &common::TestApp) {
 
     let (status, body) = send(app, "GET", "/api/balances/staff", None, &manager).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    let me = body["data"]["staff"].as_array().unwrap().iter().find(|s| s["employeeKey"] == employee_key.as_str()).unwrap();
+    let me = body["data"]["staff"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["employeeKey"] == employee_key.as_str())
+        .unwrap();
     assert_eq!(me["givenCents"], 80_000);
     assert_eq!(me["outstandingCents"], 80_000);
 
     // Part is taken back from pay, never more than is owed.
-    let recover = |cents: i64| json!({ "amountCents": cents, "recoveredOn": today(), "note": "October pay" });
+    let recover =
+        |cents: i64| json!({ "amountCents": cents, "recoveredOn": today(), "note": "October pay" });
     let uri = format!("/api/balances/staff/{employee_key}/recoveries");
     let (status, _) = send(app, "POST", &uri, Some(recover(10_000)), &staff).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
@@ -224,7 +313,14 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_eq!(body["code"], "ADVANCE_OVER_RECOVERED");
 
-    let (status, body) = send(app, "GET", &format!("/api/balances/staff/{employee_key}"), None, &manager).await;
+    let (status, body) = send(
+        app,
+        "GET",
+        &format!("/api/balances/staff/{employee_key}"),
+        None,
+        &manager,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["data"]["given"].as_array().unwrap().len(), 1);
     assert_eq!(body["data"]["given"][0]["categoryName"], "Advance");
@@ -232,10 +328,27 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(status, StatusCode::NOT_FOUND);
 
     // Rs. 100 was already owed before the records began.
-    let (status, body) = send(app, "PUT", &format!("/api/balances/staff/{employee_key}/opening"), Some(opening(10_000)), &manager).await;
+    let (status, body) = send(
+        app,
+        "PUT",
+        &format!("/api/balances/staff/{employee_key}/opening"),
+        Some(opening(10_000)),
+        &manager,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    let (_, body) = send(app, "GET", &format!("/api/balances/staff/{employee_key}"), None, &manager).await;
-    assert_eq!(body["data"]["summary"]["outstandingCents"], 10_000 + 80_000 - 30_000);
+    let (_, body) = send(
+        app,
+        "GET",
+        &format!("/api/balances/staff/{employee_key}"),
+        None,
+        &manager,
+    )
+    .await;
+    assert_eq!(
+        body["data"]["summary"]["outstandingCents"],
+        10_000 + 80_000 - 30_000
+    );
 }
 
 #[tokio::test]

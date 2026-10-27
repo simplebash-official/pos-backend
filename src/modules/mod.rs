@@ -1,5 +1,4 @@
 pub mod accounts;
-pub mod finance_reports;
 pub mod attachments;
 pub mod auth;
 pub mod backup;
@@ -14,6 +13,7 @@ pub mod document_packages;
 pub mod documents;
 pub mod employees;
 pub mod expenses;
+pub mod finance_reports;
 pub mod imports;
 pub mod incomes;
 pub mod inventory;

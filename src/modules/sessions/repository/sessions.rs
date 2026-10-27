@@ -20,18 +20,20 @@ fn sessions_col(db: &TenantDatabase) -> ScopedCollection<RegisterSessionDocument
     db.collection("register_sessions")
 }
 
-pub(crate) fn session_from_sqlite_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<RegisterSessionDocument> {
+pub(crate) fn session_from_sqlite_row(
+    row: &sqlx::sqlite::SqliteRow,
+) -> AppResult<RegisterSessionDocument> {
     let id_str: String = row.get("id");
     let status_str: String = row.get("status");
     let status = SessionStatus::parse(&status_str).unwrap_or(SessionStatus::Open);
 
     let opening_denominations_str: Option<String> = row.get("opening_denominations");
-    let opening_denominations = opening_denominations_str
-        .and_then(|s| serde_json::from_str(&s).ok());
+    let opening_denominations =
+        opening_denominations_str.and_then(|s| serde_json::from_str(&s).ok());
 
     let closing_denominations_str: Option<String> = row.get("closing_denominations");
-    let closing_denominations = closing_denominations_str
-        .and_then(|s| serde_json::from_str(&s).ok());
+    let closing_denominations =
+        closing_denominations_str.and_then(|s| serde_json::from_str(&s).ok());
 
     let opened_at_str: String = row.get("opened_at");
     let closed_at_str: Option<String> = row.get("closed_at");
@@ -197,24 +199,18 @@ pub async fn insert_session(
     }
 }
 
-pub async fn find_session_by_key(
-    db: &Db,
-    key: &str,
-) -> AppResult<Option<RegisterSessionDocument>> {
+pub async fn find_session_by_key(db: &Db, key: &str) -> AppResult<Option<RegisterSessionDocument>> {
     match db {
         Db::Mongo(mongo_db) => {
-            let doc = sessions_col(mongo_db)
-                .find_one(doc! { "key": key })
-                .await?;
+            let doc = sessions_col(mongo_db).find_one(doc! { "key": key }).await?;
             Ok(doc)
         }
         Db::Sqlite(pool) => {
-            let row = sqlx::query(
-                "SELECT * FROM register_sessions WHERE key = ? AND deleted_at IS NULL"
-            )
-            .bind(key)
-            .fetch_optional(pool)
-            .await?;
+            let row =
+                sqlx::query("SELECT * FROM register_sessions WHERE key = ? AND deleted_at IS NULL")
+                    .bind(key)
+                    .fetch_optional(pool)
+                    .await?;
 
             row.map(|r| session_from_sqlite_row(&r)).transpose()
         }
@@ -227,9 +223,12 @@ pub async fn find_session_by_id_or_key(
 ) -> AppResult<Option<RegisterSessionDocument>> {
     if let Ok(object_id) = ObjectId::parse_str(id_or_key)
         && let Db::Mongo(mongo_db) = db
-            && let Some(doc) = sessions_col(mongo_db).find_one(doc! { "_id": object_id }).await? {
-                return Ok(Some(doc));
-            }
+        && let Some(doc) = sessions_col(mongo_db)
+            .find_one(doc! { "_id": object_id })
+            .await?
+    {
+        return Ok(Some(doc));
+    }
     match db {
         Db::Mongo(mongo_db) => {
             let doc = sessions_col(mongo_db)
@@ -342,7 +341,9 @@ pub async fn update_session(
             update_doc.version += 1;
 
             let filter = doc! { "key": &doc.key, "version": doc.version };
-            let res = sessions_col(mongo_db).replace_one(filter, &update_doc).await?;
+            let res = sessions_col(mongo_db)
+                .replace_one(filter, &update_doc)
+                .await?;
             if res.matched_count == 0 {
                 return Ok(None);
             }
@@ -405,7 +406,7 @@ pub async fn update_session(
                     version = version + 1,
                     updated_at = ?
                 WHERE key = ? AND version = ?
-                "#
+                "#,
             )
             .bind(doc.status.as_str())
             .bind(&opened_at_iso)
@@ -499,7 +500,7 @@ pub async fn increment_session_sales(
                     version = version + 1,
                     updated_at = ?
                 WHERE key = ?
-                "#
+                "#,
             )
             .bind(cash_delta)
             .bind(card_delta)
@@ -545,7 +546,7 @@ pub async fn increment_session_refunds(
                     version = version + 1,
                     updated_at = ?
                 WHERE key = ?
-                "#
+                "#,
             )
             .bind(refund_cash_delta)
             .bind(&updated_at_iso)
@@ -652,13 +653,17 @@ pub async fn list_sessions(
                 filter.insert("opened_at", doc! { "$gte": from });
             }
             if let Some(to) = &query.to {
-                filter.entry("opened_at".to_string()).or_insert_with(|| doc! {}.into());
+                filter
+                    .entry("opened_at".to_string())
+                    .or_insert_with(|| doc! {}.into());
                 if let Ok(d) = filter.get_document_mut("opened_at") {
                     d.insert("$lte", to);
                 }
             }
 
-            let total = sessions_col(mongo_db).count_documents(filter.clone()).await?;
+            let total = sessions_col(mongo_db)
+                .count_documents(filter.clone())
+                .await?;
             let mut cursor = sessions_col(mongo_db)
                 .find(filter)
                 .sort(doc! { "opened_at": -1 })
@@ -709,7 +714,8 @@ pub async fn list_sessions(
             }
 
             let where_clause = conditions.join(" AND ");
-            let count_sql = format!("SELECT COUNT(*) as total FROM register_sessions WHERE {where_clause}");
+            let count_sql =
+                format!("SELECT COUNT(*) as total FROM register_sessions WHERE {where_clause}");
             let mut count_query = sqlx::query(&count_sql);
             for b in &bindings {
                 count_query = count_query.bind(b);

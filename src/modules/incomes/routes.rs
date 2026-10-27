@@ -15,7 +15,9 @@ use crate::{
         middleware::{auth::CurrentUser, sync_headers::DeviceId},
         response::{ApiResponse, ErrorResponse},
     },
-    domain::incomes::{CreateIncomeRequest, IncomeListQuery, IncomeListResponse, IncomeRow, IncomeStats},
+    domain::incomes::{
+        CreateIncomeRequest, IncomeListQuery, IncomeListResponse, IncomeRow, IncomeStats,
+    },
     modules::incomes::service,
 };
 
@@ -52,7 +54,10 @@ async fn list_incomes(
 ) -> AppResult<Json<ApiResponse<IncomeListResponse>>> {
     current_user.require_permission(perm::INCOME_VIEW)?;
     let response = service::list_incomes(&state.db, query).await?;
-    Ok(Json(ApiResponse::success(response, "Income retrieved successfully")))
+    Ok(Json(ApiResponse::success(
+        response,
+        "Income retrieved successfully",
+    )))
 }
 
 #[utoipa::path(
@@ -68,7 +73,10 @@ async fn get_income_stats(
 ) -> AppResult<Json<ApiResponse<IncomeStats>>> {
     current_user.require_permission(perm::INCOME_VIEW)?;
     let stats = service::get_stats(&state.db).await?;
-    Ok(Json(ApiResponse::success(stats, "Income stats retrieved successfully")))
+    Ok(Json(ApiResponse::success(
+        stats,
+        "Income stats retrieved successfully",
+    )))
 }
 
 #[utoipa::path(
@@ -89,7 +97,10 @@ async fn get_income(
 ) -> AppResult<Json<ApiResponse<IncomeRow>>> {
     current_user.require_permission(perm::INCOME_VIEW)?;
     let income = service::get_income(&state.db, &key).await?;
-    Ok(Json(ApiResponse::success(income, "Income retrieved successfully")))
+    Ok(Json(ApiResponse::success(
+        income,
+        "Income retrieved successfully",
+    )))
 }
 
 #[utoipa::path(
@@ -111,6 +122,10 @@ async fn create_income(
 ) -> AppResult<(StatusCode, Json<ApiResponse<IncomeRow>>)> {
     current_user.require_permission(perm::INCOME_MANAGE)?;
     let name = current_user.resolve_name(&state.db).await;
-    let income = service::create_income(&state.db, current_user.user_id, name, body, device_id.0).await?;
-    Ok((StatusCode::CREATED, Json(ApiResponse::success(income, "Income recorded successfully"))))
+    let income =
+        service::create_income(&state.db, current_user.user_id, name, body, device_id.0).await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(ApiResponse::success(income, "Income recorded successfully")),
+    ))
 }

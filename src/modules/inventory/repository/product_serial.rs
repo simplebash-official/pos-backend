@@ -59,9 +59,7 @@ pub(crate) async fn insert_product_serial(
     let mut unit = unit.into();
     match unit.backend().await? {
         Backend::Mongo(db, session) => {
-            let result = product_serials(db)
-                .insert_one_in(&serial, session)
-                .await?;
+            let result = product_serials(db).insert_one_in(&serial, session).await?;
             let mut inserted = serial;
             inserted.id = result.inserted_id.as_object_id();
             Ok(inserted)

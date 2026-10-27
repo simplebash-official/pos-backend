@@ -12,7 +12,10 @@ use crate::{
         logging::domain::tracked,
     },
     domain::{
-        accounts::{AccountActivity, AccountKind, AccountSummary, AccountsResponse, SetAccountOpeningRequest},
+        accounts::{
+            AccountActivity, AccountKind, AccountSummary, AccountsResponse,
+            SetAccountOpeningRequest,
+        },
         cash_categories::category_key,
         expenses::PaidFrom,
         incomes::ReceivedInto,
@@ -43,7 +46,11 @@ fn balance_of(opening_cents: i64, a: &AccountActivity) -> i64 {
         - a.withdrawals_cents
 }
 
-fn summary_of(kind: AccountKind, opening: Option<&AccountOpeningDocument>, activity: Option<AccountActivity>) -> AccountSummary {
+fn summary_of(
+    kind: AccountKind,
+    opening: Option<&AccountOpeningDocument>,
+    activity: Option<AccountActivity>,
+) -> AccountSummary {
     match (opening, activity) {
         (Some(o), Some(a)) => AccountSummary {
             kind,
@@ -52,7 +59,13 @@ fn summary_of(kind: AccountKind, opening: Option<&AccountOpeningDocument>, activ
             balance_cents: Some(balance_of(o.opening_balance_cents, &a)),
             activity: Some(a),
         },
-        _ => AccountSummary { kind, opening_balance_cents: None, as_of_date: None, balance_cents: None, activity: None },
+        _ => AccountSummary {
+            kind,
+            opening_balance_cents: None,
+            as_of_date: None,
+            balance_cents: None,
+            activity: None,
+        },
     }
 }
 
@@ -85,7 +98,9 @@ async fn activity_since(db: &Db, kind: AccountKind, since: &str) -> AppResult<Ac
         .sum();
     match kind {
         AccountKind::Card | AccountKind::Online => {
-            for (method, received, refunded) in billing::service::payments::totals_by_method_since(db, since).await? {
+            for (method, received, refunded) in
+                billing::service::payments::totals_by_method_since(db, since).await?
+            {
                 if method == kind.as_str() {
                     activity.sales_cents += received;
                     activity.refunds_cents += refunded;
@@ -103,7 +118,8 @@ async fn activity_since(db: &Db, kind: AccountKind, since: &str) -> AppResult<Ac
                 &category_key(CashMovementType::AddCash, BANK_WITHDRAWAL),
             )
             .await?;
-            let (deposited, withdrawn) = sessions::service::bank_cash_moves(db, since, &deposit, &withdrawal).await?;
+            let (deposited, withdrawn) =
+                sessions::service::bank_cash_moves(db, since, &deposit, &withdrawal).await?;
             activity.deposits_cents = deposited;
             activity.withdrawals_cents = withdrawn;
         }
@@ -204,7 +220,10 @@ mod tests {
             deposits_cents: 700,
             withdrawals_cents: 200,
         };
-        assert_eq!(balance_of(5000, &a), 5000 + 1000 - 100 + 50 + 700 - 300 - 200);
+        assert_eq!(
+            balance_of(5000, &a),
+            5000 + 1000 - 100 + 50 + 700 - 300 - 200
+        );
         assert_eq!(balance_of(-250, &AccountActivity::default()), -250);
     }
 

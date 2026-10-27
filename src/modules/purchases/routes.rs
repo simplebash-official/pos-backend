@@ -166,8 +166,7 @@ async fn record_receipt(
         name: current_user.resolve_name(&state.db).await,
         user_id: current_user.user_id,
     };
-    let recorded =
-        receipt::record_receipt(&state.db, Some(recorded_by), body, device_id.0).await?;
+    let recorded = receipt::record_receipt(&state.db, Some(recorded_by), body, device_id.0).await?;
     Ok((
         StatusCode::CREATED,
         Json(ApiResponse::success(
@@ -224,7 +223,10 @@ async fn record_credit(
     let recorded = credit::create_credit(&state.db, by, body).await?;
     Ok((
         StatusCode::CREATED,
-        Json(ApiResponse::success(recorded, "Credit recorded successfully")),
+        Json(ApiResponse::success(
+            recorded,
+            "Credit recorded successfully",
+        )),
     ))
 }
 

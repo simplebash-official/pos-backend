@@ -63,7 +63,9 @@ async fn main() {
     // are ensured on every start (idempotent). A multi-tenant cloud has no shop in scope here:
     // each shop gets them when it is provisioned.
     if config.tenant_mode != simplebash_pos_backend::core::config::TenantMode::Multi
-        && let Err(err) = simplebash_pos_backend::modules::cash_categories::service::ensure_system_categories(&db).await
+        && let Err(err) =
+            simplebash_pos_backend::modules::cash_categories::service::ensure_system_categories(&db)
+                .await
     {
         tracing::error!(%err, "failed to ensure the built-in cash categories");
         std::process::exit(1);

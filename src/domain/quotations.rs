@@ -12,6 +12,7 @@ use crate::domain::billing::PricingAdjustments;
 /// them: it is derived from `valid_until` at read time (`Quotation::is_expired`)
 /// so an offer never needs a background job to flip it.
 pub const STATUS_ACTIVE: &str = "active";
+pub const STATUS_FULFILLED: &str = "fulfilled";
 pub const STATUS_CANCELLED: &str = "cancelled";
 
 /// One priced line of a quotation, embedded in the stored document and the
@@ -108,17 +109,26 @@ pub struct CreateQuotationRequest {
 /// A persisted quotation as returned by the API. The frozen shop-profile
 /// snapshot is intentionally not part of it (it can carry a base64 logo);
 /// only the PDF builder reads it.
-#[derive(Debug, Clone, Serialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Quotation {
     pub id: String,
     pub key: String,
     /// Human-facing number, e.g. `QUO-0001`.
     pub quotation_number: String,
-    /// `active` or `cancelled`.
+    /// `active`, `fulfilled`, or `cancelled`.
     pub status: String,
     /// True when still `active` but `validUntil` is in the past.
     pub is_expired: bool,
+    /// True when this quotation was created with items that were out of stock.
+    #[serde(default)]
+    pub has_out_of_stock_items: bool,
+    /// The invoice that converted/fulfilled this quotation, if fulfilled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fulfilled_by_invoice_key: Option<String>,
+    /// When this quotation was converted to a sale.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fulfilled_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub customer_key: Option<String>,
     pub customer_name: String,
@@ -155,6 +165,12 @@ pub struct SyncQuotation {
     pub key: String,
     pub quotation_number: String,
     pub status: String,
+    #[serde(default)]
+    pub has_out_of_stock_items: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fulfilled_by_invoice_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fulfilled_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub customer_key: Option<String>,
     pub customer_name: String,

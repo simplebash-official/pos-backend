@@ -45,7 +45,10 @@ async fn get_cash_settings(
 ) -> AppResult<Json<ApiResponse<CashSettings>>> {
     current_user.require_permission(perm::CASH_MOVEMENTS_VIEW)?;
     let settings = service::get_settings(&state.db).await?;
-    Ok(Json(ApiResponse::success(settings, "Cash settings retrieved successfully")))
+    Ok(Json(ApiResponse::success(
+        settings,
+        "Cash settings retrieved successfully",
+    )))
 }
 
 #[utoipa::path(
@@ -67,5 +70,8 @@ async fn update_cash_settings(
     current_user.require_permission(perm::CASH_SETTINGS_MANAGE)?;
     let name = current_user.resolve_name(&state.db).await;
     let settings = service::update_settings(&state.db, name, body).await?;
-    Ok(Json(ApiResponse::success(settings, "Cash settings saved successfully")))
+    Ok(Json(ApiResponse::success(
+        settings,
+        "Cash settings saved successfully",
+    )))
 }

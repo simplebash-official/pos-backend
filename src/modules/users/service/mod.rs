@@ -728,10 +728,9 @@ pub async fn verify_user_pin(
                         continue;
                     }
                 }
-                "manager"
-                    if user_doc.role != Role::Admin && user_doc.role != Role::Manager => {
-                        continue;
-                    }
+                "manager" if user_doc.role != Role::Admin && user_doc.role != Role::Manager => {
+                    continue;
+                }
                 _ => {}
             }
         }
@@ -743,11 +742,7 @@ pub async fn verify_user_pin(
 }
 
 /// Sets or updates a numeric PIN for a user account.
-pub async fn set_user_pin(
-    db: &Db,
-    user_id_or_key: &str,
-    pin: &str,
-) -> AppResult<()> {
+pub async fn set_user_pin(db: &Db, user_id_or_key: &str, pin: &str) -> AppResult<()> {
     if pin.len() < 4 || pin.len() > 8 || !pin.chars().all(|c| c.is_ascii_digit()) {
         return Err(AppError::validation("PIN must be 4 to 8 numeric digits"));
     }
@@ -758,8 +753,11 @@ pub async fn set_user_pin(
     };
     let user_doc = match user_doc {
         Some(u) => u,
-        None => repository::find_user_by_username(db, user_id_or_key).await?
-            .ok_or_else(|| AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND))?,
+        None => repository::find_user_by_username(db, user_id_or_key)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND)
+            })?,
     };
 
     let hashed = hash_password(pin)?;
@@ -772,4 +770,3 @@ pub async fn set_user_pin(
     .await?;
     Ok(())
 }
-

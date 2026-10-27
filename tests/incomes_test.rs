@@ -17,7 +17,13 @@ use simplebash_pos_backend::{
 };
 use tower::ServiceExt;
 
-async fn send(app: &common::TestApp, method: &str, uri: &str, body: Option<Value>, token: &str) -> (StatusCode, Value) {
+async fn send(
+    app: &common::TestApp,
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+    token: &str,
+) -> (StatusCode, Value) {
     let mut builder = Request::builder()
         .method(method)
         .uri(uri)
@@ -31,8 +37,14 @@ async fn send(app: &common::TestApp, method: &str, uri: &str, body: Option<Value
     };
     let response = app.router.clone().oneshot(request).await.unwrap();
     let status = response.status();
-    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let json = if bytes.is_empty() { Value::Null } else { serde_json::from_slice(&bytes).unwrap() };
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes).unwrap()
+    };
     (status, json)
 }
 
@@ -41,12 +53,23 @@ fn add_cash(name: &str) -> String {
 }
 
 fn today() -> String {
-    chrono::Utc::now().date_naive().format("%Y-%m-%d").to_string()
+    chrono::Utc::now()
+        .date_naive()
+        .format("%Y-%m-%d")
+        .to_string()
 }
 
 async fn scenario(app: &common::TestApp) {
-    let staff = common::mint_token(&app.config, Some(Role::Staff), roles::default_permissions(Role::Staff));
-    let manager = common::mint_token(&app.config, Some(Role::Manager), roles::default_permissions(Role::Manager));
+    let staff = common::mint_token(
+        &app.config,
+        Some(Role::Staff),
+        roles::default_permissions(Role::Staff),
+    );
+    let manager = common::mint_token(
+        &app.config,
+        Some(Role::Manager),
+        roles::default_permissions(Role::Manager),
+    );
     let scrap = add_cash("Scrap and waste sale");
 
     // A cashier sees the drawer's movements, not the shop's income.
@@ -65,11 +88,29 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(status, StatusCode::FORBIDDEN);
 
     // Income categories are the add-cash ones that count as income, nothing else.
-    let (status, body) = send(app, "GET", "/api/cash-categories?forIncome=true", None, &manager).await;
+    let (status, body) = send(
+        app,
+        "GET",
+        "/api/cash-categories?forIncome=true",
+        None,
+        &manager,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    let names: Vec<&str> = body["data"].as_array().unwrap().iter().map(|c| c["name"].as_str().unwrap()).collect();
-    assert!(names.contains(&"Scrap and waste sale") && names.contains(&"Other income"), "{names:?}");
-    assert!(!names.contains(&"Owner capital") && !names.contains(&"Fuel"), "{names:?}");
+    let names: Vec<&str> = body["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["name"].as_str().unwrap())
+        .collect();
+    assert!(
+        names.contains(&"Scrap and waste sale") && names.contains(&"Other income"),
+        "{names:?}"
+    );
+    assert!(
+        !names.contains(&"Owner capital") && !names.contains(&"Fuel"),
+        "{names:?}"
+    );
 
     // Money received into the bank is entered once.
     let (status, body) = send(
@@ -90,7 +131,13 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(income["receivedInto"], "bank");
     assert_eq!(income["categoryName"], "Commission received");
     assert_eq!(income["reportGroup"], "other_income");
-    assert!(income["payeeKey"].as_str().unwrap().starts_with("pye_other_"), "the typed name is saved for next time");
+    assert!(
+        income["payeeKey"]
+            .as_str()
+            .unwrap()
+            .starts_with("pye_other_"),
+        "the typed name is saved for next time"
+    );
     let key = income["key"].as_str().unwrap().to_string();
     let (status, body) = send(app, "GET", &format!("/api/incomes/{key}"), None, &manager).await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -101,15 +148,29 @@ async fn scenario(app: &common::TestApp) {
     // What cannot be entered.
     let good = || json!({ "incomeDate": today(), "categoryKey": scrap, "amountCents": 100, "receivedInto": "online" });
     for (what, extra) in [
-        ("drawer cash is a cash movement", json!({ "receivedInto": "drawer" })),
+        (
+            "drawer cash is a cash movement",
+            json!({ "receivedInto": "drawer" }),
+        ),
         ("no amount", json!({ "amountCents": 0 })),
         ("a made-up date", json!({ "incomeDate": "2026-02-30" })),
-        ("owner capital is not income", json!({ "categoryKey": add_cash("Owner capital") })),
-        ("a loan received is not income", json!({ "categoryKey": add_cash("Loan received") })),
-        ("a cost category is not income", json!({ "categoryKey": category_key(CashMovementType::PettyExpense, "Fuel") })),
+        (
+            "owner capital is not income",
+            json!({ "categoryKey": add_cash("Owner capital") }),
+        ),
+        (
+            "a loan received is not income",
+            json!({ "categoryKey": add_cash("Loan received") }),
+        ),
+        (
+            "a cost category is not income",
+            json!({ "categoryKey": category_key(CashMovementType::PettyExpense, "Fuel") }),
+        ),
     ] {
         let mut body = good();
-        body.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        body.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
         let (status, body) = send(app, "POST", "/api/incomes", Some(body), &manager).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{what}: {body}");
     }
@@ -180,9 +241,23 @@ async fn scenario(app: &common::TestApp) {
     // Filters.
     let (_, body) = send(app, "GET", "/api/incomes?search=dialog", None, &manager).await;
     assert_eq!(body["data"]["total"], 1);
-    let (_, body) = send(app, "GET", &format!("/api/incomes?categoryKey={scrap}"), None, &manager).await;
+    let (_, body) = send(
+        app,
+        "GET",
+        &format!("/api/incomes?categoryKey={scrap}"),
+        None,
+        &manager,
+    )
+    .await;
     assert_eq!(body["data"]["total"], 1);
-    let (_, body) = send(app, "GET", "/api/incomes?source=ledger&from=2020-01-01", None, &manager).await;
+    let (_, body) = send(
+        app,
+        "GET",
+        "/api/incomes?source=ledger&from=2020-01-01",
+        None,
+        &manager,
+    )
+    .await;
     assert_eq!(body["data"]["total"], 1);
     let (status, _) = send(app, "GET", "/api/incomes?source=bank", None, &manager).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);

@@ -549,7 +549,10 @@ async fn reverse_cash_movement(
     .await?;
     Ok((
         StatusCode::CREATED,
-        Json(ApiResponse::success(movement, "Cash movement reversed successfully")),
+        Json(ApiResponse::success(
+            movement,
+            "Cash movement reversed successfully",
+        )),
     ))
 }
 

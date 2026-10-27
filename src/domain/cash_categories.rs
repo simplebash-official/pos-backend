@@ -318,7 +318,10 @@ pub fn recurring_expense_key(category_key: &str, payee_key: Option<&str>) -> Str
     use sha2::{Digest, Sha256};
     let digest = Sha256::digest(format!("{category_key}|{}", payee_key.unwrap_or("")).as_bytes());
     let hex: String = digest.iter().take(6).map(|b| format!("{b:02x}")).collect();
-    format!("{}_{hex}", crate::core::constants::prefixes::RECURRING_EXPENSE)
+    format!(
+        "{}_{hex}",
+        crate::core::constants::prefixes::RECURRING_EXPENSE
+    )
 }
 
 #[cfg(test)]
@@ -327,7 +330,10 @@ mod tests {
 
     #[test]
     fn names_normalize_without_case_or_spacing() {
-        assert_eq!(normalize_name("  Tea and  Refreshments "), "teaandrefreshments");
+        assert_eq!(
+            normalize_name("  Tea and  Refreshments "),
+            "teaandrefreshments"
+        );
     }
 
     #[test]

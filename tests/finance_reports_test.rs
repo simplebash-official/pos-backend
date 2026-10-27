@@ -17,7 +17,13 @@ use simplebash_pos_backend::{
 };
 use tower::ServiceExt;
 
-async fn send(app: &common::TestApp, method: &str, uri: &str, body: Option<Value>, token: &str) -> (StatusCode, Value) {
+async fn send(
+    app: &common::TestApp,
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+    token: &str,
+) -> (StatusCode, Value) {
     let mut builder = Request::builder()
         .method(method)
         .uri(uri)
@@ -31,8 +37,14 @@ async fn send(app: &common::TestApp, method: &str, uri: &str, body: Option<Value
     };
     let response = app.router.clone().oneshot(request).await.unwrap();
     let status = response.status();
-    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let json = if bytes.is_empty() { Value::Null } else { serde_json::from_slice(&bytes).unwrap() };
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes).unwrap()
+    };
     (status, json)
 }
 
@@ -41,51 +53,113 @@ fn cat(t: CashMovementType, name: &str) -> String {
 }
 
 fn today() -> String {
-    chrono::Utc::now().date_naive().format("%Y-%m-%d").to_string()
+    chrono::Utc::now()
+        .date_naive()
+        .format("%Y-%m-%d")
+        .to_string()
 }
 
 fn account<'a>(body: &'a Value, kind: &str) -> &'a Value {
-    body["data"]["accounts"].as_array().unwrap().iter().find(|a| a["kind"] == kind).unwrap()
+    body["data"]["accounts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["kind"] == kind)
+        .unwrap()
 }
 
 fn line_in(account: &Value, code: &str) -> i64 {
-    account["lines"].as_array().unwrap().iter().find(|l| l["code"] == code).map_or(0, |l| l["inCents"].as_i64().unwrap())
+    account["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["code"] == code)
+        .map_or(0, |l| l["inCents"].as_i64().unwrap())
 }
 
 fn line_out(account: &Value, code: &str) -> i64 {
-    account["lines"].as_array().unwrap().iter().find(|l| l["code"] == code).map_or(0, |l| l["outCents"].as_i64().unwrap())
+    account["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["code"] == code)
+        .map_or(0, |l| l["outCents"].as_i64().unwrap())
 }
 
 async fn scenario(app: &common::TestApp) {
-    let staff = common::mint_token(&app.config, Some(Role::Staff), roles::default_permissions(Role::Staff));
-    let manager = common::mint_token(&app.config, Some(Role::Manager), roles::default_permissions(Role::Manager));
+    let staff = common::mint_token(
+        &app.config,
+        Some(Role::Staff),
+        roles::default_permissions(Role::Staff),
+    );
+    let manager = common::mint_token(
+        &app.config,
+        Some(Role::Manager),
+        roles::default_permissions(Role::Manager),
+    );
     let period = format!("from={}&to={}", today(), today());
 
     // Reports are for managers and owners; a cashier is refused, and dates are required and checked.
     for path in ["profit-loss", "expenses", "cash-flow"] {
-        let (status, _) = send(app, "GET", &format!("/api/finance-reports/{path}?{period}"), None, &staff).await;
+        let (status, _) = send(
+            app,
+            "GET",
+            &format!("/api/finance-reports/{path}?{period}"),
+            None,
+            &staff,
+        )
+        .await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{path}");
-        let (status, _) = send(app, "GET", &format!("/api/finance-reports/{path}"), None, &manager).await;
+        let (status, _) = send(
+            app,
+            "GET",
+            &format!("/api/finance-reports/{path}"),
+            None,
+            &manager,
+        )
+        .await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{path} without dates");
-        let (status, _) =
-            send(app, "GET", &format!("/api/finance-reports/{path}?from=2026-02-02&to=2026-02-01"), None, &manager).await;
+        let (status, _) = send(
+            app,
+            "GET",
+            &format!("/api/finance-reports/{path}?from=2026-02-02&to=2026-02-01"),
+            None,
+            &manager,
+        )
+        .await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{path} backwards");
-        let (status, _) =
-            send(app, "GET", &format!("/api/finance-reports/{path}?from=2020-01-01&to=2026-02-01"), None, &manager).await;
+        let (status, _) = send(
+            app,
+            "GET",
+            &format!("/api/finance-reports/{path}?from=2020-01-01&to=2026-02-01"),
+            None,
+            &manager,
+        )
+        .await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{path} too long");
     }
     let (status, _) = send(app, "GET", "/api/finance-reports/payables", None, &staff).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
     // A quiet shop: everything is zero.
-    let (status, body) = send(app, "GET", &format!("/api/finance-reports/profit-loss?{period}"), None, &manager).await;
+    let (status, body) = send(
+        app,
+        "GET",
+        &format!("/api/finance-reports/profit-loss?{period}"),
+        None,
+        &manager,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["data"]["netProfitCents"], 0);
 
     // The same events the accounts test uses: costs from the bank and a card, income into the bank, drawer moves, a card sale.
     let post = |uri: &'static str, value: Value, token: String| async move {
         let (status, body) = send(app, "POST", uri, Some(value), &token).await;
-        assert!(status == StatusCode::CREATED || status == StatusCode::OK, "{uri}: {body}");
+        assert!(
+            status == StatusCode::CREATED || status == StatusCode::OK,
+            "{uri}: {body}"
+        );
     };
     post(
         "/api/expenses",
@@ -105,16 +179,35 @@ async fn scenario(app: &common::TestApp) {
         manager.clone(),
     )
     .await;
-    let movement = |t: &str, amount: i64, category: String| {
-        json!({ "movementType": t, "amountCents": amount, "terminalId": "term_rep", "categoryKey": category })
-    };
+    let movement = |t: &str, amount: i64, category: String| json!({ "movementType": t, "amountCents": amount, "terminalId": "term_rep", "categoryKey": category });
     for (t, amount, category) in [
-        ("add_cash", 5_000_000, cat(CashMovementType::AddCash, "Opening float")),
-        ("cash_drop", 200_000, cat(CashMovementType::CashDrop, "To bank deposit")),
-        ("cash_drop", 70_000, cat(CashMovementType::CashDrop, "To safe")),
-        ("add_cash", 50_000, cat(CashMovementType::AddCash, "Bank withdrawal to drawer")),
+        (
+            "add_cash",
+            5_000_000,
+            cat(CashMovementType::AddCash, "Opening float"),
+        ),
+        (
+            "cash_drop",
+            200_000,
+            cat(CashMovementType::CashDrop, "To bank deposit"),
+        ),
+        (
+            "cash_drop",
+            70_000,
+            cat(CashMovementType::CashDrop, "To safe"),
+        ),
+        (
+            "add_cash",
+            50_000,
+            cat(CashMovementType::AddCash, "Bank withdrawal to drawer"),
+        ),
     ] {
-        post("/api/sessions/movements", movement(t, amount, category), staff.clone()).await;
+        post(
+            "/api/sessions/movements",
+            movement(t, amount, category),
+            staff.clone(),
+        )
+        .await;
     }
     post(
         "/api/billing/sales",
@@ -128,7 +221,9 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     // A bill that was due yesterday and is still unpaid.
-    let yesterday = (chrono::Utc::now().date_naive() - chrono::Days::new(1)).format("%Y-%m-%d").to_string();
+    let yesterday = (chrono::Utc::now().date_naive() - chrono::Days::new(1))
+        .format("%Y-%m-%d")
+        .to_string();
     post(
         "/api/expenses",
         json!({ "expenseDate": today(), "categoryKey": cat(CashMovementType::RentAndBills, "Shop rent"), "amountCents": 80_000, "paidFrom": "unpaid", "dueDate": yesterday }),
@@ -137,18 +232,38 @@ async fn scenario(app: &common::TestApp) {
     .await;
 
     // Profit and loss: 1,500 sales + 4,500 other income - (1,200 + 200 + 800) costs; the unpaid bill is a cost already.
-    let (status, body) = send(app, "GET", &format!("/api/finance-reports/profit-loss?{period}"), None, &manager).await;
+    let (status, body) = send(
+        app,
+        "GET",
+        &format!("/api/finance-reports/profit-loss?{period}"),
+        None,
+        &manager,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let pl = &body["data"];
     assert_eq!(pl["salesCents"], 150_000);
-    assert_eq!(pl["grossProfitCents"], 150_000 - pl["costOfGoodsCents"].as_i64().unwrap());
+    assert_eq!(
+        pl["grossProfitCents"],
+        150_000 - pl["costOfGoodsCents"].as_i64().unwrap()
+    );
     assert_eq!(pl["otherIncomeCents"], 450_000);
     assert_eq!(pl["expensesCents"], 220_000);
     assert_eq!(pl["expenses"][0]["group"], "operating_expense");
-    assert_eq!(pl["netProfitCents"], pl["grossProfitCents"].as_i64().unwrap() + 450_000 - 220_000);
+    assert_eq!(
+        pl["netProfitCents"],
+        pl["grossProfitCents"].as_i64().unwrap() + 450_000 - 220_000
+    );
 
     // Costs by category and month: the same 2,200, biggest first, every month of the period present.
-    let (status, body) = send(app, "GET", &format!("/api/finance-reports/expenses?{period}"), None, &manager).await;
+    let (status, body) = send(
+        app,
+        "GET",
+        &format!("/api/finance-reports/expenses?{period}"),
+        None,
+        &manager,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["data"]["totalCents"], 220_000);
     assert_eq!(body["data"]["categories"][0]["categoryName"], "Electricity");
@@ -159,14 +274,25 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(body["data"]["months"].as_array().unwrap().len(), 1);
 
     // Cash flow per account.
-    let (status, body) = send(app, "GET", &format!("/api/finance-reports/cash-flow?{period}"), None, &manager).await;
+    let (status, body) = send(
+        app,
+        "GET",
+        &format!("/api/finance-reports/cash-flow?{period}"),
+        None,
+        &manager,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let drawer = account(&body, "drawer");
     assert_eq!(line_in(drawer, "cash_added"), 5_050_000);
     assert_eq!(line_out(drawer, "cash_to_bank_or_safe"), 270_000);
     assert_eq!(drawer["netCents"], 5_050_000 - 270_000);
     let bank = account(&body, "bank");
-    assert_eq!(line_in(bank, "bank_deposits"), 200_000, "only the bank deposit, not the safe");
+    assert_eq!(
+        line_in(bank, "bank_deposits"),
+        200_000,
+        "only the bank deposit, not the safe"
+    );
     assert_eq!(line_in(bank, "other_income"), 450_000);
     assert_eq!(line_out(bank, "expense_payments"), 120_000);
     assert_eq!(line_out(bank, "bank_withdrawals"), 50_000);
@@ -174,8 +300,14 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(line_in(card, "sales"), 150_000);
     assert_eq!(line_out(card, "expense_payments"), 20_000);
     // A period before today has none of it.
-    let (status, body) =
-        send(app, "GET", "/api/finance-reports/cash-flow?from=2026-01-01&to=2026-01-02", None, &manager).await;
+    let (status, body) = send(
+        app,
+        "GET",
+        "/api/finance-reports/cash-flow?from=2026-01-01&to=2026-01-02",
+        None,
+        &manager,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(account(&body, "bank")["netCents"], 0);
 
@@ -185,7 +317,10 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(body["data"]["billsCents"], 80_000);
     assert_eq!(body["data"]["overdueCents"], 80_000);
     assert_eq!(body["data"]["bills"][0]["isOverdue"], true);
-    assert_eq!(body["data"]["totalCents"], 80_000 + body["data"]["suppliersCents"].as_i64().unwrap());
+    assert_eq!(
+        body["data"]["totalCents"],
+        80_000 + body["data"]["suppliersCents"].as_i64().unwrap()
+    );
 }
 
 #[tokio::test]

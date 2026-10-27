@@ -121,7 +121,13 @@ async fn lists_each_kind_with_its_designs_standard_design_first() {
         .collect();
     assert_eq!(
         slugs,
-        ["a4-invoice", "thermal-receipt", "credit-note", "quotation", "z-report"]
+        [
+            "a4-invoice",
+            "thermal-receipt",
+            "credit-note",
+            "quotation",
+            "z-report"
+        ]
     );
 
     let invoice = kind(&body, "a4-invoice");

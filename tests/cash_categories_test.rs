@@ -17,7 +17,13 @@ use simplebash_pos_backend::{
 };
 use tower::ServiceExt;
 
-async fn send(app: &common::TestApp, method: &str, uri: &str, body: Option<Value>, token: &str) -> (StatusCode, Value) {
+async fn send(
+    app: &common::TestApp,
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+    token: &str,
+) -> (StatusCode, Value) {
     let mut builder = Request::builder()
         .method(method)
         .uri(uri)
@@ -31,8 +37,14 @@ async fn send(app: &common::TestApp, method: &str, uri: &str, body: Option<Value
     };
     let response = app.router.clone().oneshot(request).await.unwrap();
     let status = response.status();
-    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let json = if bytes.is_empty() { Value::Null } else { serde_json::from_slice(&bytes).unwrap() };
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes).unwrap()
+    };
     (status, json)
 }
 
@@ -47,8 +59,16 @@ struct Tokens {
 
 fn tokens(app: &common::TestApp) -> Tokens {
     Tokens {
-        staff: common::mint_token(&app.config, Some(Role::Staff), roles::default_permissions(Role::Staff)),
-        manager: common::mint_token(&app.config, Some(Role::Manager), roles::default_permissions(Role::Manager)),
+        staff: common::mint_token(
+            &app.config,
+            Some(Role::Staff),
+            roles::default_permissions(Role::Staff),
+        ),
+        manager: common::mint_token(
+            &app.config,
+            Some(Role::Manager),
+            roles::default_permissions(Role::Manager),
+        ),
     }
 }
 
@@ -56,14 +76,25 @@ async fn scenario(app: &common::TestApp) {
     let t = tokens(app);
 
     // The built-in list is there, best first, and filters by kind of payment.
-    let (status, body) = send(app, "GET", "/api/cash-categories?movementType=petty_expense", None, &t.staff).await;
+    let (status, body) = send(
+        app,
+        "GET",
+        "/api/cash-categories?movementType=petty_expense",
+        None,
+        &t.staff,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let petty = body["data"].as_array().unwrap();
     // Ten everyday ones plus the system "Stock charges" a receipt files its courier payments under.
     assert_eq!(petty.len(), 11);
     assert!(petty.iter().any(|c| c["name"] == "Stock charges"));
     assert_eq!(petty[0]["name"], "Tea and refreshments");
-    assert!(petty.iter().all(|c| c["movementType"] == "petty_expense" && c["usageCount"] == 0));
+    assert!(
+        petty
+            .iter()
+            .all(|c| c["movementType"] == "petty_expense" && c["usageCount"] == 0)
+    );
 
     // A cashier can add to a low-risk type; it waits for review.
     let (status, body) = send(
@@ -80,7 +111,10 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(body["data"]["reportGroup"], "operating_expense");
     assert_eq!(body["data"]["isSystem"], false);
     let diesel_key = body["data"]["key"].as_str().unwrap().to_string();
-    assert_eq!(diesel_key, key(CashMovementType::PettyExpense, "generator diesel"));
+    assert_eq!(
+        diesel_key,
+        key(CashMovementType::PettyExpense, "generator diesel")
+    );
 
     // The same name, in any case or spacing, is refused.
     let (status, body) = send(
@@ -186,13 +220,22 @@ async fn scenario(app: &common::TestApp) {
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
     let other = key(CashMovementType::PettyExpense, "Other");
-    let (status, _) = send(app, "PATCH", &format!("/api/cash-categories/{other}"), Some(json!({ "active": false })), &t.manager).await;
+    let (status, _) = send(
+        app,
+        "PATCH",
+        &format!("/api/cash-categories/{other}"),
+        Some(json!({ "active": false })),
+        &t.manager,
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 
     // Movements: the typed rules. Between-shift movements need no open shift.
     let movement = |extra: Value| {
         let mut base = json!({ "terminalId": "term_cat_test", "amountCents": 1500 });
-        base.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        base.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
         base
     };
     // Payouts need cash in the drawer, so put some in first.
@@ -232,7 +275,14 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(body["data"][0]["usageCount"], 1);
 
     // Category ranking uses real usage.
-    let (_, body) = send(app, "GET", "/api/cash-categories?movementType=petty_expense", None, &t.staff).await;
+    let (_, body) = send(
+        app,
+        "GET",
+        "/api/cash-categories?movementType=petty_expense",
+        None,
+        &t.staff,
+    )
+    .await;
     assert_eq!(body["data"][0]["name"], "Tea and refreshments");
     assert_eq!(body["data"][0]["usageCount"], 1);
 
@@ -242,7 +292,9 @@ async fn scenario(app: &common::TestApp) {
         app,
         "POST",
         "/api/sessions/movements",
-        Some(movement(json!({ "movementType": "petty_expense", "categoryKey": rent_cat }))),
+        Some(movement(
+            json!({ "movementType": "petty_expense", "categoryKey": rent_cat }),
+        )),
         &t.staff,
     )
     .await;
@@ -271,7 +323,9 @@ async fn scenario(app: &common::TestApp) {
         app,
         "POST",
         "/api/sessions/movements",
-        Some(movement(json!({ "movementType": "petty_expense", "categoryKey": tea, "amountCents": 0 }))),
+        Some(movement(
+            json!({ "movementType": "petty_expense", "categoryKey": tea, "amountCents": 0 }),
+        )),
         &t.staff,
     )
     .await;
@@ -281,16 +335,24 @@ async fn scenario(app: &common::TestApp) {
         app,
         "POST",
         "/api/sessions/movements",
-        Some(movement(json!({ "movementType": "no_sale", "categoryKey": no_sale_cat }))),
+        Some(movement(
+            json!({ "movementType": "no_sale", "categoryKey": no_sale_cat }),
+        )),
         &t.staff,
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "a no-sale open with an amount");
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "a no-sale open with an amount"
+    );
     let (status, body) = send(
         app,
         "POST",
         "/api/sessions/movements",
-        Some(movement(json!({ "movementType": "no_sale", "categoryKey": no_sale_cat, "amountCents": 0 }))),
+        Some(movement(
+            json!({ "movementType": "no_sale", "categoryKey": no_sale_cat, "amountCents": 0 }),
+        )),
         &t.staff,
     )
     .await;
@@ -313,14 +375,23 @@ async fn scenario(app: &common::TestApp) {
         app,
         "POST",
         "/api/sessions/movements",
-        Some(movement(json!({ "movementType": "rent_and_bills", "categoryKey": rent_cat }))),
+        Some(movement(
+            json!({ "movementType": "rent_and_bills", "categoryKey": rent_cat }),
+        )),
         &t.staff,
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
     // A vendor is added by a manager (not a cashier), then rent needs a vendor and a period.
-    let (status, _) = send(app, "POST", "/api/payees", Some(json!({ "payeeType": "vendor", "name": "Mr. Landlord" })), &t.staff).await;
+    let (status, _) = send(
+        app,
+        "POST",
+        "/api/payees",
+        Some(json!({ "payeeType": "vendor", "name": "Mr. Landlord" })),
+        &t.staff,
+    )
+    .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     let (status, body) = send(
         app,
@@ -332,9 +403,23 @@ async fn scenario(app: &common::TestApp) {
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
     let landlord = body["data"]["key"].as_str().unwrap().to_string();
-    let (status, _) = send(app, "POST", "/api/payees", Some(json!({ "payeeType": "vendor", "name": "MR.  landlord" })), &t.manager).await;
+    let (status, _) = send(
+        app,
+        "POST",
+        "/api/payees",
+        Some(json!({ "payeeType": "vendor", "name": "MR.  landlord" })),
+        &t.manager,
+    )
+    .await;
     assert_eq!(status, StatusCode::CONFLICT);
-    let (status, _) = send(app, "POST", "/api/payees", Some(json!({ "payeeType": "supplier", "name": "Nope" })), &t.manager).await;
+    let (status, _) = send(
+        app,
+        "POST",
+        "/api/payees",
+        Some(json!({ "payeeType": "supplier", "name": "Nope" })),
+        &t.manager,
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 
     let (status, _) = send(
@@ -370,7 +455,11 @@ async fn scenario(app: &common::TestApp) {
         &t.staff,
     )
     .await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "over the category limit needs a PIN: {body}");
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "over the category limit needs a PIN: {body}"
+    );
     let (status, _) = send(
         app,
         "POST",
@@ -396,7 +485,9 @@ async fn scenario(app: &common::TestApp) {
         app,
         "POST",
         "/api/sessions/movements",
-        Some(movement(json!({ "movementType": "petty_expense", "categoryKey": teas }))),
+        Some(movement(
+            json!({ "movementType": "petty_expense", "categoryKey": teas }),
+        )),
         &t.staff,
     )
     .await;
@@ -412,10 +503,35 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["data"]["key"], tea.as_str());
     assert_eq!(body["data"]["usageCount"], 2);
-    let (_, body) = send(app, "GET", "/api/cash-categories?movementType=petty_expense", None, &t.staff).await;
-    assert!(body["data"].as_array().unwrap().iter().all(|c| c["key"] != teas.as_str()));
-    let (_, body) = send(app, "GET", &format!("/api/sessions/movements?categoryKey={tea}"), None, &t.manager).await;
-    let merged_rows: Vec<&Value> = body["data"]["movements"].as_array().unwrap().iter().filter(|m| m["categoryKey"] == teas.as_str()).collect();
+    let (_, body) = send(
+        app,
+        "GET",
+        "/api/cash-categories?movementType=petty_expense",
+        None,
+        &t.staff,
+    )
+    .await;
+    assert!(
+        body["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|c| c["key"] != teas.as_str())
+    );
+    let (_, body) = send(
+        app,
+        "GET",
+        &format!("/api/sessions/movements?categoryKey={tea}"),
+        None,
+        &t.manager,
+    )
+    .await;
+    let merged_rows: Vec<&Value> = body["data"]["movements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|m| m["categoryKey"] == teas.as_str())
+        .collect();
     assert_eq!(merged_rows.len(), 1, "{body}");
     assert_eq!(merged_rows[0]["categoryName"], "Tea and refreshments");
     // A merged category can no longer be used, and built-in ones cannot be merged away.
@@ -423,7 +539,9 @@ async fn scenario(app: &common::TestApp) {
         app,
         "POST",
         "/api/sessions/movements",
-        Some(movement(json!({ "movementType": "petty_expense", "categoryKey": teas }))),
+        Some(movement(
+            json!({ "movementType": "petty_expense", "categoryKey": teas }),
+        )),
         &t.staff,
     )
     .await;
@@ -440,14 +558,54 @@ async fn scenario(app: &common::TestApp) {
 
     // Hidden categories leave the picker but stay for the management screen.
     let fuel = key(CashMovementType::PettyExpense, "Fuel");
-    let (status, _) = send(app, "PATCH", &format!("/api/cash-categories/{fuel}"), Some(json!({ "active": false })), &t.manager).await;
+    let (status, _) = send(
+        app,
+        "PATCH",
+        &format!("/api/cash-categories/{fuel}"),
+        Some(json!({ "active": false })),
+        &t.manager,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
-    let (_, body) = send(app, "GET", "/api/cash-categories?movementType=petty_expense", None, &t.staff).await;
-    assert!(body["data"].as_array().unwrap().iter().all(|c| c["name"] != "Fuel"));
-    let (status, _) = send(app, "GET", "/api/cash-categories?includeHidden=true", None, &t.staff).await;
+    let (_, body) = send(
+        app,
+        "GET",
+        "/api/cash-categories?movementType=petty_expense",
+        None,
+        &t.staff,
+    )
+    .await;
+    assert!(
+        body["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|c| c["name"] != "Fuel")
+    );
+    let (status, _) = send(
+        app,
+        "GET",
+        "/api/cash-categories?includeHidden=true",
+        None,
+        &t.staff,
+    )
+    .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    let (_, body) = send(app, "GET", "/api/cash-categories?movementType=petty_expense&includeHidden=true", None, &t.manager).await;
-    assert!(body["data"].as_array().unwrap().iter().any(|c| c["name"] == "Fuel" && c["active"] == false));
+    let (_, body) = send(
+        app,
+        "GET",
+        "/api/cash-categories?movementType=petty_expense&includeHidden=true",
+        None,
+        &t.manager,
+    )
+    .await;
+    assert!(
+        body["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["name"] == "Fuel" && c["active"] == false)
+    );
     let (status, body) = send(
         app,
         "POST",
@@ -460,8 +618,21 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(body["code"], "CASH_CATEGORY_HIDDEN");
 
     // Review queue.
-    let (_, body) = send(app, "GET", "/api/cash-categories?needsReview=true", None, &t.manager).await;
-    assert!(body["data"].as_array().unwrap().iter().all(|c| c["reviewStatus"] == "needs_review"));
+    let (_, body) = send(
+        app,
+        "GET",
+        "/api/cash-categories?needsReview=true",
+        None,
+        &t.manager,
+    )
+    .await;
+    assert!(
+        body["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|c| c["reviewStatus"] == "needs_review")
+    );
 }
 
 #[tokio::test]
@@ -480,11 +651,17 @@ async fn cash_categories_and_typed_movements_on_mongo() {
 #[tokio::test]
 async fn seeding_the_built_in_categories_twice_changes_nothing() {
     let app = common::spawn_app_sqlite().await;
-    let again = simplebash_pos_backend::modules::cash_categories::service::ensure_system_categories(&app.db_handle)
+    let again =
+        simplebash_pos_backend::modules::cash_categories::service::ensure_system_categories(
+            &app.db_handle,
+        )
         .await
         .unwrap();
     assert_eq!(again.created, 0);
-    assert_eq!(again.existing, simplebash_pos_backend::seeds::cash_categories::SYSTEM_CATEGORIES.len());
+    assert_eq!(
+        again.existing,
+        simplebash_pos_backend::seeds::cash_categories::SYSTEM_CATEGORIES.len()
+    );
 }
 
 /// A desktop database from before typed movements: the old six-type table with free-text reasons.
@@ -514,8 +691,22 @@ async fn old_cash_movements_are_migrated_to_typed_movements_once() {
     for (n, kind, amount, reason, who, supplier) in [
         (1, "pay_in", 5000, "Change float", Some("Owner"), None),
         (2, "pay_out_expense", 200, "Tea", Some("Corner shop"), None),
-        (3, "pay_out_supplier", 9000, "Cables", Some("ABC Traders"), Some("sup_abc")),
-        (4, "owner_withdrawal", 1000, "Drawings", Some("Mr. Silva"), None),
+        (
+            3,
+            "pay_out_supplier",
+            9000,
+            "Cables",
+            Some("ABC Traders"),
+            Some("sup_abc"),
+        ),
+        (
+            4,
+            "owner_withdrawal",
+            1000,
+            "Drawings",
+            Some("Mr. Silva"),
+            None,
+        ),
         (5, "cash_drop", 3000, "Excess", None, None),
         (6, "drawer_open_no_sale", 0, "Making change", None, None),
     ] {
@@ -538,9 +729,13 @@ async fn old_cash_movements_are_migrated_to_typed_movements_once() {
         .unwrap();
     }
 
-    simplebash_pos_backend::clients::sqlite::init_db(&pool).await.unwrap();
+    simplebash_pos_backend::clients::sqlite::init_db(&pool)
+        .await
+        .unwrap();
     // Running it again must change nothing.
-    simplebash_pos_backend::clients::sqlite::init_db(&pool).await.unwrap();
+    simplebash_pos_backend::clients::sqlite::init_db(&pool)
+        .await
+        .unwrap();
 
     let rows = sqlx::query(
         "SELECT movement_type, direction, category_key, note, payee_name, payee_key, amount_cents
@@ -549,7 +744,14 @@ async fn old_cash_movements_are_migrated_to_typed_movements_once() {
     .fetch_all(&pool)
     .await
     .unwrap();
-    type Migrated = (String, String, String, Option<String>, Option<String>, Option<String>);
+    type Migrated = (
+        String,
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    );
     let got: Vec<Migrated> = rows
         .iter()
         .map(|r| {
@@ -567,19 +769,66 @@ async fn old_cash_movements_are_migrated_to_typed_movements_once() {
     assert_eq!(
         got,
         vec![
-            ("add_cash".into(), "in".into(), other(CashMovementType::AddCash), Some("Change float".into()), Some("Owner".into()), None),
-            ("petty_expense".into(), "out".into(), other(CashMovementType::PettyExpense), Some("Tea".into()), Some("Corner shop".into()), None),
-            ("supplier_payment".into(), "out".into(), other(CashMovementType::SupplierPayment), Some("Cables".into()), Some("ABC Traders".into()), Some("sup_abc".into())),
-            ("owner_withdrawal".into(), "out".into(), other(CashMovementType::OwnerWithdrawal), Some("Drawings".into()), Some("Mr. Silva".into()), None),
-            ("cash_drop".into(), "neutral".into(), key(CashMovementType::CashDrop, "To safe"), Some("Excess".into()), None, None),
-            ("no_sale".into(), "neutral".into(), other(CashMovementType::NoSale), Some("Making change".into()), None, None),
+            (
+                "add_cash".into(),
+                "in".into(),
+                other(CashMovementType::AddCash),
+                Some("Change float".into()),
+                Some("Owner".into()),
+                None
+            ),
+            (
+                "petty_expense".into(),
+                "out".into(),
+                other(CashMovementType::PettyExpense),
+                Some("Tea".into()),
+                Some("Corner shop".into()),
+                None
+            ),
+            (
+                "supplier_payment".into(),
+                "out".into(),
+                other(CashMovementType::SupplierPayment),
+                Some("Cables".into()),
+                Some("ABC Traders".into()),
+                Some("sup_abc".into())
+            ),
+            (
+                "owner_withdrawal".into(),
+                "out".into(),
+                other(CashMovementType::OwnerWithdrawal),
+                Some("Drawings".into()),
+                Some("Mr. Silva".into()),
+                None
+            ),
+            (
+                "cash_drop".into(),
+                "neutral".into(),
+                key(CashMovementType::CashDrop, "To safe"),
+                Some("Excess".into()),
+                None,
+                None
+            ),
+            (
+                "no_sale".into(),
+                "neutral".into(),
+                other(CashMovementType::NoSale),
+                Some("Making change".into()),
+                None,
+                None
+            ),
         ]
     );
-    let columns: Vec<String> = sqlx::query_scalar("SELECT name FROM pragma_table_info('cash_movements')")
-        .fetch_all(&pool)
-        .await
-        .unwrap();
-    assert!(!columns.iter().any(|c| c == "reason" || c == "recipient_or_source" || c == "supplier_key"));
+    let columns: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM pragma_table_info('cash_movements')")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert!(
+        !columns
+            .iter()
+            .any(|c| c == "reason" || c == "recipient_or_source" || c == "supplier_key")
+    );
 }
 
 #[tokio::test]
@@ -599,25 +848,48 @@ async fn old_cash_movements_are_migrated_on_mongo_once() {
         .await
         .unwrap();
 
-    let dry = simplebash_pos_backend::modules::cash_categories::migration::migrate_mongo(&app.db, false, true)
-        .await
-        .unwrap();
+    let dry = simplebash_pos_backend::modules::cash_categories::migration::migrate_mongo(
+        &app.db, false, true,
+    )
+    .await
+    .unwrap();
     assert_eq!(dry.movements, 1);
-    assert!(movements.find_one(doc! { "reason": { "$exists": true } }).await.unwrap().is_some(), "a dry run writes nothing");
+    assert!(
+        movements
+            .find_one(doc! { "reason": { "$exists": true } })
+            .await
+            .unwrap()
+            .is_some(),
+        "a dry run writes nothing"
+    );
 
-    let report = simplebash_pos_backend::modules::cash_categories::migration::migrate_mongo(&app.db, false, false)
-        .await
-        .unwrap();
+    let report = simplebash_pos_backend::modules::cash_categories::migration::migrate_mongo(
+        &app.db, false, false,
+    )
+    .await
+    .unwrap();
     assert_eq!(report.movements, 1);
-    let again = simplebash_pos_backend::modules::cash_categories::migration::migrate_mongo(&app.db, false, false)
-        .await
-        .unwrap();
+    let again = simplebash_pos_backend::modules::cash_categories::migration::migrate_mongo(
+        &app.db, false, false,
+    )
+    .await
+    .unwrap();
     assert_eq!(again.movements, 0);
 
-    let migrated = movements.find_one(doc! { "key": "cshm_old1" }).await.unwrap().unwrap();
-    assert_eq!(migrated.get_str("movement_type").unwrap(), "supplier_payment");
+    let migrated = movements
+        .find_one(doc! { "key": "cshm_old1" })
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        migrated.get_str("movement_type").unwrap(),
+        "supplier_payment"
+    );
     assert_eq!(migrated.get_str("direction").unwrap(), "out");
-    assert_eq!(migrated.get_str("category_key").unwrap(), key(CashMovementType::SupplierPayment, "Other"));
+    assert_eq!(
+        migrated.get_str("category_key").unwrap(),
+        key(CashMovementType::SupplierPayment, "Other")
+    );
     assert_eq!(migrated.get_str("note").unwrap(), "Cables");
     assert_eq!(migrated.get_str("payee_name").unwrap(), "ABC Traders");
     assert_eq!(migrated.get_str("payee_key").unwrap(), "sup_abc");
@@ -625,7 +897,14 @@ async fn old_cash_movements_are_migrated_on_mongo_once() {
 
     // And it reads through the normal API shape with the category's name.
     let t = tokens(&app);
-    let (status, body) = send(&app, "GET", "/api/sessions/movements/cshm_old1", None, &t.manager).await;
+    let (status, body) = send(
+        &app,
+        "GET",
+        "/api/sessions/movements/cshm_old1",
+        None,
+        &t.manager,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["data"]["categoryName"], "Other");
     app.db.drop().await.ok();

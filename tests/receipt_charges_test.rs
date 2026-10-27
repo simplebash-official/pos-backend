@@ -101,8 +101,8 @@ impl Shop<'_> {
     }
 
     async fn expected_cash(&self) -> i64 {
-        self.get(&format!("/api/sessions/{}", self.session_key)).await["data"]
-            ["expectedCashCents"]
+        self.get(&format!("/api/sessions/{}", self.session_key))
+            .await["data"]["expectedCashCents"]
             .as_i64()
             .unwrap()
     }
@@ -300,7 +300,13 @@ async fn scenario(app: &common::TestApp) {
             billed["totalCents"].as_i64(),
             billed["dueCents"].as_i64()
         ),
-        (Some(100_000), Some(1_500), Some(0), Some(101_500), Some(101_500)),
+        (
+            Some(100_000),
+            Some(1_500),
+            Some(0),
+            Some(101_500),
+            Some(101_500)
+        ),
         "what the supplier bills changes what is owed"
     );
     // Shipping 2,000 by value: 1,200 / 800. Discount 500 by quantity: 250 / 250. Shares: 950 / 550.
@@ -313,8 +319,16 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(shares, vec![950, 550]);
     assert_eq!(billed["lines"][0]["landedTotalCents"], 60_950);
     assert_eq!(billed["charges"].as_array().unwrap().len(), 2);
-    let a_cost: i64 = shop.batches(&a_key).await.iter().map(|b| b["receivedQuantity"].as_i64().unwrap() * b["unitCostCents"].as_i64().unwrap()).sum();
-    assert_eq!(a_cost, 60_950, "the stock is costed with its share of the charges");
+    let a_cost: i64 = shop
+        .batches(&a_key)
+        .await
+        .iter()
+        .map(|b| b["receivedQuantity"].as_i64().unwrap() * b["unitCostCents"].as_i64().unwrap())
+        .sum();
+    assert_eq!(
+        a_cost, 60_950,
+        "the stock is costed with its share of the charges"
+    );
 
     // ---- A courier paid at once from the drawer: stock cost, not owed to the supplier. ----
     let (_, c_key) = shop.product("Courier item", false).await;
@@ -338,7 +352,12 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(courier["charges"][0]["paymentKind"], "cash_movement");
     assert_eq!(shop.expected_cash().await, cash_before - 700);
     assert_eq!(courier["lines"][0]["landedTotalCents"], 20_700);
-    let batch_cost: i64 = shop.batches(&c_key).await.iter().map(|b| b["receivedQuantity"].as_i64().unwrap() * b["unitCostCents"].as_i64().unwrap()).sum();
+    let batch_cost: i64 = shop
+        .batches(&c_key)
+        .await
+        .iter()
+        .map(|b| b["receivedQuantity"].as_i64().unwrap() * b["unitCostCents"].as_i64().unwrap())
+        .sum();
     assert_eq!(batch_cost, 20_700);
 
     // ... and from the bank, through the expense ledger, with no register involved.
@@ -347,7 +366,11 @@ async fn scenario(app: &common::TestApp) {
     let (status, bank) = shop.post("/api/purchase-receipts", body).await;
     assert_eq!(status, StatusCode::CREATED, "{bank}");
     assert_eq!(bank["data"]["charges"][0]["paymentKind"], "expense_payment");
-    assert_eq!(shop.expected_cash().await, cash_before - 700, "the bank leaves the drawer alone");
+    assert_eq!(
+        shop.expected_cash().await,
+        cash_before - 700,
+        "the bank leaves the drawer alone"
+    );
 
     // ---- The goods payment and the courier together count against the drawer. ----
     // Each fits in the Rs 500 float on its own; together they do not.
@@ -367,8 +390,16 @@ async fn scenario(app: &common::TestApp) {
     let (status, refused) = shop.post("/api/purchase-receipts", body).await;
     assert_eq!(status, StatusCode::CONFLICT, "{refused}");
     assert_eq!(refused["code"], "DRAWER_CASH_EXCEEDED");
-    assert_eq!(shop.receipts().await, receipts_before, "a refused save writes no receipt");
-    assert_eq!(shop.batches(&c_key).await.len(), stock_before, "and no stock");
+    assert_eq!(
+        shop.receipts().await,
+        receipts_before,
+        "a refused save writes no receipt"
+    );
+    assert_eq!(
+        shop.batches(&c_key).await.len(),
+        stock_before,
+        "and no stock"
+    );
     assert_eq!(shop.expected_cash().await, drawer, "and moves no cash");
 
     // ---- Refused requests. ----
@@ -418,14 +449,26 @@ async fn scenario(app: &common::TestApp) {
         }
         shop.receipt(described_line.clone(), json!([charge]))
     };
-    let (status, saved) = shop.post("/api/purchase-receipts", other(json!("  Packing tape  "))).await;
+    let (status, saved) = shop
+        .post("/api/purchase-receipts", other(json!("  Packing tape  ")))
+        .await;
     assert_eq!(status, StatusCode::CREATED, "{saved}");
     assert_eq!(saved["data"]["charges"][0]["description"], "Packing tape");
-    assert_eq!(saved["data"]["totalCents"], 11_200, "the description changes no figure");
-    let (status, blank) = shop.post("/api/purchase-receipts", other(json!("   "))).await;
+    assert_eq!(
+        saved["data"]["totalCents"], 11_200,
+        "the description changes no figure"
+    );
+    let (status, blank) = shop
+        .post("/api/purchase-receipts", other(json!("   ")))
+        .await;
     assert_eq!(status, StatusCode::CREATED, "{blank}");
-    assert!(blank["data"]["charges"][0].get("description").is_none(), "blank means none");
-    let (status, none) = shop.post("/api/purchase-receipts", other(Value::Null)).await;
+    assert!(
+        blank["data"]["charges"][0].get("description").is_none(),
+        "blank means none"
+    );
+    let (status, none) = shop
+        .post("/api/purchase-receipts", other(Value::Null))
+        .await;
     assert_eq!(status, StatusCode::CREATED, "{none}");
     assert!(none["data"]["charges"][0].get("description").is_none());
     let receipts_before = shop.receipts().await;
@@ -441,7 +484,11 @@ async fn scenario(app: &common::TestApp) {
         let (status, response) = shop.post("/api/purchase-receipts", body).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{what}: {response}");
     }
-    assert_eq!(shop.receipts().await, receipts_before, "a refused charge saves no receipt");
+    assert_eq!(
+        shop.receipts().await,
+        receipts_before,
+        "a refused charge saves no receipt"
+    );
 
     // ---- Who is paid is optional for a charge paid to someone else. ----
     let mut body = shop.receipt(
@@ -473,7 +520,12 @@ async fn scenario(app: &common::TestApp) {
     let phone_batches = shop.batches(&phone_key).await;
     let shape: Vec<(i64, i64)> = phone_batches
         .iter()
-        .map(|b| (b["receivedQuantity"].as_i64().unwrap(), b["unitCostCents"].as_i64().unwrap()))
+        .map(|b| {
+            (
+                b["receivedQuantity"].as_i64().unwrap(),
+                b["unitCostCents"].as_i64().unwrap(),
+            )
+        })
         .collect();
     assert_eq!(shape, vec![(2, 33_333), (1, 33_334)]);
     let listed = shop

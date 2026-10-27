@@ -64,7 +64,11 @@ mod tests {
     use super::*;
 
     fn shift(status: SessionStatus, cash: i64, variance: Option<i64>) -> ShiftFigures {
-        ShiftFigures { status, cash_sales_cents: cash, cash_variance_cents: variance }
+        ShiftFigures {
+            status,
+            cash_sales_cents: cash,
+            cash_variance_cents: variance,
+        }
     }
 
     #[test]

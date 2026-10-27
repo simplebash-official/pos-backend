@@ -24,8 +24,9 @@ fn from_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<AttachmentDocument> {
     Ok(AttachmentDocument {
         id: ObjectId::parse_str(row.get::<String, _>("id")).ok(),
         key: row.get("key"),
-        owner_kind: AttachmentOwner::parse(&kind)
-            .ok_or_else(|| AppError::internal(format!("Unknown attachment owner '{kind}' in database")))?,
+        owner_kind: AttachmentOwner::parse(&kind).ok_or_else(|| {
+            AppError::internal(format!("Unknown attachment owner '{kind}' in database"))
+        })?,
         owner_key: row.get("owner_key"),
         file_name: row.get("file_name"),
         content_type: row.get("content_type"),
@@ -41,7 +42,10 @@ fn from_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<AttachmentDocument> {
 }
 
 /// Inserts a photo.
-pub(crate) async fn insert(db: &Db, mut document: AttachmentDocument) -> AppResult<AttachmentDocument> {
+pub(crate) async fn insert(
+    db: &Db,
+    mut document: AttachmentDocument,
+) -> AppResult<AttachmentDocument> {
     match db {
         Db::Mongo(db) => {
             let res = attachments(db).insert_one(&document).await?;
@@ -49,7 +53,10 @@ pub(crate) async fn insert(db: &Db, mut document: AttachmentDocument) -> AppResu
             Ok(document)
         }
         Db::Sqlite(pool) => {
-            let id = document.id.map(|o| o.to_hex()).unwrap_or_else(generate_id_hex);
+            let id = document
+                .id
+                .map(|o| o.to_hex())
+                .unwrap_or_else(generate_id_hex);
             sqlx::query(
                 "INSERT INTO attachments (
                     key, id, owner_kind, owner_key, file_name, content_type, size_bytes, data_base64,

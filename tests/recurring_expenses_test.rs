@@ -18,7 +18,13 @@ use simplebash_pos_backend::{
 };
 use tower::ServiceExt;
 
-async fn send(app: &common::TestApp, method: &str, uri: &str, body: Option<Value>, token: &str) -> (StatusCode, Value) {
+async fn send(
+    app: &common::TestApp,
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+    token: &str,
+) -> (StatusCode, Value) {
     let mut builder = Request::builder()
         .method(method)
         .uri(uri)
@@ -32,8 +38,14 @@ async fn send(app: &common::TestApp, method: &str, uri: &str, body: Option<Value
     };
     let response = app.router.clone().oneshot(request).await.unwrap();
     let status = response.status();
-    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let json = if bytes.is_empty() { Value::Null } else { serde_json::from_slice(&bytes).unwrap() };
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes).unwrap()
+    };
     (status, json)
 }
 
@@ -42,8 +54,16 @@ fn cat(name: &str) -> String {
 }
 
 async fn scenario(app: &common::TestApp) {
-    let staff = common::mint_token(&app.config, Some(Role::Staff), roles::default_permissions(Role::Staff));
-    let manager = common::mint_token(&app.config, Some(Role::Manager), roles::default_permissions(Role::Manager));
+    let staff = common::mint_token(
+        &app.config,
+        Some(Role::Staff),
+        roles::default_permissions(Role::Staff),
+    );
+    let manager = common::mint_token(
+        &app.config,
+        Some(Role::Manager),
+        roles::default_permissions(Role::Manager),
+    );
     let today = Utc::now().date_naive();
     let month = today.format("%Y-%m").to_string();
     let first_day = format!("{month}-01");
@@ -69,7 +89,14 @@ async fn scenario(app: &common::TestApp) {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
-    let (status, vendor) = send(app, "POST", "/api/payees", Some(json!({ "payeeType": "vendor", "name": "Mr. Landlord" })), &manager).await;
+    let (status, vendor) = send(
+        app,
+        "POST",
+        "/api/payees",
+        Some(json!({ "payeeType": "vendor", "name": "Mr. Landlord" })),
+        &manager,
+    )
+    .await;
     assert_eq!(status, StatusCode::CREATED, "{vendor}");
     let landlord = vendor["data"]["key"].as_str().unwrap().to_string();
 
@@ -79,10 +106,19 @@ async fn scenario(app: &common::TestApp) {
             "categoryKey": cat("Shop rent"), "payeeKey": landlord, "amountCents": 5_000_000,
             "dueDay": today.day(), "remindDaysBefore": 3, "paidFrom": "drawer", "note": "Monthly rent"
         });
-        base.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        base.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
         base
     };
-    let (status, body) = send(app, "POST", "/api/recurring-expenses", Some(create(json!({}))), &manager).await;
+    let (status, body) = send(
+        app,
+        "POST",
+        "/api/recurring-expenses",
+        Some(create(json!({}))),
+        &manager,
+    )
+    .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
     let rent_key = body["data"]["key"].as_str().unwrap().to_string();
     assert_eq!(body["data"]["categoryName"], "Shop rent");
@@ -90,25 +126,74 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(body["data"]["active"], true);
 
     // One regular bill per category and payee; bad schedules are refused.
-    let (status, body) = send(app, "POST", "/api/recurring-expenses", Some(create(json!({}))), &manager).await;
+    let (status, body) = send(
+        app,
+        "POST",
+        "/api/recurring-expenses",
+        Some(create(json!({}))),
+        &manager,
+    )
+    .await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_eq!(body["code"], "RECURRING_EXPENSE_EXISTS");
     for (what, extra) in [
-        ("amount", json!({ "categoryKey": cat("Water"), "amountCents": 0 })),
-        ("due day 0", json!({ "categoryKey": cat("Water"), "dueDay": 0 })),
-        ("due day 32", json!({ "categoryKey": cat("Water"), "dueDay": 32 })),
-        ("reminder too early", json!({ "categoryKey": cat("Water"), "remindDaysBefore": 31 })),
-        ("unpaid is not an account", json!({ "categoryKey": cat("Water"), "paidFrom": "unpaid" })),
-        ("not a cost", json!({ "categoryKey": category_key(CashMovementType::OwnerWithdrawal, "Personal use") })),
-        ("drawer rent without a payee", json!({ "categoryKey": cat("Water"), "payeeKey": null, "paidFrom": "drawer" })),
-        ("unknown payee", json!({ "categoryKey": cat("Water"), "payeeKey": "pye_vendor_nope" })),
+        (
+            "amount",
+            json!({ "categoryKey": cat("Water"), "amountCents": 0 }),
+        ),
+        (
+            "due day 0",
+            json!({ "categoryKey": cat("Water"), "dueDay": 0 }),
+        ),
+        (
+            "due day 32",
+            json!({ "categoryKey": cat("Water"), "dueDay": 32 }),
+        ),
+        (
+            "reminder too early",
+            json!({ "categoryKey": cat("Water"), "remindDaysBefore": 31 }),
+        ),
+        (
+            "unpaid is not an account",
+            json!({ "categoryKey": cat("Water"), "paidFrom": "unpaid" }),
+        ),
+        (
+            "not a cost",
+            json!({ "categoryKey": category_key(CashMovementType::OwnerWithdrawal, "Personal use") }),
+        ),
+        (
+            "drawer rent without a payee",
+            json!({ "categoryKey": cat("Water"), "payeeKey": null, "paidFrom": "drawer" }),
+        ),
+        (
+            "unknown payee",
+            json!({ "categoryKey": cat("Water"), "payeeKey": "pye_vendor_nope" }),
+        ),
     ] {
-        let (status, body) = send(app, "POST", "/api/recurring-expenses", Some(create(extra)), &manager).await;
-        assert!(status == StatusCode::BAD_REQUEST || status == StatusCode::NOT_FOUND, "{what}: {status} {body}");
+        let (status, body) = send(
+            app,
+            "POST",
+            "/api/recurring-expenses",
+            Some(create(extra)),
+            &manager,
+        )
+        .await;
+        assert!(
+            status == StatusCode::BAD_REQUEST || status == StatusCode::NOT_FOUND,
+            "{what}: {status} {body}"
+        );
     }
 
     // Due today: inside the reminder window, nothing paid yet.
-    let bill = |bills: &Value, key: &str| bills["data"].as_array().unwrap().iter().find(|b| b["template"]["key"] == key).cloned().unwrap();
+    let bill = |bills: &Value, key: &str| {
+        bills["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|b| b["template"]["key"] == key)
+            .cloned()
+            .unwrap()
+    };
     let (_, bills) = send(app, "GET", "/api/recurring-expenses", None, &manager).await;
     let rent = bill(&bills, &rent_key);
     assert_eq!(rent["period"], month.as_str());
@@ -135,20 +220,36 @@ async fn scenario(app: &common::TestApp) {
         )
         .await;
         assert_eq!(status, StatusCode::CREATED, "{body}");
-        extra_keys.push((body["data"]["key"].as_str().unwrap().to_string(), "upcoming"));
+        extra_keys.push((
+            body["data"]["key"].as_str().unwrap().to_string(),
+            "upcoming",
+        ));
     }
     let (_, bills) = send(app, "GET", "/api/recurring-expenses", None, &manager).await;
     for (key, expected) in &extra_keys {
         assert_eq!(bill(&bills, key)["status"], *expected);
     }
-    let days: Vec<i64> = bills["data"].as_array().unwrap().iter().map(|b| b["daysUntilDue"].as_i64().unwrap()).collect();
-    assert!(days.windows(2).all(|w| w[0] <= w[1]), "most urgent first: {days:?}");
+    let days: Vec<i64> = bills["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b["daysUntilDue"].as_i64().unwrap())
+        .collect();
+    assert!(
+        days.windows(2).all(|w| w[0] <= w[1]),
+        "most urgent first: {days:?}"
+    );
 
     // Cash in the drawer, then rent paid in two parts against the same month.
     let (status, body) = send(
-        app, "POST", "/api/sessions/movements",
-        Some(json!({ "movementType": "add_cash", "amountCents": 50_000_000, "terminalId": "term_rec",
-                     "categoryKey": category_key(CashMovementType::AddCash, "Opening float") })), &staff,
+        app,
+        "POST",
+        "/api/sessions/movements",
+        Some(
+            json!({ "movementType": "add_cash", "amountCents": 50_000_000, "terminalId": "term_rec",
+                     "categoryKey": category_key(CashMovementType::AddCash, "Opening float") }),
+        ),
+        &staff,
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
@@ -157,10 +258,19 @@ async fn scenario(app: &common::TestApp) {
             "movementType": "rent_and_bills", "amountCents": amount, "terminalId": "term_rec",
             "categoryKey": cat("Shop rent"), "payeeKey": landlord, "periodStart": first_day, "periodEnd": last_day
         });
-        base.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        base.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
         base
     };
-    let (status, body) = send(app, "POST", "/api/sessions/movements", Some(pay(3_000_000, json!({}))), &manager).await;
+    let (status, body) = send(
+        app,
+        "POST",
+        "/api/sessions/movements",
+        Some(pay(3_000_000, json!({}))),
+        &manager,
+    )
+    .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
     let first_payment = body["data"]["key"].as_str().unwrap().to_string();
 
@@ -173,14 +283,22 @@ async fn scenario(app: &common::TestApp) {
 
     // The "already paid" check says what is recorded; a part payment is not yet a duplicate.
     let status_uri = format!(
-        "/api/recurring-expenses/period-status?categoryKey={}&payeeKey={landlord}&period={month}", cat("Shop rent")
+        "/api/recurring-expenses/period-status?categoryKey={}&payeeKey={landlord}&period={month}",
+        cat("Shop rent")
     );
     let (status, body) = send(app, "GET", &status_uri, None, &manager).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["data"]["paidCents"], 3_000_000);
     assert_eq!(body["data"]["expectedCents"], 5_000_000);
     assert_eq!(body["data"]["alreadyPaid"], false);
-    let (status, body) = send(app, "POST", "/api/sessions/movements", Some(pay(2_000_000, json!({}))), &manager).await;
+    let (status, body) = send(
+        app,
+        "POST",
+        "/api/sessions/movements",
+        Some(pay(2_000_000, json!({}))),
+        &manager,
+    )
+    .await;
     assert_eq!(status, StatusCode::CREATED, "the rest of the rent: {body}");
 
     let (_, bills) = send(app, "GET", "/api/recurring-expenses", None, &manager).await;
@@ -189,19 +307,39 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(rent["balanceCents"], 0);
 
     // Paid in full: another rent payment for the month is asked about, not silently doubled.
-    let (status, body) = send(app, "POST", "/api/sessions/movements", Some(pay(100_000, json!({}))), &manager).await;
+    let (status, body) = send(
+        app,
+        "POST",
+        "/api/sessions/movements",
+        Some(pay(100_000, json!({}))),
+        &manager,
+    )
+    .await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_eq!(body["code"], "PERIOD_ALREADY_PAID");
-    assert!(body["message"].as_str().unwrap().contains("Rs. 50,000.00"), "{body}");
-    let (status, body) = send(app, "POST", "/api/sessions/movements", Some(pay(100_000, json!({ "confirmDuplicate": true }))), &manager).await;
+    assert!(
+        body["message"].as_str().unwrap().contains("Rs. 50,000.00"),
+        "{body}"
+    );
+    let (status, body) = send(
+        app,
+        "POST",
+        "/api/sessions/movements",
+        Some(pay(100_000, json!({ "confirmDuplicate": true }))),
+        &manager,
+    )
+    .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
     let (_, body) = send(app, "GET", &status_uri, None, &manager).await;
     assert_eq!(body["data"]["alreadyPaid"], true);
 
     // A reversed payment stops counting.
     let (status, _) = send(
-        app, "POST", &format!("/api/sessions/movements/{first_payment}/reverse"),
-        Some(json!({ "reason": "Entered twice" })), &manager,
+        app,
+        "POST",
+        &format!("/api/sessions/movements/{first_payment}/reverse"),
+        Some(json!({ "reason": "Entered twice" })),
+        &manager,
     )
     .await;
     assert_eq!(status, StatusCode::CREATED);
@@ -230,22 +368,76 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(body["data"]["amountCents"], 5_500_000);
     assert_eq!(body["data"]["dueDay"], 7);
     assert_eq!(body["data"]["paidFrom"], "bank");
-    let (status, _) = send(app, "PATCH", &format!("/api/recurring-expenses/{rent_key}"), Some(json!({ "dueDay": 40 })), &manager).await;
+    let (status, _) = send(
+        app,
+        "PATCH",
+        &format!("/api/recurring-expenses/{rent_key}"),
+        Some(json!({ "dueDay": 40 })),
+        &manager,
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     if let Some((bank_only, _)) = extra_keys.first() {
-        let (status, body) = send(app, "PATCH", &format!("/api/recurring-expenses/{bank_only}"), Some(json!({ "paidFrom": "drawer" })), &manager).await;
-        assert_eq!(status, StatusCode::BAD_REQUEST, "a payee-less rent bill cannot move to the drawer: {body}");
+        let (status, body) = send(
+            app,
+            "PATCH",
+            &format!("/api/recurring-expenses/{bank_only}"),
+            Some(json!({ "paidFrom": "drawer" })),
+            &manager,
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "a payee-less rent bill cannot move to the drawer: {body}"
+        );
     }
-    let (status, _) = send(app, "PATCH", "/api/recurring-expenses/rexp_nope", Some(json!({ "active": false })), &manager).await;
+    let (status, _) = send(
+        app,
+        "PATCH",
+        "/api/recurring-expenses/rexp_nope",
+        Some(json!({ "active": false })),
+        &manager,
+    )
+    .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
-    let (status, _) = send(app, "PATCH", &format!("/api/recurring-expenses/{rent_key}"), Some(json!({ "active": false })), &manager).await;
+    let (status, _) = send(
+        app,
+        "PATCH",
+        &format!("/api/recurring-expenses/{rent_key}"),
+        Some(json!({ "active": false })),
+        &manager,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     let (_, bills) = send(app, "GET", "/api/recurring-expenses", None, &manager).await;
-    assert!(bills["data"].as_array().unwrap().iter().all(|b| b["template"]["key"] != rent_key.as_str()));
-    let (_, bills) = send(app, "GET", "/api/recurring-expenses?includeInactive=true", None, &manager).await;
-    assert!(bills["data"].as_array().unwrap().iter().any(|b| b["template"]["key"] == rent_key.as_str()));
+    assert!(
+        bills["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|b| b["template"]["key"] != rent_key.as_str())
+    );
+    let (_, bills) = send(
+        app,
+        "GET",
+        "/api/recurring-expenses?includeInactive=true",
+        None,
+        &manager,
+    )
+    .await;
+    assert!(
+        bills["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|b| b["template"]["key"] == rent_key.as_str())
+    );
     let (_, body) = send(app, "GET", &status_uri, None, &manager).await;
-    assert!(body["data"].get("expectedCents").is_none(), "a stopped bill no longer sets an expectation");
+    assert!(
+        body["data"].get("expectedCents").is_none(),
+        "a stopped bill no longer sets an expectation"
+    );
 }
 
 #[tokio::test]

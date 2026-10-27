@@ -87,7 +87,10 @@ pub struct CalcSettlementPartReply {
     pub amount_cents: i64,
 }
 
-pub fn compute(request: &CalcSettlementRequest, open: &[OpenBill]) -> AppResult<CalcSettlementReply> {
+pub fn compute(
+    request: &CalcSettlementRequest,
+    open: &[OpenBill],
+) -> AppResult<CalcSettlementReply> {
     if !(0..=MAX_CENTS).contains(&request.payment_cents) {
         return Err(AppError::validation("The payment is out of range"));
     }
@@ -165,7 +168,11 @@ pub fn compute(request: &CalcSettlementRequest, open: &[OpenBill]) -> AppResult<
         .filter(|bill| bill.due_cents > 0)
         .map(|bill| CalcSettlementPartReply {
             receipt_key: bill.key.clone(),
-            amount_cents: if room > 0 { room.min(bill.due_cents) } else { bill.due_cents },
+            amount_cents: if room > 0 {
+                room.min(bill.due_cents)
+            } else {
+                bill.due_cents
+            },
         })
         .collect();
 
@@ -185,9 +192,18 @@ mod tests {
 
     fn bills() -> Vec<OpenBill> {
         vec![
-            OpenBill { key: "prc_old".into(), due_cents: 30_000 },
-            OpenBill { key: "prc_mid".into(), due_cents: 50_000 },
-            OpenBill { key: "prc_new".into(), due_cents: 20_000 },
+            OpenBill {
+                key: "prc_old".into(),
+                due_cents: 30_000,
+            },
+            OpenBill {
+                key: "prc_mid".into(),
+                due_cents: 50_000,
+            },
+            OpenBill {
+                key: "prc_new".into(),
+                due_cents: 20_000,
+            },
         ]
     }
 
@@ -206,13 +222,23 @@ mod tests {
     }
 
     fn spread(parts: &[CalcSettlementPartReply]) -> Vec<(&str, i64)> {
-        parts.iter().map(|p| (p.receipt_key.as_str(), p.amount_cents)).collect()
+        parts
+            .iter()
+            .map(|p| (p.receipt_key.as_str(), p.amount_cents))
+            .collect()
     }
 
     #[test]
     fn ticking_a_bill_takes_what_is_left_of_the_payment_or_the_whole_bill() {
         let reply = compute(&request(40_000, &[("prc_old", 30_000)]), &bills()).unwrap();
-        assert_eq!(spread(&reply.if_ticked), [("prc_old", 10_000), ("prc_mid", 10_000), ("prc_new", 10_000)]);
+        assert_eq!(
+            spread(&reply.if_ticked),
+            [
+                ("prc_old", 10_000),
+                ("prc_mid", 10_000),
+                ("prc_new", 10_000)
+            ]
+        );
         let none_left = compute(&request(30_000, &[("prc_old", 30_000)]), &bills()).unwrap();
         assert_eq!(spread(&none_left.if_ticked)[1], ("prc_mid", 50_000));
     }
@@ -221,17 +247,38 @@ mod tests {
     fn a_payment_pays_the_oldest_bills_first() {
         let reply = compute(&request(60_000, &[]), &bills()).unwrap();
         assert_eq!(reply.owed_cents, 100_000);
-        assert_eq!(spread(&reply.oldest_first), vec![("prc_old", 30_000), ("prc_mid", 30_000)]);
+        assert_eq!(
+            spread(&reply.oldest_first),
+            vec![("prc_old", 30_000), ("prc_mid", 30_000)]
+        );
         let more = compute(&request(150_000, &[]), &bills()).unwrap();
         // Everything is paid; the rest stays unallocated.
         assert_eq!(spread(&more.oldest_first).len(), 3);
-        assert_eq!(more.oldest_first.iter().map(|p| p.amount_cents).sum::<i64>(), 100_000);
-        assert_eq!(spread(&more.pay_everything), vec![("prc_old", 30_000), ("prc_mid", 50_000), ("prc_new", 20_000)]);
+        assert_eq!(
+            more.oldest_first
+                .iter()
+                .map(|p| p.amount_cents)
+                .sum::<i64>(),
+            100_000
+        );
+        assert_eq!(
+            spread(&more.pay_everything),
+            vec![
+                ("prc_old", 30_000),
+                ("prc_mid", 50_000),
+                ("prc_new", 20_000)
+            ]
+        );
     }
 
     #[test]
     fn nothing_is_spread_without_a_payment() {
-        assert!(compute(&request(0, &[]), &bills()).unwrap().oldest_first.is_empty());
+        assert!(
+            compute(&request(0, &[]), &bills())
+                .unwrap()
+                .oldest_first
+                .is_empty()
+        );
     }
 
     #[test]
@@ -239,7 +286,13 @@ mod tests {
         let reply = compute(
             &request(
                 40_000,
-                &[("prc_old", 30_000), ("prc_gone", 1_000), ("prc_mid", 0), ("prc_new", 25_000), ("prc_old", 5)],
+                &[
+                    ("prc_old", 30_000),
+                    ("prc_gone", 1_000),
+                    ("prc_mid", 0),
+                    ("prc_new", 25_000),
+                    ("prc_old", 5),
+                ],
             ),
             &bills(),
         )
@@ -261,7 +314,11 @@ mod tests {
 
     #[test]
     fn a_fair_split_has_no_blockers() {
-        let reply = compute(&request(50_000, &[("prc_old", 30_000), ("prc_new", 20_000)]), &bills()).unwrap();
+        let reply = compute(
+            &request(50_000, &[("prc_old", 30_000), ("prc_new", 20_000)]),
+            &bills(),
+        )
+        .unwrap();
         assert!(reply.blockers.is_empty());
         assert_eq!(reply.allocated_cents, 50_000);
     }

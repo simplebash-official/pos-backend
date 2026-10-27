@@ -103,6 +103,7 @@ impl ProductDocument {
             subcategory_key: self.subcategory_key,
             subcategory: subcategory_name,
             price_tiers: Vec::new(),
+            last_selling_price_cents: None,
             stock_quantity: self.stock_quantity,
             min_stock_threshold: self.min_stock_threshold,
             is_serialized: self.is_serialized,

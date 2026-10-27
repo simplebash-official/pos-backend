@@ -54,8 +54,9 @@ fn payment_from_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<ExpensePaymentDo
         key: row.get("key"),
         expense_key: row.get("expense_key"),
         amount_cents: row.get("amount_cents"),
-        paid_from: PaidFrom::parse(&from)
-            .ok_or_else(|| AppError::internal(format!("Unknown payment account '{from}' in database")))?,
+        paid_from: PaidFrom::parse(&from).ok_or_else(|| {
+            AppError::internal(format!("Unknown payment account '{from}' in database"))
+        })?,
         paid_on: row.get("paid_on"),
         reference_no: row.get("reference_no"),
         note: row.get("note"),
@@ -81,7 +82,10 @@ pub(crate) async fn insert_expense(
             Ok(document)
         }
         Backend::Sqlite(mut conn) => {
-            let id = document.id.map(|o| o.to_hex()).unwrap_or_else(generate_id_hex);
+            let id = document
+                .id
+                .map(|o| o.to_hex())
+                .unwrap_or_else(generate_id_hex);
             sqlx::query(
                 "INSERT INTO expenses (
                     key, id, expense_number, expense_date, category_key, payee_key, payee_name,
@@ -126,7 +130,10 @@ pub(crate) async fn insert_payment(
             Ok(document)
         }
         Backend::Sqlite(mut conn) => {
-            let id = document.id.map(|o| o.to_hex()).unwrap_or_else(generate_id_hex);
+            let id = document
+                .id
+                .map(|o| o.to_hex())
+                .unwrap_or_else(generate_id_hex);
             sqlx::query(
                 "INSERT INTO expense_payments (
                     key, id, expense_key, amount_cents, paid_from, paid_on, reference_no, note,
@@ -183,7 +190,11 @@ pub(crate) async fn list_expenses(
             if let Some(to) = to {
                 range.insert("$lte", to);
             }
-            let filter = if range.is_empty() { doc! {} } else { doc! { "expense_date": range } };
+            let filter = if range.is_empty() {
+                doc! {}
+            } else {
+                doc! { "expense_date": range }
+            };
             let mut cursor = expenses(db).find(filter).await?;
             let mut out = Vec::new();
             while let Some(d) = cursor.try_next().await? {
@@ -206,7 +217,12 @@ pub(crate) async fn list_expenses(
             if let Some(to) = to {
                 query = query.bind(to);
             }
-            Ok(query.fetch_all(pool).await?.iter().map(expense_from_row).collect())
+            Ok(query
+                .fetch_all(pool)
+                .await?
+                .iter()
+                .map(expense_from_row)
+                .collect())
         }
     }
 }
@@ -215,7 +231,10 @@ pub(crate) async fn list_expenses(
 pub(crate) async fn list_all_payments(db: &Db) -> AppResult<Vec<ExpensePaymentDocument>> {
     match db {
         Db::Mongo(db) => {
-            let mut cursor = payments(db).find(doc! {}).sort(doc! { "created_at": 1 }).await?;
+            let mut cursor = payments(db)
+                .find(doc! {})
+                .sort(doc! { "created_at": 1 })
+                .await?;
             let mut out = Vec::new();
             while let Some(d) = cursor.try_next().await? {
                 out.push(d);
@@ -232,7 +251,10 @@ pub(crate) async fn list_all_payments(db: &Db) -> AppResult<Vec<ExpensePaymentDo
 }
 
 /// The payments of one expense, oldest first.
-pub(crate) async fn list_payments_for(db: &Db, expense_key: &str) -> AppResult<Vec<ExpensePaymentDocument>> {
+pub(crate) async fn list_payments_for(
+    db: &Db,
+    expense_key: &str,
+) -> AppResult<Vec<ExpensePaymentDocument>> {
     match db {
         Db::Mongo(db) => {
             let mut cursor = payments(db)
@@ -246,10 +268,12 @@ pub(crate) async fn list_payments_for(db: &Db, expense_key: &str) -> AppResult<V
             Ok(out)
         }
         Db::Sqlite(pool) => {
-            let rows = sqlx::query("SELECT * FROM expense_payments WHERE expense_key = ? ORDER BY created_at ASC")
-                .bind(expense_key)
-                .fetch_all(pool)
-                .await?;
+            let rows = sqlx::query(
+                "SELECT * FROM expense_payments WHERE expense_key = ? ORDER BY created_at ASC",
+            )
+            .bind(expense_key)
+            .fetch_all(pool)
+            .await?;
             rows.iter().map(payment_from_row).collect()
         }
     }

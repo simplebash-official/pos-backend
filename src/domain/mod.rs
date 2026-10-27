@@ -2,7 +2,6 @@
 // Populated as domain modules (billing, repairs, inventory, ...) grow.
 
 pub mod accounts;
-pub mod finance_reports;
 pub mod attachments;
 pub mod auth;
 pub mod backup;
@@ -13,6 +12,7 @@ pub mod cash_settings;
 pub mod customers;
 pub mod employees;
 pub mod expenses;
+pub mod finance_reports;
 pub mod imports;
 pub mod incomes;
 pub mod inventory;
@@ -27,8 +27,8 @@ pub mod reports;
 pub mod sequences;
 pub mod sessions;
 pub mod settings;
-pub mod supplier_products;
 pub mod supplier_credits;
+pub mod supplier_products;
 pub mod suppliers;
 pub mod sync;
 pub mod sync_local;

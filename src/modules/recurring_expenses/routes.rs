@@ -55,7 +55,10 @@ async fn list_bills(
 ) -> AppResult<Json<ApiResponse<Vec<RecurringBill>>>> {
     current_user.require_permission(perm::EXPENSES_VIEW)?;
     let bills = service::list_bills(&state.db, query).await?;
-    Ok(Json(ApiResponse::success(bills, "Regular bills retrieved successfully")))
+    Ok(Json(ApiResponse::success(
+        bills,
+        "Regular bills retrieved successfully",
+    )))
 }
 
 #[utoipa::path(
@@ -73,7 +76,10 @@ async fn get_period_status(
 ) -> AppResult<Json<ApiResponse<PeriodStatus>>> {
     current_user.require_permission(perm::EXPENSES_VIEW)?;
     let status = service::period_status(&state.db, query).await?;
-    Ok(Json(ApiResponse::success(status, "Period status retrieved successfully")))
+    Ok(Json(ApiResponse::success(
+        status,
+        "Period status retrieved successfully",
+    )))
 }
 
 #[utoipa::path(
@@ -94,7 +100,13 @@ async fn create_template(
 ) -> AppResult<(StatusCode, Json<ApiResponse<RecurringExpense>>)> {
     current_user.require_permission(perm::EXPENSES_MANAGE)?;
     let template = service::create_template(&state.db, body).await?;
-    Ok((StatusCode::CREATED, Json(ApiResponse::success(template, "Regular bill added successfully"))))
+    Ok((
+        StatusCode::CREATED,
+        Json(ApiResponse::success(
+            template,
+            "Regular bill added successfully",
+        )),
+    ))
 }
 
 #[utoipa::path(
@@ -117,5 +129,8 @@ async fn update_template(
 ) -> AppResult<Json<ApiResponse<RecurringExpense>>> {
     current_user.require_permission(perm::EXPENSES_MANAGE)?;
     let template = service::update_template(&state.db, &key, body).await?;
-    Ok(Json(ApiResponse::success(template, "Regular bill updated successfully")))
+    Ok(Json(ApiResponse::success(
+        template,
+        "Regular bill updated successfully",
+    )))
 }

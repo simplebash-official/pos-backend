@@ -24,8 +24,9 @@ fn from_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<PayeeDocument> {
     Ok(PayeeDocument {
         id: ObjectId::parse_str(row.get::<String, _>("id")).ok(),
         key: row.get("key"),
-        payee_type: PayeeType::parse(&type_str)
-            .ok_or_else(|| AppError::internal(format!("Unknown payee type '{type_str}' in database")))?,
+        payee_type: PayeeType::parse(&type_str).ok_or_else(|| {
+            AppError::internal(format!("Unknown payee type '{type_str}' in database"))
+        })?,
         name: row.get("name"),
         normalized_name: row.get("normalized_name"),
         phone: row.get("phone"),
@@ -78,7 +79,10 @@ pub(crate) async fn insert(db: &Db, mut document: PayeeDocument) -> AppResult<Pa
             Ok(document)
         }
         Db::Sqlite(pool) => {
-            let id = document.id.map(|o| o.to_hex()).unwrap_or_else(generate_id_hex);
+            let id = document
+                .id
+                .map(|o| o.to_hex())
+                .unwrap_or_else(generate_id_hex);
             sqlx::query(
                 "INSERT INTO payees (key, id, payee_type, name, normalized_name, phone, active, version, created_at, updated_at)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -105,7 +109,9 @@ pub(crate) async fn insert(db: &Db, mut document: PayeeDocument) -> AppResult<Pa
 pub(crate) async fn save(db: &Db, document: &PayeeDocument) -> AppResult<()> {
     match db {
         Db::Mongo(db) => {
-            payees(db).replace_one(doc! { "key": &document.key }, document).await?;
+            payees(db)
+                .replace_one(doc! { "key": &document.key }, document)
+                .await?;
             Ok(())
         }
         Db::Sqlite(pool) => {

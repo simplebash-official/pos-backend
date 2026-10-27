@@ -17,12 +17,28 @@ use ReportGroup as G;
 /// One shipped category: `(type, name, report group)`. Order within a type is its display order.
 pub const SYSTEM_CATEGORIES: &[(CashMovementType, &str, ReportGroup)] = &[
     (T::PettyExpense, "Tea and refreshments", G::OperatingExpense),
-    (T::PettyExpense, "Transport and delivery", G::OperatingExpense),
+    (
+        T::PettyExpense,
+        "Transport and delivery",
+        G::OperatingExpense,
+    ),
     (T::PettyExpense, "Fuel", G::OperatingExpense),
-    (T::PettyExpense, "Internet and phone reload", G::OperatingExpense),
-    (T::PettyExpense, "Stationery and supplies", G::OperatingExpense),
+    (
+        T::PettyExpense,
+        "Internet and phone reload",
+        G::OperatingExpense,
+    ),
+    (
+        T::PettyExpense,
+        "Stationery and supplies",
+        G::OperatingExpense,
+    ),
     (T::PettyExpense, "Cleaning", G::OperatingExpense),
-    (T::PettyExpense, "Repairs and maintenance", G::OperatingExpense),
+    (
+        T::PettyExpense,
+        "Repairs and maintenance",
+        G::OperatingExpense,
+    ),
     (T::PettyExpense, "Packaging", G::OperatingExpense),
     (T::PettyExpense, "Courier and postage", G::OperatingExpense),
     // Paid to a courier or agent while receiving stock: stock cost, so not an operating expense.
@@ -33,11 +49,19 @@ pub const SYSTEM_CATEGORIES: &[(CashMovementType, &str, ReportGroup)] = &[
     (T::RentAndBills, "Water", G::OperatingExpense),
     (T::RentAndBills, "Internet and phone", G::OperatingExpense),
     (T::RentAndBills, "Garbage and security", G::OperatingExpense),
-    (T::RentAndBills, "Municipal and licence fees", G::OperatingExpense),
+    (
+        T::RentAndBills,
+        "Municipal and licence fees",
+        G::OperatingExpense,
+    ),
     (T::RentAndBills, "Taxes", G::OperatingExpense),
     (T::RentAndBills, "Insurance", G::OperatingExpense),
     (T::RentAndBills, "Loan or lease installment", G::Liabilities),
-    (T::RentAndBills, "Software subscriptions", G::OperatingExpense),
+    (
+        T::RentAndBills,
+        "Software subscriptions",
+        G::OperatingExpense,
+    ),
     (T::RentAndBills, "Professional fees", G::OperatingExpense),
     (T::RentAndBills, "Bank charges", G::OperatingExpense),
     (T::RentAndBills, "Other", G::OperatingExpense),
@@ -49,7 +73,11 @@ pub const SYSTEM_CATEGORIES: &[(CashMovementType, &str, ReportGroup)] = &[
     (T::StaffPayment, "Allowance", G::Payroll),
     (T::StaffPayment, "Staff loan", G::Payroll),
     (T::StaffPayment, "EPF and ETF remittance", G::Payroll),
-    (T::SupplierPayment, "Stock purchase (cash on delivery)", G::Purchases),
+    (
+        T::SupplierPayment,
+        "Stock purchase (cash on delivery)",
+        G::Purchases,
+    ),
     (T::SupplierPayment, "Settle credit balance", G::Purchases),
     (T::SupplierPayment, "Advance or deposit", G::Purchases),
     (T::SupplierPayment, "Freight and handling", G::Purchases),

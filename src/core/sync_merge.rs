@@ -38,8 +38,8 @@ const INVOICE_LIFECYCLE: &[&str] = &[
 /// Invoice columns recomputed from ledger rows (never merged from a payload).
 const INVOICE_DERIVED: &[&str] = &["refundedCents", "creditNoteCount"];
 const CREDIT_NOTE_LIFECYCLE: &[&str] = &["status", "voidedAt", "voidedBy", "voidedReason"];
-/// A quotation's only post-creation change is its status (active -> cancelled).
-const QUOTATION_LIFECYCLE: &[&str] = &["status"];
+/// A quotation's post-creation changes are its lifecycle fields (active -> fulfilled -> cancelled).
+const QUOTATION_LIFECYCLE: &[&str] = &["status", "fulfilledByInvoiceKey", "fulfilledAt"];
 
 /// Maximum accepted clock lead of a sender over the receiver.
 const MAX_FUTURE_MS: i64 = 5 * 60 * 1000;
@@ -198,7 +198,8 @@ pub fn lifecycle_rank(resource: &str, status: &str) -> Option<u8> {
         ("creditNotes" | "credit_notes" | "creditNote", "resolved") => Some(1),
         ("creditNotes" | "credit_notes" | "creditNote", "voided") => Some(2),
         ("quotations" | "quotation", "active") => Some(0),
-        ("quotations" | "quotation", "cancelled") => Some(1),
+        ("quotations" | "quotation", "fulfilled") => Some(1),
+        ("quotations" | "quotation", "cancelled") => Some(2),
         _ => None,
     }
 }
@@ -793,7 +794,8 @@ mod tests {
     #[test]
     fn quotation_lifecycle_only_moves_forward() {
         assert_eq!(lifecycle_rank("quotations", "active"), Some(0));
-        assert_eq!(lifecycle_rank("quotations", "cancelled"), Some(1));
+        assert_eq!(lifecycle_rank("quotations", "fulfilled"), Some(1));
+        assert_eq!(lifecycle_rank("quotations", "cancelled"), Some(2));
         // `expired` is derived from the date, never a stored status.
         assert_eq!(lifecycle_rank("quotations", "expired"), None);
     }

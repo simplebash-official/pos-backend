@@ -606,7 +606,10 @@ CREATE TABLE IF NOT EXISTS quotations (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     deleted_at TEXT,
-    updated_by_device TEXT
+    updated_by_device TEXT,
+    fulfilled_by_invoice_key TEXT,
+    fulfilled_at TEXT,
+    has_out_of_stock_items INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_quotations_created_at ON quotations(created_at);

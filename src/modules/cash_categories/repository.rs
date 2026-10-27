@@ -30,16 +30,25 @@ fn from_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<CashCategoryDocument> {
     Ok(CashCategoryDocument {
         id: ObjectId::parse_str(row.get::<String, _>("id")).ok(),
         key: row.get("key"),
-        movement_type: CashMovementType::parse(&type_str)
-            .ok_or_else(|| AppError::internal(format!("Unknown movement type '{type_str}' on a cash category")))?,
+        movement_type: CashMovementType::parse(&type_str).ok_or_else(|| {
+            AppError::internal(format!(
+                "Unknown movement type '{type_str}' on a cash category"
+            ))
+        })?,
         name: row.get("name"),
         name_si: row.get("name_si"),
         normalized_name: row.get("normalized_name"),
-        report_group: ReportGroup::parse(&group_str)
-            .ok_or_else(|| AppError::internal(format!("Unknown report group '{group_str}' on a cash category")))?,
+        report_group: ReportGroup::parse(&group_str).ok_or_else(|| {
+            AppError::internal(format!(
+                "Unknown report group '{group_str}' on a cash category"
+            ))
+        })?,
         is_system: row.get::<i64, _>("is_system") != 0,
-        review_status: ReviewStatus::parse(&review_str)
-            .ok_or_else(|| AppError::internal(format!("Unknown review status '{review_str}' on a cash category")))?,
+        review_status: ReviewStatus::parse(&review_str).ok_or_else(|| {
+            AppError::internal(format!(
+                "Unknown review status '{review_str}' on a cash category"
+            ))
+        })?,
         pinned: row.get::<i64, _>("pinned") != 0,
         sort_order: row.get("sort_order"),
         active: row.get::<i64, _>("active") != 0,
@@ -66,7 +75,9 @@ pub(crate) async fn list_all(db: &Db) -> AppResult<Vec<CashCategoryDocument>> {
             Ok(out)
         }
         Db::Sqlite(pool) => {
-            let rows = sqlx::query("SELECT * FROM cash_categories").fetch_all(pool).await?;
+            let rows = sqlx::query("SELECT * FROM cash_categories")
+                .fetch_all(pool)
+                .await?;
             rows.iter().map(from_row).collect()
         }
     }
@@ -87,7 +98,10 @@ pub(crate) async fn find_by_key(db: &Db, key: &str) -> AppResult<Option<CashCate
 }
 
 /// Inserts a new category.
-pub(crate) async fn insert(db: &Db, mut document: CashCategoryDocument) -> AppResult<CashCategoryDocument> {
+pub(crate) async fn insert(
+    db: &Db,
+    mut document: CashCategoryDocument,
+) -> AppResult<CashCategoryDocument> {
     match db {
         Db::Mongo(db) => {
             let res = categories(db).insert_one(&document).await?;
@@ -95,7 +109,10 @@ pub(crate) async fn insert(db: &Db, mut document: CashCategoryDocument) -> AppRe
             Ok(document)
         }
         Db::Sqlite(pool) => {
-            let id = document.id.map(|o| o.to_hex()).unwrap_or_else(generate_id_hex);
+            let id = document
+                .id
+                .map(|o| o.to_hex())
+                .unwrap_or_else(generate_id_hex);
             sqlx::query(
                 "INSERT INTO cash_categories (
                     key, id, movement_type, name, name_si, normalized_name, report_group, is_system,

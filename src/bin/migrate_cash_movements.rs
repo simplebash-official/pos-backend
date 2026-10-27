@@ -21,7 +21,11 @@ async fn main() {
     let config = Config::from_env().expect("invalid configuration");
     println!(
         "{} cash movement migration on database '{}'",
-        if dry_run { "DRY RUN (nothing is written):" } else { "APPLYING" },
+        if dry_run {
+            "DRY RUN (nothing is written):"
+        } else {
+            "APPLYING"
+        },
         config.mongodb_db_name
     );
     let db = clients::mongo::connect(&config.mongodb_uri, &config.mongodb_db_name)
@@ -32,8 +36,14 @@ async fn main() {
         .await
         .expect("cash movement migration failed");
     let verb = if dry_run { "would be" } else { "were" };
-    println!("  shops checked for the built-in categories: {}", report.shops_checked);
-    println!("  old movements that {verb} converted: {}", report.movements);
+    println!(
+        "  shops checked for the built-in categories: {}",
+        report.shops_checked
+    );
+    println!(
+        "  old movements that {verb} converted: {}",
+        report.movements
+    );
     if dry_run {
         println!("\nNothing was changed. Run without --dry-run to apply.");
     }

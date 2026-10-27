@@ -5,15 +5,15 @@
 use mongodb::bson::{DateTime as BsonDateTime, oid::ObjectId};
 use serde::{Deserialize, Serialize};
 
-use crate::modules::purchases::charges;
 use crate::domain::{
     purchase_receipts::{
         Allocation, BilledBy, ChargeKind, PaymentKind, PurchaseReceipt, ReceiptCharge,
         ReceiptSettlement, ReceiptStatus,
     },
-    supplier_credits::{CreditReason, SupplierCredit},
     purchases::{ProductSummary, Purchase, SupplierSummary},
+    supplier_credits::{CreditReason, SupplierCredit},
 };
+use crate::modules::purchases::charges;
 
 /// A single stock-intake record. References `suppliers`/inventory
 /// `products` via their immutable `key`s (`supplier_key`/`product_key`),

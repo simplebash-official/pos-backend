@@ -561,11 +561,15 @@ pub async fn complete_sale(
         // Resolve the register session: if specified, validate it; otherwise detect active session for terminal/cashier
         let session_doc = match &body.session_key {
             Some(key) => {
-                let sess = crate::modules::sessions::repository::sessions::find_session_by_key(db, key)
-                    .await?
-                    .ok_or_else(|| {
-                        AppError::not_found_with_code("Register session not found", codes::SESSION_NOT_FOUND)
-                    })?;
+                let sess =
+                    crate::modules::sessions::repository::sessions::find_session_by_key(db, key)
+                        .await?
+                        .ok_or_else(|| {
+                            AppError::not_found_with_code(
+                                "Register session not found",
+                                codes::SESSION_NOT_FOUND,
+                            )
+                        })?;
                 if sess.status == crate::domain::sessions::SessionStatus::Closed {
                     return Err(AppError::conflict(
                         codes::SESSION_ALREADY_CLOSED,
@@ -574,12 +578,14 @@ pub async fn complete_sale(
                 }
                 Some(sess)
             }
-            None => crate::modules::sessions::service::resolve_active_session(
-                db,
-                device_id.as_deref(),
-                &cashier_id,
-            )
-            .await?,
+            None => {
+                crate::modules::sessions::service::resolve_active_session(
+                    db,
+                    device_id.as_deref(),
+                    &cashier_id,
+                )
+                .await?
+            }
         };
         let active_session_key = session_doc.as_ref().map(|s| s.key.clone());
         let active_session_terminal_id = session_doc.as_ref().map(|s| s.terminal_id.clone());
@@ -786,30 +792,33 @@ pub async fn complete_sale(
             (cash, card, 0i64, unpaid)
         };
 
-        if let (Some(sess_key), Some(term_id)) = (&active_session_key, &active_session_terminal_id) {
-            if let Err(err) = crate::modules::sessions::repository::sessions::increment_session_sales(
-                db,
-                sess_key,
-                cash_delta,
-                card_delta,
-                online_delta,
-                credit_delta,
-            )
-            .await
+        if let (Some(sess_key), Some(term_id)) = (&active_session_key, &active_session_terminal_id)
+        {
+            if let Err(err) =
+                crate::modules::sessions::repository::sessions::increment_session_sales(
+                    db,
+                    sess_key,
+                    cash_delta,
+                    card_delta,
+                    online_delta,
+                    credit_delta,
+                )
+                .await
             {
-                warnings.push(format!("Register session sales counters failed to update: {err}"));
+                warnings.push(format!(
+                    "Register session sales counters failed to update: {err}"
+                ));
             }
 
             if cash_delta != 0
-                && let Err(err) = crate::modules::sessions::repository::drawer::update_drawer_balance(
-                    db,
-                    term_id,
-                    cash_delta,
-                )
-                .await
-                {
-                    warnings.push(format!("Cash drawer balance failed to update: {err}"));
-                }
+                && let Err(err) =
+                    crate::modules::sessions::repository::drawer::update_drawer_balance(
+                        db, term_id, cash_delta,
+                    )
+                    .await
+            {
+                warnings.push(format!("Cash drawer balance failed to update: {err}"));
+            }
         }
 
         // Run every line item's stock/ticket side effect concurrently instead of
@@ -864,6 +873,20 @@ pub async fn complete_sale(
             {
                 warnings.push(format!("Customer financials could not be updated: {err}"));
             }
+        }
+
+        if let Some(quotation_key) = &body.quotation_key
+            && let Err(err) = crate::modules::quotations::service::fulfill_quotation(
+                db,
+                quotation_key,
+                &inserted_invoice.key,
+                device_id.clone(),
+            )
+            .await
+        {
+            warnings.push(format!(
+                "Quotation '{quotation_key}' could not be marked as fulfilled: {err}"
+            ));
         }
 
         Ok(CompleteSaleResponse {

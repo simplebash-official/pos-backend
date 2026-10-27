@@ -50,7 +50,10 @@ pub(crate) async fn find_by_key(db: &Db, key: &str) -> AppResult<Option<AccountO
 }
 
 /// Inserts the first opening balance of an account.
-pub(crate) async fn insert(db: &Db, mut document: AccountOpeningDocument) -> AppResult<AccountOpeningDocument> {
+pub(crate) async fn insert(
+    db: &Db,
+    mut document: AccountOpeningDocument,
+) -> AppResult<AccountOpeningDocument> {
     match db {
         Db::Mongo(db) => {
             let res = openings(db).insert_one(&document).await?;
@@ -58,7 +61,10 @@ pub(crate) async fn insert(db: &Db, mut document: AccountOpeningDocument) -> App
             Ok(document)
         }
         Db::Sqlite(pool) => {
-            let id = document.id.map(|o| o.to_hex()).unwrap_or_else(generate_id_hex);
+            let id = document
+                .id
+                .map(|o| o.to_hex())
+                .unwrap_or_else(generate_id_hex);
             sqlx::query(
                 "INSERT INTO account_openings (
                     key, id, kind, opening_balance_cents, as_of_date, set_by_name_snapshot,
@@ -86,7 +92,9 @@ pub(crate) async fn insert(db: &Db, mut document: AccountOpeningDocument) -> App
 pub(crate) async fn save(db: &Db, document: &AccountOpeningDocument) -> AppResult<()> {
     match db {
         Db::Mongo(db) => {
-            openings(db).replace_one(doc! { "key": &document.key }, document).await?;
+            openings(db)
+                .replace_one(doc! { "key": &document.key }, document)
+                .await?;
             Ok(())
         }
         Db::Sqlite(pool) => {

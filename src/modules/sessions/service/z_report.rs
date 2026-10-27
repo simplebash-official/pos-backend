@@ -11,7 +11,8 @@ use crate::{
         error::{AppError, AppResult},
     },
     domain::sessions::{
-        CashMovementType, ZReportCashReconciliation, ZReportMovementGroup, ZReportPaymentMethodSummary, ZReportResponse,
+        CashMovementType, ZReportCashReconciliation, ZReportMovementGroup,
+        ZReportPaymentMethodSummary, ZReportResponse,
     },
     modules::sessions::repository::{movements, sessions},
 };
@@ -24,28 +25,47 @@ async fn summarize_movements(
 ) -> AppResult<Vec<ZReportMovementGroup>> {
     let keys: Vec<String> = docs.iter().map(|d| d.key.clone()).collect();
     let reversed = movement::reversed_keys(db, &keys).await?;
-    let counted: Vec<_> = docs.iter().filter(|d| d.reverses_key.is_none() && !reversed.contains(&d.key)).collect();
+    let counted: Vec<_> = docs
+        .iter()
+        .filter(|d| d.reverses_key.is_none() && !reversed.contains(&d.key))
+        .collect();
     let owned: Vec<_> = counted.iter().map(|d| (*d).clone()).collect();
     let names = movement::category_names(db, &owned).await?;
-    let mut groups: std::collections::BTreeMap<(usize, String), ZReportMovementGroup> = std::collections::BTreeMap::new();
+    let mut groups: std::collections::BTreeMap<(usize, String), ZReportMovementGroup> =
+        std::collections::BTreeMap::new();
     for d in counted {
-        let order = KIND_ORDER.iter().position(|t| *t == d.movement_type).unwrap_or(KIND_ORDER.len());
-        let name = names.get(&d.category_key).cloned().unwrap_or_else(|| d.category_key.clone());
-        let group = groups.entry((order, name.clone())).or_insert_with(|| ZReportMovementGroup {
-            movement_type: d.movement_type,
-            direction: d.direction,
-            category_name: name,
-            count: 0,
-            total_cents: 0,
-        });
+        let order = KIND_ORDER
+            .iter()
+            .position(|t| *t == d.movement_type)
+            .unwrap_or(KIND_ORDER.len());
+        let name = names
+            .get(&d.category_key)
+            .cloned()
+            .unwrap_or_else(|| d.category_key.clone());
+        let group = groups
+            .entry((order, name.clone()))
+            .or_insert_with(|| ZReportMovementGroup {
+                movement_type: d.movement_type,
+                direction: d.direction,
+                category_name: name,
+                count: 0,
+                total_cents: 0,
+            });
         group.count += 1;
         group.total_cents += d.amount_cents;
     }
     let mut out: Vec<ZReportMovementGroup> = groups.into_values().collect();
     // BTreeMap sorted by (kind, name); within a kind put the biggest first (stable, so ties stay by name).
     out.sort_by(|a, b| {
-        let rank = |g: &ZReportMovementGroup| KIND_ORDER.iter().position(|t| *t == g.movement_type).unwrap_or(KIND_ORDER.len());
-        rank(a).cmp(&rank(b)).then(b.total_cents.cmp(&a.total_cents))
+        let rank = |g: &ZReportMovementGroup| {
+            KIND_ORDER
+                .iter()
+                .position(|t| *t == g.movement_type)
+                .unwrap_or(KIND_ORDER.len())
+        };
+        rank(a)
+            .cmp(&rank(b))
+            .then(b.total_cents.cmp(&a.total_cents))
     });
     Ok(out)
 }

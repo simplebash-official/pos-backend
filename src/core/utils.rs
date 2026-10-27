@@ -54,8 +54,10 @@ pub const SHOP_TZ_OFFSET_SECS: i32 = 5 * 3600 + 30 * 60;
 
 /// The shop-local calendar day that `at` falls on.
 pub fn shop_day(at: DateTime<Utc>) -> chrono::NaiveDate {
-    at.with_timezone(&chrono::FixedOffset::east_opt(SHOP_TZ_OFFSET_SECS).expect("valid fixed offset"))
-        .date_naive()
+    at.with_timezone(
+        &chrono::FixedOffset::east_opt(SHOP_TZ_OFFSET_SECS).expect("valid fixed offset"),
+    )
+    .date_naive()
 }
 
 /// Returns the `[start, end)` bounds, as UTC instants, of the shop-local "today" (midnight to

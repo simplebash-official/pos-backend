@@ -20,15 +20,21 @@ fn cash_movements_col(db: &TenantDatabase) -> ScopedCollection<CashMovementDocum
     db.collection("cash_movements")
 }
 
-pub(crate) fn movement_from_sqlite_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<CashMovementDocument> {
+pub(crate) fn movement_from_sqlite_row(
+    row: &sqlx::sqlite::SqliteRow,
+) -> AppResult<CashMovementDocument> {
     let id_str: String = row.get("id");
     let movement_type_str: String = row.get("movement_type");
     let movement_type = CashMovementType::parse(&movement_type_str).ok_or_else(|| {
-        AppError::internal(format!("Unknown cash movement type '{movement_type_str}' in database"))
+        AppError::internal(format!(
+            "Unknown cash movement type '{movement_type_str}' in database"
+        ))
     })?;
     let direction_str: String = row.get("direction");
     let direction = CashDirection::parse(&direction_str).ok_or_else(|| {
-        AppError::internal(format!("Unknown cash movement direction '{direction_str}' in database"))
+        AppError::internal(format!(
+            "Unknown cash movement direction '{direction_str}' in database"
+        ))
     })?;
     let recorded_late_int: i64 = row.get("recorded_late");
     let created_at_str: String = row.get("created_at");
@@ -153,12 +159,11 @@ pub async fn find_cash_movement_by_key(
             Ok(doc)
         }
         Db::Sqlite(pool) => {
-            let row = sqlx::query(
-                "SELECT * FROM cash_movements WHERE key = ? AND deleted_at IS NULL"
-            )
-            .bind(key)
-            .fetch_optional(pool)
-            .await?;
+            let row =
+                sqlx::query("SELECT * FROM cash_movements WHERE key = ? AND deleted_at IS NULL")
+                    .bind(key)
+                    .fetch_optional(pool)
+                    .await?;
 
             row.map(|r| movement_from_sqlite_row(&r)).transpose()
         }
@@ -231,13 +236,17 @@ pub async fn list_cash_movements(
                 filter.insert("created_at", doc! { "$gte": from });
             }
             if let Some(to) = &query.to {
-                filter.entry("created_at".to_string()).or_insert_with(|| doc! {}.into());
+                filter
+                    .entry("created_at".to_string())
+                    .or_insert_with(|| doc! {}.into());
                 if let Ok(d) = filter.get_document_mut("created_at") {
                     d.insert("$lte", to);
                 }
             }
 
-            let total = cash_movements_col(mongo_db).count_documents(filter.clone()).await?;
+            let total = cash_movements_col(mongo_db)
+                .count_documents(filter.clone())
+                .await?;
             let mut cursor = cash_movements_col(mongo_db)
                 .find(filter)
                 .sort(doc! { "created_at": -1 })
@@ -268,7 +277,11 @@ pub async fn list_cash_movements(
                 bindings.push(movement_type.clone());
             }
             if let Some(category_keys) = &query.category_keys {
-                let placeholders = category_keys.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+                let placeholders = category_keys
+                    .iter()
+                    .map(|_| "?")
+                    .collect::<Vec<_>>()
+                    .join(",");
                 conditions.push(format!("category_key IN ({placeholders})"));
                 bindings.extend(category_keys.iter().cloned());
             }
@@ -278,7 +291,11 @@ pub async fn list_cash_movements(
             }
             if let Some(recorded_late) = query.recorded_late {
                 conditions.push("recorded_late = ?".to_string());
-                bindings.push(if recorded_late { "1".to_string() } else { "0".to_string() });
+                bindings.push(if recorded_late {
+                    "1".to_string()
+                } else {
+                    "0".to_string()
+                });
             }
             if let Some(from) = &query.from {
                 conditions.push("created_at >= ?".to_string());
@@ -290,7 +307,8 @@ pub async fn list_cash_movements(
             }
 
             let where_clause = conditions.join(" AND ");
-            let count_sql = format!("SELECT COUNT(*) as total FROM cash_movements WHERE {where_clause}");
+            let count_sql =
+                format!("SELECT COUNT(*) as total FROM cash_movements WHERE {where_clause}");
             let mut count_query = sqlx::query(&count_sql);
             for b in &bindings {
                 count_query = count_query.bind(b);
@@ -337,7 +355,9 @@ async fn count_by(db: &Db, field: &'static str) -> AppResult<Vec<(String, i64)>>
             let mut cursor = cash_movements_col(mongo_db).aggregate(pipeline).await?;
             let mut out = Vec::new();
             while let Some(row) = cursor.try_next().await? {
-                let key = row.get_str("_id").map_err(|e| AppError::internal(e.to_string()))?;
+                let key = row
+                    .get_str("_id")
+                    .map_err(|e| AppError::internal(e.to_string()))?;
                 let n = match row.get("n") {
                     Some(mongodb::bson::Bson::Int32(n)) => i64::from(*n),
                     Some(mongodb::bson::Bson::Int64(n)) => *n,
@@ -376,7 +396,9 @@ pub async fn list_movements_of_types(
                 let date = chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d")
                     .map_err(|_| AppError::validation("Please pick a valid date."))?;
                 Ok(mongodb::bson::DateTime::from_chrono(
-                    date.and_hms_opt(0, 0, 0).expect("midnight exists").and_utc(),
+                    date.and_hms_opt(0, 0, 0)
+                        .expect("midnight exists")
+                        .and_utc(),
                 ))
             };
             if let Some(from) = from {
@@ -459,7 +481,10 @@ pub async fn find_reversals_of(db: &Db, keys: &[String]) -> AppResult<Vec<(Strin
                 query = query.bind(key);
             }
             let rows = query.fetch_all(pool).await?;
-            Ok(rows.iter().map(|r| (r.get("reverses_key"), r.get("key"))).collect())
+            Ok(rows
+                .iter()
+                .map(|r| (r.get("reverses_key"), r.get("key")))
+                .collect())
         }
     }
 }

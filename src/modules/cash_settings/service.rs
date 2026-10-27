@@ -57,9 +57,11 @@ pub async fn ensure_settings(db: &Db) -> AppResult<()> {
 }
 
 async fn document(db: &Db) -> AppResult<CashSettingsDocument> {
-    repository::find(db, CASH_SETTINGS_KEY).await?.ok_or_else(|| {
-        AppError::internal("The drawer rules have not been set up for this shop".to_string())
-    })
+    repository::find(db, CASH_SETTINGS_KEY)
+        .await?
+        .ok_or_else(|| {
+            AppError::internal("The drawer rules have not been set up for this shop".to_string())
+        })
 }
 
 /// The shop's drawer rules.
@@ -91,7 +93,9 @@ fn check_money(label: &str, cents: i64) -> AppResult<()> {
 fn validate(body: &UpdateCashSettingsRequest) -> AppResult<()> {
     let (low, high) = UNDO_WINDOW_RANGE;
     if !(low..=high).contains(&body.undo_window_seconds) {
-        return Err(AppError::validation(format!("The undo window must be between {low} and {high} seconds.")));
+        return Err(AppError::validation(format!(
+            "The undo window must be between {low} and {high} seconds."
+        )));
     }
     if let Some(limit) = body.approval_threshold_cents {
         check_money("The approval limit", limit)?;
@@ -101,19 +105,27 @@ fn validate(body: &UpdateCashSettingsRequest) -> AppResult<()> {
     }
     let chips = &body.quick_amounts_cents;
     if chips.is_empty() || chips.len() > MAX_QUICK_AMOUNTS {
-        return Err(AppError::validation(format!("Please give between 1 and {MAX_QUICK_AMOUNTS} quick amounts.")));
+        return Err(AppError::validation(format!(
+            "Please give between 1 and {MAX_QUICK_AMOUNTS} quick amounts."
+        )));
     }
     for cents in chips {
         check_money("A quick amount", *cents)?;
     }
     if chips.windows(2).any(|w| w[0] >= w[1]) {
-        return Err(AppError::validation("Quick amounts must go from smallest to largest, with no repeats."));
+        return Err(AppError::validation(
+            "Quick amounts must go from smallest to largest, with no repeats.",
+        ));
     }
     Ok(())
 }
 
 /// Replaces the drawer rules after checking them.
-pub async fn update_settings(db: &Db, set_by_name: String, body: UpdateCashSettingsRequest) -> AppResult<CashSettings> {
+pub async fn update_settings(
+    db: &Db,
+    set_by_name: String,
+    body: UpdateCashSettingsRequest,
+) -> AppResult<CashSettings> {
     tracked("cash_settings.updated", async move {
         validate(&body)?;
         let mut doc = document(db).await?;
@@ -162,6 +174,8 @@ mod tests {
         assert!(bad(|b| b.quick_amounts_cents = vec![]));
         assert!(bad(|b| b.quick_amounts_cents = vec![5_000, 5_000]));
         assert!(bad(|b| b.quick_amounts_cents = vec![50_000, 10_000]));
-        assert!(bad(|b| b.quick_amounts_cents = (1..=9).map(|n| n * 1000).collect()));
+        assert!(bad(
+            |b| b.quick_amounts_cents = (1..=9).map(|n| n * 1000).collect()
+        ));
     }
 }

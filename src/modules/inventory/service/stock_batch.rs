@@ -173,11 +173,37 @@ pub(crate) async fn attach_price_tiers<'a>(
             .or_default()
             .push(batch);
     }
+
+    let mut out_of_stock_keys: Vec<String> = Vec::new();
+    for product in &products {
+        if !by_product.contains_key(product.key.as_str()) {
+            out_of_stock_keys.push(product.key.clone());
+        }
+    }
+
+    let latest_batches = if !out_of_stock_keys.is_empty() {
+        repository::stock_batch::list_latest_batches_for_products(db, &out_of_stock_keys).await?
+    } else {
+        Vec::new()
+    };
+    let mut latest_by_product: HashMap<&str, i64> = HashMap::new();
+    for batch in &latest_batches {
+        latest_by_product
+            .entry(batch.product_key.as_str())
+            .or_insert(batch.selling_price_cents);
+    }
+
     for product in products {
-        product.price_tiers = by_product
+        let tiers = by_product
             .get(product.key.as_str())
             .map(|batches| tiers_from_batches(batches.iter().copied()))
             .unwrap_or_default();
+        if let Some(last_tier) = tiers.last() {
+            product.last_selling_price_cents = Some(last_tier.selling_price_cents);
+        } else if let Some(last_price) = latest_by_product.get(product.key.as_str()) {
+            product.last_selling_price_cents = Some(*last_price);
+        }
+        product.price_tiers = tiers;
     }
     Ok(())
 }

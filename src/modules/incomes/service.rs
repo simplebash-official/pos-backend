@@ -15,8 +15,8 @@ use crate::{
     domain::{
         cash_categories::{ReportGroup, normalize_name},
         incomes::{
-            CreateIncomeRequest, IncomeListQuery, IncomeListResponse, IncomeRow, IncomeSource, IncomeStats,
-            ReceivedInto,
+            CreateIncomeRequest, IncomeListQuery, IncomeListResponse, IncomeRow, IncomeSource,
+            IncomeStats, ReceivedInto,
         },
         sequences::ReserveSequenceRequest,
     },
@@ -42,7 +42,9 @@ fn clean(label: &str, value: Option<&str>, max: usize) -> AppResult<Option<Strin
         return Ok(None);
     };
     if text.chars().count() > max {
-        return Err(AppError::validation(format!("{label} can have up to {max} letters.")));
+        return Err(AppError::validation(format!(
+            "{label} can have up to {max} letters."
+        )));
     }
     Ok(Some(text.to_string()))
 }
@@ -115,7 +117,10 @@ async fn all_rows(db: &Db, from: Option<&str>, to: Option<&str>) -> AppResult<Ve
     keys.dedup();
     let categories = cash_categories::service::resolve_categories(db, &keys).await?;
 
-    let mut rows: Vec<IncomeRow> = incomes.iter().map(|i| ledger_row(i, &categories[&i.category_key])).collect();
+    let mut rows: Vec<IncomeRow> = incomes
+        .iter()
+        .map(|i| ledger_row(i, &categories[&i.category_key]))
+        .collect();
     // Cash added to the drawer is income only under an income category (not a float, capital or a loan).
     rows.extend(
         movements
@@ -133,7 +138,10 @@ pub(crate) async fn rows_between(db: &Db, from: &str, to: &str) -> AppResult<Vec
     all_rows(db, Some(from), Some(to)).await
 }
 
-pub(crate) async fn account_receipts_since(db: &Db, since: &str) -> AppResult<Vec<(ReceivedInto, i64)>> {
+pub(crate) async fn account_receipts_since(
+    db: &Db,
+    since: &str,
+) -> AppResult<Vec<(ReceivedInto, i64)>> {
     Ok(repository::list_incomes(db, Some(since), None)
         .await?
         .into_iter()
@@ -159,7 +167,11 @@ pub async fn list_incomes(db: &Db, query: IncomeListQuery) -> AppResult<IncomeLi
         Some(key) => Some(cash_categories::service::keys_including_merged(db, key).await?),
         None => None,
     };
-    let search = query.search.as_deref().map(normalize_name).filter(|s| !s.is_empty());
+    let search = query
+        .search
+        .as_deref()
+        .map(normalize_name)
+        .filter(|s| !s.is_empty());
 
     let page = query.page.unwrap_or(1).max(1);
     let limit = query.limit.unwrap_or(50).min(200);
@@ -168,8 +180,17 @@ pub async fn list_incomes(db: &Db, query: IncomeListQuery) -> AppResult<IncomeLi
         .await?
         .into_iter()
         .filter(|r| source.is_none_or(|s| r.source == s))
-        .filter(|r| category_keys.as_ref().is_none_or(|keys| keys.contains(&r.category_key)))
-        .filter(|r| query.payee_key.as_ref().is_none_or(|k| r.payee_key.as_ref() == Some(k)))
+        .filter(|r| {
+            category_keys
+                .as_ref()
+                .is_none_or(|keys| keys.contains(&r.category_key))
+        })
+        .filter(|r| {
+            query
+                .payee_key
+                .as_ref()
+                .is_none_or(|k| r.payee_key.as_ref() == Some(k))
+        })
         .filter(|r| {
             search.as_ref().is_none_or(|q| {
                 [
@@ -203,7 +224,11 @@ pub async fn get_stats(db: &Db) -> AppResult<IncomeStats> {
     let today = Utc::now().date_naive();
     let month = today.format("%Y-%m").to_string();
     let last_month = (today - Months::new(1)).format("%Y-%m").to_string();
-    let mut stats = IncomeStats { this_month_cents: 0, this_month_drawer_cents: 0, last_month_cents: 0 };
+    let mut stats = IncomeStats {
+        this_month_cents: 0,
+        this_month_drawer_cents: 0,
+        last_month_cents: 0,
+    };
     for r in &rows {
         if r.date.starts_with(&month) {
             stats.this_month_cents += r.amount_cents;
@@ -221,9 +246,14 @@ pub async fn get_stats(db: &Db) -> AppResult<IncomeStats> {
 pub async fn get_income(db: &Db, key: &str) -> AppResult<IncomeRow> {
     let income = repository::find_income_by_key(db, key)
         .await?
-        .ok_or_else(|| AppError::not_found_with_code("Income not found.", codes::INCOME_NOT_FOUND))?;
-    let categories =
-        cash_categories::service::resolve_categories(db, std::slice::from_ref(&income.category_key)).await?;
+        .ok_or_else(|| {
+            AppError::not_found_with_code("Income not found.", codes::INCOME_NOT_FOUND)
+        })?;
+    let categories = cash_categories::service::resolve_categories(
+        db,
+        std::slice::from_ref(&income.category_key),
+    )
+    .await?;
     Ok(ledger_row(&income, &categories[&income.category_key]))
 }
 
@@ -315,7 +345,10 @@ mod tests {
 
     #[test]
     fn text_is_trimmed_and_limited() {
-        assert_eq!(clean("Note", Some("  hi "), 10).unwrap().as_deref(), Some("hi"));
+        assert_eq!(
+            clean("Note", Some("  hi "), 10).unwrap().as_deref(),
+            Some("hi")
+        );
         assert_eq!(clean("Note", Some("   "), 10).unwrap(), None);
         assert!(clean("Note", Some("abcdefghijk"), 10).is_err());
     }

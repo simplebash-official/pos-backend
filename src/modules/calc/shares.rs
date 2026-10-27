@@ -63,10 +63,17 @@ pub fn compute(request: &CalcSharesRequest) -> AppResult<CalcSharesReply> {
         .iter()
         .map(|part| {
             let basis_points = share_basis_points(part.cents, part.whole_cents.unwrap_or(total));
-            ShareLine { key: part.key.clone(), basis_points, percent: (basis_points + 50) / 100 }
+            ShareLine {
+                key: part.key.clone(),
+                basis_points,
+                percent: (basis_points + 50) / 100,
+            }
         })
         .collect();
-    Ok(CalcSharesReply { total_cents: total, parts })
+    Ok(CalcSharesReply {
+        total_cents: total,
+        parts,
+    })
 }
 
 #[cfg(test)]
@@ -74,13 +81,21 @@ mod tests {
     use super::*;
 
     fn part(key: &str, cents: i64, whole: Option<i64>) -> SharePart {
-        SharePart { key: key.into(), cents, whole_cents: whole }
+        SharePart {
+            key: key.into(),
+            cents,
+            whole_cents: whole,
+        }
     }
 
     #[test]
     fn parts_default_to_a_share_of_their_own_total() {
         let reply = compute(&CalcSharesRequest {
-            parts: vec![part("cash", 300, None), part("card", 100, None), part("none", 0, None)],
+            parts: vec![
+                part("cash", 300, None),
+                part("card", 100, None),
+                part("none", 0, None),
+            ],
         })
         .unwrap();
         assert_eq!(reply.total_cents, 400);
@@ -91,7 +106,10 @@ mod tests {
 
     #[test]
     fn a_part_given_its_own_whole_is_capped_at_full() {
-        let reply = compute(&CalcSharesRequest { parts: vec![part("bill", 15_000, Some(10_000))] }).unwrap();
+        let reply = compute(&CalcSharesRequest {
+            parts: vec![part("bill", 15_000, Some(10_000))],
+        })
+        .unwrap();
         assert_eq!(reply.parts[0].percent, 100);
     }
 }

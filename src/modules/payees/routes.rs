@@ -52,7 +52,10 @@ async fn list_payees(
         current_user.require_permission(perm::PAYEES_MANAGE)?;
     }
     let payees = service::list_payees(&state.db, query).await?;
-    Ok(Json(ApiResponse::success(payees, "Payees retrieved successfully")))
+    Ok(Json(ApiResponse::success(
+        payees,
+        "Payees retrieved successfully",
+    )))
 }
 
 #[utoipa::path(
@@ -73,7 +76,10 @@ async fn create_payee(
 ) -> AppResult<(StatusCode, Json<ApiResponse<Payee>>)> {
     current_user.require_permission(perm::PAYEES_MANAGE)?;
     let payee = service::create_payee(&state.db, body).await?;
-    Ok((StatusCode::CREATED, Json(ApiResponse::success(payee, "Payee created successfully"))))
+    Ok((
+        StatusCode::CREATED,
+        Json(ApiResponse::success(payee, "Payee created successfully")),
+    ))
 }
 
 #[utoipa::path(
@@ -98,5 +104,8 @@ async fn update_payee(
 ) -> AppResult<Json<ApiResponse<Payee>>> {
     current_user.require_permission(perm::PAYEES_MANAGE)?;
     let payee = service::update_payee(&state.db, &key, body).await?;
-    Ok(Json(ApiResponse::success(payee, "Payee updated successfully")))
+    Ok(Json(ApiResponse::success(
+        payee,
+        "Payee updated successfully",
+    )))
 }

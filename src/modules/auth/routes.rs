@@ -251,7 +251,9 @@ async fn set_pin(
     let target_user_id = match &body.target_user_id {
         Some(id) if !id.trim().is_empty() => {
             if id != &user.user_id && user.role != Some(Role::Admin) {
-                return Err(AppError::forbidden("Only admins can set PIN for other users"));
+                return Err(AppError::forbidden(
+                    "Only admins can set PIN for other users",
+                ));
             }
             id.as_str()
         }
@@ -261,4 +263,3 @@ async fn set_pin(
     crate::modules::users::service::set_user_pin(&state.db, target_user_id, &body.pin).await?;
     Ok(Json(ApiResponse::success(true, "PIN set successfully")))
 }
-

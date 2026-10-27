@@ -237,12 +237,7 @@ pub fn index_specs(multi_tenant: bool) -> Vec<IndexSpec> {
         doc! { "movement_type": 1, "normalized_name": 1 },
         false,
     );
-    specs.add(
-        "payees",
-        "payees_key_unique",
-        doc! { "key": 1 },
-        true,
-    );
+    specs.add("payees", "payees_key_unique", doc! { "key": 1 }, true);
     specs.add(
         "payees",
         "payees_type_name",
@@ -335,21 +330,61 @@ pub fn index_specs(multi_tenant: bool) -> Vec<IndexSpec> {
         doc! { "key": 1 },
         true,
     );
-    specs.add("expenses", "expenses_date", doc! { "expense_date": 1 }, false);
+    specs.add(
+        "expenses",
+        "expenses_date",
+        doc! { "expense_date": 1 },
+        false,
+    );
     // The income ledger (`modules::incomes`): read by date.
     specs.add("incomes", "incomes_key_unique", doc! { "key": 1 }, true);
     specs.add("incomes", "incomes_date", doc! { "income_date": 1 }, false);
     // Account opening balances (`modules::accounts`): one row per account kind.
-    specs.add("account_openings", "account_openings_key_unique", doc! { "key": 1 }, true);
+    specs.add(
+        "account_openings",
+        "account_openings_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
     // Supplier and staff balances (`modules::balances`).
-    specs.add("balance_openings", "balance_openings_key_unique", doc! { "key": 1 }, true);
-    specs.add("advance_recoveries", "advance_recoveries_key_unique", doc! { "key": 1 }, true);
-    specs.add("advance_recoveries", "advance_recoveries_employee_key", doc! { "employee_key": 1 }, false);
+    specs.add(
+        "balance_openings",
+        "balance_openings_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    specs.add(
+        "advance_recoveries",
+        "advance_recoveries_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    specs.add(
+        "advance_recoveries",
+        "advance_recoveries_employee_key",
+        doc! { "employee_key": 1 },
+        false,
+    );
     // Receipt photos (`modules::attachments`): listed by the record they belong to.
-    specs.add("attachments", "attachments_key_unique", doc! { "key": 1 }, true);
-    specs.add("attachments", "attachments_owner", doc! { "owner_kind": 1, "owner_key": 1 }, false);
+    specs.add(
+        "attachments",
+        "attachments_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    specs.add(
+        "attachments",
+        "attachments_owner",
+        doc! { "owner_kind": 1, "owner_key": 1 },
+        false,
+    );
     // The shop's drawer rules (`modules::cash_settings`): one row.
-    specs.add("cash_settings", "cash_settings_key_unique", doc! { "key": 1 }, true);
+    specs.add(
+        "cash_settings",
+        "cash_settings_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
     specs.add(
         "expense_payments",
         "expense_payments_expense_key",

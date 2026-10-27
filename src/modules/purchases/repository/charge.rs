@@ -156,7 +156,9 @@ pub(crate) async fn list_supplier_billed_charges(
     match db {
         Db::Mongo(db) => {
             let mut cursor = charges(db)
-                .find(doc! { "supplier_key": supplier_key, "billed_by": BilledBy::Supplier.as_str() })
+                .find(
+                    doc! { "supplier_key": supplier_key, "billed_by": BilledBy::Supplier.as_str() },
+                )
                 .await?;
             let mut items = Vec::new();
             while let Some(document) = cursor.try_next().await? {

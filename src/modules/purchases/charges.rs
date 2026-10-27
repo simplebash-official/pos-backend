@@ -50,7 +50,10 @@ pub fn allocate(amount_cents: i64, weights: &[i64]) -> Vec<i64> {
     }
 
     let sign: i128 = if amount_cents < 0 { -1 } else { 1 };
-    shares.into_iter().map(|share| (share * sign) as i64).collect()
+    shares
+        .into_iter()
+        .map(|share| (share * sign) as i64)
+        .collect()
 }
 
 /// One stock batch of a line: how many units and what each costs.
@@ -162,7 +165,11 @@ mod tests {
                 vec![1, 1, 1, 1, 1, 1, 1],
             ] {
                 let shares = allocate(amount, &weights);
-                assert_eq!(shares.iter().sum::<i64>(), amount, "{amount} over {weights:?}");
+                assert_eq!(
+                    shares.iter().sum::<i64>(),
+                    amount,
+                    "{amount} over {weights:?}"
+                );
                 assert!(shares.iter().all(|&s| s >= 0));
             }
         }
@@ -216,7 +223,10 @@ mod tests {
                 assert!(batches.len() <= 2);
                 assert_eq!(batches.iter().map(|b| b.quantity).sum::<i64>(), quantity);
                 assert_eq!(
-                    batches.iter().map(|b| b.quantity * b.unit_cost_cents).sum::<i64>(),
+                    batches
+                        .iter()
+                        .map(|b| b.quantity * b.unit_cost_cents)
+                        .sum::<i64>(),
                     total
                 );
             }

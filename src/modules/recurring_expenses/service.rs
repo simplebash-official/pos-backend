@@ -15,12 +15,13 @@ use crate::{
     },
     domain::{
         cash_categories::{PayeeListQuery, recurring_expense_key},
-        sessions::CashMovementType,
         expenses::PaidFrom,
         recurring_expenses::{
-            BillStatus, CreateRecurringExpenseRequest, PeriodStatus, PeriodStatusQuery, RecurringBill,
-            RecurringExpense, RecurringExpenseListQuery, UpdateRecurringExpenseRequest,
+            BillStatus, CreateRecurringExpenseRequest, PeriodStatus, PeriodStatusQuery,
+            RecurringBill, RecurringExpense, RecurringExpenseListQuery,
+            UpdateRecurringExpenseRequest,
         },
+        sessions::CashMovementType,
     },
     modules::{
         cash_categories, expenses, payees,
@@ -36,17 +37,28 @@ fn clean_note(value: Option<&str>) -> AppResult<Option<String>> {
         return Ok(None);
     };
     if text.chars().count() > NOTE_MAX {
-        return Err(AppError::validation(format!("The note can have up to {NOTE_MAX} letters.")));
+        return Err(AppError::validation(format!(
+            "The note can have up to {NOTE_MAX} letters."
+        )));
     }
     Ok(Some(text.to_string()))
 }
 
-fn check_schedule(amount_cents: i64, due_day: i64, remind_days_before: i64, paid_from: PaidFrom) -> AppResult<()> {
+fn check_schedule(
+    amount_cents: i64,
+    due_day: i64,
+    remind_days_before: i64,
+    paid_from: PaidFrom,
+) -> AppResult<()> {
     if amount_cents <= 0 {
-        return Err(AppError::validation("Please enter an amount greater than zero."));
+        return Err(AppError::validation(
+            "Please enter an amount greater than zero.",
+        ));
     }
     if !(1..=31).contains(&due_day) {
-        return Err(AppError::validation("The due day must be between 1 and 31."));
+        return Err(AppError::validation(
+            "The due day must be between 1 and 31.",
+        ));
     }
     if !(0..=REMIND_MAX_DAYS).contains(&remind_days_before) {
         return Err(AppError::validation(format!(
@@ -86,7 +98,11 @@ fn month_string(first_day: NaiveDate) -> String {
 }
 
 fn previous_month(first_day: NaiveDate) -> NaiveDate {
-    first_day.pred_opt().expect("a day before exists").with_day(1).expect("day 1 exists")
+    first_day
+        .pred_opt()
+        .expect("a day before exists")
+        .with_day(1)
+        .expect("day 1 exists")
 }
 
 /// The day a bill falls due in a month: the due day, or the month's last day when it has fewer days.
@@ -98,7 +114,9 @@ fn due_date_in(first_day: NaiveDate, due_day: i64) -> NaiveDate {
     }
     .expect("a valid first of month");
     let last_day = i64::from(next_month.pred_opt().expect("a day before exists").day());
-    first_day.with_day(due_day.min(last_day) as u32).expect("a valid day of month")
+    first_day
+        .with_day(due_day.min(last_day) as u32)
+        .expect("a valid day of month")
 }
 
 /// How a bill stands for a month, given today and what has been paid.
@@ -122,16 +140,29 @@ fn status_for(
 
 /// Names for every payee including hidden ones: a bill keeps working after its payee is hidden.
 async fn payee_names(db: &Db) -> AppResult<HashMap<String, String>> {
-    Ok(payees::service::list_payees(db, PayeeListQuery { include_hidden: Some(true), ..Default::default() })
-        .await?
-        .into_iter()
-        .map(|p| (p.key, p.name))
-        .collect())
+    Ok(payees::service::list_payees(
+        db,
+        PayeeListQuery {
+            include_hidden: Some(true),
+            ..Default::default()
+        },
+    )
+    .await?
+    .into_iter()
+    .map(|p| (p.key, p.name))
+    .collect())
 }
 
-fn to_dto(doc: &RecurringExpenseDocument, category_name: String, payee_name: Option<String>) -> RecurringExpense {
+fn to_dto(
+    doc: &RecurringExpenseDocument,
+    category_name: String,
+    payee_name: Option<String>,
+) -> RecurringExpense {
     RecurringExpense {
-        id: doc.id.map(|o| o.to_hex()).unwrap_or_else(|| doc.key.clone()),
+        id: doc
+            .id
+            .map(|o| o.to_hex())
+            .unwrap_or_else(|| doc.key.clone()),
         key: doc.key.clone(),
         category_key: doc.category_key.clone(),
         category_name,
@@ -168,11 +199,24 @@ async fn dtos(db: &Db, docs: &[RecurringExpenseDocument]) -> AppResult<Vec<Recur
 }
 
 /// Adds a regular bill. The category must count as a business cost; one bill per category and payee.
-pub async fn create_template(db: &Db, body: CreateRecurringExpenseRequest) -> AppResult<RecurringExpense> {
+pub async fn create_template(
+    db: &Db,
+    body: CreateRecurringExpenseRequest,
+) -> AppResult<RecurringExpense> {
     tracked("recurring_expenses.created", async move {
-        check_schedule(body.amount_cents, body.due_day, body.remind_days_before, body.paid_from)?;
-        let category = cash_categories::service::category_for_expense(db, &body.category_key).await?;
-        check_payee(category.movement_type, body.paid_from, body.payee_key.as_deref())?;
+        check_schedule(
+            body.amount_cents,
+            body.due_day,
+            body.remind_days_before,
+            body.paid_from,
+        )?;
+        let category =
+            cash_categories::service::category_for_expense(db, &body.category_key).await?;
+        check_payee(
+            category.movement_type,
+            body.paid_from,
+            body.payee_key.as_deref(),
+        )?;
         if let Some(payee_key) = &body.payee_key {
             payees::service::resolve_payee(db, payee_key).await?;
         }
@@ -217,18 +261,30 @@ pub async fn update_template(
 ) -> AppResult<RecurringExpense> {
     tracked("recurring_expenses.updated", async move {
         let mut doc = repository::find_by_key(db, key).await?.ok_or_else(|| {
-            AppError::not_found_with_code("Regular bill not found.", codes::RECURRING_EXPENSE_NOT_FOUND)
+            AppError::not_found_with_code(
+                "Regular bill not found.",
+                codes::RECURRING_EXPENSE_NOT_FOUND,
+            )
         })?;
         doc.amount_cents = body.amount_cents.unwrap_or(doc.amount_cents);
         doc.due_day = body.due_day.unwrap_or(doc.due_day);
         doc.remind_days_before = body.remind_days_before.unwrap_or(doc.remind_days_before);
         doc.paid_from = body.paid_from.unwrap_or(doc.paid_from);
-        check_schedule(doc.amount_cents, doc.due_day, doc.remind_days_before, doc.paid_from)?;
+        check_schedule(
+            doc.amount_cents,
+            doc.due_day,
+            doc.remind_days_before,
+            doc.paid_from,
+        )?;
         // Only a change of account is checked, so a bill can always be stopped.
         if body.paid_from.is_some() {
             let category =
                 cash_categories::service::category_for_expense(db, &doc.category_key).await?;
-            check_payee(category.movement_type, doc.paid_from, doc.payee_key.as_deref())?;
+            check_payee(
+                category.movement_type,
+                doc.paid_from,
+                doc.payee_key.as_deref(),
+            )?;
         }
         if let Some(note) = &body.note {
             doc.note = clean_note(Some(note))?;
@@ -249,7 +305,10 @@ pub async fn update_template(
 ///
 /// shortcut: each template reads the whole expense list for its payments; a shop has a handful of
 /// regular bills, so this stays cheap. Upgrade to one shared read if a shop keeps dozens.
-pub async fn list_bills(db: &Db, query: RecurringExpenseListQuery) -> AppResult<Vec<RecurringBill>> {
+pub async fn list_bills(
+    db: &Db,
+    query: RecurringExpenseListQuery,
+) -> AppResult<Vec<RecurringBill>> {
     let include_inactive = query.include_inactive.unwrap_or(false);
     let docs: Vec<RecurringExpenseDocument> = repository::list_all(db)
         .await?
@@ -262,7 +321,11 @@ pub async fn list_bills(db: &Db, query: RecurringExpenseListQuery) -> AppResult<
 
     let mut bills = Vec::with_capacity(templates.len());
     for template in templates {
-        let created = template.created_at.date_naive().with_day(1).expect("day 1 exists");
+        let created = template
+            .created_at
+            .date_naive()
+            .with_day(1)
+            .expect("day 1 exists");
         // A bill added this month has nothing owed for last month.
         let candidates: Vec<NaiveDate> = [previous_month(this_month), this_month]
             .into_iter()
@@ -290,7 +353,13 @@ pub async fn list_bills(db: &Db, query: RecurringExpenseListQuery) -> AppResult<
         let (month, payments, paid) = chosen.unwrap_or_else(|| (this_month, Vec::new(), 0));
         let due = due_date_in(month, template.due_day);
         bills.push(RecurringBill {
-            status: status_for(today, due, template.remind_days_before, template.amount_cents, paid),
+            status: status_for(
+                today,
+                due,
+                template.remind_days_before,
+                template.amount_cents,
+                paid,
+            ),
             period: month_string(month),
             due_date: due.format("%Y-%m-%d").to_string(),
             days_until_due: (due - today).num_days(),

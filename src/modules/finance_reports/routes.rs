@@ -53,7 +53,9 @@ struct PeriodQuery {
 fn period(query: PeriodQuery) -> AppResult<(String, String)> {
     match (query.from, query.to) {
         (Some(from), Some(to)) => Ok((from, to)),
-        _ => Err(AppError::validation("Please pick the first and the last day of the report.")),
+        _ => Err(AppError::validation(
+            "Please pick the first and the last day of the report.",
+        )),
     }
 }
 
@@ -80,7 +82,10 @@ async fn profit_loss(
     current_user.require_permission(perm::REPORTS_VIEW)?;
     let (from, to) = period(query)?;
     let report = service::profit_loss(&state.db, &from, &to).await?;
-    Ok(Json(ApiResponse::success(report, "Profit and loss retrieved successfully")))
+    Ok(Json(ApiResponse::success(
+        report,
+        "Profit and loss retrieved successfully",
+    )))
 }
 
 #[utoipa::path(
@@ -102,7 +107,10 @@ async fn expense_breakdown(
     current_user.require_permission(perm::REPORTS_VIEW)?;
     let (from, to) = period(query)?;
     let report = service::expense_breakdown(&state.db, &from, &to).await?;
-    Ok(Json(ApiResponse::success(report, "Expense breakdown retrieved successfully")))
+    Ok(Json(ApiResponse::success(
+        report,
+        "Expense breakdown retrieved successfully",
+    )))
 }
 
 // ============================================================================
@@ -128,7 +136,10 @@ async fn cash_flow(
     current_user.require_permission(perm::REPORTS_VIEW)?;
     let (from, to) = period(query)?;
     let report = service::cash_flow(&state.db, &from, &to).await?;
-    Ok(Json(ApiResponse::success(report, "Cash flow retrieved successfully")))
+    Ok(Json(ApiResponse::success(
+        report,
+        "Cash flow retrieved successfully",
+    )))
 }
 
 #[utoipa::path(
@@ -144,5 +155,8 @@ async fn payables(
 ) -> AppResult<Json<ApiResponse<PayablesResponse>>> {
     current_user.require_permission(perm::REPORTS_VIEW)?;
     let report = service::payables(&state.db).await?;
-    Ok(Json(ApiResponse::success(report, "Payables retrieved successfully")))
+    Ok(Json(ApiResponse::success(
+        report,
+        "Payables retrieved successfully",
+    )))
 }

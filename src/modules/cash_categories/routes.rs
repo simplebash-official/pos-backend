@@ -60,7 +60,10 @@ async fn list_categories(
         current_user.require_permission(perm::CASH_CATEGORIES_MANAGE)?;
     }
     let categories = service::list_categories(&state.db, query).await?;
-    Ok(Json(ApiResponse::success(categories, "Categories retrieved successfully")))
+    Ok(Json(ApiResponse::success(
+        categories,
+        "Categories retrieved successfully",
+    )))
 }
 
 #[utoipa::path(
@@ -78,7 +81,10 @@ async fn similar_categories(
 ) -> AppResult<Json<ApiResponse<Vec<CashCategory>>>> {
     current_user.require_permission(perm::CASH_CATEGORIES_CREATE)?;
     let categories = service::similar_categories(&state.db, query).await?;
-    Ok(Json(ApiResponse::success(categories, "Similar categories retrieved successfully")))
+    Ok(Json(ApiResponse::success(
+        categories,
+        "Similar categories retrieved successfully",
+    )))
 }
 
 #[utoipa::path(
@@ -104,7 +110,10 @@ async fn create_category(
     let category = service::create_category(&state.db, name, can_manage, body).await?;
     Ok((
         StatusCode::CREATED,
-        Json(ApiResponse::success(category, "Category created successfully")),
+        Json(ApiResponse::success(
+            category,
+            "Category created successfully",
+        )),
     ))
 }
 
@@ -129,7 +138,10 @@ async fn update_category(
 ) -> AppResult<Json<ApiResponse<CashCategory>>> {
     current_user.require_permission(perm::CASH_CATEGORIES_MANAGE)?;
     let category = service::update_category(&state.db, &key, body).await?;
-    Ok(Json(ApiResponse::success(category, "Category updated successfully")))
+    Ok(Json(ApiResponse::success(
+        category,
+        "Category updated successfully",
+    )))
 }
 
 #[utoipa::path(
@@ -152,5 +164,8 @@ async fn merge_category(
 ) -> AppResult<Json<ApiResponse<CashCategory>>> {
     current_user.require_permission(perm::CASH_CATEGORIES_MANAGE)?;
     let category = service::merge_category(&state.db, &key, body).await?;
-    Ok(Json(ApiResponse::success(category, "Categories merged successfully")))
+    Ok(Json(ApiResponse::success(
+        category,
+        "Categories merged successfully",
+    )))
 }

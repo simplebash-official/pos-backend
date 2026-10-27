@@ -16,8 +16,9 @@ use crate::{
     },
     domain::{
         balances::{
-            AdvanceGiven, AdvanceRecovery, BalanceSubject, CreateAdvanceRecoveryRequest, SetBalanceOpeningRequest,
-            StaffAdvance, StaffAdvanceDetail, StaffAdvancesResponse, SupplierBalance, SupplierBalancesResponse,
+            AdvanceGiven, AdvanceRecovery, BalanceSubject, CreateAdvanceRecoveryRequest,
+            SetBalanceOpeningRequest, StaffAdvance, StaffAdvanceDetail, StaffAdvancesResponse,
+            SupplierBalance, SupplierBalancesResponse,
         },
         cash_categories::category_key,
         employees::EmployeeListQuery,
@@ -65,24 +66,28 @@ async fn advances_given(db: &Db) -> AppResult<Vec<Given>> {
     let mut keys = Vec::new();
     for name in ADVANCE_CATEGORIES {
         keys.extend(
-            cash_categories::service::keys_including_merged(db, &category_key(CashMovementType::StaffPayment, name))
-                .await?,
+            cash_categories::service::keys_including_merged(
+                db,
+                &category_key(CashMovementType::StaffPayment, name),
+            )
+            .await?,
         );
     }
     let is_advance = |category: &str| keys.iter().any(|k| k == category);
     let is_staff = |payee: &Option<String>| payee.as_deref().is_some_and(|k| k.starts_with("emp_"));
-    let mut out: Vec<Given> = sessions::service::payouts_of_type(db, CashMovementType::StaffPayment)
-        .await?
-        .into_iter()
-        .filter(|p| is_advance(&p.category_key) && is_staff(&p.payee_key))
-        .map(|p| Given {
-            employee_key: p.payee_key.expect("filtered to staff"),
-            category_key: p.category_key,
-            day: p.day,
-            number: p.number,
-            cents: p.amount_cents,
-        })
-        .collect();
+    let mut out: Vec<Given> =
+        sessions::service::payouts_of_type(db, CashMovementType::StaffPayment)
+            .await?
+            .into_iter()
+            .filter(|p| is_advance(&p.category_key) && is_staff(&p.payee_key))
+            .map(|p| Given {
+                employee_key: p.payee_key.expect("filtered to staff"),
+                category_key: p.category_key,
+                day: p.day,
+                number: p.number,
+                cents: p.amount_cents,
+            })
+            .collect();
     out.extend(
         expenses::service::ledger_payouts(db)
             .await?
@@ -121,8 +126,16 @@ fn advance_summary(
 ) -> StaffAdvance {
     let since = opening.map(|o| o.as_of_date.as_str());
     let counts = |day: &str| since.is_none_or(|s| day >= s);
-    let given_cents: i64 = given.iter().filter(|g| counts(&g.day)).map(|g| g.cents).sum();
-    let recovered_cents: i64 = recoveries.iter().filter(|r| counts(&r.recovered_on)).map(|r| r.amount_cents).sum();
+    let given_cents: i64 = given
+        .iter()
+        .filter(|g| counts(&g.day))
+        .map(|g| g.cents)
+        .sum();
+    let recovered_cents: i64 = recoveries
+        .iter()
+        .filter(|r| counts(&r.recovered_on))
+        .map(|r| r.amount_cents)
+        .sum();
     StaffAdvance {
         employee_key: employee_key.to_string(),
         name,
@@ -130,7 +143,11 @@ fn advance_summary(
         as_of_date: opening.map(|o| o.as_of_date.clone()),
         given_cents,
         recovered_cents,
-        outstanding_cents: owed(opening.map_or(0, |o| o.opening_balance_cents), given_cents, recovered_cents),
+        outstanding_cents: owed(
+            opening.map_or(0, |o| o.opening_balance_cents),
+            given_cents,
+            recovered_cents,
+        ),
         last_given_on: given.iter().map(|g| g.day.clone()).max(),
     }
 }
@@ -139,22 +156,33 @@ fn advance_summary(
 pub async fn list_staff_advances(db: &Db) -> AppResult<StaffAdvancesResponse> {
     let given = advances_given(db).await?;
     let recoveries = repository::list_recoveries(db).await?;
-    let openings: HashMap<String, BalanceOpeningDocument> = repository::list_openings(db, BalanceSubject::Staff)
-        .await?
-        .into_iter()
-        .map(|o| (o.subject_key.clone(), o))
-        .collect();
+    let openings: HashMap<String, BalanceOpeningDocument> =
+        repository::list_openings(db, BalanceSubject::Staff)
+            .await?
+            .into_iter()
+            .map(|o| (o.subject_key.clone(), o))
+            .collect();
     let mut staff = Vec::new();
-    for e in employees::service::list_employees(db, EmployeeListQuery::default()).await?.employees {
+    for e in employees::service::list_employees(db, EmployeeListQuery::default())
+        .await?
+        .employees
+    {
         let g: Vec<&Given> = given.iter().filter(|g| g.employee_key == e.key).collect();
-        let r: Vec<&AdvanceRecoveryDocument> = recoveries.iter().filter(|r| r.employee_key == e.key).collect();
+        let r: Vec<&AdvanceRecoveryDocument> = recoveries
+            .iter()
+            .filter(|r| r.employee_key == e.key)
+            .collect();
         let opening = openings.get(&e.key);
         if g.is_empty() && r.is_empty() && opening.is_none() {
             continue;
         }
         staff.push(advance_summary(&e.key, e.name, opening, &g, &r));
     }
-    staff.sort_by(|a, b| b.outstanding_cents.cmp(&a.outstanding_cents).then(a.name.cmp(&b.name)));
+    staff.sort_by(|a, b| {
+        b.outstanding_cents
+            .cmp(&a.outstanding_cents)
+            .then(a.name.cmp(&b.name))
+    });
     Ok(StaffAdvancesResponse { staff })
 }
 
@@ -162,21 +190,39 @@ pub async fn list_staff_advances(db: &Db) -> AppResult<StaffAdvancesResponse> {
 pub async fn get_staff_advance(db: &Db, employee_key: &str) -> AppResult<StaffAdvanceDetail> {
     let employee = employees::service::get_employee_by_key(db, employee_key).await?;
     let all_given = advances_given(db).await?;
-    let given: Vec<&Given> = all_given.iter().filter(|g| g.employee_key == employee_key).collect();
+    let given: Vec<&Given> = all_given
+        .iter()
+        .filter(|g| g.employee_key == employee_key)
+        .collect();
     let all_recoveries = repository::list_recoveries(db).await?;
-    let recoveries: Vec<&AdvanceRecoveryDocument> =
-        all_recoveries.iter().filter(|r| r.employee_key == employee_key).collect();
+    let recoveries: Vec<&AdvanceRecoveryDocument> = all_recoveries
+        .iter()
+        .filter(|r| r.employee_key == employee_key)
+        .collect();
     let opening = repository::find_opening(db, &opening_key(employee_key)).await?;
-    let summary = advance_summary(employee_key, employee.name, opening.as_ref(), &given, &recoveries);
+    let summary = advance_summary(
+        employee_key,
+        employee.name,
+        opening.as_ref(),
+        &given,
+        &recoveries,
+    );
 
     let since = summary.as_of_date.clone();
     let since = since.as_deref();
     let names = cash_categories::service::display_names(
         db,
-        &given.iter().map(|g| g.category_key.clone()).collect::<Vec<_>>(),
+        &given
+            .iter()
+            .map(|g| g.category_key.clone())
+            .collect::<Vec<_>>(),
     )
     .await?;
-    let mut entries: Vec<&Given> = given.iter().copied().filter(|g| since.is_none_or(|s| g.day.as_str() >= s)).collect();
+    let mut entries: Vec<&Given> = given
+        .iter()
+        .copied()
+        .filter(|g| since.is_none_or(|s| g.day.as_str() >= s))
+        .collect();
     entries.sort_by(|a, b| b.day.cmp(&a.day).then(b.number.cmp(&a.number)));
     Ok(StaffAdvanceDetail {
         summary,
@@ -208,14 +254,25 @@ pub async fn recover_advance(
 ) -> AppResult<StaffAdvanceDetail> {
     tracked("balances.advance_recovered", async move {
         if body.amount_cents <= 0 {
-            return Err(AppError::validation("Please enter an amount greater than zero."));
+            return Err(AppError::validation(
+                "Please enter an amount greater than zero.",
+            ));
         }
         parse_day(&body.recovered_on)?;
-        let note = body.note.as_deref().map(str::trim).filter(|n| !n.is_empty());
+        let note = body
+            .note
+            .as_deref()
+            .map(str::trim)
+            .filter(|n| !n.is_empty());
         if note.is_some_and(|n| n.chars().count() > NOTE_MAX) {
-            return Err(AppError::validation(format!("The note can have up to {NOTE_MAX} letters.")));
+            return Err(AppError::validation(format!(
+                "The note can have up to {NOTE_MAX} letters."
+            )));
         }
-        let outstanding = get_staff_advance(db, employee_key).await?.summary.outstanding_cents;
+        let outstanding = get_staff_advance(db, employee_key)
+            .await?
+            .summary
+            .outstanding_cents;
         if body.amount_cents > outstanding {
             return Err(AppError::conflict(
                 codes::ADVANCE_OVER_RECOVERED,
@@ -248,11 +305,12 @@ pub async fn recover_advance(
 
 /// Every supplier with what the shop owes them. A supplier has no balance until an opening balance is set.
 pub async fn list_supplier_balances(db: &Db) -> AppResult<SupplierBalancesResponse> {
-    let openings: HashMap<String, BalanceOpeningDocument> = repository::list_openings(db, BalanceSubject::Supplier)
-        .await?
-        .into_iter()
-        .map(|o| (o.subject_key.clone(), o))
-        .collect();
+    let openings: HashMap<String, BalanceOpeningDocument> =
+        repository::list_openings(db, BalanceSubject::Supplier)
+            .await?
+            .into_iter()
+            .map(|o| (o.subject_key.clone(), o))
+            .collect();
     let mut payouts: Vec<(String, String, i64)> = Vec::new();
     for p in sessions::service::payouts_of_type(db, CashMovementType::SupplierPayment).await? {
         if let Some(payee) = p.payee_key {
@@ -266,7 +324,10 @@ pub async fn list_supplier_balances(db: &Db) -> AppResult<SupplierBalancesRespon
     }
 
     let mut out = Vec::new();
-    for s in suppliers::service::list_suppliers(db, SupplierListQuery::default()).await?.suppliers {
+    for s in suppliers::service::list_suppliers(db, SupplierListQuery::default())
+        .await?
+        .suppliers
+    {
         let mut balance = SupplierBalance {
             supplier_key: s.key.clone(),
             name: s.name,
@@ -306,7 +367,11 @@ pub async fn list_supplier_balances(db: &Db) -> AppResult<SupplierBalancesRespon
         out.push(balance);
     }
     // Biggest debt first; suppliers not set up yet last.
-    out.sort_by(|a, b| b.balance_cents.cmp(&a.balance_cents).then(a.name.cmp(&b.name)));
+    out.sort_by(|a, b| {
+        b.balance_cents
+            .cmp(&a.balance_cents)
+            .then(a.name.cmp(&b.name))
+    });
     Ok(SupplierBalancesResponse { suppliers: out })
 }
 

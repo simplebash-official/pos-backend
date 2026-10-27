@@ -16,7 +16,7 @@ use crate::{
         error::{AppError, AppResult},
         utils::build_bson_regex,
     },
-    domain::quotations::{STATUS_ACTIVE, STATUS_CANCELLED},
+    domain::quotations::{STATUS_ACTIVE, STATUS_CANCELLED, STATUS_FULFILLED},
     modules::quotations::model::QuotationDocument,
 };
 
@@ -40,12 +40,19 @@ fn row_to_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<QuotationDocument> {
     let created_at: String = row.get("created_at");
     let updated_at: String = row.get("updated_at");
     let deleted_at: Option<String> = row.get("deleted_at");
+    let fulfilled_by_invoice_key: Option<String> =
+        row.try_get("fulfilled_by_invoice_key").ok().flatten();
+    let fulfilled_at: Option<String> = row.try_get("fulfilled_at").ok().flatten();
+    let has_out_of_stock_items: bool = row.try_get("has_out_of_stock_items").unwrap_or(false);
 
     Ok(QuotationDocument {
         id: ObjectId::parse_str(&id_str).ok(),
         key: row.get("key"),
         quotation_number: row.get("quotation_number"),
         status: row.get("status"),
+        has_out_of_stock_items,
+        fulfilled_by_invoice_key,
+        fulfilled_at: fulfilled_at.map(|s| to_bson_datetime(&s)),
         customer_key: row.get("customer_key"),
         customer_name: row.get("customer_name"),
         customer_phone: row.get("customer_phone"),
@@ -140,18 +147,19 @@ pub(crate) async fn insert(
             sqlx::query(
                 r#"
                 INSERT INTO quotations (
-                    key, id, quotation_number, status, customer_key, customer_name,
+                    key, id, quotation_number, status, has_out_of_stock_items, customer_key, customer_name,
                     customer_phone, customer_address, items, subtotal_cents, discount_type,
                     discount_value, discount_cents, total_cents, valid_until, notes, terms,
                     prepared_by, shop_profile_snapshot, version, created_at, updated_at,
-                    deleted_at, updated_by_device
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    deleted_at, updated_by_device, fulfilled_by_invoice_key, fulfilled_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(&document.key)
             .bind(&id)
             .bind(&document.quotation_number)
             .bind(&document.status)
+            .bind(if document.has_out_of_stock_items { 1i32 } else { 0i32 })
             .bind(&document.customer_key)
             .bind(&document.customer_name)
             .bind(&document.customer_phone)
@@ -172,6 +180,8 @@ pub(crate) async fn insert(
             .bind(bson_to_iso(&document.updated_at))
             .bind(document.deleted_at.as_ref().map(bson_to_iso))
             .bind(&document.updated_by_device)
+            .bind(&document.fulfilled_by_invoice_key)
+            .bind(document.fulfilled_at.as_ref().map(bson_to_iso))
             .execute(pool)
             .await?;
 
@@ -227,6 +237,56 @@ pub(crate) async fn cancel(
     }
 }
 
+/// Fulfills an active quotation, transitioning status to `fulfilled` and linking
+/// to the invoice that converted it.
+pub(crate) async fn fulfill(
+    db: &Db,
+    id: ObjectId,
+    invoice_key: &str,
+    device_id: Option<String>,
+) -> AppResult<Option<QuotationDocument>> {
+    match db {
+        Db::Mongo(db) => {
+            let mut set_doc = doc! {
+                "status": STATUS_FULFILLED,
+                "fulfilled_by_invoice_key": invoice_key,
+                "fulfilled_at": BsonDateTime::now(),
+                "updated_at": BsonDateTime::now(),
+            };
+            if let Some(device) = device_id {
+                set_doc.insert("updated_by_device", device);
+            }
+            Ok(quotations(db)
+                .find_one_and_update(
+                    doc! { "_id": id, "status": STATUS_ACTIVE },
+                    doc! { "$set": set_doc, "$inc": { "version": 1 } },
+                )
+                .return_document(mongodb::options::ReturnDocument::After)
+                .await?)
+        }
+        Db::Sqlite(pool) => {
+            let res = sqlx::query(
+                "UPDATE quotations SET status = ?, fulfilled_by_invoice_key = ?, fulfilled_at = ?, \
+                 updated_at = ?, updated_by_device = ?, version = version + 1 \
+                 WHERE id = ? AND status = ?",
+            )
+            .bind(STATUS_FULFILLED)
+            .bind(invoice_key)
+            .bind(now_utc_iso())
+            .bind(now_utc_iso())
+            .bind(&device_id)
+            .bind(id.to_hex())
+            .bind(STATUS_ACTIVE)
+            .execute(pool)
+            .await?;
+            if res.rows_affected() == 0 {
+                return Ok(None);
+            }
+            find_by_id(db, id).await
+        }
+    }
+}
+
 fn mongo_filter(filter: &ListFilter) -> Document {
     let mut clauses: Vec<Document> = Vec::new();
     if let Some(search) = &filter.search {
@@ -244,6 +304,7 @@ fn mongo_filter(filter: &ListFilter) -> Document {
         Some("expired") => clauses.push(
             doc! { "status": STATUS_ACTIVE, "valid_until": { "$lt": filter.today.as_str() } },
         ),
+        Some("fulfilled") => clauses.push(doc! { "status": STATUS_FULFILLED }),
         Some("cancelled") => clauses.push(doc! { "status": STATUS_CANCELLED }),
         _ => {}
     }
@@ -273,6 +334,10 @@ fn sqlite_where(filter: &ListFilter) -> (String, Vec<String>) {
         Some("expired") => {
             conditions.push("status = ? AND valid_until < ?".to_string());
             bindings.extend([STATUS_ACTIVE.to_string(), filter.today.clone()]);
+        }
+        Some("fulfilled") => {
+            conditions.push("status = ?".to_string());
+            bindings.push(STATUS_FULFILLED.to_string());
         }
         Some("cancelled") => {
             conditions.push("status = ?".to_string());

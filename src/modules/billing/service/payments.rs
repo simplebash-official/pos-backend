@@ -179,6 +179,9 @@ pub async fn list_payments(db: &Db, invoice_key: &str) -> AppResult<Vec<PaymentR
 }
 
 /// What customers paid and were refunded by method from `since` (`YYYY-MM-DD`) on, as `(method, received, refunded)`.
-pub(crate) async fn totals_by_method_since(db: &Db, since: &str) -> AppResult<Vec<(String, i64, i64)>> {
+pub(crate) async fn totals_by_method_since(
+    db: &Db,
+    since: &str,
+) -> AppResult<Vec<(String, i64, i64)>> {
     repository::payment_totals_by_method(db, since).await
 }

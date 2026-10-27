@@ -28,8 +28,9 @@ fn opening_from_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<BalanceOpeningDo
     Ok(BalanceOpeningDocument {
         id: ObjectId::parse_str(row.get::<String, _>("id")).ok(),
         key: row.get("key"),
-        subject_kind: BalanceSubject::parse(&kind)
-            .ok_or_else(|| AppError::internal(format!("Unknown balance subject '{kind}' in database")))?,
+        subject_kind: BalanceSubject::parse(&kind).ok_or_else(|| {
+            AppError::internal(format!("Unknown balance subject '{kind}' in database"))
+        })?,
         subject_key: row.get("subject_key"),
         opening_balance_cents: row.get("opening_balance_cents"),
         as_of_date: row.get("as_of_date"),
@@ -59,10 +60,15 @@ fn recovery_from_row(row: &sqlx::sqlite::SqliteRow) -> AdvanceRecoveryDocument {
 }
 
 /// Every opening of one kind (suppliers or staff).
-pub(crate) async fn list_openings(db: &Db, kind: BalanceSubject) -> AppResult<Vec<BalanceOpeningDocument>> {
+pub(crate) async fn list_openings(
+    db: &Db,
+    kind: BalanceSubject,
+) -> AppResult<Vec<BalanceOpeningDocument>> {
     match db {
         Db::Mongo(db) => {
-            let mut cursor = openings(db).find(doc! { "subject_kind": kind.as_str() }).await?;
+            let mut cursor = openings(db)
+                .find(doc! { "subject_kind": kind.as_str() })
+                .await?;
             let mut out = Vec::new();
             while let Some(d) = cursor.try_next().await? {
                 out.push(d);
@@ -105,7 +111,10 @@ pub(crate) async fn insert_opening(
             Ok(document)
         }
         Db::Sqlite(pool) => {
-            let id = document.id.map(|o| o.to_hex()).unwrap_or_else(generate_id_hex);
+            let id = document
+                .id
+                .map(|o| o.to_hex())
+                .unwrap_or_else(generate_id_hex);
             sqlx::query(
                 "INSERT INTO balance_openings (
                     key, id, subject_kind, subject_key, opening_balance_cents, as_of_date,
@@ -134,7 +143,9 @@ pub(crate) async fn insert_opening(
 pub(crate) async fn save_opening(db: &Db, document: &BalanceOpeningDocument) -> AppResult<()> {
     match db {
         Db::Mongo(db) => {
-            openings(db).replace_one(doc! { "key": &document.key }, document).await?;
+            openings(db)
+                .replace_one(doc! { "key": &document.key }, document)
+                .await?;
             Ok(())
         }
         Db::Sqlite(pool) => {
@@ -167,7 +178,10 @@ pub(crate) async fn insert_recovery(
             Ok(document)
         }
         Db::Sqlite(pool) => {
-            let id = document.id.map(|o| o.to_hex()).unwrap_or_else(generate_id_hex);
+            let id = document
+                .id
+                .map(|o| o.to_hex())
+                .unwrap_or_else(generate_id_hex);
             sqlx::query(
                 "INSERT INTO advance_recoveries (
                     key, id, employee_key, amount_cents, recovered_on, note, recorded_by_user_id,
@@ -197,7 +211,10 @@ pub(crate) async fn insert_recovery(
 pub(crate) async fn list_recoveries(db: &Db) -> AppResult<Vec<AdvanceRecoveryDocument>> {
     match db {
         Db::Mongo(db) => {
-            let mut cursor = recoveries(db).find(doc! {}).sort(doc! { "created_at": 1 }).await?;
+            let mut cursor = recoveries(db)
+                .find(doc! {})
+                .sort(doc! { "created_at": 1 })
+                .await?;
             let mut out = Vec::new();
             while let Some(d) = cursor.try_next().await? {
                 out.push(d);

@@ -854,19 +854,37 @@ async fn record_purchase_requires_auth_and_validates_quantity() {
         }],
     });
 
-    let (status, _) = send(&app.router, "POST", "/api/purchase-receipts", Some(payload.clone())).await;
+    let (status, _) = send(
+        &app.router,
+        "POST",
+        "/api/purchase-receipts",
+        Some(payload.clone()),
+    )
+    .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
     let mut invalid = payload.clone();
     invalid["lines"][0]["quantity"] = json!(0);
-    let (status, _) =
-        send_authed(&app.router, "POST", "/api/purchase-receipts", Some(invalid), &token).await;
+    let (status, _) = send_authed(
+        &app.router,
+        "POST",
+        "/api/purchase-receipts",
+        Some(invalid),
+        &token,
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 
     let mut empty = payload;
     empty["lines"] = json!([]);
-    let (status, _) =
-        send_authed(&app.router, "POST", "/api/purchase-receipts", Some(empty), &token).await;
+    let (status, _) = send_authed(
+        &app.router,
+        "POST",
+        "/api/purchase-receipts",
+        Some(empty),
+        &token,
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 

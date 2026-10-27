@@ -181,7 +181,14 @@ fn upgrade_pre_receipt_backup(tables: &mut HashMap<String, Vec<Value>>) {
         let receipt_key = format!("prc_leg_{first}");
         let created_at = text(purchase, "created_at").unwrap_or_default();
         receipts.entry(receipt_key.clone()).or_insert_with(|| {
-            let tail: String = first.chars().rev().take(10).collect::<Vec<_>>().into_iter().rev().collect();
+            let tail: String = first
+                .chars()
+                .rev()
+                .take(10)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
             let hex: String = first.bytes().map(|b| format!("{b:02X}")).collect();
             json!({
                 "key": receipt_key,

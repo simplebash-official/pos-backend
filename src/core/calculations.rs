@@ -886,14 +886,26 @@ mod invoice_balance_tests {
 
     #[test]
     fn a_credit_invoice_owes_what_is_left_after_payments_and_returns() {
-        assert_eq!(invoice_paid_and_balance(true, 100_000, 30_000, 0), (30_000, 70_000));
-        assert_eq!(invoice_paid_and_balance(true, 100_000, 30_000, 20_000), (30_000, 50_000));
+        assert_eq!(
+            invoice_paid_and_balance(true, 100_000, 30_000, 0),
+            (30_000, 70_000)
+        );
+        assert_eq!(
+            invoice_paid_and_balance(true, 100_000, 30_000, 20_000),
+            (30_000, 50_000)
+        );
         // Paid and returned more than the total: nothing is owed, never negative.
-        assert_eq!(invoice_paid_and_balance(true, 100_000, 90_000, 40_000), (90_000, 0));
+        assert_eq!(
+            invoice_paid_and_balance(true, 100_000, 90_000, 40_000),
+            (90_000, 0)
+        );
     }
 
     #[test]
     fn a_sale_paid_at_the_till_owes_nothing() {
-        assert_eq!(invoice_paid_and_balance(false, 100_000, 100_000, 0), (100_000, 0));
+        assert_eq!(
+            invoice_paid_and_balance(false, 100_000, 100_000, 0),
+            (100_000, 0)
+        );
     }
 }

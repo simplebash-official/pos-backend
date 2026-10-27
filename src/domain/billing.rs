@@ -493,6 +493,9 @@ pub struct CreateSaleRequest {
     /// Document template style preference.
     #[serde(default)]
     pub document_selection: Option<String>,
+    /// Quotation key if this sale fulfills a quotation.
+    #[serde(default)]
+    pub quotation_key: Option<String>,
 }
 
 /// Response for `POST /billing/sales`. `warnings` surfaces any sub-step

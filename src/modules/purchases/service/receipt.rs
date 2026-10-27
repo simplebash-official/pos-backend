@@ -27,8 +27,8 @@ use crate::{
         expenses::{CreateExpenseRequest, PaidFrom},
         inventory::{BatchSource, PaginationMeta, StockMovementType},
         purchase_receipts::{
-            BilledBy, ChargeKind, ChargesPayment, CreateReceiptRequest, PaymentKind,
-            PaymentSource, PurchaseReceipt, ReceiptApproval, ReceiptCharge, ReceiptChargeRequest,
+            BilledBy, ChargeKind, ChargesPayment, CreateReceiptRequest, PaymentKind, PaymentSource,
+            PurchaseReceipt, ReceiptApproval, ReceiptCharge, ReceiptChargeRequest,
             ReceiptListQuery, ReceiptListResponse, ReceiptPayment, ReceiptSettlement,
         },
         purchases::SupplierSummary,
@@ -337,9 +337,7 @@ fn spread_charges(
         };
         let amount = charges::signed_amount(charge.kind, charge.amount_cents);
         let per_line = match allocation {
-            Some(allocation) => {
-                charges::allocate(amount, &charges::weights(allocation, lines))
-            }
+            Some(allocation) => charges::allocate(amount, &charges::weights(allocation, lines)),
             None => vec![amount],
         };
         for (share, part) in shares.iter_mut().zip(per_line) {
@@ -463,7 +461,10 @@ pub async fn record_receipt(
             }
             payee_names.push(Some(payee.name));
         }
-        let has_third_party = body.charges.iter().any(|c| c.billed_by == BilledBy::ThirdParty);
+        let has_third_party = body
+            .charges
+            .iter()
+            .any(|c| c.billed_by == BilledBy::ThirdParty);
         match (has_third_party, &body.charges_payment) {
             (true, None) => {
                 return Err(AppError::validation(
@@ -507,7 +508,10 @@ pub async fn record_receipt(
             matches!(source, PaymentSource::Drawer | PaymentSource::OwnerPocket)
         };
         let cash_involved = body.payment.as_ref().is_some_and(|p| is_cash(p.source))
-            || body.charges_payment.as_ref().is_some_and(|p| is_cash(p.source));
+            || body
+                .charges_payment
+                .as_ref()
+                .is_some_and(|p| is_cash(p.source));
         if body.approval.is_some() && !cash_involved {
             return Err(AppError::validation(
                 "A manager PIN only applies to cash from the drawer.",
@@ -594,7 +598,8 @@ pub async fn record_receipt(
                 }
                 let prepared = prepare_outlay(
                     db,
-                    by.as_ref().expect("a payer is known when a payment is made"),
+                    by.as_ref()
+                        .expect("a payer is known when a payment is made"),
                     &receipt_key,
                     body.approval.as_ref(),
                     cash_offset,

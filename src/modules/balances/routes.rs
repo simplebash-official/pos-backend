@@ -54,7 +54,10 @@ async fn list_supplier_balances(
 ) -> AppResult<Json<ApiResponse<SupplierBalancesResponse>>> {
     current_user.require_permission(perm::BALANCES_VIEW)?;
     let response = service::list_supplier_balances(&state.db).await?;
-    Ok(Json(ApiResponse::success(response, "Supplier balances retrieved successfully")))
+    Ok(Json(ApiResponse::success(
+        response,
+        "Supplier balances retrieved successfully",
+    )))
 }
 
 // ============================================================================
@@ -74,7 +77,10 @@ async fn list_staff_advances(
 ) -> AppResult<Json<ApiResponse<StaffAdvancesResponse>>> {
     current_user.require_permission(perm::BALANCES_VIEW)?;
     let response = service::list_staff_advances(&state.db).await?;
-    Ok(Json(ApiResponse::success(response, "Staff advances retrieved successfully")))
+    Ok(Json(ApiResponse::success(
+        response,
+        "Staff advances retrieved successfully",
+    )))
 }
 
 #[utoipa::path(
@@ -95,7 +101,10 @@ async fn get_staff_advance(
 ) -> AppResult<Json<ApiResponse<StaffAdvanceDetail>>> {
     current_user.require_permission(perm::BALANCES_VIEW)?;
     let detail = service::get_staff_advance(&state.db, &employee_key).await?;
-    Ok(Json(ApiResponse::success(detail, "Staff advance retrieved successfully")))
+    Ok(Json(ApiResponse::success(
+        detail,
+        "Staff advance retrieved successfully",
+    )))
 }
 
 #[utoipa::path(
@@ -118,8 +127,16 @@ async fn recover_advance(
 ) -> AppResult<(StatusCode, Json<ApiResponse<StaffAdvanceDetail>>)> {
     current_user.require_permission(perm::BALANCES_MANAGE)?;
     let name = current_user.resolve_name(&state.db).await;
-    let detail = service::recover_advance(&state.db, &employee_key, current_user.user_id, name, body).await?;
-    Ok((StatusCode::CREATED, Json(ApiResponse::success(detail, "Recovery recorded successfully"))))
+    let detail =
+        service::recover_advance(&state.db, &employee_key, current_user.user_id, name, body)
+            .await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(ApiResponse::success(
+            detail,
+            "Recovery recorded successfully",
+        )),
+    ))
 }
 
 // ============================================================================
@@ -148,8 +165,12 @@ async fn set_balance_opening(
     Json(body): Json<SetBalanceOpeningRequest>,
 ) -> AppResult<Json<ApiResponse<serde_json::Value>>> {
     current_user.require_permission(perm::BALANCES_MANAGE)?;
-    let subject = BalanceSubject::parse(&kind).ok_or_else(|| AppError::validation("Unknown kind."))?;
+    let subject =
+        BalanceSubject::parse(&kind).ok_or_else(|| AppError::validation("Unknown kind."))?;
     let name = current_user.resolve_name(&state.db).await;
     service::set_opening(&state.db, subject, &key, name, body).await?;
-    Ok(Json(ApiResponse::success(serde_json::json!({}), "Opening balance saved successfully")))
+    Ok(Json(ApiResponse::success(
+        serde_json::json!({}),
+        "Opening balance saved successfully",
+    )))
 }
