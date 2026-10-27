@@ -31,13 +31,14 @@ trap 'rm -rf "$LOCK"' EXIT
 # Atlas (free tier) allows 500 collections in total and every throwaway test database holds ~35, so
 # databases left behind by interrupted runs make the next run fail with "already using 500
 # collections of 500" (it looks like a mass regression but is not). Sweep ONLY our own pattern
-# jt<area>_<20-24 hex>; jwa_*, simplebash_* and anything else are never touched.
+# jt<area>_<20-24 hex> (this repo) and jwa_<24 hex> (identity-server tests, same leak, same quota);
+# simplebash_* and anything else are never touched.
 if pgrep -f "backend/target/debug/deps" >/dev/null; then
   echo "another backend test run is active; skipping the leftover sweep" >&2
 else
   mongosh "$MONGODB_URI" --quiet --eval '
     db.adminCommand({listDatabases:1,nameOnly:true}).databases.forEach(d => {
-      if (/^jt[a-z]+_[0-9a-f]{20,24}$/.test(d.name)) db.getSiblingDB(d.name).dropDatabase();
+      if (/^(jt[a-z]+_[0-9a-f]{20,24}|jwa_[0-9a-f]{24})$/.test(d.name)) db.getSiblingDB(d.name).dropDatabase();
     })' >/dev/null 2>&1 || echo "leftover sweep failed (mongosh); continuing" >&2
 fi
 
@@ -60,4 +61,6 @@ echo "== clippy (CI flags) =="
 cargo clippy --all-targets --all-features -- -D warnings
 
 echo "== cargo test --no-fail-fast on Atlas db $DB =="
-cargo test --no-fail-fast
+# Each parallel Mongo test holds a ~42-collection database, so unbounded threads (one per core)
+# can alone pass the 500 quota. 4 threads keep a full run near 170 on top of the baseline.
+RUST_TEST_THREADS="${CHECK_ATLAS_THREADS:-4}" cargo test --no-fail-fast

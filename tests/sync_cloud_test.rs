@@ -1163,7 +1163,10 @@ async fn pushed_quotations_apply_merge_forward_and_are_never_reopened() {
 
     // 5. Two quotations that were given the same number: the second is renumbered and reported.
     let mut twin = reid(&payload);
-    twin["key"] = json!("quo_twin_2");
+    // The lower key wins a number clash, and the original's key is random; an extension of it always
+    // sorts after it, so the twin is the one renumbered on every run (a fixed key lost 1 run in 10).
+    let twin_key = format!("{key}_twin");
+    twin["key"] = json!(twin_key);
     twin["version"] = json!(1);
     twin["status"] = json!("active");
     let (_, body) = push(
@@ -1176,7 +1179,7 @@ async fn pushed_quotations_apply_merge_forward_and_are_never_reopened() {
     .await;
     assert_eq!(statuses(&body), ["applied"], "{body}");
     let original_number = payload["quotationNumber"].as_str().unwrap();
-    let renamed = stored_quotation(&app, "tnt_qd", "quo_twin_2").await;
+    let renamed = stored_quotation(&app, "tnt_qd", &twin_key).await;
     let renamed_number = renamed.get_str("quotation_number").unwrap();
     assert!(
         renamed_number.starts_with(&format!("{original_number}-")),
