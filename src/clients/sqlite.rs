@@ -747,6 +747,7 @@ pub fn map_sqlite_row_to_document(row: &sqlx::sqlite::SqliteRow) -> mongodb::bso
                         | "no_receipt"
                         | "is_manager_override"
                         | "is_active"
+                        | "has_out_of_stock_items"
                 ) {
                     doc.insert(name, mongodb::bson::Bson::Boolean(val != 0));
                 } else {
