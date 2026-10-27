@@ -34,7 +34,12 @@ const DATETIME_FIELDS: &[&str] = &[
 /// DTO fields that are computed on read (never stored), per wire resource name.
 fn enrichment_fields(resource: &str) -> &'static [&'static str] {
     match resource {
-        "products" => &["category", "subcategory", "priceTiers"],
+        "products" => &[
+            "category",
+            "subcategory",
+            "priceTiers",
+            "lastSellingPriceCents",
+        ],
         "purchases" => &[
             "product",
             "supplier",
