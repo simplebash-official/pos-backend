@@ -4,18 +4,15 @@
 // shift saves use); the handler reads the drawer, the category and the shop limit, this module
 // only combines them.
 
-use std::collections::HashMap;
-
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::{
     core::error::{AppError, AppResult},
-    domain::sessions::{CashMovementType, DENOMINATION_RUPEES, VARIANCE_TOLERANCE_CENTS},
+    domain::sessions::{CashMovementType, VARIANCE_TOLERANCE_CENTS},
 };
 
 const MAX_CENTS: i64 = 10_000_000_000_000;
-const MAX_COUNT: i64 = 1_000_000;
 const MAX_SETTLEMENTS: usize = 200;
 
 fn check_cents(label: &str, cents: i64) -> AppResult<()> {
@@ -29,59 +26,10 @@ fn check_cents(label: &str, cents: i64) -> AppResult<()> {
 // Counting notes and coins
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct CalcCashCountRequest {
-    /// How many of each note or coin, keyed by its rupee value ("5000", "1000", ... "1").
-    pub counts: HashMap<String, i64>,
-}
-
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct CashCountLine {
-    /// The rupee value, the key of a stored count.
-    pub id: String,
-    pub value_cents: i64,
-    pub count: i64,
-    pub subtotal_cents: i64,
-}
-
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct CalcCashCountReply {
-    /// Every denomination, largest first, whether or not any were counted.
-    pub lines: Vec<CashCountLine>,
-    pub total_cents: i64,
-}
+pub use pos_calc_core::cash::{CalcCashCountReply, CalcCashCountRequest, CashCountLine};
 
 pub fn compute_count(request: &CalcCashCountRequest) -> AppResult<CalcCashCountReply> {
-    for (id, count) in &request.counts {
-        if !DENOMINATION_RUPEES
-            .iter()
-            .any(|rupees| rupees.to_string() == *id)
-        {
-            return Err(AppError::validation(format!("{id} is not a note or coin")));
-        }
-        if !(0..=MAX_COUNT).contains(count) {
-            return Err(AppError::validation("A count is out of range"));
-        }
-    }
-    let lines: Vec<CashCountLine> = DENOMINATION_RUPEES
-        .iter()
-        .map(|rupees| {
-            let id = rupees.to_string();
-            let count = request.counts.get(&id).copied().unwrap_or(0);
-            let value_cents = rupees * 100;
-            CashCountLine {
-                id,
-                value_cents,
-                count,
-                subtotal_cents: value_cents * count,
-            }
-        })
-        .collect();
-    let total_cents = lines.iter().map(|l| l.subtotal_cents).sum();
-    Ok(CalcCashCountReply { lines, total_cents })
+    Ok(pos_calc_core::cash::compute_count(request)?)
 }
 
 // ---------------------------------------------------------------------------
@@ -336,6 +284,7 @@ pub fn compute_movement(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     fn movement(kind: CashMovementType, amount: i64) -> CalcCashMovementRequest {
         CalcCashMovementRequest {

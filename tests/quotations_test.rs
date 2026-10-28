@@ -979,13 +979,23 @@ async fn out_of_stock_quotation_creation_replenishment_and_fulfillment() {
     assert_eq!(quo_res["data"]["hasOutOfStockItems"], true);
 
     // 5. Verify pulse report flags this quotation as pending stock with isReadyToFill = false
-    let (status, pulse_res) = call(&ctx.router, "GET", "/api/reports/dashboard-pulse", None, &tok).await;
+    let (status, pulse_res) = call(
+        &ctx.router,
+        "GET",
+        "/api/reports/dashboard-pulse",
+        None,
+        &tok,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{pulse_res}");
     let pending = pulse_res["data"]["pendingStockQuotations"]
         .as_array()
         .expect("pendingStockQuotations array");
     let found = pending.iter().find(|q| q["key"] == quotation_key);
-    assert!(found.is_some(), "Quotation should be in pendingStockQuotations");
+    assert!(
+        found.is_some(),
+        "Quotation should be in pendingStockQuotations"
+    );
     assert_eq!(found.unwrap()["isReadyToFill"], false);
 
     // 6. Replenish stock via purchase receipt:
@@ -1026,7 +1036,14 @@ async fn out_of_stock_quotation_creation_replenishment_and_fulfillment() {
     assert_eq!(status, StatusCode::CREATED, "{rcp_res}");
 
     // 7. Pulse now shows isReadyToFill = true!
-    let (status, pulse_res2) = call(&ctx.router, "GET", "/api/reports/dashboard-pulse", None, &tok).await;
+    let (status, pulse_res2) = call(
+        &ctx.router,
+        "GET",
+        "/api/reports/dashboard-pulse",
+        None,
+        &tok,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{pulse_res2}");
     let pending2 = pulse_res2["data"]["pendingStockQuotations"]
         .as_array()
@@ -1057,7 +1074,10 @@ async fn out_of_stock_quotation_creation_replenishment_and_fulfillment() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{sale2}");
-    let invoice_key = sale2["data"]["invoice"]["key"].as_str().unwrap().to_string();
+    let invoice_key = sale2["data"]["invoice"]["key"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     // 9. Verify quotation is now fulfilled
     let (status, quo_after) = call(
@@ -1074,7 +1094,14 @@ async fn out_of_stock_quotation_creation_replenishment_and_fulfillment() {
     assert!(quo_after["data"]["fulfilledAt"].as_str().is_some());
 
     // 10. Pulse no longer lists this quotation because it is fulfilled!
-    let (status, pulse_res3) = call(&ctx.router, "GET", "/api/reports/dashboard-pulse", None, &tok).await;
+    let (status, pulse_res3) = call(
+        &ctx.router,
+        "GET",
+        "/api/reports/dashboard-pulse",
+        None,
+        &tok,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{pulse_res3}");
     let pending3 = pulse_res3["data"]["pendingStockQuotations"]
         .as_array()
