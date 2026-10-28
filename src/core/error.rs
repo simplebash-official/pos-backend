@@ -350,6 +350,14 @@ impl From<serde_json::Error> for AppError {
     }
 }
 
+impl From<pos_calc_core::CalcError> for AppError {
+    fn from(err: pos_calc_core::CalcError) -> Self {
+        match err {
+            pos_calc_core::CalcError::Validation(msg) => AppError::validation(msg),
+        }
+    }
+}
+
 /// Handler and service-layer return type: every fallible operation in this
 /// codebase resolves to either a domain value or an `AppError` that already
 /// knows how to render itself as the right HTTP response.
