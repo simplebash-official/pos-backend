@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS suppliers (
     contact_person TEXT NOT NULL,
     primary_phone TEXT NOT NULL,
     secondary_phone TEXT,
+    contact_persons TEXT NOT NULL DEFAULT '[]',
     email TEXT,
     address TEXT NOT NULL,
     supplied_categories TEXT NOT NULL DEFAULT '[]',

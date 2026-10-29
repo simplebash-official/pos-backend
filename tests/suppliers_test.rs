@@ -11,7 +11,7 @@ use mongodb::bson::DateTime as BsonDateTime;
 use serde_json::{Value, json};
 use simplebash_pos_backend::{
     core::{config::Config, constants::roles, id::generate_id},
-    domain::users::Role,
+    domain::{suppliers::ContactPerson, users::Role},
     modules::inventory::model::{CategoryDocument, SubcategoryDocument},
     modules::suppliers::model::SupplierDocument,
 };
@@ -1002,6 +1002,10 @@ async fn seed_supplier_with(
             contact_person: contact_person.to_string(),
             primary_phone: "0770000000".to_string(),
             secondary_phone: None,
+            contact_persons: vec![ContactPerson {
+                name: contact_person.to_string(),
+                phone_numbers: vec!["0770000000".to_string()],
+            }],
             address: "123 Test St".to_string(),
             supplied_categories,
             email: None,
@@ -1060,4 +1064,198 @@ async fn suppliers_stats_endpoint_returns_totals_categories_and_direct_contacts(
     );
 
     db.drop().await.ok();
+}
+
+#[tokio::test]
+async fn create_supplier_with_multiple_contact_persons_and_up_to_two_phones() {
+    let app = common::spawn_app().await;
+    let token = admin_token(&app.config);
+
+    let payload = json!({
+        "name": format!("Multi Contact Supplier {}", Uuid::new_v4()),
+        "contactPersons": [
+            {
+                "name": "Ranjith Silva",
+                "phoneNumbers": ["077 123 4567", "011 234 5678"]
+            },
+            {
+                "name": "Sunil Perera",
+                "phoneNumbers": ["071 999 8888"]
+            }
+        ],
+        "address": "45 Pettah Street, Colombo",
+        "suppliedCategories": ["Displays", "Batteries"],
+        "email": "contact@multisup.lk",
+    });
+
+    let (status, body) =
+        send_authed(&app.router, "POST", "/api/suppliers", Some(payload), &token).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+
+    let data = &body["data"];
+    assert_eq!(data["contactPerson"], "Ranjith Silva");
+    assert_eq!(data["primaryPhone"], "077 123 4567");
+    assert_eq!(data["secondaryPhone"], "011 234 5678");
+
+    let cps = data["contactPersons"]
+        .as_array()
+        .expect("contactPersons array");
+    assert_eq!(cps.len(), 2);
+    assert_eq!(cps[0]["name"], "Ranjith Silva");
+    assert_eq!(
+        cps[0]["phoneNumbers"],
+        json!(["077 123 4567", "011 234 5678"])
+    );
+    assert_eq!(cps[1]["name"], "Sunil Perera");
+    assert_eq!(cps[1]["phoneNumbers"], json!(["071 999 8888"]));
+}
+
+#[tokio::test]
+async fn create_supplier_enforces_maximum_two_phones_per_contact_person() {
+    let app = common::spawn_app().await;
+    let token = admin_token(&app.config);
+
+    let payload = json!({
+        "name": format!("Too Many Phones Supplier {}", Uuid::new_v4()),
+        "contactPersons": [
+            {
+                "name": "Too Many Phones",
+                "phoneNumbers": ["077 111 2222", "077 333 4444", "077 555 6666"]
+            }
+        ],
+        "address": "Colombo",
+        "suppliedCategories": ["Displays"],
+    });
+
+    let (status, body) =
+        send_authed(&app.router, "POST", "/api/suppliers", Some(payload), &token).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("at most 2 phone numbers"),
+        "error message must mention maximum 2 phone numbers: {body}"
+    );
+}
+
+#[tokio::test]
+async fn create_supplier_enforces_at_least_one_phone_per_contact_person() {
+    let app = common::spawn_app().await;
+    let token = admin_token(&app.config);
+
+    let payload = json!({
+        "name": format!("No Phone Supplier {}", Uuid::new_v4()),
+        "contactPersons": [
+            {
+                "name": "No Phone Contact",
+                "phoneNumbers": []
+            }
+        ],
+        "address": "Colombo",
+        "suppliedCategories": ["Displays"],
+    });
+
+    let (status, body) =
+        send_authed(&app.router, "POST", "/api/suppliers", Some(payload), &token).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("at least one phone number"),
+        "error message must mention at least one phone number: {body}"
+    );
+}
+
+#[tokio::test]
+async fn create_supplier_enforces_contact_person_name_required() {
+    let app = common::spawn_app().await;
+    let token = admin_token(&app.config);
+
+    let payload = json!({
+        "name": format!("Empty Contact Name Supplier {}", Uuid::new_v4()),
+        "contactPersons": [
+            {
+                "name": "   ",
+                "phoneNumbers": ["077 123 4567"]
+            }
+        ],
+        "address": "Colombo",
+        "suppliedCategories": ["Displays"],
+    });
+
+    let (status, body) =
+        send_authed(&app.router, "POST", "/api/suppliers", Some(payload), &token).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("name is required"),
+        "error message must mention name is required: {body}"
+    );
+}
+
+#[tokio::test]
+async fn search_suppliers_finds_by_secondary_contact_name_or_phone() {
+    let app = common::spawn_app().await;
+    let token = admin_token(&app.config);
+    let unique = Uuid::new_v4().simple().to_string();
+
+    let sec_name = format!("SecContact{unique}");
+    let sec_phone = format!("071{:07}", (Uuid::new_v4().as_u128() % 10_000_000));
+    let supplier_name = format!("SearchSupplier{unique}");
+
+    let payload = json!({
+        "name": supplier_name,
+        "contactPersons": [
+            {
+                "name": "First Contact",
+                "phoneNumbers": ["077 000 1111"]
+            },
+            {
+                "name": sec_name,
+                "phoneNumbers": [sec_phone.clone()]
+            }
+        ],
+        "address": "Somewhere",
+        "suppliedCategories": ["Parts"],
+    });
+
+    let (status, _) =
+        send_authed(&app.router, "POST", "/api/suppliers", Some(payload), &token).await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // Search by secondary contact person name
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/suppliers?search={sec_name}"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let suppliers = body["data"]["suppliers"].as_array().unwrap();
+    assert!(
+        suppliers.iter().any(|s| s["name"] == supplier_name),
+        "expected {supplier_name} when searching by secondary contact name: {body}"
+    );
+
+    // Search by secondary contact person phone
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/suppliers?search={sec_phone}"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let suppliers = body["data"]["suppliers"].as_array().unwrap();
+    assert!(
+        suppliers.iter().any(|s| s["name"] == supplier_name),
+        "expected {supplier_name} when searching by secondary contact phone: {body}"
+    );
 }

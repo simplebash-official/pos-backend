@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     core::{constants::prefixes, id::generate_id},
-    domain::suppliers::Supplier,
+    domain::suppliers::{ContactPerson, Supplier},
 };
 
 /// Mongo document shape representing a supplier record.
@@ -28,6 +28,9 @@ pub struct SupplierDocument {
     /// Secondary contact telephone number, if available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub secondary_phone: Option<String>,
+    /// All contact persons belonging to this supplier, each with up to 2 phone numbers.
+    #[serde(default)]
+    pub contact_persons: Vec<ContactPerson>,
     /// Physical or mailing address of the supplier.
     pub address: String,
     /// List of product categories supplied by this vendor.
@@ -66,6 +69,22 @@ impl SupplierDocument {
         } else {
             self.key
         };
+        let contact_persons = if !self.contact_persons.is_empty() {
+            self.contact_persons
+        } else if !self.contact_person.is_empty() && !self.primary_phone.is_empty() {
+            let mut phones = vec![self.primary_phone.clone()];
+            if let Some(ref sec) = self.secondary_phone
+                && !sec.is_empty()
+            {
+                phones.push(sec.clone());
+            }
+            vec![ContactPerson {
+                name: self.contact_person.clone(),
+                phone_numbers: phones,
+            }]
+        } else {
+            Vec::new()
+        };
         Supplier {
             id: self
                 .id
@@ -76,6 +95,7 @@ impl SupplierDocument {
             contact_person: self.contact_person,
             primary_phone: self.primary_phone,
             secondary_phone: self.secondary_phone,
+            contact_persons,
             address: self.address,
             supplied_categories: self.supplied_categories,
             email: self.email,

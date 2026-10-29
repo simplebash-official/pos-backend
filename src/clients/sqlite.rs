@@ -155,6 +155,36 @@ pub async fn migrate_purchases_to_receipts(pool: &SqlitePool) -> Result<(), sqlx
 
 /// Applies incremental migrations for legacy databases (e.g., removing deprecated columns).
 pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    // `suppliers.contact_persons` arrived with multiple contact persons support.
+    let supplier_cols = table_columns(pool, "suppliers").await?;
+    if !supplier_cols.is_empty() && !supplier_cols.iter().any(|c| c == "contact_persons") {
+        tracing::info!("Migrating 'suppliers' table: adding 'contact_persons' column");
+        pool.execute("ALTER TABLE suppliers ADD COLUMN contact_persons TEXT NOT NULL DEFAULT '[]'")
+            .await?;
+        let rows: Vec<(String, String, String, Option<String>)> = sqlx::query_as(
+            "SELECT key, contact_person, primary_phone, secondary_phone FROM suppliers WHERE contact_person != '' AND primary_phone != ''"
+        )
+        .fetch_all(pool)
+        .await?;
+        for (key, contact, primary, secondary) in rows {
+            let mut phones = vec![primary];
+            if let Some(sec) = secondary
+                && !sec.trim().is_empty()
+            {
+                phones.push(sec);
+            }
+            let contact_persons = vec![serde_json::json!({
+                "name": contact,
+                "phoneNumbers": phones,
+            })];
+            let json = serde_json::to_string(&contact_persons).unwrap_or_else(|_| "[]".to_string());
+            sqlx::query("UPDATE suppliers SET contact_persons = ? WHERE key = ?")
+                .bind(json)
+                .bind(key)
+                .execute(pool)
+                .await?;
+        }
+    }
     // `cash_movements.receipt_key` arrived with supplier receipts too.
     let movement_cols = table_columns(pool, "cash_movements").await?;
     if !movement_cols.is_empty() && !movement_cols.iter().any(|c| c == "receipt_key") {
