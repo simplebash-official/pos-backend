@@ -80,12 +80,10 @@ pub fn sample_suppliers() -> Vec<SeedSupplier> {
             contact_person: "Chamari Perera",
             primary_phone: "076 234 5678",
             secondary_phone: Some("091 222 3344"),
-            contact_persons: vec![
-                SeedContactPerson {
-                    name: "Chamari Perera",
-                    phone_numbers: vec!["076 234 5678", "091 222 3344"],
-                },
-            ],
+            contact_persons: vec![SeedContactPerson {
+                name: "Chamari Perera",
+                phone_numbers: vec!["076 234 5678", "091 222 3344"],
+            }],
             address: "No. 88, Matara Road, Galle",
             supplied_categories: vec!["Mug Blanks", "T-Shirts", "Sublimation Ink"],
             email: Some("orders@gallesublimation.lk"),
@@ -96,12 +94,10 @@ pub fn sample_suppliers() -> Vec<SeedSupplier> {
             contact_person: "Nuwan Bandara",
             primary_phone: "081 345 6789",
             secondary_phone: None,
-            contact_persons: vec![
-                SeedContactPerson {
-                    name: "Nuwan Bandara",
-                    phone_numbers: vec!["081 345 6789"],
-                },
-            ],
+            contact_persons: vec![SeedContactPerson {
+                name: "Nuwan Bandara",
+                phone_numbers: vec!["081 345 6789"],
+            }],
             address: "No. 23, Peradeniya Road, Kandy",
             supplied_categories: vec!["Paper", "Printer Ink", "General Printing"],
             email: None,

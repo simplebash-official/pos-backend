@@ -1097,10 +1097,15 @@ async fn create_supplier_with_multiple_contact_persons_and_up_to_two_phones() {
     assert_eq!(data["primaryPhone"], "077 123 4567");
     assert_eq!(data["secondaryPhone"], "011 234 5678");
 
-    let cps = data["contactPersons"].as_array().expect("contactPersons array");
+    let cps = data["contactPersons"]
+        .as_array()
+        .expect("contactPersons array");
     assert_eq!(cps.len(), 2);
     assert_eq!(cps[0]["name"], "Ranjith Silva");
-    assert_eq!(cps[0]["phoneNumbers"], json!(["077 123 4567", "011 234 5678"]));
+    assert_eq!(
+        cps[0]["phoneNumbers"],
+        json!(["077 123 4567", "011 234 5678"])
+    );
     assert_eq!(cps[1]["name"], "Sunil Perera");
     assert_eq!(cps[1]["phoneNumbers"], json!(["071 999 8888"]));
 }

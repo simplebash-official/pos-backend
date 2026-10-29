@@ -26,7 +26,9 @@ use crate::{
 /// and all telephone numbers must contain valid phone characters.
 fn validate_contact_persons(contact_persons: &[ContactPerson]) -> AppResult<()> {
     if contact_persons.is_empty() {
-        return Err(AppError::validation("At least one contact person is required"));
+        return Err(AppError::validation(
+            "At least one contact person is required",
+        ));
     }
     for (idx, cp) in contact_persons.iter().enumerate() {
         let num = idx + 1;
@@ -85,7 +87,9 @@ fn resolve_and_validate_contacts(
             phone_numbers: phones,
         }]
     } else {
-        return Err(AppError::validation("At least one contact person is required"));
+        return Err(AppError::validation(
+            "At least one contact person is required",
+        ));
     };
 
     validate_contact_persons(&resolved)?;
@@ -93,7 +97,10 @@ fn resolve_and_validate_contacts(
     let primary_cp = &resolved[0];
     let contact_person = primary_cp.name.trim().to_string();
     let primary_phone = primary_cp.phone_numbers[0].trim().to_string();
-    let secondary_phone = primary_cp.phone_numbers.get(1).map(|p| p.trim().to_string());
+    let secondary_phone = primary_cp
+        .phone_numbers
+        .get(1)
+        .map(|p| p.trim().to_string());
 
     Ok((resolved, contact_person, primary_phone, secondary_phone))
 }
@@ -530,55 +537,59 @@ pub(crate) async fn update_supplier(
             .supplied_categories
             .unwrap_or(existing.supplied_categories);
 
-        let (contact_persons, contact_person, primary_phone, secondary_phone) = match body.contact_persons {
-            Some(cps) => {
-                validate_contact_persons(&cps)?;
-                let primary_cp = &cps[0];
-                let cp_name = primary_cp.name.trim().to_string();
-                let pp = primary_cp.phone_numbers[0].trim().to_string();
-                let sp = primary_cp.phone_numbers.get(1).map(|p| p.trim().to_string());
-                (cps, cp_name, pp, sp)
-            }
-            None => {
-                let cp_name = body
-                    .contact_person
-                    .map(|cp| cp.trim().to_string())
-                    .unwrap_or(existing.contact_person.clone());
-                let pp = body
-                    .primary_phone
-                    .map(|pp| pp.trim().to_string())
-                    .unwrap_or(existing.primary_phone.clone());
-                let sp = match body.secondary_phone {
-                    Some(s) => {
-                        let sanitized = sanitize_string(Some(s));
-                        if let Some(ref phone) = sanitized {
-                            validate_phone(phone, "Backup phone")?;
-                        }
-                        sanitized
-                    }
-                    None => existing.secondary_phone.clone(),
-                };
-                let mut existing_cps = existing.contact_persons.clone();
-                if existing_cps.is_empty() {
-                    let mut phones = vec![pp.clone()];
-                    if let Some(ref sec) = sp {
-                        phones.push(sec.clone());
-                    }
-                    existing_cps = vec![ContactPerson {
-                        name: cp_name.clone(),
-                        phone_numbers: phones,
-                    }];
-                } else {
-                    existing_cps[0].name = cp_name.clone();
-                    let mut phones = vec![pp.clone()];
-                    if let Some(ref sec) = sp {
-                        phones.push(sec.clone());
-                    }
-                    existing_cps[0].phone_numbers = phones;
+        let (contact_persons, contact_person, primary_phone, secondary_phone) =
+            match body.contact_persons {
+                Some(cps) => {
+                    validate_contact_persons(&cps)?;
+                    let primary_cp = &cps[0];
+                    let cp_name = primary_cp.name.trim().to_string();
+                    let pp = primary_cp.phone_numbers[0].trim().to_string();
+                    let sp = primary_cp
+                        .phone_numbers
+                        .get(1)
+                        .map(|p| p.trim().to_string());
+                    (cps, cp_name, pp, sp)
                 }
-                (existing_cps, cp_name, pp, sp)
-            }
-        };
+                None => {
+                    let cp_name = body
+                        .contact_person
+                        .map(|cp| cp.trim().to_string())
+                        .unwrap_or(existing.contact_person.clone());
+                    let pp = body
+                        .primary_phone
+                        .map(|pp| pp.trim().to_string())
+                        .unwrap_or(existing.primary_phone.clone());
+                    let sp = match body.secondary_phone {
+                        Some(s) => {
+                            let sanitized = sanitize_string(Some(s));
+                            if let Some(ref phone) = sanitized {
+                                validate_phone(phone, "Backup phone")?;
+                            }
+                            sanitized
+                        }
+                        None => existing.secondary_phone.clone(),
+                    };
+                    let mut existing_cps = existing.contact_persons.clone();
+                    if existing_cps.is_empty() {
+                        let mut phones = vec![pp.clone()];
+                        if let Some(ref sec) = sp {
+                            phones.push(sec.clone());
+                        }
+                        existing_cps = vec![ContactPerson {
+                            name: cp_name.clone(),
+                            phone_numbers: phones,
+                        }];
+                    } else {
+                        existing_cps[0].name = cp_name.clone();
+                        let mut phones = vec![pp.clone()];
+                        if let Some(ref sec) = sp {
+                            phones.push(sec.clone());
+                        }
+                        existing_cps[0].phone_numbers = phones;
+                    }
+                    (existing_cps, cp_name, pp, sp)
+                }
+            };
 
         validate_required_fields(
             &name,

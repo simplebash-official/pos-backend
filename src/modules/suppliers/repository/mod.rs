@@ -263,7 +263,9 @@ pub(crate) async fn update_supplier(
             if let Ok(cp_arr) = set_doc.get_array("contact_persons") {
                 sup.contact_persons = cp_arr
                     .iter()
-                    .filter_map(|b| mongodb::bson::deserialize_from_bson::<ContactPerson>(b.clone()).ok())
+                    .filter_map(|b| {
+                        mongodb::bson::deserialize_from_bson::<ContactPerson>(b.clone()).ok()
+                    })
                     .collect();
             }
             if set_doc.contains_key("notes") {
@@ -280,8 +282,8 @@ pub(crate) async fn update_supplier(
 
             let categories_json = serde_json::to_string(&sup.supplied_categories)
                 .unwrap_or_else(|_| "[]".to_string());
-            let contact_persons_json = serde_json::to_string(&sup.contact_persons)
-                .unwrap_or_else(|_| "[]".to_string());
+            let contact_persons_json =
+                serde_json::to_string(&sup.contact_persons).unwrap_or_else(|_| "[]".to_string());
             let updated_at_iso = bson_to_iso(&sup.updated_at);
 
             sqlx::query(
