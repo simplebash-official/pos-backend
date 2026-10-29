@@ -7,6 +7,17 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
+/// A contact person within a supplier business. Each contact person has a name
+/// and between 1 and 2 telephone numbers (maximum 2).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ContactPerson {
+    /// Full name of the contact person.
+    pub name: String,
+    /// Up to 2 telephone numbers for this contact person.
+    pub phone_numbers: Vec<String>,
+}
+
 /// A supplier as returned to API clients. `id` (the Mongo `ObjectId` as a
 /// hex string) is the stable route/lookup key (`GET/PUT/PATCH/DELETE
 /// /suppliers/{id}`); `key` is the human-shareable prefixed id (see
@@ -25,13 +36,16 @@ pub struct Supplier {
     pub key: String,
     /// Supplier company or vendor name.
     pub name: String,
-    /// Primary contact person.
+    /// Primary contact person name (kept in sync with primary contact person).
     pub contact_person: String,
-    /// Primary telephone number.
+    /// Primary telephone number (kept in sync with primary contact person).
     pub primary_phone: String,
     /// Secondary phone number if available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub secondary_phone: Option<String>,
+    /// All contact persons belonging to this supplier, each with up to 2 phone numbers.
+    #[serde(default)]
+    pub contact_persons: Vec<ContactPerson>,
     /// Physical or postal address.
     pub address: String,
     /// Categories of products supplied by this vendor.
@@ -70,13 +84,18 @@ fn default_version() -> i64 {
 pub struct CreateSupplierRequest {
     /// Supplier name.
     pub name: String,
-    /// Main contact person's name.
-    pub contact_person: String,
-    /// Primary phone number.
-    pub primary_phone: String,
+    /// Main contact person's name (optional if `contact_persons` is provided).
+    #[serde(default)]
+    pub contact_person: Option<String>,
+    /// Primary phone number (optional if `contact_persons` is provided).
+    #[serde(default)]
+    pub primary_phone: Option<String>,
     /// Optional secondary phone number.
     #[serde(default)]
     pub secondary_phone: Option<String>,
+    /// Contact persons with up to 2 phone numbers each.
+    #[serde(default)]
+    pub contact_persons: Option<Vec<ContactPerson>>,
     /// Address of supplier.
     pub address: String,
     /// List of supplied product categories.
@@ -104,6 +123,8 @@ pub struct UpdateSupplierRequest {
     pub primary_phone: Option<String>,
     /// Updated secondary phone.
     pub secondary_phone: Option<String>,
+    /// Updated contact persons list.
+    pub contact_persons: Option<Vec<ContactPerson>>,
     /// Updated address.
     pub address: Option<String>,
     /// Updated supplied categories list.

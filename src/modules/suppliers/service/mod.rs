@@ -15,11 +15,88 @@ use crate::{
         utils::build_bson_regex,
     },
     domain::suppliers::{
-        CreateSupplierRequest, Supplier, SupplierCategoriesResponse, SupplierListQuery,
-        SupplierStats, SuppliersResponse, UpdateSupplierRequest,
+        ContactPerson, CreateSupplierRequest, Supplier, SupplierCategoriesResponse,
+        SupplierListQuery, SupplierStats, SuppliersResponse, UpdateSupplierRequest,
     },
     modules::suppliers::{model::SupplierDocument, repository},
 };
+
+/// Invariants for contact persons: at least one contact person is required,
+/// each person must have a non-empty name, between 1 and 2 telephone numbers (maximum 2),
+/// and all telephone numbers must contain valid phone characters.
+fn validate_contact_persons(contact_persons: &[ContactPerson]) -> AppResult<()> {
+    if contact_persons.is_empty() {
+        return Err(AppError::validation("At least one contact person is required"));
+    }
+    for (idx, cp) in contact_persons.iter().enumerate() {
+        let num = idx + 1;
+        if cp.name.trim().is_empty() {
+            return Err(AppError::validation(format!(
+                "Contact person {num} name is required"
+            )));
+        }
+        if cp.phone_numbers.is_empty() {
+            return Err(AppError::validation(format!(
+                "Contact person '{}' must have at least one phone number",
+                cp.name.trim()
+            )));
+        }
+        if cp.phone_numbers.len() > 2 {
+            return Err(AppError::validation(format!(
+                "Contact person '{}' can have at most 2 phone numbers",
+                cp.name.trim()
+            )));
+        }
+        for (p_idx, phone) in cp.phone_numbers.iter().enumerate() {
+            let label = if p_idx == 0 {
+                format!("Phone number for {}", cp.name.trim())
+            } else {
+                format!("Secondary phone for {}", cp.name.trim())
+            };
+            if phone.trim().is_empty() {
+                return Err(AppError::validation(format!("{label} cannot be empty")));
+            }
+            validate_phone(phone.trim(), &label)?;
+        }
+    }
+    Ok(())
+}
+
+fn resolve_and_validate_contacts(
+    contact_persons: Option<Vec<ContactPerson>>,
+    legacy_contact: Option<String>,
+    legacy_primary: Option<String>,
+    legacy_secondary: Option<String>,
+) -> AppResult<(Vec<ContactPerson>, String, String, Option<String>)> {
+    let resolved = if let Some(cps) = contact_persons {
+        cps
+    } else if let (Some(cp), Some(pp)) = (legacy_contact, legacy_primary) {
+        if cp.trim().is_empty() || pp.trim().is_empty() {
+            return Err(AppError::validation(
+                "Contact person and primary phone are required",
+            ));
+        }
+        let mut phones = vec![pp.trim().to_string()];
+        if let Some(sec) = legacy_secondary.and_then(|s| sanitize_string(Some(s))) {
+            phones.push(sec);
+        }
+        vec![ContactPerson {
+            name: cp.trim().to_string(),
+            phone_numbers: phones,
+        }]
+    } else {
+        return Err(AppError::validation("At least one contact person is required"));
+    };
+
+    validate_contact_persons(&resolved)?;
+
+    let primary_cp = &resolved[0];
+    let contact_person = primary_cp.name.trim().to_string();
+    let primary_phone = primary_cp.phone_numbers[0].trim().to_string();
+    let secondary_phone = primary_cp.phone_numbers.get(1).map(|p| p.trim().to_string());
+
+    Ok((resolved, contact_person, primary_phone, secondary_phone))
+}
 
 /// Name/contact-person/phone/address/category invariants shared by create,
 /// full replace, and (on the merged result) partial update — kept separate
@@ -116,6 +193,9 @@ pub async fn list_suppliers(db: &Db, query: SupplierListQuery) -> AppResult<Supp
                 { "name": { "$regex": pattern.clone() } },
                 { "contact_person": { "$regex": pattern.clone() } },
                 { "primary_phone": { "$regex": pattern.clone() } },
+                { "contact_persons.name": { "$regex": pattern.clone() } },
+                { "contact_persons.phoneNumbers": { "$regex": pattern.clone() } },
+                { "contact_persons.phone_numbers": { "$regex": pattern.clone() } },
                 { "address": { "$regex": pattern } },
             ]
         });
@@ -177,18 +257,21 @@ pub(crate) async fn get_suppliers_by_keys(db: &Db, keys: &[String]) -> AppResult
 
 pub async fn create_supplier(db: &Db, body: CreateSupplierRequest) -> AppResult<Supplier> {
     crate::core::logging::domain::tracked("suppliers.created", async move {
+        let (contact_persons, contact_person, primary_phone, secondary_phone) =
+            resolve_and_validate_contacts(
+                body.contact_persons,
+                body.contact_person,
+                body.primary_phone,
+                body.secondary_phone,
+            )?;
+
         validate_required_fields(
             &body.name,
-            &body.contact_person,
-            &body.primary_phone,
+            &contact_person,
+            &primary_phone,
             &body.address,
             &body.supplied_categories,
         )?;
-
-        let secondary_phone = sanitize_string(body.secondary_phone);
-        if let Some(ref sec_phone) = secondary_phone {
-            validate_phone(sec_phone, "Backup phone")?;
-        }
 
         let email = sanitize_string(body.email);
         if let Some(ref e) = email {
@@ -202,9 +285,10 @@ pub async fn create_supplier(db: &Db, body: CreateSupplierRequest) -> AppResult<
             id: None,
             key: generate_id(prefixes::SUPPLIER),
             name: body.name.trim().to_string(),
-            contact_person: body.contact_person.trim().to_string(),
-            primary_phone: body.primary_phone.trim().to_string(),
+            contact_person,
+            primary_phone,
             secondary_phone,
+            contact_persons,
             address: body.address.trim().to_string(),
             supplied_categories: body.supplied_categories,
             email,
@@ -241,7 +325,14 @@ pub(crate) async fn replace_supplier(
                 AppError::not_found_with_code("Supplier not found", codes::SUPPLIER_NOT_FOUND)
             })?;
 
-        let secondary_phone = sanitize_string(body.secondary_phone);
+        let (contact_persons, contact_person, primary_phone, secondary_phone) =
+            resolve_and_validate_contacts(
+                body.contact_persons,
+                body.contact_person,
+                body.primary_phone,
+                body.secondary_phone,
+            )?;
+
         let email = sanitize_string(body.email);
         let notes = sanitize_string(body.notes);
 
@@ -252,14 +343,17 @@ pub(crate) async fn replace_supplier(
             if body.name.trim() != existing.name {
                 conflicting.push("name");
             }
-            if body.contact_person.trim() != existing.contact_person {
+            if contact_person != existing.contact_person {
                 conflicting.push("contactPerson");
             }
-            if body.primary_phone.trim() != existing.primary_phone {
+            if primary_phone != existing.primary_phone {
                 conflicting.push("primaryPhone");
             }
             if secondary_phone != existing.secondary_phone {
                 conflicting.push("secondaryPhone");
+            }
+            if contact_persons != existing.contact_persons {
+                conflicting.push("contactPersons");
             }
             if body.address.trim() != existing.address {
                 conflicting.push("address");
@@ -289,27 +383,27 @@ pub(crate) async fn replace_supplier(
 
         validate_required_fields(
             &body.name,
-            &body.contact_person,
-            &body.primary_phone,
+            &contact_person,
+            &primary_phone,
             &body.address,
             &body.supplied_categories,
         )?;
-        if let Some(ref sec_phone) = secondary_phone {
-            validate_phone(sec_phone, "Backup phone")?;
-        }
         if let Some(ref e) = email {
             validate_email(e)?;
         }
 
         let mut set_doc = doc! {
             "name": body.name.trim(),
-            "contact_person": body.contact_person.trim(),
-            "primary_phone": body.primary_phone.trim(),
+            "contact_person": &contact_person,
+            "primary_phone": &primary_phone,
             "address": body.address.trim(),
             "supplied_categories": &body.supplied_categories,
             "updated_at": BsonDateTime::now(),
         };
-        if let Some(sp) = secondary_phone {
+        if let Ok(cp_bson) = mongodb::bson::serialize_to_bson(&contact_persons) {
+            set_doc.insert("contact_persons", cp_bson);
+        }
+        if let Some(ref sp) = secondary_phone {
             set_doc.insert("secondary_phone", sp);
         } else {
             set_doc.insert("secondary_phone", mongodb::bson::Bson::Null);
@@ -385,6 +479,11 @@ pub(crate) async fn update_supplier(
             {
                 conflicting.push("secondaryPhone");
             }
+            if let Some(ref cps) = body.contact_persons
+                && cps != &existing.contact_persons
+            {
+                conflicting.push("contactPersons");
+            }
             if let Some(ref addr) = body.address
                 && addr.trim() != existing.address
             {
@@ -423,14 +522,6 @@ pub(crate) async fn update_supplier(
             .name
             .map(|n| n.trim().to_string())
             .unwrap_or(existing.name);
-        let contact_person = body
-            .contact_person
-            .map(|cp| cp.trim().to_string())
-            .unwrap_or(existing.contact_person);
-        let primary_phone = body
-            .primary_phone
-            .map(|pp| pp.trim().to_string())
-            .unwrap_or(existing.primary_phone);
         let address = body
             .address
             .map(|a| a.trim().to_string())
@@ -439,6 +530,56 @@ pub(crate) async fn update_supplier(
             .supplied_categories
             .unwrap_or(existing.supplied_categories);
 
+        let (contact_persons, contact_person, primary_phone, secondary_phone) = match body.contact_persons {
+            Some(cps) => {
+                validate_contact_persons(&cps)?;
+                let primary_cp = &cps[0];
+                let cp_name = primary_cp.name.trim().to_string();
+                let pp = primary_cp.phone_numbers[0].trim().to_string();
+                let sp = primary_cp.phone_numbers.get(1).map(|p| p.trim().to_string());
+                (cps, cp_name, pp, sp)
+            }
+            None => {
+                let cp_name = body
+                    .contact_person
+                    .map(|cp| cp.trim().to_string())
+                    .unwrap_or(existing.contact_person.clone());
+                let pp = body
+                    .primary_phone
+                    .map(|pp| pp.trim().to_string())
+                    .unwrap_or(existing.primary_phone.clone());
+                let sp = match body.secondary_phone {
+                    Some(s) => {
+                        let sanitized = sanitize_string(Some(s));
+                        if let Some(ref phone) = sanitized {
+                            validate_phone(phone, "Backup phone")?;
+                        }
+                        sanitized
+                    }
+                    None => existing.secondary_phone.clone(),
+                };
+                let mut existing_cps = existing.contact_persons.clone();
+                if existing_cps.is_empty() {
+                    let mut phones = vec![pp.clone()];
+                    if let Some(ref sec) = sp {
+                        phones.push(sec.clone());
+                    }
+                    existing_cps = vec![ContactPerson {
+                        name: cp_name.clone(),
+                        phone_numbers: phones,
+                    }];
+                } else {
+                    existing_cps[0].name = cp_name.clone();
+                    let mut phones = vec![pp.clone()];
+                    if let Some(ref sec) = sp {
+                        phones.push(sec.clone());
+                    }
+                    existing_cps[0].phone_numbers = phones;
+                }
+                (existing_cps, cp_name, pp, sp)
+            }
+        };
+
         validate_required_fields(
             &name,
             &contact_person,
@@ -446,18 +587,6 @@ pub(crate) async fn update_supplier(
             &address,
             &supplied_categories,
         )?;
-
-        let has_secondary_phone = body.secondary_phone.is_some();
-        let secondary_phone = match body.secondary_phone {
-            Some(sp) => {
-                let sanitized = sanitize_string(Some(sp));
-                if let Some(ref phone) = sanitized {
-                    validate_phone(phone, "Backup phone")?;
-                }
-                sanitized
-            }
-            None => existing.secondary_phone,
-        };
 
         let has_email = body.email.is_some();
         let email = match body.email {
@@ -485,12 +614,13 @@ pub(crate) async fn update_supplier(
             "supplied_categories": &supplied_categories,
             "updated_at": BsonDateTime::now(),
         };
-        if has_secondary_phone {
-            if let Some(sp) = secondary_phone {
-                set_doc.insert("secondary_phone", sp);
-            } else {
-                set_doc.insert("secondary_phone", mongodb::bson::Bson::Null);
-            }
+        if let Ok(cp_bson) = mongodb::bson::serialize_to_bson(&contact_persons) {
+            set_doc.insert("contact_persons", cp_bson);
+        }
+        if let Some(ref sp) = secondary_phone {
+            set_doc.insert("secondary_phone", sp);
+        } else {
+            set_doc.insert("secondary_phone", mongodb::bson::Bson::Null);
         }
         if has_email {
             if let Some(e) = email {

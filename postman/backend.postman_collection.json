@@ -6171,7 +6171,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Colombo Mobile Parts\",\n  \"contactPerson\": \"Ranjith Silva\",\n  \"primaryPhone\": \"077 123 4567\",\n  \"secondaryPhone\": \"011 234 5678\",\n  \"address\": \"No. 45, First Cross Street, Pettah, Colombo 11\",\n  \"suppliedCategories\": [\n    \"Phone Parts\",\n    \"Display Assemblies\",\n    \"Batteries\",\n    \"Repair Tools\"\n  ],\n  \"email\": \"sales@colombomobileparts.lk\",\n  \"notes\": \"Preferred supplier for iPhone and Samsung original displays.\"\n}",
+              "raw": "{\n  \"name\": \"Colombo Mobile Parts\",\n  \"contactPerson\": \"Ranjith Silva\",\n  \"primaryPhone\": \"077 123 4567\",\n  \"secondaryPhone\": \"011 234 5678\",\n  \"contactPersons\": [\n    {\n      \"name\": \"Ranjith Silva\",\n      \"phoneNumbers\": [\n        \"077 123 4567\",\n        \"011 234 5678\"\n      ]\n    },\n    {\n      \"name\": \"Kamal Perera\",\n      \"phoneNumbers\": [\n        \"071 987 6543\"\n      ]\n    }\n  ],\n  \"address\": \"No. 45, First Cross Street, Pettah, Colombo 11\",\n  \"suppliedCategories\": [\n    \"Phone Parts\",\n    \"Display Assemblies\",\n    \"Batteries\",\n    \"Repair Tools\"\n  ],\n  \"email\": \"sales@colombomobileparts.lk\",\n  \"notes\": \"Preferred supplier for iPhone and Samsung original displays.\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6224,7 +6224,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Colombo Mobile Parts\",\n  \"contactPerson\": \"Ranjith Silva\",\n  \"primaryPhone\": \"077 999 8888\",\n  \"address\": \"No. 45, First Cross Street, Pettah, Colombo 11\",\n  \"suppliedCategories\": [\n    \"Phone Parts\",\n    \"Display Assemblies\"\n  ]\n}",
+              "raw": "{\n  \"name\": \"Colombo Mobile Parts\",\n  \"contactPerson\": \"Ranjith Silva\",\n  \"primaryPhone\": \"077 999 8888\",\n  \"contactPersons\": [\n    {\n      \"name\": \"Ranjith Silva\",\n      \"phoneNumbers\": [\n        \"077 999 8888\"\n      ]\n    }\n  ],\n  \"address\": \"No. 45, First Cross Street, Pettah, Colombo 11\",\n  \"suppliedCategories\": [\n    \"Phone Parts\",\n    \"Display Assemblies\"\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"

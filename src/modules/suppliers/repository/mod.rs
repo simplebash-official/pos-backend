@@ -14,6 +14,7 @@ use crate::{
         sqlite::{bson_to_iso, generate_id_hex, to_bson_datetime},
     },
     core::error::AppResult,
+    domain::suppliers::ContactPerson,
     modules::suppliers::model::SupplierDocument,
 };
 
@@ -25,6 +26,8 @@ struct SupplierSqliteRow {
     contact_person: String,
     primary_phone: String,
     secondary_phone: Option<String>,
+    #[sqlx(default)]
+    contact_persons: Option<String>,
     email: Option<String>,
     address: String,
     supplied_categories: String,
@@ -40,6 +43,11 @@ impl SupplierSqliteRow {
     fn into_document(self) -> SupplierDocument {
         let supplied_categories: Vec<String> =
             serde_json::from_str(&self.supplied_categories).unwrap_or_default();
+        let contact_persons: Vec<ContactPerson> = self
+            .contact_persons
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_default();
         SupplierDocument {
             id: ObjectId::parse_str(&self.id).ok(),
             key: self.key,
@@ -47,6 +55,7 @@ impl SupplierSqliteRow {
             contact_person: self.contact_person,
             primary_phone: self.primary_phone,
             secondary_phone: self.secondary_phone,
+            contact_persons,
             email: self.email,
             address: self.address,
             supplied_categories,
@@ -164,6 +173,8 @@ pub(crate) async fn insert_supplier(
                 .unwrap_or_else(generate_id_hex);
             let categories_json = serde_json::to_string(&document.supplied_categories)
                 .unwrap_or_else(|_| "[]".to_string());
+            let contact_persons_json = serde_json::to_string(&document.contact_persons)
+                .unwrap_or_else(|_| "[]".to_string());
             let created_at = bson_to_iso(&document.created_at);
             let updated_at = bson_to_iso(&document.updated_at);
             let deleted_at = document.deleted_at.as_ref().map(bson_to_iso);
@@ -172,9 +183,9 @@ pub(crate) async fn insert_supplier(
                 r#"
                 INSERT INTO suppliers (
                     key, id, name, contact_person, primary_phone, secondary_phone,
-                    email, address, supplied_categories, notes, version,
+                    contact_persons, email, address, supplied_categories, notes, version,
                     created_at, updated_at, deleted_at, updated_by_device
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(&document.key)
@@ -183,6 +194,7 @@ pub(crate) async fn insert_supplier(
             .bind(&document.contact_person)
             .bind(&document.primary_phone)
             .bind(&document.secondary_phone)
+            .bind(&contact_persons_json)
             .bind(&document.email)
             .bind(&document.address)
             .bind(&categories_json)
@@ -248,6 +260,12 @@ pub(crate) async fn update_supplier(
                     .filter_map(|b| b.as_str().map(str::to_string))
                     .collect();
             }
+            if let Ok(cp_arr) = set_doc.get_array("contact_persons") {
+                sup.contact_persons = cp_arr
+                    .iter()
+                    .filter_map(|b| mongodb::bson::deserialize_from_bson::<ContactPerson>(b.clone()).ok())
+                    .collect();
+            }
             if set_doc.contains_key("notes") {
                 sup.notes = set_doc.get_str("notes").ok().map(|s| s.to_string());
             }
@@ -262,13 +280,15 @@ pub(crate) async fn update_supplier(
 
             let categories_json = serde_json::to_string(&sup.supplied_categories)
                 .unwrap_or_else(|_| "[]".to_string());
+            let contact_persons_json = serde_json::to_string(&sup.contact_persons)
+                .unwrap_or_else(|_| "[]".to_string());
             let updated_at_iso = bson_to_iso(&sup.updated_at);
 
             sqlx::query(
                 r#"
                 UPDATE suppliers SET
                     name = ?, contact_person = ?, primary_phone = ?, secondary_phone = ?,
-                    email = ?, address = ?, supplied_categories = ?, notes = ?,
+                    contact_persons = ?, email = ?, address = ?, supplied_categories = ?, notes = ?,
                     updated_by_device = ?, version = ?, updated_at = ?
                 WHERE id = ? AND deleted_at IS NULL
                 "#,
@@ -277,6 +297,7 @@ pub(crate) async fn update_supplier(
             .bind(&sup.contact_person)
             .bind(&sup.primary_phone)
             .bind(&sup.secondary_phone)
+            .bind(&contact_persons_json)
             .bind(&sup.email)
             .bind(&sup.address)
             .bind(&categories_json)
@@ -409,6 +430,13 @@ pub(crate) async fn list_suppliers(db: &Db, filter: Document) -> AppResult<Vec<S
                                     s.name.to_lowercase().contains(&pattern)
                                         || s.contact_person.to_lowercase().contains(&pattern)
                                         || s.primary_phone.to_lowercase().contains(&pattern)
+                                        || s.contact_persons.iter().any(|cp| {
+                                            cp.name.to_lowercase().contains(&pattern)
+                                                || cp
+                                                    .phone_numbers
+                                                    .iter()
+                                                    .any(|p| p.to_lowercase().contains(&pattern))
+                                        })
                                         || s.email
                                             .as_ref()
                                             .map(|e| e.to_lowercase().contains(&pattern))
