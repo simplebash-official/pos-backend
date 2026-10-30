@@ -1,8 +1,6 @@
-mod get_installation;
-mod get_setup_status;
-mod perform_setup;
-mod router;
-mod setup_status_query;
+//! HTTP surface of the system module: installation info and first-run setup.
 
-pub use router::router;
-pub use setup_status_query::SetupStatusQuery;
+mod system_routes;
+
+pub use system_routes::SetupStatusQuery;
+pub use system_routes::router;

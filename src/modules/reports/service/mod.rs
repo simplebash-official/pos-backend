@@ -1,4 +1,4 @@
-// Business rules and reporting orchestration for the reports module.
+//! Business rules and reporting orchestration for the reports module.
 
 pub(crate) mod analytics;
 pub(crate) mod commissions;

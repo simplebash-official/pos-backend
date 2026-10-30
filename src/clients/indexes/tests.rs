@@ -1,4 +1,4 @@
-use super::index_spec::IndexSpec;
+use super::clients_indexes::IndexSpec;
 use super::index_specs::index_specs;
 use crate::core::config::TenantMode;
 use crate::core::tenancy::TENANT_FIELD;

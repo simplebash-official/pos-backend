@@ -17,7 +17,7 @@ async fn main() {
         .await
         .expect("failed to connect to database");
 
-    match seeds::admin::seed_admin(&db, None, None).await {
+    match seeds::admin::seed_admin(&db, &config.seed_admin).await {
         Ok(res) => println!("{}", res.message),
         Err(err) => panic!("failed to seed admin account: {err}"),
     }

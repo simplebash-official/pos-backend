@@ -25,7 +25,7 @@ async fn main() {
     println!("🌱 Starting full POS database seeding...");
     println!("============================================================");
 
-    match seeds::seed_all(&db).await {
+    match seeds::seed_all(&db, &config.seed_admin).await {
         Ok(summary) => {
             println!("\n✅ Master seeding completed successfully!");
             println!("------------------------------------------------------------");

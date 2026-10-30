@@ -1,5 +1,5 @@
-use super::money::money;
-use super::pct::pct;
+use super::service_report_payload::money;
+use super::service_report_payload::pct;
 
 #[test]
 fn money_formats_lkr_with_thousands_and_paisa() {

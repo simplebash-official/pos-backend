@@ -9,13 +9,14 @@
 // extraction never reach a handler that queries storage (same router
 // construction as `authorization_test.rs`).
 
+mod common;
+
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use simplebash_pos_backend::app::AppState;
-use simplebash_pos_backend::core::config::Config;
 use simplebash_pos_backend::{app, clients};
 use tower::ServiceExt;
 
@@ -33,8 +34,7 @@ impl Write for Captured {
 }
 
 async fn build_test_app() -> axum::Router {
-    dotenvy::dotenv().ok();
-    let config = Config::from_env().expect("invalid configuration for test run");
+    let config = common::test_config(&[]);
     // Never connected: the requests below are answered before any query.
     let pool = sqlx::sqlite::SqlitePoolOptions::new()
         .connect_lazy("sqlite::memory:")
@@ -73,12 +73,10 @@ fn span_request_id(line: &serde_json::Value) -> Option<&str> {
 
 #[tokio::test]
 async fn requests_get_ids_and_redacted_body_logs() {
-    // SAFETY: set before any thread reads the logging settings (first use is
+    // Set before any thread reads the logging settings (first use is
     // `settings()` below), in a test binary with a single test.
-    unsafe {
-        std::env::set_var("LOG_HTTP_BODIES", "true");
-        std::env::set_var("LOG_FORMAT", "json");
-    }
+    common::set_config_override("LOG_HTTP_BODIES", "true");
+    common::set_config_override("LOG_FORMAT", "json");
     let captured = Captured::default();
     let writer = captured.clone();
     tracing_subscriber::fmt()

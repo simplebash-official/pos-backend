@@ -1,8 +1,8 @@
-use super::apply_result::ApplyResult;
-use super::get_i64::get_i64;
-use super::get_str::get_str;
-use super::iso::iso;
-use super::sim_row::SimRow;
+use super::core_sync_sim::ApplyResult;
+use super::core_sync_sim::SimRow;
+use super::core_sync_sim::get_i64;
+use super::core_sync_sim::get_str;
+use super::core_sync_sim::iso;
 use crate::core::sync_merge::{
     Decision, IncomingChange, META_KEYS, RowMeta, append_only_differs, clamp_updated_at, decide,
     decide_append_only, is_meaningful_conflict, merge_lifecycle,

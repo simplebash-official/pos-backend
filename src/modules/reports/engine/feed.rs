@@ -1,6 +1,6 @@
-// Multi-dataset aggregation service for the Analytics & Chart Engine feed.
-// Uses `tokio::try_join!` for high-concurrency database execution, reducing
-// frontend roundtrips from 15 to 1.
+//! Multi-dataset aggregation service for the Analytics & Chart Engine feed.
+//! Uses `tokio::try_join!` for high-concurrency database execution, reducing
+//! frontend roundtrips from 15 to 1.
 
 use tokio::try_join;
 
@@ -19,6 +19,7 @@ use crate::modules::reports::service;
 
 use crate::modules::reports::service::dates::parse_date_range_tz;
 
+/// Builds the engine feed.
 pub async fn build_engine_feed(
     db: &Db,
     query: &EngineFeedQuery,

@@ -1,1 +1,0 @@
-pub const TOMBSTONE_RETENTION_DAYS: i64 = 90;

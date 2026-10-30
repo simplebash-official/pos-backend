@@ -1,12 +1,12 @@
-// Runs the one-time MongoDB migration to stock batches
-// (`inventory::service::stock_batch_migration`) against the configured
-// database (`MONGODB_URI` + `MONGODB_DB_NAME`). Idempotent; safe to re-run.
-//
-//   cargo run --bin migrate_stock_batches -- --dry-run   # read only: report what would change
-//   cargo run --bin migrate_stock_batches                # apply
-//
-// MUST run before deploying the batch-aware backend to an environment with
-// existing data. Run the dry run first and read its warnings.
+//! Runs the one-time MongoDB migration to stock batches
+//! (`inventory::service::stock_batch_migration`) against the configured
+//! database (`MONGODB_URI` + `MONGODB_DB_NAME`). Idempotent; safe to re-run.
+//!
+//!   cargo run --bin migrate_stock_batches -- --dry-run   # read only: report what would change
+//!   cargo run --bin migrate_stock_batches                # apply
+//!
+//! MUST run before deploying the batch-aware backend to an environment with
+//! existing data. Run the dry run first and read its warnings.
 
 use simplebash_pos_backend::clients;
 
@@ -53,6 +53,9 @@ async fn main() {
 
     let dry_run = std::env::args().any(|arg| arg == "--dry-run");
     let config = Config::from_env().expect("invalid configuration");
+    let (mongo_uri, mongo_name) = config
+        .mongo_settings()
+        .expect("this tool needs DATABASE_TYPE=mongodb");
     println!(
         "{} stock batch migration on database '{}'",
         if dry_run {
@@ -60,9 +63,9 @@ async fn main() {
         } else {
             "APPLYING"
         },
-        config.mongodb_db_name
+        mongo_name
     );
-    let db = clients::mongo::connect(&config.mongodb_uri, &config.mongodb_db_name)
+    let db = clients::mongo::connect(mongo_uri, mongo_name)
         .await
         .expect("failed to connect to MongoDB");
 

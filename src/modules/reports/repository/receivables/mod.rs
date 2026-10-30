@@ -1,9 +1,6 @@
-// MongoDB aggregation queries for credit receivables and overdue balance tracking.
+//! MongoDB aggregation queries for credit receivables and overdue balance tracking.
 
-mod aggregate_outstanding_stats;
-mod invoices;
-mod list_outstanding_invoices;
-mod outstanding_stats_aggregate;
+mod repository_receivables;
 
-pub(crate) use aggregate_outstanding_stats::aggregate_outstanding_stats;
-pub(crate) use list_outstanding_invoices::list_outstanding_invoices;
+pub(crate) use repository_receivables::aggregate_outstanding_stats;
+pub(crate) use repository_receivables::list_outstanding_invoices;

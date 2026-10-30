@@ -3,6 +3,7 @@
 use super::ConflictKind;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// What to do with one incoming change.
 pub enum Decision {
     /// The change wins (or the row is new): write it.
     Apply,

@@ -1,3 +1,5 @@
+//! Prefixed unique identifiers for documents.
+
 mod generate_id;
 #[cfg(test)]
 mod tests;

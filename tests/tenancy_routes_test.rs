@@ -25,11 +25,9 @@ use uuid::Uuid;
 async fn spawn_unthrottled() -> common::TestApp {
     static LIFT: std::sync::Once = std::sync::Once::new();
     LIFT.call_once(|| {
-        // SAFETY: runs once, before any test in this binary has built a router.
-        unsafe {
-            std::env::set_var("RATE_LIMIT_BURST", "1000000");
-            std::env::set_var("RATE_LIMIT_REFILL_PER_SEC", "1000000");
-        }
+        // Runs once, before any test in this binary has built a router.
+        common::set_config_override("RATE_LIMIT_BURST", "1000000");
+        common::set_config_override("RATE_LIMIT_REFILL_PER_SEC", "1000000");
     });
     common::spawn_app_multi_tenant().await
 }

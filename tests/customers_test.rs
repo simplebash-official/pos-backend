@@ -617,9 +617,8 @@ async fn customers_stats_endpoint_returns_totals_balance_and_debtor_count() {
     // aggregates the WHOLE collection with no filter — connect an isolated
     // throwaway database instead, same as the billing/repairs/print-jobs
     // stats tests.
-    let app = common::spawn_app().await;
     let db_name = format!("jtstats_{}", &Uuid::new_v4().simple().to_string()[..24]);
-    let db = simplebash_pos_backend::clients::mongo::connect(&app.config.mongodb_uri, &db_name)
+    let db = simplebash_pos_backend::clients::mongo::connect(&common::mongo_uri(), &db_name)
         .await
         .expect("failed to connect to isolated stats test database");
 

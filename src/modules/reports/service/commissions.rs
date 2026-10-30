@@ -1,9 +1,9 @@
-// Business logic for the Technician & Staff Commissions report. Resolves
-// each bucket `repository::commissions::aggregate_employee_commissions`
-// returns (keyed by `assigned_employee_id`, or an unassigned sentinel)
-// against `modules::employees` in a single batch call — this is where the
-// cross-module lookup belongs, not the repository (see that module's
-// comment for the "reach through service, never repository" rule).
+//! Business logic for the Technician & Staff Commissions report. Resolves
+//! each bucket `repository::commissions::aggregate_employee_commissions`
+//! returns (keyed by `assigned_employee_id`, or an unassigned sentinel)
+//! against `modules::employees` in a single batch call — this is where the
+//! cross-module lookup belongs, not the repository (see that module's
+//! comment for the "reach through service, never repository" rule).
 
 use std::collections::HashMap;
 

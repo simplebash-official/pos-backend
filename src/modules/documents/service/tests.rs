@@ -1,4 +1,4 @@
-use super::is_safe_path_segment::is_safe_path_segment;
+use super::documents_service::is_safe_path_segment;
 
 #[test]
 fn only_generated_key_shapes_are_safe_path_segments() {

@@ -1,10 +1,10 @@
-// MongoDB-only itemized commission listing for one employee — the
-// server-computed replacement for the frontend's former mock earnings
-// ledger. Reuses `core::calculations::commission_cents` so the
-// aggregated and itemized views can never silently disagree. Lives here
-// (not in `modules::employees`) because it reads raw `repairs`/`print_jobs`
-// documents directly, the same cross-collection financial-aggregation
-// responsibility `reports` already owns for `commissions.rs`.
+//! MongoDB-only itemized commission listing for one employee — the
+//! server-computed replacement for the frontend's former mock earnings
+//! ledger. Reuses `core::calculations::commission_cents` so the
+//! aggregated and itemized views can never silently disagree. Lives here
+//! (not in `modules::employees`) because it reads raw `repairs`/`print_jobs`
+//! documents directly, the same cross-collection financial-aggregation
+//! responsibility `reports` already owns for `commissions.rs`.
 
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use chrono::{DateTime, Utc};

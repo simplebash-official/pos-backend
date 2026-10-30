@@ -1,4 +1,4 @@
-use super::derive_username::derive_username;
+use super::clients_sqlite::derive_username;
 
 use std::collections::HashSet;
 

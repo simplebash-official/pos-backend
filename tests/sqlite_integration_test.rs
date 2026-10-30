@@ -1,3 +1,4 @@
+use simplebash_pos_backend::core::logging::SqlLogging;
 mod common;
 
 use axum::body::Body;
@@ -8,7 +9,7 @@ use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde_json::{Value, json};
 use simplebash_pos_backend::app::AppState;
 use simplebash_pos_backend::clients::db::Db;
-use simplebash_pos_backend::core::config::{Config, DatabaseType};
+use simplebash_pos_backend::core::config::Config;
 use simplebash_pos_backend::core::constants::roles;
 use simplebash_pos_backend::domain::users::Role;
 use simplebash_pos_backend::{app, clients};
@@ -37,34 +38,20 @@ async fn setup_sqlite_app() -> SqliteTestContext {
     let db_path = std::env::temp_dir().join(format!("pos_test_{}.db", Uuid::new_v4()));
     let db_url = format!("sqlite://{}?mode=rwc", db_path.display());
 
-    let pool = clients::sqlite::connect(&db_url)
+    let pool = clients::sqlite::connect(&db_url, SqlLogging::Off)
         .await
         .expect("failed to initialize SQLite test database");
 
     let mock_doc_server_url = common::start_mock_document_server().await;
 
-    let config = Config {
-        database_type: DatabaseType::Sqlite,
-        database_url: db_url,
-        mongodb_uri: String::new(),
-        mongodb_db_name: String::new(),
-        jwt_secret: "test-sqlite-jwt-secret-key-that-is-long-enough".to_string(),
-        port: 8080,
-        bind_addr: "127.0.0.1".to_string(),
-        jwt_expiry_hours: 12,
-        document_server_url: mock_doc_server_url,
-        document_server_api_key: "test-doc-key".to_string(),
-        generated_documents_dir: std::env::temp_dir().display().to_string(),
-        return_window_days: 30,
-        auto_seed: false,
-        tenant_mode: simplebash_pos_backend::core::config::TenantMode::Single,
-        cors_allowed_origins: Vec::new(),
-        identity_jwks_url: None,
-        identity_issuer: None,
-        identity_tenant_id: None,
-        provision_secret: None,
-        app_env: "test".to_string(),
-    };
+    let config = common::test_config(&[
+        ("DATABASE_URL", &db_url),
+        ("DOCUMENT_SERVER_URL", &mock_doc_server_url),
+        (
+            "GENERATED_DOCUMENTS_DIR",
+            &std::env::temp_dir().display().to_string(),
+        ),
+    ]);
 
     let config = Arc::new(config);
     let document_server = Arc::new(clients::document_server::DocumentServerClient::new(

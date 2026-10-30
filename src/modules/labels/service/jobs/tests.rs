@@ -1,7 +1,7 @@
-use super::coverage_status::coverage_status;
-use super::last_label::LastLabel;
-use super::last_labels::last_labels;
-use super::validate_job_request::validate_job_request;
+use super::service_jobs::LastLabel;
+use super::service_jobs::coverage_status;
+use super::service_jobs::last_labels;
+use super::service_jobs::validate_job_request;
 
 use crate::domain::labels::{
     CreateLabelJobRequest, LabelCoverageStatus, LabelPrintAction, LabelPrintMethod,

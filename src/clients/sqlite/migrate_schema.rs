@@ -1,7 +1,7 @@
-use super::derive_username::derive_username;
-use super::migrate_cash_movements::migrate_cash_movements;
-use super::migrate_to_stock_batches::migrate_to_stock_batches;
-use super::table_columns::table_columns;
+use super::clients_sqlite::derive_username;
+use super::clients_sqlite::migrate_cash_movements;
+use super::clients_sqlite::migrate_to_stock_batches;
+use super::clients_sqlite::table_columns;
 
 use sqlx::{Executor, SqlitePool};
 

@@ -1,5 +1,5 @@
-use super::compute::compute;
-use super::shift_figures::ShiftFigures;
+use super::calc_shift_totals::ShiftFigures;
+use super::calc_shift_totals::compute;
 
 use crate::domain::sessions::SessionStatus;
 

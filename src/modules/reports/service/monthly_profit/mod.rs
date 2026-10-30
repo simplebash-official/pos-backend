@@ -1,5 +1,6 @@
-mod get_monthly_profit_report;
-mod sales_cost_and_refunds;
+//! The monthly profit report.
 
-pub(crate) use get_monthly_profit_report::get_monthly_profit_report;
-pub(crate) use sales_cost_and_refunds::sales_cost_and_refunds;
+mod service_monthly_profit;
+
+pub(crate) use service_monthly_profit::get_monthly_profit_report;
+pub(crate) use service_monthly_profit::sales_cost_and_refunds;

@@ -1,11 +1,8 @@
-// Pure domain types for initial system installation, onboarding status, and database bootstrap.
+//! Pure domain types for initial system installation, onboarding status, and database bootstrap.
 
-mod setup_status_response;
-mod setup_system_request;
-mod setup_system_response;
-mod system_installation;
+mod domain_system;
 
-pub use setup_status_response::SetupStatusResponse;
-pub use setup_system_request::SetupSystemRequest;
-pub use setup_system_response::SetupSystemResponse;
-pub use system_installation::SystemInstallation;
+pub use domain_system::SetupStatusResponse;
+pub use domain_system::SetupSystemRequest;
+pub use domain_system::SetupSystemResponse;
+pub use domain_system::SystemInstallation;

@@ -5,7 +5,6 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use simplebash_pos_backend::app::AppState;
 use simplebash_pos_backend::clients::db::Db;
-use simplebash_pos_backend::core::config::{Config, DatabaseType, TenantMode};
 use simplebash_pos_backend::{app, clients};
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -17,28 +16,7 @@ async fn portal_renders_at_root_and_api() {
         .expect("in-memory sqlite pool");
     let db = Db::Sqlite(pool);
 
-    let config = Config {
-        database_type: DatabaseType::Sqlite,
-        database_url: "sqlite::memory:".to_string(),
-        mongodb_uri: String::new(),
-        mongodb_db_name: String::new(),
-        jwt_secret: "test-jwt-secret-key-that-is-at-least-32-characters-long".to_string(),
-        port: 8080,
-        bind_addr: "127.0.0.1".to_string(),
-        jwt_expiry_hours: 12,
-        document_server_url: "http://127.0.0.1:8090".to_string(),
-        document_server_api_key: "test-key".to_string(),
-        generated_documents_dir: "generated_documents".to_string(),
-        return_window_days: 30,
-        auto_seed: false,
-        tenant_mode: TenantMode::Single,
-        cors_allowed_origins: vec![],
-        identity_jwks_url: None,
-        identity_issuer: None,
-        identity_tenant_id: None,
-        provision_secret: None,
-        app_env: "development".to_string(),
-    };
+    let config = common::test_config(&[]);
 
     let document_server = clients::document_server::DocumentServerClient::new(
         config.document_server_url.clone(),

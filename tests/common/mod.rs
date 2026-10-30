@@ -1,3 +1,5 @@
+mod test_config;
+
 use std::sync::Arc;
 
 use axum::Router;
@@ -9,6 +11,9 @@ use simplebash_pos_backend::core::config::Config;
 use simplebash_pos_backend::core::middleware::auth::Claims;
 use simplebash_pos_backend::domain::users::Role;
 use simplebash_pos_backend::{app, clients};
+
+#[allow(unused_imports)]
+pub use test_config::{mongo_overrides, mongo_uri, set_config_override, test_config};
 
 pub struct TestApp {
     #[allow(dead_code)]
@@ -431,8 +436,13 @@ pub async fn spawn_app() -> TestApp {
 #[allow(dead_code)]
 pub async fn spawn_app_with_document_server_url(document_server_url: String) -> TestApp {
     dotenvy::dotenv().ok();
-    let db_name =
-        std::env::var("MONGODB_TEST_DB_NAME").unwrap_or_else(|_| "simplebash_pos_test".to_string());
+    let db_name = std::env::var("MONGODB_TEST_DB_NAME").expect(
+        "MONGODB_TEST_DB_NAME must name the throwaway test database (use `make check-atlas`)",
+    );
+    assert!(
+        db_name.starts_with("jt"),
+        "MONGODB_TEST_DB_NAME must be a throwaway `jt*` database, not {db_name}"
+    );
     spawn_mongo_app(db_name, document_server_url).await
 }
 
@@ -499,14 +509,14 @@ async fn start_up_once(db: &Database, db_handle: &simplebash_pos_backend::client
 }
 
 async fn spawn_mongo_app(db_name: String, document_server_url: String) -> TestApp {
-    let mut config = Config::from_env().expect("invalid configuration for test run");
-    config.mongodb_db_name = db_name;
+    let uri = mongo_uri();
+    let mut overrides = mongo_overrides(&uri, &db_name).to_vec();
+    overrides.push(("DOCUMENT_SERVER_URL", document_server_url.as_str()));
+    let config = test_config(&overrides);
 
-    let db = clients::mongo::connect(&config.mongodb_uri, &config.mongodb_db_name)
+    let db = clients::mongo::connect(&uri, &db_name)
         .await
         .expect("failed to connect to test MongoDB");
-
-    config.document_server_url = document_server_url;
 
     let config = Arc::new(config);
     let document_server = Arc::new(clients::document_server::DocumentServerClient::new(
@@ -545,11 +555,13 @@ pub async fn spawn_app_sqlite() -> TestApp {
 pub async fn spawn_app_sqlite_with_document_server_url(document_server_url: String) -> TestApp {
     dotenvy::dotenv().ok();
 
-    let mut config = Config::from_env().expect("invalid configuration for test run");
-    config.database_type = simplebash_pos_backend::core::config::DatabaseType::Sqlite;
     let test_id = simplebash_pos_backend::core::id::generate_id("test");
     let test_db_path = format!("data/test_{test_id}.db");
-    config.database_url = format!("sqlite://{test_db_path}?mode=rwc");
+    let database_url = format!("sqlite://{test_db_path}?mode=rwc");
+    let config = test_config(&[
+        ("DATABASE_URL", database_url.as_str()),
+        ("DOCUMENT_SERVER_URL", document_server_url.as_str()),
+    ]);
 
     let db_handle = clients::connect_from_config(&config)
         .await
@@ -558,7 +570,6 @@ pub async fn spawn_app_sqlite_with_document_server_url(document_server_url: Stri
         .await
         .expect("failed to ensure the built-in cash categories");
 
-    config.document_server_url = document_server_url;
     let config = Arc::new(config);
     let document_server = Arc::new(clients::document_server::DocumentServerClient::new(
         config.document_server_url.clone(),
@@ -574,13 +585,12 @@ pub async fn spawn_app_sqlite_with_document_server_url(document_server_url: Stri
         reports_engine,
     };
 
-    let mongo_client = match mongodb::Client::with_uri_str(&config.mongodb_uri).await {
-        Ok(client) => client,
-        Err(_) => mongodb::Client::with_uri_str("mongodb://localhost:27017")
-            .await
-            .expect("fallback mongo client"),
-    };
-    let db = mongo_client.database("simplebash_pos_test");
+    // `TestApp::db` is a MongoDB handle even for SQLite apps. The client connects lazily and no
+    // SQLite test uses it, so this one never reaches a server.
+    let mongo_client = mongodb::Client::with_uri_str("mongodb://127.0.0.1:27017")
+        .await
+        .expect("a lazy MongoDB client");
+    let db = mongo_client.database("unused_by_sqlite_tests");
 
     TestApp {
         router: app::build_router(state),
@@ -702,17 +712,21 @@ pub async fn spawn_app_multi_tenant_with_secret(provision_secret: Option<&str>) 
     dotenvy::dotenv().ok();
     let mock_doc_server_url = start_mock_document_server().await;
 
-    let mut config = Config::from_env().expect("invalid configuration for test run");
-    config.database_type = simplebash_pos_backend::core::config::DatabaseType::Mongo;
-    config.tenant_mode = simplebash_pos_backend::core::config::TenantMode::Multi;
-    config.provision_secret = provision_secret.map(str::to_string);
-    config.mongodb_db_name = format!(
+    let uri = mongo_uri();
+    let db_name = format!(
         "jtroute_{}",
         &uuid::Uuid::new_v4().simple().to_string()[..24]
     );
-    config.document_server_url = mock_doc_server_url;
+    let mut overrides = mongo_overrides(&uri, &db_name).to_vec();
+    overrides.push(("TENANT_MODE", "multi"));
+    overrides.push(("DOCUMENT_SERVER_URL", mock_doc_server_url.as_str()));
+    if let Some(secret) = provision_secret {
+        overrides.push(("PROVISIONING", "enabled"));
+        overrides.push(("PROVISION_SECRET", secret));
+    }
+    let config = test_config(&overrides);
 
-    let db = clients::mongo::connect(&config.mongodb_uri, &config.mongodb_db_name)
+    let db = clients::mongo::connect(&uri, &db_name)
         .await
         .expect("failed to connect to throwaway multi-tenant MongoDB");
 

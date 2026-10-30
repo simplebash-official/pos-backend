@@ -1,4 +1,4 @@
-use super::index_spec::IndexSpec;
+use super::clients_indexes::IndexSpec;
 use crate::core::config::TenantMode;
 use crate::core::tenancy::TENANT_FIELD;
 use mongodb::bson::{Document, doc};

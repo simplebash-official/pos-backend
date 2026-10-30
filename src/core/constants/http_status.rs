@@ -1,3 +1,5 @@
+//! HTTP status codes under the names the backend uses.
+
 use axum::http::StatusCode;
 
 /// Standard HTTP Status Code constants re-exported for consistent use across the backend.

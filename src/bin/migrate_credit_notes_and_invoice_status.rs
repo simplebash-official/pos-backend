@@ -1,18 +1,18 @@
-// One-time data migration for the Invoice Status Model + Credit Note
-// upgrade (see /Users/mayura/.claude/plans/now-here-is-the-enchanted-storm.md).
-// Rewrites pre-migration data left over from the old `"cancelled"` invoice
-// status / `returns` collection / `restock_action` field shape into the new
-// `InvoiceStatus::Voided` / `credit_notes` collection / `condition`+
-// `disposition` shape the new backend code assumes with no fallback.
-//
-// Idempotent and safe to re-run: every step checks the document is still in
-// the OLD shape before rewriting it, so running this against a database
-// that's already partially or fully migrated (or has no legacy data at all)
-// is a no-op for whatever it finds already-migrated.
-//
-// Run with: `cargo run --bin migrate_credit_notes_and_invoice_status`
-// MUST run before deploying the new backend binary in any environment that
-// has pre-existing data — the new code has no compat shim for the old shape.
+//! One-time data migration for the Invoice Status Model + Credit Note
+//! upgrade (see /Users/mayura/.claude/plans/now-here-is-the-enchanted-storm.md).
+//! Rewrites pre-migration data left over from the old `"cancelled"` invoice
+//! status / `returns` collection / `restock_action` field shape into the new
+//! `InvoiceStatus::Voided` / `credit_notes` collection / `condition`+
+//! `disposition` shape the new backend code assumes with no fallback.
+//!
+//! Idempotent and safe to re-run: every step checks the document is still in
+//! the OLD shape before rewriting it, so running this against a database
+//! that's already partially or fully migrated (or has no legacy data at all)
+//! is a no-op for whatever it finds already-migrated.
+//!
+//! Run with: `cargo run --bin migrate_credit_notes_and_invoice_status`
+//! MUST run before deploying the new backend binary in any environment that
+//! has pre-existing data — the new code has no compat shim for the old shape.
 
 use mongodb::Database;
 
@@ -29,7 +29,10 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     let config = Config::from_env().expect("invalid configuration");
-    let db = clients::mongo::connect(&config.mongodb_uri, &config.mongodb_db_name)
+    let (mongo_uri, mongo_name) = config
+        .mongo_settings()
+        .expect("this tool needs DATABASE_TYPE=mongodb");
+    let db = clients::mongo::connect(mongo_uri, mongo_name)
         .await
         .expect("failed to connect to MongoDB");
 

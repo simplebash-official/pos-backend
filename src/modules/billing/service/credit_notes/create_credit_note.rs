@@ -1,5 +1,5 @@
-use super::line_hint::LineHint;
-use super::line_match::line_match;
+use super::service_credit_notes::LineHint;
+use super::service_credit_notes::line_match;
 use crate::clients::db::Db;
 use crate::core::calculations;
 use crate::core::config::Config;

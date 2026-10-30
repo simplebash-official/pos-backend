@@ -1,8 +1,8 @@
 use super::super::{redact, settings};
-use super::incoming_request_id::incoming_request_id;
-use super::is_textual::is_textual;
-use super::request_id::REQUEST_ID;
-use super::request_id_header::REQUEST_ID_HEADER;
+use super::logging_request::REQUEST_ID;
+use super::logging_request::REQUEST_ID_HEADER;
+use super::logging_request::incoming_request_id;
+use super::logging_request::is_textual;
 use crate::app::AppState;
 use crate::core::middleware::auth::Claims;
 use axum::body::{Body, Bytes};
@@ -56,6 +56,7 @@ fn should_capture(headers: &HeaderMap, body: &Body) -> bool {
         && length.is_some_and(|l| l <= MAX_BUFFERED_BODY_BYTES)
 }
 
+/// Middleware that assigns a request id and logs each request and its outcome.
 pub async fn log_requests(State(state): State<AppState>, request: Request, next: Next) -> Response {
     let started = Instant::now();
     let request_id = incoming_request_id(request.headers())

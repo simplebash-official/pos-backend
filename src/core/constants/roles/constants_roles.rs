@@ -1,0 +1,114 @@
+use crate::core::constants::permissions as perm;
+use crate::domain::users::Role;
+
+/// Every shop's single Admin logs in as this username. Shop names/codes are
+/// unique, so `shop code + username` identifies a login; the owner only chooses
+/// the password.
+pub const ADMIN_USERNAME: &str = "admin";
+
+const ADMIN_PERMISSIONS: &[&str] = &[
+    perm::USERS_MANAGE,
+    perm::SESSIONS_VIEW,
+    perm::REGISTER_SESSIONS_VIEW,
+    perm::REGISTER_SESSIONS_MANAGE,
+    perm::CASH_MOVEMENTS_VIEW,
+    perm::CASH_MOVEMENTS_CREATE,
+    perm::CASH_MOVEMENTS_CREATE_MANAGED,
+    perm::CASH_MOVEMENTS_REVERSE,
+    perm::CASH_CATEGORIES_CREATE,
+    perm::CASH_CATEGORIES_MANAGE,
+    perm::PAYEES_MANAGE,
+    perm::SUPPLIERS_CREATE,
+    perm::EXPENSES_VIEW,
+    perm::EXPENSES_MANAGE,
+    perm::INCOME_VIEW,
+    perm::INCOME_MANAGE,
+    perm::ACCOUNTS_VIEW,
+    perm::ACCOUNTS_MANAGE,
+    perm::BALANCES_VIEW,
+    perm::BALANCES_MANAGE,
+    perm::CASH_SETTINGS_MANAGE,
+    perm::ATTACHMENTS_VIEW,
+    perm::ATTACHMENTS_CREATE,
+    perm::INVENTORY_READ,
+    perm::INVENTORY_WRITE,
+    perm::INVENTORY_ADMIN,
+    perm::BILLING_WRITE,
+    perm::REPAIRS_WRITE,
+    perm::PRINT_JOBS_WRITE,
+    perm::REPORTS_VIEW,
+    perm::CUSTOMERS_WRITE,
+    perm::EMPLOYEES_READ,
+    perm::EMPLOYEES_WRITE,
+    perm::QUOTATIONS_MANAGE,
+];
+
+// Everything an Admin has except full account management — a Manager runs
+// day-to-day shop operations and may provision Staff accounts specifically
+// (`USERS_MANAGE_STAFF`), but not Manager or Admin accounts (see
+// `modules::users::service`'s `manageable_roles`).
+const MANAGER_PERMISSIONS: &[&str] = &[
+    perm::USERS_MANAGE_STAFF,
+    perm::SESSIONS_VIEW,
+    perm::REGISTER_SESSIONS_VIEW,
+    perm::REGISTER_SESSIONS_MANAGE,
+    perm::CASH_MOVEMENTS_VIEW,
+    perm::CASH_MOVEMENTS_CREATE,
+    perm::CASH_MOVEMENTS_CREATE_MANAGED,
+    perm::CASH_MOVEMENTS_REVERSE,
+    perm::CASH_CATEGORIES_CREATE,
+    perm::CASH_CATEGORIES_MANAGE,
+    perm::PAYEES_MANAGE,
+    perm::SUPPLIERS_CREATE,
+    perm::EXPENSES_VIEW,
+    perm::EXPENSES_MANAGE,
+    perm::INCOME_VIEW,
+    perm::INCOME_MANAGE,
+    perm::ACCOUNTS_VIEW,
+    perm::BALANCES_VIEW,
+    perm::BALANCES_MANAGE,
+    perm::ATTACHMENTS_VIEW,
+    perm::ATTACHMENTS_CREATE,
+    perm::INVENTORY_READ,
+    perm::INVENTORY_WRITE,
+    perm::INVENTORY_ADMIN,
+    perm::BILLING_WRITE,
+    perm::REPAIRS_WRITE,
+    perm::PRINT_JOBS_WRITE,
+    perm::REPORTS_VIEW,
+    perm::CUSTOMERS_WRITE,
+    perm::EMPLOYEES_READ,
+    perm::EMPLOYEES_WRITE,
+    perm::QUOTATIONS_MANAGE,
+];
+
+// Day-to-day operational permissions only — no inventory administration, no
+// supplier/purchase management, no report or session visibility.
+const STAFF_PERMISSIONS: &[&str] = &[
+    perm::INVENTORY_READ,
+    perm::BILLING_WRITE,
+    perm::REPAIRS_WRITE,
+    perm::PRINT_JOBS_WRITE,
+    perm::CUSTOMERS_WRITE,
+    perm::EMPLOYEES_READ,
+    perm::REGISTER_SESSIONS_VIEW,
+    perm::REGISTER_SESSIONS_MANAGE,
+    perm::CASH_MOVEMENTS_VIEW,
+    perm::CASH_MOVEMENTS_CREATE,
+    perm::CASH_CATEGORIES_CREATE,
+    perm::ATTACHMENTS_VIEW,
+    perm::ATTACHMENTS_CREATE,
+];
+
+/// The fixed permission set a role's JWT carries at login. Three flat
+/// slices rather than a computed union/subtraction, so each role's actual
+/// grant is visible at a glance — extending a role means editing its slice
+/// directly, not tracing through a derivation.
+#[must_use]
+pub fn default_permissions(role: Role) -> &'static [&'static str] {
+    match role {
+        Role::Admin => ADMIN_PERMISSIONS,
+        Role::Manager => MANAGER_PERMISSIONS,
+        Role::Staff => STAFF_PERMISSIONS,
+    }
+}

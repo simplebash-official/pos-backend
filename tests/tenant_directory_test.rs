@@ -4,6 +4,8 @@
 // login that ignored the shop code (or leaked across tenants) would succeed
 // where it must not.
 
+mod common;
+
 use std::sync::Arc;
 
 use axum::body::Body;
@@ -16,7 +18,7 @@ use simplebash_pos_backend::clients::db::Db;
 use simplebash_pos_backend::clients::document_server::DocumentServerClient;
 use simplebash_pos_backend::clients::mongo::connect;
 use simplebash_pos_backend::clients::tenant_db::TenantDatabase;
-use simplebash_pos_backend::core::config::{Config, DatabaseType, TenantMode};
+use simplebash_pos_backend::core::config::TenantMode;
 use simplebash_pos_backend::core::middleware::auth::Claims;
 use simplebash_pos_backend::core::tenancy::{Tenant, with_tenant};
 use simplebash_pos_backend::domain::users::{CreateUserRequest, Role};
@@ -55,13 +57,12 @@ async fn tenant_directory_and_multi_tenant_login_roundtrip() {
         return;
     };
 
-    let mut config = Config::from_env().expect("invalid configuration for test run");
-    config.database_type = DatabaseType::Mongo;
-    config.tenant_mode = TenantMode::Multi;
-    config.mongodb_db_name = format!("jtdir_{}", &Uuid::new_v4().simple().to_string()[..24]);
-    let raw = connect(&config.mongodb_uri, &config.mongodb_db_name)
-        .await
-        .expect("connect throwaway db");
+    let uri = common::mongo_uri();
+    let name = format!("jtdir_{}", &Uuid::new_v4().simple().to_string()[..24]);
+    let mut overrides = common::mongo_overrides(&uri, &name).to_vec();
+    overrides.push(("TENANT_MODE", "multi"));
+    let config = common::test_config(&overrides);
+    let raw = connect(&uri, &name).await.expect("connect throwaway db");
     clients::indexes::ensure_indexes(&raw, TenantMode::Multi).await;
     let db = Db::Mongo(TenantDatabase::multi_tenant(raw.clone()));
 
@@ -271,14 +272,13 @@ async fn multi_tenant_cors_only_allows_configured_origins() {
         eprintln!("MONGODB_URI not set - skipping");
         return;
     };
-    let mut config = Config::from_env().expect("invalid configuration for test run");
-    config.database_type = DatabaseType::Mongo;
-    config.tenant_mode = TenantMode::Multi;
-    config.mongodb_db_name = format!("jtdir_{}", &Uuid::new_v4().simple().to_string()[..24]);
-    config.cors_allowed_origins = vec!["https://app.example.test".to_string()];
-    let raw = connect(&config.mongodb_uri, &config.mongodb_db_name)
-        .await
-        .expect("connect throwaway db");
+    let uri = common::mongo_uri();
+    let name = format!("jtdir_{}", &Uuid::new_v4().simple().to_string()[..24]);
+    let mut overrides = common::mongo_overrides(&uri, &name).to_vec();
+    overrides.push(("TENANT_MODE", "multi"));
+    overrides.push(("CORS_ALLOWED_ORIGINS", "https://app.example.test"));
+    let config = common::test_config(&overrides);
+    let raw = connect(&uri, &name).await.expect("connect throwaway db");
     let db = Db::Mongo(TenantDatabase::multi_tenant(raw.clone()));
     let config = Arc::new(config);
     let router = app::build_router(AppState {

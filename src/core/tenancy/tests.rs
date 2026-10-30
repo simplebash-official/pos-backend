@@ -1,9 +1,9 @@
-use super::current_tenant_fn::current_tenant;
-use super::scope_filter::scope_filter;
-use super::scope_pipeline::scope_pipeline;
-use super::stamp_document::stamp_document;
-use super::tenant::Tenant;
-use super::with_tenant::with_tenant;
+use super::core_tenancy::Tenant;
+use super::core_tenancy::current_tenant;
+use super::core_tenancy::scope_filter;
+use super::core_tenancy::scope_pipeline;
+use super::core_tenancy::stamp_document;
+use super::core_tenancy::with_tenant;
 
 use mongodb::bson::{Bson, doc};
 

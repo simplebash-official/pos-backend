@@ -8,15 +8,12 @@ jobs:
   test:
     runs-on: ubuntu-latest
     env:
-      # Tests load config from the environment (dotenvy is a no-op without a .env file).
+      # The tests build their own configuration; they only need the database. `jt*` marks a
+      # throwaway database, and the harness refuses any other name.
       # directConnection: talk to the single replica-set member started below
       # as-is, without discovering the set by its advertised hostname.
       MONGODB_URI: mongodb://localhost:27017/?directConnection=true
-      MONGODB_DB_NAME: simplebash_pos
-      JWT_SECRET: ci-only-jwt-secret-0123456789abcdef0123456789abcdef
-      JWT_EXPIRY_HOURS: "12"
-      DOCUMENT_SERVER_URL: http://localhost:8090
-      DOCUMENT_SERVER_API_KEY: ci-only-document-server-key
+      MONGODB_TEST_DB_NAME: jtci_github_actions
     steps:
       - uses: actions/checkout@v4
       # The label and document schema-drift tests read document-server's

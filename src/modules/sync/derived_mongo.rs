@@ -1,13 +1,13 @@
-// Derived-field recompute for the cloud (MongoDB) engine: stock, customer
-// balances and an invoice's refund totals / per-line returned quantity /
-// credit-sale status are recomputed from the ledger rows after every applied
-// batch, exactly as `derived_sqlite` does on a device (formulas: sync v2 spec
-// 1.3), so both engines converge on the ledger truth.
-//
-// One deliberate difference from the device engine: only the derived columns
-// are written; `updated_at`, `version` and `updated_by_device` are left alone.
-// The cloud reads `updated_at` for last-writer-wins, so bumping it here would
-// let a recompute of stale ordinary columns beat a concurrent real edit.
+//! Derived-field recompute for the cloud (MongoDB) engine: stock, customer
+//! balances and an invoice's refund totals / per-line returned quantity /
+//! credit-sale status are recomputed from the ledger rows after every applied
+//! batch, exactly as `derived_sqlite` does on a device (formulas: sync v2 spec
+//! 1.3), so both engines converge on the ledger truth.
+//!
+//! One deliberate difference from the device engine: only the derived columns
+//! are written; `updated_at`, `version` and `updated_by_device` are left alone.
+//! The cloud reads `updated_at` for last-writer-wins, so bumping it here would
+//! let a recompute of stale ordinary columns beat a concurrent real edit.
 
 use std::collections::BTreeSet;
 
@@ -26,7 +26,7 @@ use crate::domain::sync_v2::{ConflictKind, DerivedScope, NewConflict};
 
 use crate::modules::billing::service::credit_notes::{LineHint, line_match};
 
-use crate::modules::sync::apply_mongo::num_i64;
+use crate::modules::sync::apply_mongo::{num_i64, required_i64, required_str};
 
 use crate::modules::sync::cloud_store::coll;
 
@@ -65,7 +65,7 @@ async fn sum_field(db: &Db, collection: &str, filter: Document, field: &str) -> 
         ])
         .await?;
     Ok(match cursor.try_next().await? {
-        Some(row) => num_i64(&row, "total").unwrap_or(0),
+        Some(row) => required_i64(&row, "total")?,
         None => 0,
     })
 }
@@ -88,11 +88,14 @@ async fn recompute_invoice(
     let Some(invoice) = invoices.find_one(doc! { "key": key }).await? else {
         return Ok(None);
     };
-    let total_cents = num_i64(&invoice, "total_cents").unwrap_or(0);
-    let is_credit = invoice.get_bool("is_credit").unwrap_or(false);
-    let status = invoice.get_str("status").unwrap_or_default().to_string();
-    let old_refunded = num_i64(&invoice, "refunded_cents").unwrap_or(0);
-    let old_count = num_i64(&invoice, "credit_note_count").unwrap_or(0);
+    let total_cents = required_i64(&invoice, "total_cents")?;
+    let is_credit = invoice
+        .get_bool("is_credit")
+        .map_err(|_| AppError::internal("stored invoice has no `is_credit`"))?;
+    let status = required_str(&invoice, "status")?.to_string();
+    // A derived column is absent until its first recompute, so "no old value" is expected here.
+    let old_refunded = num_i64(&invoice, "refunded_cents");
+    let old_count = num_i64(&invoice, "credit_note_count");
     let customer_key = invoice.get_str("customer_key").ok().map(str::to_string);
 
     let old_items: Vec<InvoiceItem> = invoice
@@ -115,15 +118,15 @@ async fn recompute_invoice(
     let mut count = 0i64;
     while let Some(note) = notes.try_next().await? {
         count += 1;
-        refunded += num_i64(&note, "refund_cash_cents").unwrap_or(0)
-            + num_i64(&note, "balance_reduction_cents").unwrap_or(0);
+        refunded += required_i64(&note, "refund_cash_cents")?
+            + required_i64(&note, "balance_reduction_cents")?;
         let lines: Vec<Document> = note
             .get_array("returned_items")
             .map(|a| a.iter().filter_map(|b| b.as_document().cloned()).collect())
             .unwrap_or_default();
         let sole = items.len() == 1 && lines.len() == 1;
         for line in &lines {
-            let quantity = num_i64(line, "quantity").unwrap_or(0);
+            let quantity = required_i64(line, "quantity")?;
             let batch_keys: Vec<&str> = line
                 .get_array("batchAllocations")
                 .into_iter()
@@ -167,7 +170,11 @@ async fn recompute_invoice(
     }
 
     let items_changed = serde_json::to_value(&items)? != serde_json::to_value(&old_items)?;
-    if items_changed || refunded != old_refunded || count != old_count || new_status != status {
+    if items_changed
+        || Some(refunded) != old_refunded
+        || Some(count) != old_count
+        || new_status != status
+    {
         let items_bson = bson::serialize_to_bson(&items)
             .map_err(|e| AppError::internal(format!("cannot store invoice items: {e}")))?;
         invoices
@@ -195,8 +202,8 @@ async fn recompute_customer(db: &Db, key: &str) -> AppResult<()> {
     else {
         return Ok(());
     };
-    let old_outstanding = num_i64(&customer, "outstanding_balance_cents").unwrap_or(0);
-    let old_purchases = num_i64(&customer, "total_purchases_cents").unwrap_or(0);
+    let old_outstanding = num_i64(&customer, "outstanding_balance_cents");
+    let old_purchases = num_i64(&customer, "total_purchases_cents");
 
     let sales = sum_field(
         db,
@@ -221,15 +228,15 @@ async fn recompute_customer(db: &Db, key: &str) -> AppResult<()> {
         let paid = sum_field(
             db,
             "payments",
-            doc! { "invoice_key": invoice.get_str("key").unwrap_or_default() },
+            doc! { "invoice_key": required_str(&invoice, "key")? },
             "amount_cents",
         )
         .await?;
-        outstanding += num_i64(&invoice, "total_cents").unwrap_or(0) - paid;
+        outstanding += required_i64(&invoice, "total_cents")? - paid;
     }
 
     let purchases = sales - refunds;
-    if outstanding != old_outstanding || purchases != old_purchases {
+    if Some(outstanding) != old_outstanding || Some(purchases) != old_purchases {
         customers
             .update_one(
                 doc! { "key": key },
@@ -254,7 +261,7 @@ async fn recompute_batch(
     let Some(batch) = batches.find_one(doc! { "key": batch_key }).await? else {
         return Ok(());
     };
-    let old = num_i64(&batch, "remaining_quantity").unwrap_or(0);
+    let old = num_i64(&batch, "remaining_quantity");
     let total = sum_field(
         db,
         "stock_movements",
@@ -262,7 +269,7 @@ async fn recompute_batch(
         "quantity_delta",
     )
     .await?;
-    if total == old {
+    if Some(total) == old {
         return Ok(());
     }
     batches
@@ -271,7 +278,7 @@ async fn recompute_batch(
             doc! { "$set": { "remaining_quantity": total } },
         )
         .await?;
-    if total < 0 && old >= 0 {
+    if total < 0 && old.is_none_or(|old| old >= 0) {
         conflicts.push(NewConflict {
             kind: ConflictKind::NegativeStock,
             resource: "stockBatches".to_string(),
@@ -296,7 +303,7 @@ async fn recompute_product(
     let Some(product) = products.find_one(doc! { "_id": oid }).await? else {
         return Ok(());
     };
-    let old = num_i64(&product, "stock_quantity").unwrap_or(0);
+    let old = num_i64(&product, "stock_quantity");
     let total = sum_field(
         db,
         "stock_movements",
@@ -304,7 +311,7 @@ async fn recompute_product(
         "quantity_delta",
     )
     .await?;
-    if total == old {
+    if Some(total) == old {
         return Ok(());
     }
     products
@@ -313,13 +320,13 @@ async fn recompute_product(
             doc! { "$set": { "stock_quantity": total } },
         )
         .await?;
-    if total < 0 && old >= 0 {
+    if total < 0 && old.is_none_or(|old| old >= 0) {
         conflicts.push(NewConflict {
             kind: ConflictKind::NegativeStock,
             resource: "products".to_string(),
-            entity_key: product.get_str("key").unwrap_or_default().to_string(),
+            entity_key: required_str(&product, "key")?.to_string(),
             detail: serde_json::json!({
-                "productKey": product.get_str("key").unwrap_or_default(),
+                "productKey": required_str(&product, "key")?,
                 "quantity": total,
             }),
         });

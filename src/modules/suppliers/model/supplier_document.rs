@@ -59,6 +59,7 @@ fn default_version() -> i64 {
 
 impl SupplierDocument {
     #[must_use]
+    /// Converts the stored document into the type the API returns.
     pub fn into_supplier(self) -> Supplier {
         let key = if self.key.is_empty() {
             generate_id(prefixes::SUPPLIER)

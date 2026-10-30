@@ -1,5 +1,5 @@
-use super::category_key::category_key;
-use super::normalize_name::normalize_name;
+use super::domain_cash_categories::category_key;
+use super::domain_cash_categories::normalize_name;
 use crate::domain::sessions::CashMovementType;
 
 #[test]

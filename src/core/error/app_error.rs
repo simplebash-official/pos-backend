@@ -1,4 +1,4 @@
-use super::wire_parts::WireParts;
+use super::core_error::WireParts;
 use crate::core::response::ErrorResponse;
 use axum::Json;
 use axum::http::StatusCode;
@@ -61,6 +61,7 @@ impl AppError {
     // `PRODUCT_NOT_FOUND`). Handlers reach for the plain form unless a
     // caller needs to distinguish this particular failure by `code` in the
     // response JSON.
+    /// A 404 error with the generic not-found code.
     pub fn not_found(message: impl Into<String>) -> Self {
         AppError::NotFound {
             message: message.into(),
@@ -68,6 +69,7 @@ impl AppError {
         }
     }
 
+    /// A 404 error with a specific error code.
     pub fn not_found_with_code(message: impl Into<String>, code: impl Into<String>) -> Self {
         AppError::NotFound {
             message: message.into(),
@@ -75,6 +77,7 @@ impl AppError {
         }
     }
 
+    /// A 400 error with the generic validation code.
     pub fn validation(message: impl Into<String>) -> Self {
         AppError::Validation {
             message: message.into(),
@@ -82,6 +85,7 @@ impl AppError {
         }
     }
 
+    /// A 400 error with a specific error code.
     pub fn validation_with_code(message: impl Into<String>, code: impl Into<String>) -> Self {
         AppError::Validation {
             message: message.into(),
@@ -89,6 +93,7 @@ impl AppError {
         }
     }
 
+    /// A 401 error with the generic unauthorized code.
     pub fn unauthorized(message: impl Into<String>) -> Self {
         AppError::Unauthorized {
             message: message.into(),
@@ -96,6 +101,7 @@ impl AppError {
         }
     }
 
+    /// A 401 error with a specific error code.
     pub fn unauthorized_with_code(message: impl Into<String>, code: impl Into<String>) -> Self {
         AppError::Unauthorized {
             message: message.into(),
@@ -103,6 +109,7 @@ impl AppError {
         }
     }
 
+    /// A 403 error with the generic forbidden code.
     pub fn forbidden(message: impl Into<String>) -> Self {
         AppError::Forbidden {
             message: message.into(),
@@ -110,6 +117,7 @@ impl AppError {
         }
     }
 
+    /// A 403 error with a specific error code.
     pub fn forbidden_with_code(message: impl Into<String>, code: impl Into<String>) -> Self {
         AppError::Forbidden {
             message: message.into(),
@@ -117,6 +125,7 @@ impl AppError {
         }
     }
 
+    /// A 500 error with the generic internal-error code; the message is logged, not shown to clients.
     pub fn internal(message: impl Into<String>) -> Self {
         AppError::Internal {
             message: message.into(),
@@ -124,6 +133,7 @@ impl AppError {
         }
     }
 
+    /// A 500 error with a specific error code; the message is logged, not shown to clients.
     pub fn internal_with_code(message: impl Into<String>, code: impl Into<String>) -> Self {
         AppError::Internal {
             message: message.into(),
@@ -143,6 +153,7 @@ impl AppError {
         }
     }
 
+    /// An error with any status, a specific code and structured details for the client.
     pub fn custom_with_details(
         status: StatusCode,
         code: impl Into<String>,
@@ -157,10 +168,12 @@ impl AppError {
         }
     }
 
+    /// A 409 error with a specific code.
     pub fn conflict(code: impl Into<String>, message: impl Into<String>) -> Self {
         AppError::custom(StatusCode::CONFLICT, code, message)
     }
 
+    /// A 409 error with a specific code and structured details.
     pub fn conflict_with_details(
         code: impl Into<String>,
         message: impl Into<String>,
@@ -169,10 +182,12 @@ impl AppError {
         AppError::custom_with_details(StatusCode::CONFLICT, code, message, details)
     }
 
+    /// A 422 error with a specific code.
     pub fn unprocessable_entity(code: impl Into<String>, message: impl Into<String>) -> Self {
         AppError::custom(StatusCode::UNPROCESSABLE_ENTITY, code, message)
     }
 
+    /// A 422 error with a specific code and structured details.
     pub fn unprocessable_entity_with_details(
         code: impl Into<String>,
         message: impl Into<String>,

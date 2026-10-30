@@ -1,9 +1,19 @@
-mod config;
-mod config_error;
-mod database_type;
-mod tenant_mode;
+//! Reads and validates the process environment into `Config`.
 
-pub use config::Config;
-pub use config_error::ConfigError;
-pub use database_type::DatabaseType;
-pub use tenant_mode::TenantMode;
+mod config_env;
+#[cfg(test)]
+mod tests;
+
+pub use config_env::AppEnvironment;
+pub use config_env::Config;
+pub use config_env::ConfigError;
+pub use config_env::Database;
+pub use config_env::IdentityAuth;
+pub use config_env::LogFormat;
+pub use config_env::LoggingConfig;
+pub use config_env::Provisioning;
+pub use config_env::RateLimitBucket;
+pub use config_env::RateLimits;
+pub use config_env::SeedAdminConfig;
+pub use config_env::TenantMode;
+pub use config_env::Variables;

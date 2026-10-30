@@ -1,6 +1,6 @@
-use super::compute::compute;
-use super::max_cents::MAX_CENTS;
-use super::max_quantity::MAX_QUANTITY;
+use super::calc_receipt::MAX_CENTS;
+use super::calc_receipt::MAX_QUANTITY;
+use super::calc_receipt::compute;
 
 use super::*;
 

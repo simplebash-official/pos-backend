@@ -1,5 +1,6 @@
-mod reserve_sequence_request;
-mod sequence_reservation_response;
+//! Request and response types for reserving document-number sequences.
 
-pub use reserve_sequence_request::ReserveSequenceRequest;
-pub use sequence_reservation_response::SequenceReservationResponse;
+mod domain_sequences;
+
+pub use domain_sequences::ReserveSequenceRequest;
+pub use domain_sequences::SequenceReservationResponse;

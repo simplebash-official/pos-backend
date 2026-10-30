@@ -1,7 +1,8 @@
+//! The application error type and its HTTP mapping.
+
 mod app_error;
-mod app_result;
-mod wire_parts;
+mod core_error;
 
 pub use app_error::AppError;
-pub use app_result::AppResult;
-pub use wire_parts::WireParts;
+pub use core_error::AppResult;
+pub use core_error::WireParts;

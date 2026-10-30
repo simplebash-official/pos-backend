@@ -49,7 +49,7 @@ async fn send(
 #[tokio::test]
 async fn reset_admin_credentials_rotates_the_password() {
     let app = common::spawn_app_sqlite().await;
-    seeds::admin::seed_admin(&app.db_handle, None, None)
+    seeds::admin::seed_admin(&app.db_handle, &app.config.seed_admin)
         .await
         .expect("seed_admin should create the initial admin");
 

@@ -1,6 +1,6 @@
-use super::incoming_request_id::incoming_request_id;
-use super::is_textual::is_textual;
-use super::request_id_header::REQUEST_ID_HEADER;
+use super::logging_request::REQUEST_ID_HEADER;
+use super::logging_request::incoming_request_id;
+use super::logging_request::is_textual;
 
 use axum::http::{HeaderMap, HeaderValue};
 

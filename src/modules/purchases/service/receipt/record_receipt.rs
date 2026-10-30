@@ -1,7 +1,7 @@
-use super::assemble::assemble;
-use super::charge_description_max::CHARGE_DESCRIPTION_MAX;
-use super::recorded_by::RecordedBy;
-use super::reference_max::REFERENCE_MAX;
+use super::service_receipt::CHARGE_DESCRIPTION_MAX;
+use super::service_receipt::REFERENCE_MAX;
+use super::service_receipt::RecordedBy;
+use super::service_receipt::assemble;
 use crate::clients::db::Db;
 use crate::core::constants::{codes, prefixes};
 use crate::core::error::{AppError, AppResult};

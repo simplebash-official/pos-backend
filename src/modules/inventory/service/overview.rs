@@ -1,7 +1,7 @@
-// Orchestration for the hierarchical Inventory & Stock overview endpoint.
-// Combines metrics aggregation, category & subcategory tree building,
-// free-text search across products/categories/subcategories, low-stock filter,
-// and per-subcategory product data table pagination.
+//! Orchestration for the hierarchical Inventory & Stock overview endpoint.
+//! Combines metrics aggregation, category & subcategory tree building,
+//! free-text search across products/categories/subcategories, low-stock filter,
+//! and per-subcategory product data table pagination.
 
 use mongodb::bson::{Document, doc};
 

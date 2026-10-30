@@ -1,4 +1,4 @@
-//! Fixed permission strings ("<module>:<action>") checked against a
+//! Fixed permission strings ("`<module>:<action>`") checked against a
 //! caller's JWT-embedded permission list via
 //! `core::middleware::auth::CurrentUser::require_permission`. Adding a new
 //! permission for a future module is two edits: add the constant here, then

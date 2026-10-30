@@ -5,8 +5,7 @@
 //! change on a user's account only takes effect on that user's *next*
 //! login, since there is no revocation infra to force-refresh a live token.
 
-mod admin_username;
-mod default_permissions;
+mod constants_roles;
 
-pub use admin_username::ADMIN_USERNAME;
-pub use default_permissions::default_permissions;
+pub use constants_roles::ADMIN_USERNAME;
+pub use constants_roles::default_permissions;

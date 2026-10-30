@@ -1,7 +1,7 @@
-use super::body_for_log::body_for_log;
-use super::redact_json_text::redact_json_text;
-use super::redact_value::redact_value;
-use super::redacted::REDACTED;
+use super::logging_redact::REDACTED;
+use super::logging_redact::body_for_log;
+use super::logging_redact::redact_json_text;
+use super::logging_redact::redact_value;
 
 use serde_json::json;
 

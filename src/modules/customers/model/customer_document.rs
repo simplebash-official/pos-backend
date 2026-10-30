@@ -65,6 +65,7 @@ fn default_version() -> i64 {
 
 impl CustomerDocument {
     #[must_use]
+    /// Converts the stored document into the type the API returns.
     pub fn into_customer(self) -> Customer {
         let key = if self.key.is_empty() {
             generate_id(prefixes::CUSTOMER)

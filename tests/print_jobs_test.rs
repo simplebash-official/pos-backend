@@ -561,13 +561,12 @@ async fn print_jobs_stats_endpoint_returns_today_job_count_revenue_pending_count
     // this test connects its own throwaway database, seeds only into that,
     // and calls the service function directly (bypassing HTTP/router
     // entirely) to get exact, uncontaminated numbers.
-    let app = common::spawn_app().await;
     // Atlas caps database names at 38 bytes.
     let db_name = format!(
         "jtstats_{}",
         &uuid::Uuid::new_v4().simple().to_string()[..24]
     );
-    let db = simplebash_pos_backend::clients::mongo::connect(&app.config.mongodb_uri, &db_name)
+    let db = simplebash_pos_backend::clients::mongo::connect(&common::mongo_uri(), &db_name)
         .await
         .expect("failed to connect to isolated stats test database");
 

@@ -1,8 +1,8 @@
-// Registers a tenant in the platform directory (multi-tenant deployments):
-//   cargo run --bin create_tenant -- <shop-code> "<Business name>" [tenant-id]
-// Pass the tenant id the identity service issued (tnt_...) so staff logins by
-// shop code reach the same data the devices sync; without it a new id is minted.
-// Requires TENANT_MODE=multi on MongoDB (see `.env.web.example`).
+//! Registers a tenant in the platform directory (multi-tenant deployments):
+//!   `cargo run --bin create_tenant -- <shop-code> "<Business name>" [tenant-id]`
+//! Pass the tenant id the identity service issued (tnt_...) so staff logins by
+//! shop code reach the same data the devices sync; without it a new id is minted.
+//! Requires TENANT_MODE=multi on MongoDB (see `.env.web.example`).
 
 use simplebash_pos_backend::clients;
 

@@ -1,4 +1,4 @@
-use super::number_to_words_rupees::number_to_words_rupees;
+use super::service_print_payload::number_to_words_rupees;
 
 #[test]
 fn matches_frontend_examples() {

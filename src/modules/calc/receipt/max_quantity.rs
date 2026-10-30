@@ -1,1 +1,0 @@
-pub const MAX_QUANTITY: i64 = 1_000_000_000;

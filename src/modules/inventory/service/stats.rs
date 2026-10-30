@@ -1,8 +1,8 @@
-// Orchestration for the lightweight Inventory & Stock KPI-card endpoint
-// (`GET /inventory/stats`) — deliberately separate from `overview`, which
-// returns the whole category/subcategory/paginated-product tree; this one
-// exists purely so the frontend's dashboard header doesn't have to fetch
-// that entire tree just to render 4 numbers.
+//! Orchestration for the lightweight Inventory & Stock KPI-card endpoint
+//! (`GET /inventory/stats`) — deliberately separate from `overview`, which
+//! returns the whole category/subcategory/paginated-product tree; this one
+//! exists purely so the frontend's dashboard header doesn't have to fetch
+//! that entire tree just to render 4 numbers.
 
 use crate::clients::db::Db;
 

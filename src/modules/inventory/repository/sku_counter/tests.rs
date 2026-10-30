@@ -1,5 +1,5 @@
-use super::next_sequence::next_sequence;
-use super::reserve_block::reserve_block;
+use super::repository_sku_counter::next_sequence;
+use super::repository_sku_counter::reserve_block;
 use crate::clients::db::Db;
 
 use crate::clients::tenant_db::TenantDatabase;

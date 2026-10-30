@@ -1,3 +1,4 @@
+use simplebash_pos_backend::core::logging::SqlLogging;
 // End-to-end coverage of stock batches — every delivery of a product with
 // its own cost, selling price and remaining quantity — through the real
 // router. The scenario is the one the feature was built for: item A bought
@@ -464,7 +465,7 @@ async fn a_sqlite_database_from_before_batches_is_migrated() {
 
     let path = std::env::temp_dir().join(format!("pos_batch_mig_{}.db", uuid::Uuid::new_v4()));
     let url = format!("sqlite://{}?mode=rwc", path.display());
-    let pool = sqlite::connect(&url).await.unwrap();
+    let pool = sqlite::connect(&url, SqlLogging::Off).await.unwrap();
 
     // Recreate the old shape on top of a fresh schema.
     for statement in [

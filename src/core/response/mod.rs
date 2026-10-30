@@ -1,5 +1,6 @@
-mod api_response;
-mod error_response;
+//! The JSON envelopes every endpoint answers with.
 
-pub use api_response::ApiResponse;
-pub use error_response::ErrorResponse;
+mod core_response;
+
+pub use core_response::ApiResponse;
+pub use core_response::ErrorResponse;

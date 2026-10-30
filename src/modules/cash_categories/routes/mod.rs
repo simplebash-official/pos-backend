@@ -1,10 +1,5 @@
-// HTTP layer for drawer cash categories.
+//! HTTP layer for drawer cash categories.
 
-mod create_category;
-mod list_categories;
-mod merge_category;
-mod router;
-mod similar_categories;
-mod update_category;
+mod cash_categories_routes;
 
-pub use router::router;
+pub use cash_categories_routes::router;

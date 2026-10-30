@@ -1,10 +1,10 @@
-// Pure merge engine for sync v2: decides what to do with an incoming change
-// given what the receiver already holds. No I/O; both the SQLite device
-// applier and the Mongo cloud applier call `decide` so they always agree.
-//
-// Every rule is a total, order-independent function of (local state, incoming
-// change), which is what makes replicas converge no matter the delivery order
-// (see the convergence tests in `core::sync_sim`).
+//! Pure merge engine for sync v2: decides what to do with an incoming change
+//! given what the receiver already holds. No I/O; both the SQLite device
+//! applier and the Mongo cloud applier call `decide` so they always agree.
+//!
+//! Every rule is a total, order-independent function of (local state, incoming
+//! change), which is what makes replicas converge no matter the delivery order
+//! (see the convergence tests in `core::sync_sim`).
 
 pub use crate::domain::sync_v2::{ConflictKind, NewConflict};
 mod append_only_differs;

@@ -1,11 +1,5 @@
-// HTTP layer for the money reports. Read-only; every route needs `reports:view` (Admin and Manager).
+//! HTTP layer for the money reports. Read-only; every route needs `reports:view` (Admin and Manager).
 
-mod cash_flow;
-mod expense_breakdown;
-mod payables;
-mod period;
-mod period_query;
-mod profit_loss;
-mod router;
+mod finance_reports_routes;
 
-pub use router::router;
+pub use finance_reports_routes::router;

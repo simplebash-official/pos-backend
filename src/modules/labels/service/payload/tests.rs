@@ -1,5 +1,5 @@
-use super::build_label_data::build_label_data;
-use super::sticker::Sticker;
+use super::service_payload::Sticker;
+use super::service_payload::build_label_data;
 
 use serde_json::Value;
 

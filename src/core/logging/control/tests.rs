@@ -1,5 +1,5 @@
 use super::super::SqlLogging;
-use super::parse_control::parse_control;
+use super::logging_control::parse_control;
 
 #[test]
 fn parses_log_mode_lines_and_ignores_others() {

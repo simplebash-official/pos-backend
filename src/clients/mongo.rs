@@ -1,6 +1,9 @@
+//! MongoDB connection with bounded retries.
+
 use mongodb::options::{ClientOptions, ResolverConfig};
 use mongodb::{Client, Database};
 
+/// Connects to MongoDB and returns the `db_name` database, retrying a few times with a growing pause.
 pub async fn connect(uri: &str, db_name: &str) -> mongodb::error::Result<Database> {
     let mut last_err = None;
     for attempt in 0..5 {

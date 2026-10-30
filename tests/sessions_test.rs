@@ -104,7 +104,7 @@ async fn session_full_lifecycle_and_z_report() {
     let app = common::spawn_app().await;
 
     // Seed Admin
-    simplebash_pos_backend::seeds::admin::seed_admin(&app.db_handle, None, None)
+    simplebash_pos_backend::seeds::admin::seed_admin(&app.db_handle, &app.config.seed_admin)
         .await
         .unwrap();
 
@@ -690,7 +690,7 @@ async fn session_discrepancy_outside_movement_and_variance_conversion() {
     let app = common::spawn_app().await;
 
     // Seed Admin
-    simplebash_pos_backend::seeds::admin::seed_admin(&app.db_handle, None, None)
+    simplebash_pos_backend::seeds::admin::seed_admin(&app.db_handle, &app.config.seed_admin)
         .await
         .unwrap();
 
@@ -910,7 +910,7 @@ async fn test_shared_vs_isolated_register_shift_mode_and_mid_shift_guard() {
     let app = common::spawn_app_isolated().await;
 
     // Seed Admin
-    simplebash_pos_backend::seeds::admin::seed_admin(&app.db_handle, None, None)
+    simplebash_pos_backend::seeds::admin::seed_admin(&app.db_handle, &app.config.seed_admin)
         .await
         .unwrap();
 
@@ -1167,7 +1167,7 @@ async fn test_shared_vs_isolated_register_shift_mode_and_mid_shift_guard_sqlite(
     let app = common::spawn_app_sqlite().await;
 
     // Seed Admin
-    simplebash_pos_backend::seeds::admin::seed_admin(&app.db_handle, None, None)
+    simplebash_pos_backend::seeds::admin::seed_admin(&app.db_handle, &app.config.seed_admin)
         .await
         .unwrap();
 
@@ -1396,7 +1396,7 @@ async fn reconciliation_exact_and_variance_calculation_on_blind_count() {
     let app = common::spawn_app().await;
 
     // Seed Admin
-    simplebash_pos_backend::seeds::admin::seed_admin(&app.db_handle, None, None)
+    simplebash_pos_backend::seeds::admin::seed_admin(&app.db_handle, &app.config.seed_admin)
         .await
         .unwrap();
 
@@ -1578,7 +1578,7 @@ async fn reconciliation_exact_and_variance_calculation_on_blind_count() {
 async fn test_cashier_name_resolved_when_token_lacks_name() {
     let app = common::spawn_app().await;
 
-    simplebash_pos_backend::seeds::admin::seed_admin(&app.db_handle, None, None)
+    simplebash_pos_backend::seeds::admin::seed_admin(&app.db_handle, &app.config.seed_admin)
         .await
         .unwrap();
 
@@ -1663,7 +1663,7 @@ async fn test_cashier_name_resolved_when_token_lacks_name() {
 async fn cancel_close_returns_a_counted_shift_to_open() {
     let app = common::spawn_app().await;
 
-    simplebash_pos_backend::seeds::admin::seed_admin(&app.db_handle, None, None)
+    simplebash_pos_backend::seeds::admin::seed_admin(&app.db_handle, &app.config.seed_admin)
         .await
         .unwrap();
     let admin_token = mint_token_for(

@@ -1,4 +1,4 @@
-use super::derive_code::derive_code;
+use super::service_sku::derive_code;
 
 #[test]
 fn derives_first_three_letters_uppercased() {

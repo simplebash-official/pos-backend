@@ -1,6 +1,6 @@
-use super::jwks_cache::JwksCache;
-use super::role_for_scope::role_for_scope;
-use super::verify_platform_token::verify_platform_token;
+use super::middleware_platform_jwt::JwksCache;
+use super::middleware_platform_jwt::role_for_scope;
+use super::middleware_platform_jwt::verify_platform_token;
 use crate::core::constants::roles;
 
 use crate::domain::users::Role;
@@ -251,29 +251,73 @@ async fn non_eddsa_and_kidless_tokens_are_rejected() {
 fn test_config(
     jwks_url: Option<String>,
     tenant_mode: crate::core::config::TenantMode,
+    identity_tenant_id: Option<&str>,
 ) -> crate::core::config::Config {
-    crate::core::config::Config {
-        database_type: crate::core::config::DatabaseType::Sqlite,
-        database_url: String::new(),
-        mongodb_uri: String::new(),
-        mongodb_db_name: String::new(),
-        jwt_secret: "unit-test-jwt-secret-that-is-long-enough-0123".to_string(),
-        port: 0,
-        bind_addr: "127.0.0.1".to_string(),
-        jwt_expiry_hours: 1,
-        document_server_url: String::new(),
-        document_server_api_key: String::new(),
-        generated_documents_dir: String::new(),
-        return_window_days: 30,
-        auto_seed: false,
-        tenant_mode,
-        cors_allowed_origins: Vec::new(),
-        identity_jwks_url: jwks_url,
-        identity_issuer: Some(ISSUER.to_string()),
-        identity_tenant_id: None,
-        provision_secret: None,
-        app_env: "test".to_string(),
+    use crate::core::config::{TenantMode, Variables};
+    let multi = tenant_mode == TenantMode::Multi;
+    let mut variables = std::collections::HashMap::from([
+        (
+            "DATABASE_TYPE",
+            if multi { "mongodb" } else { "sqlite" }.to_string(),
+        ),
+        ("DATABASE_URL", "sqlite::memory:".to_string()),
+        ("MONGODB_URI", "mongodb://localhost:27017".to_string()),
+        ("MONGODB_DB_NAME", "unit".to_string()),
+        (
+            "TENANT_MODE",
+            if multi { "multi" } else { "single" }.to_string(),
+        ),
+        (
+            "JWT_SECRET",
+            "unit-test-jwt-secret-that-is-long-enough-0123".to_string(),
+        ),
+        ("JWT_EXPIRY_HOURS", "1".to_string()),
+        ("PORT", "0".to_string()),
+        ("BIND_ADDR", "127.0.0.1".to_string()),
+        ("DOCUMENT_SERVER_URL", "http://127.0.0.1:1".to_string()),
+        ("DOCUMENT_SERVER_API_KEY", "unit-test-key".to_string()),
+        ("GENERATED_DOCUMENTS_DIR", "generated_documents".to_string()),
+        ("RETURN_WINDOW_DAYS", "30".to_string()),
+        ("AUTO_SEED", "false".to_string()),
+        ("CORS_ALLOWED_ORIGINS", String::new()),
+        (
+            "IDENTITY_AUTH",
+            if jwks_url.is_some() {
+                "enabled"
+            } else {
+                "disabled"
+            }
+            .to_string(),
+        ),
+        ("PROVISIONING", "disabled".to_string()),
+        ("APP_ENV", "development".to_string()),
+        ("RATE_LIMIT_BURST", "1".to_string()),
+        ("RATE_LIMIT_REFILL_PER_SEC", "1".to_string()),
+        ("RATE_LIMIT_SENSITIVE_BURST", "1".to_string()),
+        ("RATE_LIMIT_SENSITIVE_REFILL_PER_SEC", "1".to_string()),
+        ("RATE_LIMIT_LIVE_BURST", "1".to_string()),
+        ("RATE_LIMIT_LIVE_REFILL_PER_SEC", "1".to_string()),
+        ("LOG_FILTER", "warn".to_string()),
+        ("LOG_FORMAT", "text".to_string()),
+        ("LOG_BODY_CAP_BYTES", "1024".to_string()),
+        ("LOG_SQL", "off".to_string()),
+        ("LOG_HTTP_BODIES", "false".to_string()),
+        ("INSTALLATION_ID", "inst_unit".to_string()),
+        ("PLATFORM", "unit".to_string()),
+        ("SEED_ADMIN_NAME", "Admin".to_string()),
+        ("SEED_ADMIN_PASSWORD", "unit-test-password".to_string()),
+    ]);
+    if let Some(url) = jwks_url {
+        variables.insert("IDENTITY_JWKS_URL", url);
+        variables.insert("IDENTITY_ISSUER", ISSUER.to_string());
     }
+    if let Some(tenant_id) = identity_tenant_id {
+        variables.insert("IDENTITY_TENANT_ID", tenant_id.to_string());
+    }
+    crate::core::config::Config::from_variables(&Variables::new(&|name| {
+        variables.get(name).cloned()
+    }))
+    .expect("the unit-test configuration is valid")
 }
 
 fn bearer(token: &str) -> axum::http::HeaderMap {
@@ -300,7 +344,7 @@ async fn verify_bearer_derives_the_tenant_for_both_token_kinds() {
     use crate::core::middleware::auth::verify_bearer;
     use crate::core::tenancy::Tenant;
     let mock = mock_jwks(jwks(&[("k1", KEY1_X)])).await;
-    let config = test_config(Some(mock.url.clone()), TenantMode::Multi);
+    let config = test_config(Some(mock.url.clone()), TenantMode::Multi, None);
     let exp = chrono::Utc::now().timestamp() + 300;
 
     // Local HS256 token carrying a tenant.
@@ -312,16 +356,18 @@ async fn verify_bearer_derives_the_tenant_for_both_token_kinds() {
     assert_eq!(v.tenant, Some(Tenant::id("tnt_local").unwrap()));
     assert_eq!(v.tenant_id().as_deref(), Some("tnt_local"));
 
-    // Local token without a tenant (or an empty one): no tenant, which is
-    // what makes CurrentUser reject it in multi mode.
-    for claims in [
-        json!({ "sub": "u1", "exp": exp }),
+    // Local token without a tenant: no tenant, which is what makes CurrentUser reject it in
+    // multi mode.
+    let t = hs256(&config.jwt_secret, json!({ "sub": "u1", "exp": exp }));
+    let v = verify_bearer(&bearer(&t), &config).await.unwrap();
+    assert!(v.tenant.is_none() && v.tenant_id().is_none());
+
+    // A blank tenant claim is malformed, not "no tenant".
+    let t = hs256(
+        &config.jwt_secret,
         json!({ "sub": "u1", "exp": exp, "tid": "  " }),
-    ] {
-        let t = hs256(&config.jwt_secret, claims);
-        let v = verify_bearer(&bearer(&t), &config).await.unwrap();
-        assert!(v.tenant.is_none() && v.tenant_id().is_none());
-    }
+    );
+    assert!(verify_bearer(&bearer(&t), &config).await.is_err());
 
     // Platform token: tenant, Admin role and the Admin permission set.
     let platform = token(KEY1_PEM, "k1", claims("owner", 300, ISSUER));
@@ -343,7 +389,7 @@ async fn verify_bearer_derives_the_tenant_for_both_token_kinds() {
 async fn platform_tokens_are_rejected_when_not_enabled() {
     use crate::core::config::TenantMode;
     use crate::core::middleware::auth::verify_bearer;
-    let config = test_config(None, TenantMode::Multi);
+    let config = test_config(None, TenantMode::Multi, None);
     let platform = token(KEY1_PEM, "k1", claims("owner", 300, ISSUER));
     assert!(verify_bearer(&bearer(&platform), &config).await.is_err());
     assert!(
@@ -361,17 +407,16 @@ async fn single_shop_mode_only_accepts_platform_tokens_for_its_own_shop() {
     // `claims` mints tokens for tenant `tnt_1`.
     let platform = token(KEY1_PEM, "k1", claims("owner", 300, ISSUER));
 
-    // No shop configured: platform tokens are refused outright.
-    let config = test_config(Some(mock.url.clone()), TenantMode::Single);
-    assert!(verify_bearer(&bearer(&platform), &config).await.is_err());
-
     // A different shop: refused.
-    let mut config = test_config(Some(mock.url.clone()), TenantMode::Single);
-    config.identity_tenant_id = Some("tnt_OTHER".to_string());
+    let config = test_config(
+        Some(mock.url.clone()),
+        TenantMode::Single,
+        Some("tnt_OTHER"),
+    );
     assert!(verify_bearer(&bearer(&platform), &config).await.is_err());
 
     // This shop: accepted.
-    config.identity_tenant_id = Some("tnt_1".to_string());
+    let config = test_config(Some(mock.url.clone()), TenantMode::Single, Some("tnt_1"));
     let v = verify_bearer(&bearer(&platform), &config).await.unwrap();
     assert_eq!(v.role, Some(Role::Admin));
 }

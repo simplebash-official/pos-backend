@@ -1,7 +1,7 @@
-use super::line_margin_fn::line_margin;
-use super::per_mille::PER_MILLE;
-use super::round_half_up::round_half_up;
-use super::suggested_price::suggested_price;
+use super::purchases_pricing::PER_MILLE;
+use super::purchases_pricing::line_margin;
+use super::purchases_pricing::round_half_up;
+use super::purchases_pricing::suggested_price;
 
 #[test]
 fn margin_comes_from_the_whole_lot_not_a_rounded_unit_cost() {

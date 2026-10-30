@@ -1,8 +1,6 @@
-// HTTP layer for the drawer rules. Anyone who can see cash movements reads them (the cash form needs
-// the quick amounts and the float target); only the owner changes them.
+//! HTTP layer for the drawer rules. Anyone who can see cash movements reads them (the cash form needs
+//! the quick amounts and the float target); only the owner changes them.
 
-mod get_cash_settings;
-mod router;
-mod update_cash_settings;
+mod cash_settings_routes;
 
-pub use router::router;
+pub use cash_settings_routes::router;

@@ -1,4 +1,4 @@
-// Mongo document shape for the platform `tenants` directory.
+//! Mongo document shape for the platform `tenants` directory.
 
 mod tenant_document;
 

@@ -1,3 +1,4 @@
+use simplebash_pos_backend::core::logging::SqlLogging;
 // Quotations: Admin/Manager-only access, server-side totals, validation,
 // numbering, list filters, cancel, PDF printing, and "no side effects on
 // stock or invoices". The behaviour scenarios run against in-memory-style
@@ -15,7 +16,7 @@ use chrono::{Duration, Utc};
 use serde_json::{Value, json};
 use simplebash_pos_backend::app::AppState;
 use simplebash_pos_backend::clients::db::Db;
-use simplebash_pos_backend::core::config::{Config, DatabaseType};
+use simplebash_pos_backend::core::config::Config;
 use simplebash_pos_backend::core::constants::{permissions as perm, roles};
 use simplebash_pos_backend::domain::users::Role;
 use simplebash_pos_backend::{app, clients};
@@ -46,32 +47,21 @@ async fn setup() -> Ctx {
     dotenvy::dotenv().ok();
     let db_path = std::env::temp_dir().join(format!("pos_quo_test_{}.db", Uuid::new_v4()));
     let db_url = format!("sqlite://{}?mode=rwc", db_path.display());
-    let pool = clients::sqlite::connect(&db_url)
+    let pool = clients::sqlite::connect(&db_url, SqlLogging::Off)
         .await
         .expect("failed to initialize SQLite test database");
 
-    let config = Arc::new(Config {
-        database_type: DatabaseType::Sqlite,
-        database_url: db_url.clone(),
-        mongodb_uri: String::new(),
-        mongodb_db_name: String::new(),
-        jwt_secret: "test-sqlite-jwt-secret-key-that-is-long-enough".to_string(),
-        port: 8080,
-        bind_addr: "127.0.0.1".to_string(),
-        jwt_expiry_hours: 12,
-        document_server_url: common::start_mock_document_server().await,
-        document_server_api_key: "test-doc-key".to_string(),
-        generated_documents_dir: std::env::temp_dir().display().to_string(),
-        return_window_days: 30,
-        auto_seed: false,
-        tenant_mode: simplebash_pos_backend::core::config::TenantMode::Single,
-        cors_allowed_origins: Vec::new(),
-        identity_jwks_url: None,
-        identity_issuer: None,
-        identity_tenant_id: None,
-        provision_secret: None,
-        app_env: "test".to_string(),
-    });
+    let config = Arc::new(common::test_config(&[
+        ("DATABASE_URL", &db_url),
+        (
+            "DOCUMENT_SERVER_URL",
+            &common::start_mock_document_server().await,
+        ),
+        (
+            "GENERATED_DOCUMENTS_DIR",
+            &std::env::temp_dir().display().to_string(),
+        ),
+    ]));
     let document_server = Arc::new(clients::document_server::DocumentServerClient::new(
         config.document_server_url.clone(),
         config.document_server_api_key.clone(),
@@ -812,7 +802,7 @@ async fn a_database_from_before_sync_gains_the_sync_columns_and_keeps_its_quotat
 
     // Opening it (as every start-up does) must add the columns before the capture
     // triggers that read `NEW.version` are installed.
-    let pool = clients::sqlite::connect(&url)
+    let pool = clients::sqlite::connect(&url, SqlLogging::Off)
         .await
         .expect("upgrade succeeds");
 
@@ -859,7 +849,9 @@ async fn a_database_from_before_sync_gains_the_sync_columns_and_keeps_its_quotat
 
     // Running the upgrade again changes nothing.
     pool.close().await;
-    let again = clients::sqlite::connect(&url).await.expect("idempotent");
+    let again = clients::sqlite::connect(&url, SqlLogging::Off)
+        .await
+        .expect("idempotent");
     let version: i64 = sqlx::query_scalar("SELECT version FROM quotations WHERE key = 'quo_old'")
         .fetch_one(&again)
         .await

@@ -1,18 +1,13 @@
-// Pure business types for the imports feature — no I/O, no Mongo/Axum
-// types beyond serde/utoipa derives. Mongo document shapes live in
-// `modules::imports::model` and convert into these before a handler wraps
-// them in `core::response::ApiResponse<T>`.
+//! Pure business types for the imports feature — no I/O, no Mongo/Axum
+//! types beyond serde/utoipa derives. Mongo document shapes live in
+//! `modules::imports::model` and convert into these before a handler wraps
+//! them in `core::response::ApiResponse<T>`.
 
-mod import_batch;
-mod import_batch_list_query;
-mod import_batch_list_response;
-mod import_options;
-mod import_row_error;
-mod process_import_request;
+mod domain_imports;
 
-pub use import_batch::ImportBatch;
-pub use import_batch_list_query::ImportBatchListQuery;
-pub use import_batch_list_response::ImportBatchListResponse;
-pub use import_options::ImportOptions;
-pub use import_row_error::ImportRowError;
-pub use process_import_request::ProcessImportRequest;
+pub use domain_imports::ImportBatch;
+pub use domain_imports::ImportBatchListQuery;
+pub use domain_imports::ImportBatchListResponse;
+pub use domain_imports::ImportOptions;
+pub use domain_imports::ImportRowError;
+pub use domain_imports::ProcessImportRequest;

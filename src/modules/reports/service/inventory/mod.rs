@@ -1,5 +1,6 @@
-mod get_inventory_valuation;
-mod get_top_products;
+//! Inventory valuation and top-product reports.
 
-pub(crate) use get_inventory_valuation::get_inventory_valuation;
-pub(crate) use get_top_products::get_top_products;
+mod service_inventory;
+
+pub(crate) use service_inventory::get_inventory_valuation;
+pub(crate) use service_inventory::get_top_products;

@@ -1,7 +1,7 @@
-use super::activity_per_kind::ACTIVITY_PER_KIND;
-use super::cost::cost;
-use super::percent::percent;
-use super::pulse_input::PulseInput;
+use super::service_pulse::ACTIVITY_PER_KIND;
+use super::service_pulse::PulseInput;
+use super::service_pulse::cost;
+use super::service_pulse::percent;
 
 use crate::core::utils::shop_day;
 use crate::domain::billing::Invoice;

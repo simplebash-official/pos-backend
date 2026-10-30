@@ -1,10 +1,7 @@
-// Dual-engine (Mongo / SQLite) access for the `account_openings` collection.
+//! Dual-engine (Mongo / SQLite) access for the `account_openings` collection.
 
-mod find_by_key;
-mod insert;
-mod openings;
-mod save;
+mod accounts_repository;
 
-pub(crate) use find_by_key::find_by_key;
-pub(crate) use insert::insert;
-pub(crate) use save::save;
+pub(crate) use accounts_repository::find_by_key;
+pub(crate) use accounts_repository::insert;
+pub(crate) use accounts_repository::save;

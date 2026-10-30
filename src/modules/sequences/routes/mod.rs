@@ -1,4 +1,5 @@
-mod reserve_sequence;
-mod router;
+//! HTTP surface of the sequences module.
 
-pub use router::router;
+mod sequences_routes;
+
+pub use sequences_routes::router;

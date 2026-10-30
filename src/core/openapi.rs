@@ -1,3 +1,5 @@
+//! The root OpenAPI document and its security scheme.
+
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 

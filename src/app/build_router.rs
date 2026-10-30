@@ -1,7 +1,6 @@
-use super::app_state::AppState;
-use super::default_single_shop_origins::DEFAULT_SINGLE_SHOP_ORIGINS;
-use super::health;
-use super::server_uptime_seconds::server_uptime_seconds;
+use super::app_items as health;
+use super::app_items::AppState;
+use super::app_items::server_uptime_seconds;
 
 use crate::core::middleware::timing::add_processing_time_to_body;
 use crate::core::openapi::ApiDoc;
@@ -24,31 +23,17 @@ use utoipa_swagger_ui::SwaggerUi;
 /// Swagger UI, CORS, and request tracing — this is the one place all of
 /// that gets wired together, called once from `main.rs`.
 pub fn build_router(state: AppState) -> Router {
-    // Browsers are only answered from an explicit origin list — never `*`:
-    // a desktop backend listens on 127.0.0.1, so a wildcard would let any web
-    // page the shop owner visits drive this API. Multi-tenant deployments with
-    // no `CORS_ALLOWED_ORIGINS` allow no browser origin at all (fail closed);
-    // single-shop ones fall back to the desktop webview + local dev origins.
-    let configured: Vec<&str> = state
-        .config
-        .cors_allowed_origins
-        .iter()
-        .map(String::as_str)
-        .collect();
-    let origin_list: Vec<&str> = if !configured.is_empty() {
-        configured
-    } else if state.config.tenant_mode == crate::core::config::TenantMode::Multi {
-        tracing::warn!(
-            "TENANT_MODE=multi without CORS_ALLOWED_ORIGINS: no browser origin is allowed"
-        );
-        Vec::new()
-    } else {
-        DEFAULT_SINGLE_SHOP_ORIGINS.to_vec()
-    };
+    // The request logger reads these settings; the first call in a process wins.
+    crate::core::logging::install(&state.config.logging);
+    // Browsers are only answered from the configured origin list — never `*`: a desktop backend
+    // listens on 127.0.0.1, so a wildcard would let any web page the shop owner visits drive
+    // this API. `Config` has already checked that every origin is a valid header value.
     let allow_origin = tower_http::cors::AllowOrigin::list(
-        origin_list
-            .iter()
-            .filter_map(|o| o.parse::<axum::http::HeaderValue>().ok()),
+        state.config.cors_allowed_origins.iter().map(|origin| {
+            origin
+                .parse::<axum::http::HeaderValue>()
+                .expect("CORS_ALLOWED_ORIGINS was validated when the configuration loaded")
+        }),
     );
     let cors = CorsLayer::new()
         .allow_origin(allow_origin)
@@ -285,7 +270,9 @@ pub fn build_router(state: AppState) -> Router {
         // Inside CORS/trace so a 429 still carries CORS headers and is logged.
         // Inside CORS/trace so a 429 still carries CORS headers and is logged.
         .layer(axum::middleware::from_fn_with_state(
-            std::sync::Arc::new(crate::core::rate_limit::RequestLimits::from_env()),
+            std::sync::Arc::new(crate::core::rate_limit::RequestLimits::new(
+                &state.config.rate_limits,
+            )),
             crate::core::rate_limit::limit_requests,
         ))
         .layer(cors)
@@ -327,32 +314,15 @@ async fn portal(
     axum::response::Html<String>,
 ) {
     let uptime = server_uptime_seconds();
-    let version = env!("CARGO_PKG_VERSION");
-    let env_name = &state.config.app_env;
-    let env_class =
-        if env_name.eq_ignore_ascii_case("production") || env_name.eq_ignore_ascii_case("prod") {
-            "env-prod"
-        } else {
-            "env-dev"
-        };
-
-    let display_env = match env_name.to_lowercase().as_str() {
-        "production" | "prod" => "Production".to_string(),
-        "development" | "dev" => "Development".to_string(),
-        "staging" | "stage" => "Staging".to_string(),
-        "test" | "testing" => "Test".to_string(),
-        s => {
-            let mut chars = s.chars();
-            match chars.next() {
-                None => "Development".to_string(),
-                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-            }
-        }
+    let version = crate::core::constants::app_version::APP_VERSION;
+    let (env_class, display_env) = match state.config.app_env {
+        crate::core::config::AppEnvironment::Production => ("env-prod", "Production"),
+        crate::core::config::AppEnvironment::Development => ("env-dev", "Development"),
     };
 
     let rendered = PORTAL_HTML
         .replace("__VERSION__", version)
-        .replace("__ENVIRONMENT__", &display_env)
+        .replace("__ENVIRONMENT__", display_env)
         .replace("__ENV_CLASS__", env_class)
         .replace("__INITIAL_UPTIME__", &uptime.to_string());
 

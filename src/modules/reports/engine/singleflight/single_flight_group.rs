@@ -5,6 +5,7 @@ use std::sync::Mutex;
 use tokio::sync::broadcast;
 
 #[derive(Debug)]
+/// Runs one computation per key at a time; concurrent callers for the same key share its result.
 pub struct SingleFlightGroup<V>
 where
     V: Clone + Send + 'static,
@@ -26,6 +27,7 @@ where
     V: Clone + Send + 'static,
 {
     #[must_use]
+    /// A group with no computation in flight.
     pub fn new() -> Self {
         Self {
             calls: Mutex::new(HashMap::new()),

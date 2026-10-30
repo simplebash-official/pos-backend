@@ -1,9 +1,5 @@
-// HTTP layer for receipt photos. Who may see or add a photo follows the record it belongs to.
+//! HTTP layer for receipt photos. Who may see or add a photo follows the record it belongs to.
 
-mod get_attachment_content;
-mod list_attachments;
-mod require_owner_access;
-mod router;
-mod upload_attachment;
+mod attachments_routes;
 
-pub use router::router;
+pub use attachments_routes::router;

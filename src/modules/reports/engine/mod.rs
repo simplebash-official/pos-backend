@@ -1,6 +1,6 @@
-// Reports, Analytics & Chart Engine.
-// Coordinates high-performance in-memory caching, singleflight coalescing,
-// parallel multi-pipeline execution, and automated cache invalidation.
+//! Reports, Analytics & Chart Engine.
+//! Coordinates high-performance in-memory caching, singleflight coalescing,
+//! parallel multi-pipeline execution, and automated cache invalidation.
 
 mod analytics_engine;
 pub mod cache;

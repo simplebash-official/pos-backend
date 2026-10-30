@@ -1,8 +1,8 @@
-use super::build_a4_invoice_data::build_a4_invoice_data;
-use super::build_credit_note_data::build_credit_note_data;
-use super::build_quotation_data::build_quotation_data;
-use super::build_thermal_receipt_data::build_thermal_receipt_data;
-use super::build_z_report_data::build_z_report_data;
+use super::service_print_payload::build_a4_invoice_data;
+use super::service_print_payload::build_credit_note_data;
+use super::service_print_payload::build_quotation_data;
+use super::service_print_payload::build_thermal_receipt_data;
+use super::service_print_payload::build_z_report_data;
 
 use crate::domain::sessions::ZReportResponse;
 

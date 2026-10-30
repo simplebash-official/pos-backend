@@ -1,6 +1,6 @@
-use super::all::all;
-use super::find::find;
-use super::starter_key_prefix::STARTER_KEY_PREFIX;
+use super::service_starters::STARTER_KEY_PREFIX;
+use super::service_starters::all;
+use super::service_starters::find;
 
 use crate::domain::labels::LabelTemplateInput;
 use crate::modules::labels::service::validate::{check_code_fits, validate_template};

@@ -68,11 +68,8 @@ RUN mkdir -p /app/generated_documents /app/data /app/bin && \
 COPY --from=builder --chown=appuser:appuser /app/target/release/simplebash_pos_backend /app/simplebash_pos_backend
 COPY --from=builder --chown=appuser:appuser /app/target/release/bins/ /app/bin/
 
-# Environment defaults
-ENV PORT=8080 \
-    DATABASE_URL=sqlite:///app/data/pos.db?mode=rwc \
-    GENERATED_DOCUMENTS_DIR=/app/generated_documents \
-    RUST_LOG=simplebash_pos_backend=info,tower_http=info,info
+# No environment defaults: the backend requires every variable (see .env.example) and the
+# compose file or `docker run` supplies them.
 
 # Declare persistent volumes for generated invoice/receipt PDF storage and SQLite database
 VOLUME ["/app/generated_documents", "/app/data"]

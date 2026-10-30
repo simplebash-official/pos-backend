@@ -1,10 +1,8 @@
-mod get_changes;
-mod get_sync_status;
-mod hydrate;
-mod record_hard_deletes;
-mod syncable;
+//! Business logic behind the sync status and changes endpoints.
 
-pub use get_changes::get_changes;
-pub use get_sync_status::get_sync_status;
-pub(crate) use hydrate::hydrate;
-pub(crate) use record_hard_deletes::record_hard_deletes;
+mod sync_service;
+
+pub use sync_service::get_changes;
+pub use sync_service::get_sync_status;
+pub(crate) use sync_service::hydrate;
+pub(crate) use sync_service::record_hard_deletes;

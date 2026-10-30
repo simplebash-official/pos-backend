@@ -1,10 +1,5 @@
-// HTTP layer for the expense ledger.
+//! HTTP layer for the expense ledger.
 
-mod add_expense_payment;
-mod create_expense;
-mod get_expense;
-mod get_expense_stats;
-mod list_expenses;
-mod router;
+mod expenses_routes;
 
-pub use router::router;
+pub use expenses_routes::router;

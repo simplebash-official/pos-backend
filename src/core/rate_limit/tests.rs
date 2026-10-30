@@ -1,7 +1,8 @@
-use super::failure_limiter::FailureLimiter;
-use super::limit_requests::limit_requests;
-use super::request_limits::RequestLimits;
-use super::token_buckets::TokenBuckets;
+use super::core_rate_limit::FailureLimiter;
+use super::core_rate_limit::RequestLimits;
+use super::core_rate_limit::TokenBuckets;
+use super::core_rate_limit::limit_requests;
+use crate::core::config::{RateLimitBucket, RateLimits};
 
 use std::time::{Duration, Instant};
 
@@ -35,7 +36,20 @@ fn an_expired_window_unblocks() {
 
 #[test]
 fn live_calculations_have_their_own_bucket() {
-    let limits = RequestLimits::new((1.0, 0.0), (1.0, 0.0), (2.0, 0.0));
+    let limits = RequestLimits::new(&RateLimits {
+        general: RateLimitBucket {
+            burst: 1.0,
+            refill_per_second: 0.0,
+        },
+        sensitive: RateLimitBucket {
+            burst: 1.0,
+            refill_per_second: 0.0,
+        },
+        live: RateLimitBucket {
+            burst: 2.0,
+            refill_per_second: 0.0,
+        },
+    });
     assert!(limits.allow("a", "/api/calc/receipt"));
     assert!(limits.allow("a", "/api/calc/receipt"));
     assert!(!limits.allow("a", "/api/calc/receipt"), "live burst spent");
@@ -47,7 +61,20 @@ fn live_calculations_have_their_own_bucket() {
 
 #[test]
 fn sensitive_paths_are_limited_harder_and_per_client() {
-    let limits = RequestLimits::new((100.0, 0.0), (2.0, 0.0), (3.0, 0.0));
+    let limits = RequestLimits::new(&RateLimits {
+        general: RateLimitBucket {
+            burst: 100.0,
+            refill_per_second: 0.0,
+        },
+        sensitive: RateLimitBucket {
+            burst: 2.0,
+            refill_per_second: 0.0,
+        },
+        live: RateLimitBucket {
+            burst: 3.0,
+            refill_per_second: 0.0,
+        },
+    });
     assert!(limits.allow("a", "/api/auth/login"));
     assert!(limits.allow("a", "/api/auth/login"));
     assert!(
@@ -81,7 +108,20 @@ async fn middleware_answers_429_with_the_error_envelope() {
     use axum::routing::get;
     use tower::ServiceExt;
 
-    let limits = std::sync::Arc::new(RequestLimits::new((100.0, 0.0), (1.0, 0.0), (3.0, 0.0)));
+    let limits = std::sync::Arc::new(RequestLimits::new(&RateLimits {
+        general: RateLimitBucket {
+            burst: 100.0,
+            refill_per_second: 0.0,
+        },
+        sensitive: RateLimitBucket {
+            burst: 1.0,
+            refill_per_second: 0.0,
+        },
+        live: RateLimitBucket {
+            burst: 3.0,
+            refill_per_second: 0.0,
+        },
+    }));
     let app = Router::new()
         .route("/api/auth/shop/x", get(|| async { "ok" }))
         .layer(axum::middleware::from_fn_with_state(limits, limit_requests));

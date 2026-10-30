@@ -1,5 +1,6 @@
-mod api_key_seed_result;
-mod seed_api_key;
+//! Seeds the service API key.
 
-pub use api_key_seed_result::ApiKeySeedResult;
-pub use seed_api_key::seed_api_key;
+mod seeds_api_key;
+
+pub use seeds_api_key::ApiKeySeedResult;
+pub use seeds_api_key::seed_api_key;

@@ -24,14 +24,13 @@
 // extractor before any handler touches the database (same construction as
 // `openapi_test.rs` — the client is built but never pinged).
 
+mod common;
+
 use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
-use mongodb::Client;
-use mongodb::options::{ClientOptions, ResolverConfig};
 use simplebash_pos_backend::app::AppState;
-use simplebash_pos_backend::core::config::Config;
 use simplebash_pos_backend::{app, clients};
 use tower::ServiceExt;
 
@@ -82,45 +81,12 @@ const PUBLIC_ROUTES: &[(&str, &str)] = &[
 ];
 
 async fn build_test_app() -> axum::Router {
-    dotenvy::dotenv().ok();
-    let config = Config::from_env().expect("invalid configuration for test run");
-    let db_handle = match config.database_type {
-        simplebash_pos_backend::core::config::DatabaseType::Sqlite => {
-            let pool = sqlx::sqlite::SqlitePoolOptions::new()
-                .connect_lazy("sqlite::memory:")
-                .expect("in-memory sqlite pool");
-            simplebash_pos_backend::clients::db::Db::Sqlite(pool)
-        }
-        simplebash_pos_backend::core::config::DatabaseType::Mongo => {
-            let uri = if config.mongodb_uri.is_empty() {
-                "mongodb://localhost:27017"
-            } else {
-                &config.mongodb_uri
-            };
-            let parse_res = ClientOptions::parse(uri).await;
-            let options = match parse_res {
-                Ok(opts) => opts,
-                Err(_) => match ClientOptions::parse(uri)
-                    .resolver_config(ResolverConfig::cloudflare())
-                    .await
-                {
-                    Ok(opts) => opts,
-                    Err(_) => ClientOptions::parse(uri)
-                        .resolver_config(ResolverConfig::google())
-                        .await
-                        .expect("valid mongodb uri"),
-                },
-            };
-            let client = Client::with_options(options).expect("client construction");
-            let db_name = if config.mongodb_db_name.is_empty() {
-                "simplebash_pos_test"
-            } else {
-                &config.mongodb_db_name
-            };
-            let db = client.database(db_name);
-            simplebash_pos_backend::clients::db::Db::from_mongo(db)
-        }
-    };
+    let config = common::test_config(&[]);
+    // Never connected: the tests only inspect the routes.
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .connect_lazy("sqlite::memory:")
+        .expect("in-memory sqlite pool");
+    let db_handle = simplebash_pos_backend::clients::db::Db::Sqlite(pool);
 
     let config = Arc::new(config);
     let document_server = Arc::new(clients::document_server::DocumentServerClient::new(

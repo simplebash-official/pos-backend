@@ -1,5 +1,5 @@
-use super::build_product_where_clause::build_product_where_clause;
-use super::like_pattern::like_pattern;
+use super::repository_product_part1::build_product_where_clause;
+use super::repository_product_part1::like_pattern;
 use crate::clients::sqlite::SqlFilter;
 
 use mongodb::bson::doc;

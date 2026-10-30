@@ -1,29 +1,29 @@
-// Change capture for the cloud: ONE consumer per deployment watches the whole
-// database with a MongoDB change stream and appends every write to a syncable
-// collection to the writing tenant's `sync_changes` log, assigning the
-// per-tenant `seq` that devices pull by. Because capture sits below the
-// application, it sees every write path alike - REST handlers, pushed device
-// changes, atomic pipeline updates - with nothing in the service layer having
-// to remember to log.
-//
-// Exactly one instance consumes at a time (a lease document in the platform
-// `sync_consumer` collection, renewed while it runs); standby instances keep
-// serving push/pull. The stream position (resume token) is persisted, so a
-// restart continues where it stopped; re-delivered events are dropped by a
-// per-event `source_token`.
-//
-// If the saved position is no longer usable (the server dropped that part of its
-// history, e.g. after the deployment was down for longer than the oplog window:
-// `ChangeStreamHistoryLost`), retrying it can never succeed. The consumer then
-// opens a fresh stream and re-publishes every document changed since it last
-// saved its position (`catch_up`), so nothing is lost and it does not spin on the
-// same error forever.
-//
-// A hard delete leaves the stream nothing to read (no document, no tenant), so
-// the repositories that delete outright also insert a marker into
-// `sync_tombstones` (`cloud_store::record_hard_deletes`), published here as a
-// delete. Subcategory writes are not watched: they bump their parent
-// category, whose own event carries them.
+//! Change capture for the cloud: ONE consumer per deployment watches the whole
+//! database with a MongoDB change stream and appends every write to a syncable
+//! collection to the writing tenant's `sync_changes` log, assigning the
+//! per-tenant `seq` that devices pull by. Because capture sits below the
+//! application, it sees every write path alike - REST handlers, pushed device
+//! changes, atomic pipeline updates - with nothing in the service layer having
+//! to remember to log.
+//!
+//! Exactly one instance consumes at a time (a lease document in the platform
+//! `sync_consumer` collection, renewed while it runs); standby instances keep
+//! serving push/pull. The stream position (resume token) is persisted, so a
+//! restart continues where it stopped; re-delivered events are dropped by a
+//! per-event `source_token`.
+//!
+//! If the saved position is no longer usable (the server dropped that part of its
+//! history, e.g. after the deployment was down for longer than the oplog window:
+//! `ChangeStreamHistoryLost`), retrying it can never succeed. The consumer then
+//! opens a fresh stream and re-publishes every document changed since it last
+//! saved its position (`catch_up`), so nothing is lost and it does not spin on the
+//! same error forever.
+//!
+//! A hard delete leaves the stream nothing to read (no document, no tenant), so
+//! the repositories that delete outright also insert a marker into
+//! `sync_tombstones` (`cloud_store::record_hard_deletes`), published here as a
+//! delete. Subcategory writes are not watched: they bump their parent
+//! category, whose own event carries them.
 
 use std::collections::HashMap;
 

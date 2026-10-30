@@ -1,10 +1,10 @@
-use super::label_column::label_column;
-use super::merge_class::MergeClass;
-use super::phase::Phase;
-use super::snake_to_camel::snake_to_camel;
-use super::spec::spec;
 use super::sync_resources::SYNC_RESOURCES;
-use super::without_secrets::without_secrets;
+use super::sync_resources_group::MergeClass;
+use super::sync_resources_group::Phase;
+use super::sync_resources_group::label_column;
+use super::sync_resources_group::snake_to_camel;
+use super::sync_resources_group::spec;
+use super::sync_resources_group::without_secrets;
 
 #[test]
 fn origin_stamped_collections_are_exactly_the_synced_tables() {

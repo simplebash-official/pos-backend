@@ -1,5 +1,5 @@
-use super::min_desktop_app_version::MIN_DESKTOP_APP_VERSION;
-use super::parse_app_version::parse_app_version;
+use super::sync_cloud_store::MIN_DESKTOP_APP_VERSION;
+use super::sync_cloud_store::parse_app_version;
 
 #[test]
 fn app_versions_parse_and_compare_numerically() {

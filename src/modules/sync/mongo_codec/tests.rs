@@ -1,6 +1,6 @@
-use super::camel_to_snake::camel_to_snake;
-use super::encode::encode;
-use super::plain_derived::plain_derived;
+use super::sync_mongo_codec::camel_to_snake;
+use super::sync_mongo_codec::encode;
+use super::sync_mongo_codec::plain_derived;
 
 use mongodb::bson::Bson;
 

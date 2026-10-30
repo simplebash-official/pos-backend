@@ -1,6 +1,6 @@
-// MongoDB aggregation queries for stock asset and inventory valuation. Stock
-// is valued per batch — each delivery at its own cost and selling price — so
-// a product's value is the sum over its in-stock `stock_batches`.
+//! MongoDB aggregation queries for stock asset and inventory valuation. Stock
+//! is valued per batch — each delivery at its own cost and selling price — so
+//! a product's value is the sum over its in-stock `stock_batches`.
 
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use futures_util::TryStreamExt;

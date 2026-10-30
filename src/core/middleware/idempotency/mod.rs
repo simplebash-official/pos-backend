@@ -1,7 +1,8 @@
+//! Replay protection for write requests that carry an `Idempotency-Key`.
+
 mod handle_idempotency;
-mod idempotency_document;
-mod max_idempotent_body_bytes;
+mod middleware_idempotency;
 
 pub use handle_idempotency::handle_idempotency;
-pub use idempotency_document::IdempotencyDocument;
-pub use max_idempotent_body_bytes::MAX_IDEMPOTENT_BODY_BYTES;
+pub use middleware_idempotency::IdempotencyDocument;
+pub use middleware_idempotency::MAX_IDEMPOTENT_BODY_BYTES;

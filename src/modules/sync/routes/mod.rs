@@ -1,5 +1,5 @@
-mod get_changes;
-mod router;
-mod sync_status;
+//! HTTP surface of the sync status and changes endpoints.
 
-pub use router::router;
+mod sync_routes;
+
+pub use sync_routes::router;

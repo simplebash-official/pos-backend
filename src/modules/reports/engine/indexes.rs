@@ -1,4 +1,4 @@
-// Compound index setup for MongoDB collections to accelerate analytical queries.
+//! Compound index setup for MongoDB collections to accelerate analytical queries.
 
 use mongodb::{Database, IndexModel};
 
@@ -7,6 +7,7 @@ use mongodb::bson::doc;
 use mongodb::options::IndexOptions;
 use tracing::{info, warn};
 
+/// Creates the indexes the analytics queries rely on.
 pub async fn ensure_analytics_indexes(db: &Database) {
     // 1. Invoices indexes
     let invoice_indexes = vec![

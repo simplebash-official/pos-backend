@@ -1,8 +1,8 @@
-// Thin binary: load config, connect to Mongo, build the router, serve.
-// Each step below fails fast (log + `process::exit(1)`) rather than
-// letting the server start in a half-working state — a bad `.env`,
-// unreachable Mongo, or an already-bound port should never look like a
-// running server that then fails on the first real request.
+//! Thin binary: load config, connect to Mongo, build the router, serve.
+//! Each step below fails fast (log + `process::exit(1)`) rather than
+//! letting the server start in a half-working state — a bad `.env`,
+//! unreachable Mongo, or an already-bound port should never look like a
+//! running server that then fails on the first real request.
 
 use std::sync::Arc;
 
@@ -16,25 +16,26 @@ use simplebash_pos_backend::core::logging;
 
 #[tokio::main]
 async fn main() {
-    // `.ok()`: a missing `.env` is fine in prod (real env vars are already
-    // set); `Config::from_env()` below is what actually enforces the
-    // required variables are present..
+    // `.ok()`: a missing `.env` is fine in prod (real env vars are already set); the
+    // configuration below is what enforces that every required variable is present.
     dotenvy::dotenv().ok();
-    logging::init("simplebash_pos_backend=info,tower_http=info,info");
+    // Logging is configured by the configuration itself, so a bad one can only be reported
+    // on stderr.
+    let config = Config::from_env().unwrap_or_else(|err| {
+        eprintln!("invalid configuration: {err}");
+        std::process::exit(1);
+    });
+    logging::init(&config.logging);
     // Desktop only: lets the shell change logging while we run.
     logging::control::spawn_stdin_control();
 
-    let config = Config::from_env().unwrap_or_else(|err| {
-        tracing::error!(%err, "invalid configuration");
-        std::process::exit(1);
-    });
     let port = config.port;
     let bind_addr = config.bind_addr.clone();
     tracing::info!(
         category = "lifecycle",
         event = "startup.config",
-        version = env!("CARGO_PKG_VERSION"),
-        database_type = ?config.database_type,
+        version = simplebash_pos_backend::core::constants::app_version::APP_VERSION,
+        database = ?config.database,
         bind_addr = %config.bind_addr,
         port = config.port,
         auto_seed = config.auto_seed,
@@ -44,17 +45,14 @@ async fn main() {
         "backend configuration loaded"
     );
 
-    tracing::info!(
-        database_type = ?config.database_type,
-        "Connecting to database..."
-    );
+    tracing::info!(database = ?config.database, "Connecting to database...");
     let db = clients::connect_from_config(&config)
         .await
         .unwrap_or_else(|err| {
             tracing::error!(%err, "failed to connect to database");
             std::process::exit(1);
         });
-    tracing::info!(database_type = ?config.database_type, "Successfully connected to database");
+    tracing::info!(database = ?config.database, "Successfully connected to database");
 
     if let Some(mongo_db) = db.as_mongo() {
         // Best-effort, and deliberately not fatal — see `ensure_indexes`.
@@ -73,41 +71,22 @@ async fn main() {
         std::process::exit(1);
     }
 
-    // A publicly reachable instance must never come up with the well-known
-    // default admin login, so auto-seeding needs an operator-chosen password there.
-    // Loopback (desktop / local dev) keeps the convenience default.
-    let publicly_reachable = config.bind_addr != "127.0.0.1" && config.bind_addr != "localhost";
-    let seed_password_chosen = std::env::var("SEED_ADMIN_PASSWORD")
-        .map(|p| {
-            let p = p.trim();
-            !p.is_empty()
-                && p != "admin@1234"
-                && !p.starts_with("replace_with")
-                && !p.starts_with("change_this")
-        })
-        .unwrap_or(false);
-    if config.auto_seed && publicly_reachable && !seed_password_chosen {
-        tracing::error!(
-            "AUTO_SEED skipped: this instance listens on {}, so SEED_ADMIN_PASSWORD must be set to a non-default value",
-            config.bind_addr
-        );
-    } else if config.auto_seed {
+    if config.auto_seed {
         tracing::info!("AUTO_SEED is enabled — checking and seeding database...");
-        match simplebash_pos_backend::seeds::seed_all(&db).await {
-            Ok(summary) => {
-                tracing::info!(
-                    admin = %summary.admin.message,
-                    providers = summary.providers.categories_created,
-                    suppliers = summary.suppliers.suppliers_created,
-                    customers = summary.customers.customers_created,
-                    products = summary.inventory.products_created,
-                    "Automated database seeding finished successfully"
-                );
-            }
-            Err(err) => {
-                tracing::error!(%err, "Automated database seeding encountered an error");
-            }
-        }
+        let summary = simplebash_pos_backend::seeds::seed_all(&db, &config.seed_admin)
+            .await
+            .unwrap_or_else(|err| {
+                tracing::error!(%err, "automated database seeding failed");
+                std::process::exit(1);
+            });
+        tracing::info!(
+            admin = %summary.admin.message,
+            providers = summary.providers.categories_created,
+            suppliers = summary.suppliers.suppliers_created,
+            customers = summary.customers.customers_created,
+            products = summary.inventory.products_created,
+            "Automated database seeding finished successfully"
+        );
     }
 
     let document_server = clients::document_server::DocumentServerClient::new(
@@ -160,9 +139,8 @@ async fn main() {
     };
     let router = app::build_router(state);
 
-    // Defaults to 0.0.0.0 so a container/reverse proxy can route external
-    // traffic in; `BIND_ADDR=127.0.0.1` restricts it to loopback (used by
-    // the Tauri desktop bundle, where the frontend runs in the same host).
+    // `BIND_ADDR=0.0.0.0` lets a container/reverse proxy route external traffic in;
+    // `127.0.0.1` restricts it to loopback (the Tauri desktop bundle).
     let listener = tokio::net::TcpListener::bind((bind_addr.as_str(), port))
         .await
         .unwrap_or_else(|err| {

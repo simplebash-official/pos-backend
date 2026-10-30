@@ -1,3 +1,5 @@
+//! Sync v2: device push and pull, the cloud change log and its consumers.
+
 pub mod apply;
 pub mod apply_mongo;
 pub mod blocks;

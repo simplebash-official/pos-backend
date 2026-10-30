@@ -75,7 +75,7 @@ fn cat(t: CashMovementType, name: &str) -> String {
 }
 
 async fn scenario(app: &common::TestApp) {
-    simplebash_pos_backend::seeds::admin::seed_admin(&app.db_handle, None, None)
+    simplebash_pos_backend::seeds::admin::seed_admin(&app.db_handle, &app.config.seed_admin)
         .await
         .unwrap();
     let admin = token_for(app, "admin", Role::Admin, "Admin");

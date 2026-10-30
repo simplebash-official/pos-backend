@@ -1,3 +1,5 @@
+//! The unified database handle (`Db`) over MongoDB and SQLite.
+
 use super::tenant_db::TenantDatabase;
 
 use crate::core::tenancy::Tenant;

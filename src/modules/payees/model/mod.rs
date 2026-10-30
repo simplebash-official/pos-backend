@@ -1,4 +1,4 @@
-// Mongo document shape for stored payees (vendors and free-typed payees).
+//! Mongo document shape for stored payees (vendors and free-typed payees).
 
 mod payee_document;
 

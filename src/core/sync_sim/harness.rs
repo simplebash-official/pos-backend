@@ -1,10 +1,10 @@
-use super::apply_result::ApplyResult;
-use super::get_i64::get_i64;
-use super::get_str::get_str;
-use super::iso::iso;
-use super::op::Op;
-use super::rng::Rng;
-use super::sim_device::SimDevice;
+use super::core_sync_sim::ApplyResult;
+use super::core_sync_sim::Op;
+use super::core_sync_sim::Rng;
+use super::core_sync_sim::SimDevice;
+use super::core_sync_sim::get_i64;
+use super::core_sync_sim::get_str;
+use super::core_sync_sim::iso;
 use super::sim_replica::SimReplica;
 
 use crate::domain::sync_v2::{ChangeOp, ChangeRecord};

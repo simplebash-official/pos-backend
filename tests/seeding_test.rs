@@ -49,7 +49,7 @@ async fn test_seed_all_populates_database_and_allows_login() {
     let app = common::spawn_app_sqlite().await;
 
     // 1. Run master seed
-    let summary = seeds::seed_all(&app.db_handle)
+    let summary = seeds::seed_all(&app.db_handle, &app.config.seed_admin)
         .await
         .expect("seed_all should succeed");
 
@@ -155,7 +155,7 @@ async fn test_seeded_data_works_in_sale_transaction() {
     let app = common::spawn_app_sqlite().await;
 
     // Seed database
-    seeds::seed_all(&app.db_handle)
+    seeds::seed_all(&app.db_handle, &app.config.seed_admin)
         .await
         .expect("seed_all should succeed");
 
@@ -251,13 +251,13 @@ async fn test_seed_idempotency() {
     let app = common::spawn_app_sqlite().await;
 
     // Run 1
-    let summary1 = seeds::seed_all(&app.db_handle)
+    let summary1 = seeds::seed_all(&app.db_handle, &app.config.seed_admin)
         .await
         .expect("first seed_all must succeed");
     assert!(summary1.admin.created);
 
     // Run 2
-    let summary2 = seeds::seed_all(&app.db_handle)
+    let summary2 = seeds::seed_all(&app.db_handle, &app.config.seed_admin)
         .await
         .expect("second seed_all must succeed");
     assert!(!summary2.admin.created);

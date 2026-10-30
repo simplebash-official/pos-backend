@@ -1,9 +1,9 @@
-// Axum middleware that measures how long each request took to process and
-// injects the result into the JSON response body as `processingTimeMs`.
-// Applied once at the router level (see `app::build_router`) so every route
-// — success (`ApiResponse<T>`) or error (`ErrorResponse`), across every
-// module — reports timing without each handler needing to compute or thread
-// it through manually.
+//! Axum middleware that measures how long each request took to process and
+//! injects the result into the JSON response body as `processingTimeMs`.
+//! Applied once at the router level (see `app::build_router`) so every route
+//! — success (`ApiResponse<T>`) or error (`ErrorResponse`), across every
+//! module — reports timing without each handler needing to compute or thread
+//! it through manually.
 
 use std::time::Instant;
 

@@ -9,6 +9,7 @@ fn default_version() -> i64 {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// How a cash category is stored in the database.
 pub struct CashCategoryDocument {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<ObjectId>,

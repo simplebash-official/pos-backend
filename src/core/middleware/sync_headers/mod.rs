@@ -1,7 +1,7 @@
-mod add_server_time_header;
-mod device_id;
-mod if_match;
+//! Request and response headers used by device sync: device id, `If-Match` and server time.
 
-pub use add_server_time_header::add_server_time_header;
-pub use device_id::DeviceId;
-pub use if_match::IfMatch;
+mod middleware_sync_headers;
+
+pub use middleware_sync_headers::DeviceId;
+pub use middleware_sync_headers::IfMatch;
+pub use middleware_sync_headers::add_server_time_header;

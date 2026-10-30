@@ -1,10 +1,8 @@
-// Storage document shapes for a shop's own label designs and its label print
-// history. Kept apart from `domain::labels`, which holds the API-facing types.
+//! Storage document shapes for a shop's own label designs and its label print
+//! history. Kept apart from `domain::labels`, which holds the API-facing types.
 
-mod label_job_item_document;
-mod label_print_job_document;
-mod label_template_document;
+mod labels_model;
 
-pub use label_job_item_document::LabelJobItemDocument;
-pub use label_print_job_document::LabelPrintJobDocument;
-pub use label_template_document::LabelTemplateDocument;
+pub use labels_model::LabelJobItemDocument;
+pub use labels_model::LabelPrintJobDocument;
+pub use labels_model::LabelTemplateDocument;

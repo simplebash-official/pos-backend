@@ -1,3 +1,4 @@
+use simplebash_pos_backend::core::logging::SqlLogging;
 // Supplier receipts: one invoice's worth of stock received at once. The scenario runs unchanged
 // on SQLite (the desktop) and on a throwaway Atlas database (the cloud); the migration test
 // rebuilds a desktop database from before receipts existed.
@@ -1342,7 +1343,7 @@ async fn a_sqlite_database_from_before_receipts_is_migrated() {
 
     let path = std::env::temp_dir().join(format!("pos_receipt_mig_{}.db", uuid::Uuid::new_v4()));
     let url = format!("sqlite://{}?mode=rwc", path.display());
-    let pool = sqlite::connect(&url).await.unwrap();
+    let pool = sqlite::connect(&url, SqlLogging::Off).await.unwrap();
 
     // Recreate the old shape on top of a fresh schema.
     for statement in [

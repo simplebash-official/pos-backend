@@ -1,13 +1,8 @@
-// Dual-engine (Mongo / SQLite) access for the `recurring_expenses` collection.
+//! Dual-engine (Mongo / SQLite) access for the `recurring_expenses` collection.
 
-mod find_by_key;
-mod from_row;
-mod insert;
-mod list_all;
-mod save;
-mod templates;
+mod recurring_expenses_repository;
 
-pub(crate) use find_by_key::find_by_key;
-pub(crate) use insert::insert;
-pub(crate) use list_all::list_all;
-pub(crate) use save::save;
+pub(crate) use recurring_expenses_repository::find_by_key;
+pub(crate) use recurring_expenses_repository::insert;
+pub(crate) use recurring_expenses_repository::list_all;
+pub(crate) use recurring_expenses_repository::save;

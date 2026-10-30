@@ -7,6 +7,7 @@ use crate::modules::sequences::model::SequenceBlockDocument;
 use crate::modules::sequences::repository;
 use chrono::{Duration, Utc};
 
+/// Reserves the sequence.
 pub async fn reserve_sequence(
     db: &Db,
     name: String,

@@ -1,7 +1,5 @@
-// HTTP layer for the money accounts.
+//! HTTP layer for the money accounts.
 
-mod list_accounts;
-mod router;
-mod set_account_opening;
+mod accounts_routes;
 
-pub use router::router;
+pub use accounts_routes::router;

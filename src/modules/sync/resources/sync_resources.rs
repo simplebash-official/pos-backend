@@ -1,6 +1,6 @@
-use super::merge_class::MergeClass;
-use super::phase::Phase;
-use super::resource_spec::ResourceSpec;
+use super::sync_resources_group::MergeClass;
+use super::sync_resources_group::Phase;
+use super::sync_resources_group::ResourceSpec;
 
 pub const SYNC_RESOURCES: &[ResourceSpec] = &[
     ResourceSpec {

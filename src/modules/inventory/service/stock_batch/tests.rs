@@ -1,8 +1,8 @@
-use super::allocations_for_return::allocations_for_return;
-use super::backfill_line_allocations::backfill_line_allocations;
-use super::plan_from_batches::plan_from_batches;
-use super::tiers_from_batches::tiers_from_batches;
-use super::weighted_unit_cost::weighted_unit_cost;
+use super::service_stock_batch::allocations_for_return;
+use super::service_stock_batch::backfill_line_allocations;
+use super::service_stock_batch::plan_from_batches;
+use super::service_stock_batch::tiers_from_batches;
+use super::service_stock_batch::weighted_unit_cost;
 
 use crate::domain::inventory::{BatchAllocation, BatchSource};
 use crate::modules::inventory::model::StockBatchDocument;

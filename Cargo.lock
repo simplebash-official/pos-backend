@@ -3505,7 +3505,7 @@ dependencies = [
 
 [[package]]
 name = "simplebash_pos_backend"
-version = "0.1.0"
+version = "0.7.0"
 dependencies = [
  "argon2",
  "axum",

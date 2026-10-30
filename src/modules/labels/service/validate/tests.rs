@@ -1,10 +1,10 @@
-use super::check_code_fits::check_code_fits;
-use super::code128_modules::code128_modules;
-use super::max_custom_text_chars::MAX_CUSTOM_TEXT_CHARS;
-use super::max_elements::MAX_ELEMENTS;
-use super::max_name_chars::MAX_NAME_CHARS;
-use super::qr_modules::qr_modules;
-use super::validate_template::validate_template;
+use super::service_validate::MAX_CUSTOM_TEXT_CHARS;
+use super::service_validate::MAX_ELEMENTS;
+use super::service_validate::MAX_NAME_CHARS;
+use super::service_validate::check_code_fits;
+use super::service_validate::code128_modules;
+use super::service_validate::qr_modules;
+use super::service_validate::validate_template;
 use crate::core::error::{AppError, AppResult};
 use crate::domain::labels::{LabelElement, LabelTemplateInput, TextSource};
 

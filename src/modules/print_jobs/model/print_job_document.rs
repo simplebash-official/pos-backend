@@ -75,6 +75,7 @@ fn default_version() -> i64 {
 
 impl PrintJobDocument {
     #[must_use]
+    /// Converts the stored document into the type the API returns.
     pub fn into_print_job(self) -> PrintJob {
         let key = if self.key.is_empty() {
             generate_id(prefixes::PRINT_JOB)

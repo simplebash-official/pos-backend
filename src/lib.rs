@@ -1,7 +1,6 @@
-// Library crate re-exporting every module so `main.rs`, `src/bin/*.rs`
-// (separate binary crates), and `tests/*.rs` (separate integration-test
-// crates) can all share the same code via `simplebash_pos_backend::...` — none
-// of them can reach `main.rs`'s `crate::` paths directly.
+//! The SimpleBash point-of-sale backend as a library, so `main.rs`, the binaries in `src/bin` and
+//! the integration tests in `tests` share one set of modules through `simplebash_pos_backend::...`.
+
 pub mod app;
 pub mod clients;
 pub mod core;

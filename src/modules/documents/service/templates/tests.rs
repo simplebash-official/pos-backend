@@ -1,12 +1,12 @@
-use super::cache_key::cache_key;
-use super::design_settings::DesignSettings;
-use super::list_in::list_in;
-use super::merge_settings_in::merge_settings_in;
-use super::option_values::OptionValues;
-use super::resolve_in::resolve_in;
-use super::selections::Selections;
-use super::validate_option_value::validate_option_value;
-use super::with_options::with_options;
+use super::service_templates::DesignSettings;
+use super::service_templates::OptionValues;
+use super::service_templates::Selections;
+use super::service_templates::cache_key;
+use super::service_templates::list_in;
+use super::service_templates::merge_settings_in;
+use super::service_templates::resolve_in;
+use super::service_templates::validate_option_value;
+use super::service_templates::with_options;
 use crate::clients::document_server::TemplateInfo;
 use crate::core::error::WireParts;
 

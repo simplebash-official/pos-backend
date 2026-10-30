@@ -1,5 +1,6 @@
-mod sequence_block_document;
-mod sequence_counter_document;
+//! Stored documents of the sequences module.
 
-pub use sequence_block_document::SequenceBlockDocument;
-pub use sequence_counter_document::SequenceCounterDocument;
+mod sequences_model;
+
+pub use sequences_model::SequenceBlockDocument;
+pub use sequences_model::SequenceCounterDocument;

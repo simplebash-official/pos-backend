@@ -1,6 +1,6 @@
 use super::compute::compute;
 
-use super::pulse_input::PulseInput;
+use super::service_pulse::PulseInput;
 
 use crate::domain::employees::Employee;
 use crate::domain::inventory::Product;

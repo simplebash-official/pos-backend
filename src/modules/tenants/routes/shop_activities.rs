@@ -1,4 +1,4 @@
-// Internal operator endpoint to list recent business activities for a given shop.
+//! Internal operator endpoint to list recent business activities for a given shop.
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -6,10 +6,10 @@ use axum::http::HeaderMap;
 use futures_util::TryStreamExt;
 use mongodb::bson::{Document, doc};
 
-use super::authorize::authorize;
-use super::shop_activities_query::ShopActivitiesQuery;
-use super::shop_activities_response::ShopActivitiesResponse;
-use super::shop_activity_item::ShopActivityItem;
+use super::tenants_routes::ShopActivitiesQuery;
+use super::tenants_routes::ShopActivitiesResponse;
+use super::tenants_routes::ShopActivityItem;
+use super::tenants_routes::authorize;
 use crate::app::AppState;
 use crate::core::constants::codes;
 use crate::core::constants::modules;

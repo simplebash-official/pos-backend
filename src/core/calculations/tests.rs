@@ -1,6 +1,6 @@
-use super::compute_order_discount::compute_order_discount;
-use super::compute_sale_totals::compute_sale_totals;
-use super::validate_split_payments::validate_split_payments;
+use super::core_calculations::compute_order_discount;
+use super::core_calculations::compute_sale_totals;
+use super::core_calculations::validate_split_payments;
 
 use crate::domain::billing::{InvoiceItem, PricingAdjustments, SplitPayment};
 

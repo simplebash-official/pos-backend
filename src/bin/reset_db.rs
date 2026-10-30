@@ -20,10 +20,7 @@ async fn main() {
     if let Some(tenant_db) = db.as_mongo() {
         // Maintenance binary: intentionally operates on the whole database.
         let mongo = tenant_db.unscoped();
-        println!(
-            "Dropping all MongoDB collections in '{}'...",
-            config.mongodb_db_name
-        );
+        println!("Dropping all MongoDB collections in '{}'...", mongo.name());
         let collections = mongo
             .list_collection_names()
             .await
@@ -130,7 +127,7 @@ async fn main() {
     }
 
     println!("\n🌱 Seeding base system data (seed_all)...");
-    match seeds::seed_all(&db).await {
+    match seeds::seed_all(&db, &config.seed_admin).await {
         Ok(summary) => {
             println!("✅ Master seeding completed successfully!");
             println!("👤 Admin: {}", summary.admin.message);

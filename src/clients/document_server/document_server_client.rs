@@ -19,6 +19,7 @@ pub(super) struct TemplateCache {
     pub(super) templates: Arc<Vec<TemplateInfo>>,
 }
 
+/// Client of the document-server: lists templates, validates payloads and renders PDFs.
 pub struct DocumentServerClient {
     pub(super) http: reqwest::Client,
     pub(super) base_url: String,
@@ -32,7 +33,7 @@ pub struct DocumentServerClient {
     // stop the shop from printing. The schema rides along in the same entry
     // because `render_template()` validates every payload against it *before*
     // sending.
-    pub(super) template_cache: RwLock<HashMap<String, TemplateCache>>,
+    pub(super) template_cache: RwLock<HashMap<Option<String>, TemplateCache>>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -53,6 +54,7 @@ impl std::fmt::Debug for DocumentServerClient {
 
 impl DocumentServerClient {
     #[must_use]
+    /// Creates a client for the document-server at `base_url`, authenticating with `api_key`.
     pub fn new(base_url: String, api_key: String) -> Self {
         Self {
             http: reqwest::Client::new(),
@@ -99,14 +101,14 @@ impl DocumentServerClient {
             "document-server did not become ready at {} after {} attempts: {}",
             self.base_url,
             max_attempts,
-            last_err.unwrap_or_else(|| "unknown error".to_string())
+            last_err.as_deref().unwrap_or("no attempt was made")
         ))
     }
 
     /// Every template the calling tenant may use, from the cache while it is
     /// fresh, else from `GET /api/templates`.
     pub async fn list_templates(&self) -> AppResult<Arc<Vec<TemplateInfo>>> {
-        let tenant = crate::core::tenancy::current_tenant_id().unwrap_or_default();
+        let tenant = crate::core::tenancy::current_tenant_id();
         if let Some(cache) = self.template_cache.read().await.get(&tenant)
             && cache.loaded_at.elapsed() < self.cache_ttl
         {

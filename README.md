@@ -87,10 +87,9 @@ cargo run                  # API on http://localhost:8080
 
 Open **http://localhost:8080/docs** for the interactive API reference.
 
-The demo admin created by the seeder is `admin` / `admin@1234` — for
-local development only. Set `SEED_ADMIN_PASSWORD` to choose your own; the
-server refuses to seed that public default when it is reachable from the
-network or `APP_ENV=production`.
+The admin the seeder creates is `admin` with the password you set in
+`SEED_ADMIN_PASSWORD`. The server refuses to seed `admin@1234` or a placeholder
+password while it is reachable from the network.
 
 ### Run it with MongoDB
 
@@ -99,31 +98,36 @@ Copy `.env.web.example` instead, and set `DATABASE_TYPE=mongodb`,
 
 ## Configuration
 
-All settings come from environment variables (or `.env`). The server checks
-them at startup and refuses to start with a missing or placeholder secret.
+All settings come from environment variables (or `.env`). **Every variable is
+required: the backend has no built-in defaults.** The server checks them at startup
+and exits with the name of the first missing or invalid one.
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `DATABASE_TYPE` | `sqlite` | `sqlite` or `mongodb` |
-| `DATABASE_URL` | `sqlite://data/pos.db?mode=rwc` | SQLite file (SQLite mode) |
-| `MONGODB_URI`, `MONGODB_DB_NAME` | — | Required in MongoDB mode |
-| `PORT` / `BIND_ADDR` | `8080` / `0.0.0.0` | Listener. The desktop app uses `127.0.0.1` |
-| `JWT_SECRET` | **required** | 32+ random characters; signs login tokens |
-| `JWT_EXPIRY_HOURS` | **required** | How long a login lasts |
-| `DOCUMENT_SERVER_URL` | **required** | Base URL of document-server |
-| `DOCUMENT_SERVER_API_KEY` | **required** | Shared secret, equal to document-server's `INTERNAL_API_KEY` |
-| `GENERATED_DOCUMENTS_DIR` | `generated_documents` | Where rendered PDFs are cached |
-| `RETURN_WINDOW_DAYS` | `30` | Days after a sale that a return needs no manager override |
-| `AUTO_SEED` | `false` | Run all seeders on startup |
-| `SEED_ADMIN_PASSWORD` / `SEED_ADMIN_NAME` | — | First admin account for the seeder (its username is always `admin`) |
-| `TENANT_MODE` | `single` | `multi` = many shops on one server (MongoDB only) |
-| `CORS_ALLOWED_ORIGINS` | desktop + local dev only | Comma-separated browser origins allowed to call the API |
-| `RATE_LIMIT_BURST` / `RATE_LIMIT_REFILL_PER_SEC` | `200` / `50` | Per-client request bucket for every route (client = nginx `X-Real-IP`; direct callers share one bucket) |
-| `RATE_LIMIT_SENSITIVE_BURST` / `RATE_LIMIT_SENSITIVE_REFILL_PER_SEC` | `20` / `0.5` | Tighter per-client bucket for `/api/auth`, `/api/system`, `/api/internal`; exceeding either answers `429 RATE_LIMITED` |
-| `IDENTITY_JWKS_URL`, `IDENTITY_ISSUER`, `IDENTITY_TENANT_ID` | — | Optional sign-in through the SimpleBash identity service |
-| `PROVISION_SECRET` | — | Multi-tenant only: lets the identity service create shops |
-| `APP_ENV` | `development` | `production` tightens seeding rules |
-| `RUST_LOG`, `LOG_FORMAT`, `LOG_HTTP_BODIES`, `LOG_SQL` | — | Logging (`LOG_FORMAT=json` is used by the desktop app) |
+| Variable | Purpose |
+|---|---|
+| `DATABASE_TYPE` | `sqlite` or `mongodb` |
+| `DATABASE_URL` | SQLite file (required when `DATABASE_TYPE=sqlite`) |
+| `MONGODB_URI`, `MONGODB_DB_NAME` | Required when `DATABASE_TYPE=mongodb` |
+| `TENANT_MODE` | `single`, or `multi` = many shops on one server (MongoDB only) |
+| `APP_ENV` | `development` or `production` |
+| `PORT`, `BIND_ADDR` | Listener. The desktop app uses `127.0.0.1` |
+| `CORS_ALLOWED_ORIGINS` | Comma-separated browser origins allowed to call the API; empty allows none |
+| `JWT_SECRET` | 32+ random characters; signs login tokens |
+| `JWT_EXPIRY_HOURS` | How long a login lasts |
+| `IDENTITY_AUTH` | `disabled` or `enabled` (sign-in through the SimpleBash identity service) |
+| `IDENTITY_JWKS_URL`, `IDENTITY_ISSUER` | Required when `IDENTITY_AUTH=enabled` |
+| `IDENTITY_TENANT_ID` | Required when enabled in `single` mode: the one shop whose tokens are accepted |
+| `PROVISIONING` | `disabled` or `enabled` (multi-tenant only: the identity service creates shops) |
+| `PROVISION_SECRET` | 16+ characters; required when `PROVISIONING=enabled` |
+| `DOCUMENT_SERVER_URL`, `DOCUMENT_SERVER_API_KEY` | document-server address and its shared secret (equal to its `INTERNAL_API_KEY`) |
+| `GENERATED_DOCUMENTS_DIR` | Where rendered PDFs are cached |
+| `RETURN_WINDOW_DAYS` | Days after a sale that a return needs no manager override |
+| `AUTO_SEED` | `true` or `false`: run all seeders on startup |
+| `SEED_ADMIN_NAME`, `SEED_ADMIN_PASSWORD` | First admin account (its username is always `admin`) |
+| `INSTALLATION_ID`, `PLATFORM` | What this installation reports in its record and sync captures |
+| `RATE_LIMIT_BURST`, `RATE_LIMIT_REFILL_PER_SEC` | Per-client bucket for every route |
+| `RATE_LIMIT_SENSITIVE_BURST`, `RATE_LIMIT_SENSITIVE_REFILL_PER_SEC` | Tighter bucket for `/api/auth`, `/api/system`, `/api/internal` (`429 RATE_LIMITED`) |
+| `RATE_LIMIT_LIVE_BURST`, `RATE_LIMIT_LIVE_REFILL_PER_SEC` | Bucket for `/api/calc` |
+| `LOG_FILTER`, `LOG_FORMAT`, `LOG_BODY_CAP_BYTES`, `LOG_SQL`, `LOG_HTTP_BODIES` | Logging (`LOG_FORMAT=json` is used by the desktop app) |
 
 See [`.env.example`](.env.example), [`.env.desktop.example`](.env.desktop.example)
 and [`.env.web.example`](.env.web.example) for annotated templates.

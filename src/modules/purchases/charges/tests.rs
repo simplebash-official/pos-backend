@@ -1,11 +1,11 @@
-use super::allocate::allocate;
-use super::batch_cost::BatchCost;
-use super::charge_figure::ChargeFigure;
-use super::charge_totals_fn::charge_totals;
-use super::owed_total::owed_total;
-use super::rounded_unit::rounded_unit;
-use super::split_cost::split_cost;
-use super::weights::weights;
+use super::purchases_charges::BatchCost;
+use super::purchases_charges::ChargeFigure;
+use super::purchases_charges::allocate;
+use super::purchases_charges::charge_totals;
+use super::purchases_charges::owed_total;
+use super::purchases_charges::rounded_unit;
+use super::purchases_charges::split_cost;
+use super::purchases_charges::weights;
 use crate::domain::purchase_receipts::{Allocation, BilledBy, ChargeKind};
 
 #[test]

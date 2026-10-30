@@ -1,9 +1,5 @@
-// HTTP layer for regular bills.
+//! HTTP layer for regular bills.
 
-mod create_template;
-mod get_period_status;
-mod list_bills;
-mod router;
-mod update_template;
+mod recurring_expenses_routes;
 
-pub use router::router;
+pub use recurring_expenses_routes::router;

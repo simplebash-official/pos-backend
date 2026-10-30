@@ -1,5 +1,6 @@
-mod admin_seed_result;
-mod seed_admin;
+//! Seeds the first administrator account.
 
-pub use admin_seed_result::AdminSeedResult;
-pub use seed_admin::seed_admin;
+mod seeds_admin;
+
+pub use seeds_admin::AdminSeedResult;
+pub use seeds_admin::seed_admin;

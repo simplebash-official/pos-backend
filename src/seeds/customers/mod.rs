@@ -1,9 +1,8 @@
-mod customer_seed_result;
-mod sample_customers;
-mod seed_customer;
-mod seed_customers;
+//! Seeds sample customers.
 
-pub use customer_seed_result::CustomerSeedResult;
-pub use sample_customers::sample_customers;
-pub use seed_customer::SeedCustomer;
-pub use seed_customers::seed_customers;
+mod seeds_customers;
+
+pub use seeds_customers::CustomerSeedResult;
+pub use seeds_customers::SeedCustomer;
+pub use seeds_customers::sample_customers;
+pub use seeds_customers::seed_customers;

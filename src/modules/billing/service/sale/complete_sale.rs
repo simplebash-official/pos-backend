@@ -1,4 +1,4 @@
-use super::resolve_sale_items::resolve_sale_items;
+use super::service_sale::resolve_sale_items;
 use crate::clients::db::Db;
 use crate::core::calculations;
 use crate::core::constants::{codes, prefixes};
@@ -228,6 +228,7 @@ async fn apply_line_item_side_effects(
     }
 }
 
+/// Completes the sale.
 pub async fn complete_sale(
     db: &Db,
     body: CreateSaleRequest,

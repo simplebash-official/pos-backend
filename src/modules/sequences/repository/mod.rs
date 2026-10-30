@@ -1,5 +1,6 @@
-mod insert_block;
-mod reserve_block;
+//! Storage of sequence blocks.
 
-pub(crate) use insert_block::insert_block;
-pub(crate) use reserve_block::reserve_block;
+mod sequences_repository;
+
+pub(crate) use sequences_repository::insert_block;
+pub(crate) use sequences_repository::reserve_block;

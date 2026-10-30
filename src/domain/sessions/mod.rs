@@ -1,57 +1,32 @@
-// Pure business types for register sessions (shifts), cash drawer management,
-// cash movements, and Z-report reconciliation. No I/O, no framework types
-// beyond serde/utoipa derives.
+//! Pure business types for register sessions (shifts), cash drawer management,
+//! cash movements, and Z-report reconciliation. No I/O, no framework types
+//! beyond serde/utoipa derives.
 
-mod cash_direction;
-mod cash_movement;
-mod cash_movement_list_query;
-mod cash_movement_list_response;
-mod cash_movement_type;
-mod close_session_request;
-mod convert_variance_request;
-mod create_cash_movement_request;
-mod denomination_rupees;
-mod drawer_state;
-mod open_session_request;
-mod register_session;
-mod reopen_session_request;
-mod reverse_cash_movement_request;
-mod session_list_query;
-mod session_list_response;
-mod session_status;
-mod set_pin_request;
-mod submit_blind_count_request;
-mod variance_tolerance_cents;
-mod verify_pin_request;
-mod verify_pin_response;
-mod z_report_cash_reconciliation;
-mod z_report_movement_group;
-mod z_report_payment_method_summary;
-mod z_report_response;
+mod domain_sessions;
 
-pub use cash_direction::CashDirection;
-pub use cash_movement::CashMovement;
-pub use cash_movement_list_query::CashMovementListQuery;
-pub use cash_movement_list_response::CashMovementListResponse;
-pub use cash_movement_type::CashMovementType;
-pub use close_session_request::CloseSessionRequest;
-pub use convert_variance_request::ConvertVarianceRequest;
-pub use create_cash_movement_request::CreateCashMovementRequest;
-pub use denomination_rupees::DENOMINATION_RUPEES;
-pub use drawer_state::DrawerState;
-pub use open_session_request::OpenSessionRequest;
-pub use register_session::RegisterSession;
-pub use reopen_session_request::ReopenSessionRequest;
-pub use reverse_cash_movement_request::ReverseCashMovementRequest;
-pub use session_list_query::SessionListQuery;
-pub use session_list_response::SessionListResponse;
-pub use session_status::SessionStatus;
-pub use set_pin_request::SetPinRequest;
-pub use submit_blind_count_request::SubmitBlindCountRequest;
-pub use variance_tolerance_cents::VARIANCE_TOLERANCE_CENTS;
-pub use verify_pin_request::VerifyPinRequest;
-pub use verify_pin_response::VerifyPinResponse;
-pub use z_report_cash_reconciliation::ZReportCashReconciliation;
-pub use z_report_movement_group::ZReportMovementGroup;
-pub use z_report_payment_method_summary::ZReportPaymentMethodSummary;
-pub use z_report_response::ZReportResponse;
+pub use domain_sessions::CashDirection;
+pub use domain_sessions::CashMovement;
+pub use domain_sessions::CashMovementListQuery;
+pub use domain_sessions::CashMovementListResponse;
+pub use domain_sessions::CashMovementType;
+pub use domain_sessions::CloseSessionRequest;
+pub use domain_sessions::ConvertVarianceRequest;
+pub use domain_sessions::CreateCashMovementRequest;
+pub use domain_sessions::DENOMINATION_RUPEES;
+pub use domain_sessions::DrawerState;
+pub use domain_sessions::OpenSessionRequest;
+pub use domain_sessions::RegisterSession;
+pub use domain_sessions::ReopenSessionRequest;
+pub use domain_sessions::ReverseCashMovementRequest;
+pub use domain_sessions::SessionListQuery;
+pub use domain_sessions::SessionListResponse;
+pub use domain_sessions::SessionStatus;
+pub use domain_sessions::SetPinRequest;
+pub use domain_sessions::SubmitBlindCountRequest;
+pub use domain_sessions::VARIANCE_TOLERANCE_CENTS;
+pub use domain_sessions::VerifyPinRequest;
+pub use domain_sessions::VerifyPinResponse;
+pub use domain_sessions::ZReportCashReconciliation;
+pub use domain_sessions::ZReportMovementGroup;
+pub use domain_sessions::ZReportPaymentMethodSummary;
+pub use domain_sessions::ZReportResponse;

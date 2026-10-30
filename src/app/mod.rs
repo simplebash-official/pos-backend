@@ -1,10 +1,8 @@
-mod app_state;
-mod build_router;
-mod default_single_shop_origins;
-mod health;
-mod server_uptime_seconds;
+//! Application assembly: the shared `AppState`, the router with every module mounted, and the health endpoints.
 
-pub use app_state::AppState;
+mod app_items;
+mod build_router;
+
+pub use app_items::AppState;
+pub use app_items::server_uptime_seconds;
 pub use build_router::build_router;
-pub use default_single_shop_origins::DEFAULT_SINGLE_SHOP_ORIGINS;
-pub use server_uptime_seconds::server_uptime_seconds;

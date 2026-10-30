@@ -1,4 +1,4 @@
-use super::normalize_shop_code::normalize_shop_code;
+use super::tenants_service::normalize_shop_code;
 
 #[test]
 fn shop_codes_are_lowercased_and_validated() {

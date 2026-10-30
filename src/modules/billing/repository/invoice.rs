@@ -1,5 +1,5 @@
-// Mongo and SQLite access for invoice records, specifically invoice mutation helpers
-// for credit notes, voiding, and closing.
+//! Mongo and SQLite access for invoice records, specifically invoice mutation helpers
+//! for credit notes, voiding, and closing.
 
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use mongodb::bson::oid::ObjectId;

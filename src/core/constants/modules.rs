@@ -1,3 +1,5 @@
+//! Feature module names, used as OpenAPI tags and in permission checks.
+
 /// Standard feature module names and OpenAPI tags used across the application.
 pub const AUTH: &str = "auth";
 pub const BILLING: &str = "billing";

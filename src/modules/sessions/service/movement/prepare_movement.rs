@@ -1,6 +1,6 @@
-use super::cash_in_drawer::cash_in_drawer;
-use super::clean_text::clean_text;
-use super::note_max::NOTE_MAX;
+use super::service_movement::NOTE_MAX;
+use super::service_movement::cash_in_drawer;
+use super::service_movement::clean_text;
 use crate::clients::db::Db;
 
 use crate::core::constants::{codes, prefixes};

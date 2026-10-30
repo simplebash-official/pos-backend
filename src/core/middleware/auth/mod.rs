@@ -1,16 +1,11 @@
-mod account_status;
-mod admin_user;
-mod claims;
-mod current_user;
-mod invalidate_account_status;
-mod sync_agent;
-mod verified_token;
-mod verify_bearer;
+//! Authentication: token verification and the `CurrentUser` / `AdminUser` extractors.
 
-pub use admin_user::AdminUser;
-pub use claims::Claims;
-pub use current_user::CurrentUser;
-pub use invalidate_account_status::invalidate_account_status;
-pub use sync_agent::SyncAgent;
-pub use verified_token::VerifiedToken;
-pub use verify_bearer::verify_bearer;
+mod middleware_auth;
+
+pub use middleware_auth::AdminUser;
+pub use middleware_auth::Claims;
+pub use middleware_auth::CurrentUser;
+pub use middleware_auth::SyncAgent;
+pub use middleware_auth::VerifiedToken;
+pub use middleware_auth::invalidate_account_status;
+pub use middleware_auth::verify_bearer;

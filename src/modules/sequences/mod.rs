@@ -1,3 +1,5 @@
+//! Document-number sequences reserved by devices that create documents offline.
+
 mod counter_id;
 mod model;
 mod repository;

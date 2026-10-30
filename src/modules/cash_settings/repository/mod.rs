@@ -1,10 +1,7 @@
-// Dual-engine (Mongo / SQLite) access for the single `cash_settings` row.
+//! Dual-engine (Mongo / SQLite) access for the single `cash_settings` row.
 
-mod find;
-mod insert;
-mod save;
-mod settings;
+mod cash_settings_repository;
 
-pub(crate) use find::find;
-pub(crate) use insert::insert;
-pub(crate) use save::save;
+pub(crate) use cash_settings_repository::find;
+pub(crate) use cash_settings_repository::insert;
+pub(crate) use cash_settings_repository::save;

@@ -1,23 +1,14 @@
-// Mongo and SQLite access for the `quotations` collection/table. Same
-// never-interpret-a-miss-as-an-error convention as every other repository —
-// `service` decides what a missing row means.
+//! Mongo and SQLite access for the `quotations` collection/table. Same
+//! never-interpret-a-miss-as-an-error convention as every other repository —
+//! `service` decides what a missing row means.
 
-mod cancel;
-mod find_by_id;
-mod find_by_id_or_key;
-mod find_by_key;
-mod fulfill;
-mod insert;
-mod list;
-mod list_filter;
-mod quotations;
-mod row_to_doc;
+mod quotations_repository;
 
-pub(crate) use cancel::cancel;
+pub(crate) use quotations_repository::cancel;
 
-pub(crate) use find_by_id_or_key::find_by_id_or_key;
+pub(crate) use quotations_repository::find_by_id_or_key;
 
-pub(crate) use fulfill::fulfill;
-pub(crate) use insert::insert;
-pub(crate) use list::list;
-pub(crate) use list_filter::ListFilter;
+pub(crate) use quotations_repository::ListFilter;
+pub(crate) use quotations_repository::fulfill;
+pub(crate) use quotations_repository::insert;
+pub(crate) use quotations_repository::list;

@@ -1,4 +1,4 @@
-// Z-Report (End-of-Session Summary) compilation service.
+//! Z-Report (End-of-Session Summary) compilation service.
 
 use chrono::Utc;
 
@@ -82,6 +82,7 @@ const KIND_ORDER: [CashMovementType; 8] = [
     CashMovementType::NoSale,
 ];
 
+/// Generates the z report.
 pub async fn generate_z_report(db: &Db, session_key: &str) -> AppResult<ZReportResponse> {
     let session_doc = sessions::find_session_by_id_or_key(db, session_key)
         .await?

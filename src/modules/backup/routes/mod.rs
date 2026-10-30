@@ -1,9 +1,7 @@
-// HTTP route handlers and OpenAPI declarations for data backup and restore.
+//! HTTP route handlers and OpenAPI declarations for data backup and restore.
 
-mod export_backup;
-mod restore_backup;
-mod router;
+mod backup_routes;
 
-pub use export_backup::export_backup;
-pub use restore_backup::restore_backup;
-pub use router::router;
+pub use backup_routes::export_backup;
+pub use backup_routes::restore_backup;
+pub use backup_routes::router;

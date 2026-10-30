@@ -1,6 +1,6 @@
-use super::origin_field::ORIGIN_FIELD;
-use super::origin_for::origin_for;
-use super::stamp_update::stamp_update;
+use super::core_sync_origin::ORIGIN_FIELD;
+use super::core_sync_origin::origin_for;
+use super::core_sync_origin::stamp_update;
 use mongodb::bson::doc;
 use mongodb::options::UpdateModifications;
 

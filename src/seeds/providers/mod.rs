@@ -1,9 +1,8 @@
-mod default_categories;
-mod provider_seed_result;
-mod seed_category;
-mod seed_providers;
+//! Seeds the default provider categories.
 
-pub use default_categories::default_categories;
-pub use provider_seed_result::ProviderSeedResult;
-pub use seed_category::SeedCategory;
-pub use seed_providers::seed_providers;
+mod seeds_providers;
+
+pub use seeds_providers::ProviderSeedResult;
+pub use seeds_providers::SeedCategory;
+pub use seeds_providers::default_categories;
+pub use seeds_providers::seed_providers;

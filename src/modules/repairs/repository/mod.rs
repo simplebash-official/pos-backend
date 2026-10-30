@@ -1,27 +1,16 @@
-// Mongo and SQLite access for the `repairs` collection. Same never-interpret-a-
-// miss-as-an-error convention as every other repository in this codebase —
-// `service` decides what a missing row means.
+//! Mongo and SQLite access for the `repairs` collection. Same never-interpret-a-
+//! miss-as-an-error convention as every other repository in this codebase —
+//! `service` decides what a missing row means.
 
-mod aggregate_stats;
-mod delete;
-mod find_by_id;
-mod find_by_id_or_key;
-mod find_by_key;
-mod insert;
-mod list;
-mod repairs;
-mod row_to_repair_doc;
-mod set_status_by_key;
-mod stats_aggregate_result;
-mod update;
+mod repairs_repository;
 
-pub(crate) use aggregate_stats::aggregate_stats;
-pub(crate) use delete::delete;
+pub(crate) use repairs_repository::aggregate_stats;
+pub(crate) use repairs_repository::delete;
 
-pub(crate) use find_by_id_or_key::find_by_id_or_key;
+pub(crate) use repairs_repository::find_by_id_or_key;
 
-pub(crate) use insert::insert;
-pub(crate) use list::list;
-pub(crate) use set_status_by_key::set_status_by_key;
+pub(crate) use repairs_repository::insert;
+pub(crate) use repairs_repository::list;
+pub(crate) use repairs_repository::set_status_by_key;
 
-pub(crate) use update::update;
+pub(crate) use repairs_repository::update;

@@ -1,7 +1,7 @@
-use super::inventory_seed_result::InventorySeedResult;
-use super::seed_category::SeedCategory;
-use super::seed_product::SeedProduct;
-use super::seed_subcategory::SeedSubcategory;
+use super::seeds_inventory::InventorySeedResult;
+use super::seeds_inventory::SeedCategory;
+use super::seeds_inventory::SeedProduct;
+use super::seeds_inventory::SeedSubcategory;
 use crate::clients::db::Db;
 use crate::core::error::AppError;
 use crate::domain::inventory::{
@@ -153,6 +153,7 @@ async fn seed_category(db: &Db, cat: SeedCategory) -> Result<CategoryOutcome, Ap
     })
 }
 
+/// Seeds the inventory.
 pub async fn seed_inventory(db: &Db) -> Result<InventorySeedResult, AppError> {
     let outcomes: Vec<CategoryOutcome> = stream::iter(get_seed_data())
         .map(|cat| seed_category(db, cat))

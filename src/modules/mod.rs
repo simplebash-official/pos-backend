@@ -1,3 +1,5 @@
+//! Feature modules, one per business area. Each follows the routes → service → repository layering.
+
 pub mod accounts;
 pub mod attachments;
 pub mod auth;

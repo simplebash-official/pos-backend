@@ -1,5 +1,5 @@
-use super::summarize::summarize;
-use super::tracked::tracked;
+use super::logging_domain::summarize;
+use super::logging_domain::tracked;
 
 use serde_json::json;
 

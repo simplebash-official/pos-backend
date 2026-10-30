@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 #[derive(Debug, Clone)]
+/// Serves analytics feeds from a tagged in-memory cache, coalescing concurrent identical queries.
 pub struct AnalyticsEngine {
     pub(super) db: Db,
     pub(super) cache: Arc<ReportsCache>,
@@ -22,6 +23,7 @@ pub struct AnalyticsEngine {
 
 impl AnalyticsEngine {
     #[must_use]
+    /// An engine reading from `db` with an empty cache.
     pub fn new(db: Db) -> Self {
         Self {
             db,

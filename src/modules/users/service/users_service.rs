@@ -1,0 +1,758 @@
+use crate::clients::db::Db;
+use crate::core::constants::{codes, prefixes, roles};
+use crate::core::error::{AppError, AppResult};
+use crate::core::id::generate_id;
+use crate::domain::employees::EmployeeLoginSummary;
+use crate::domain::users::{
+    CATALOG_SORT_IDS, CreateUserRequest, Role, UpdateMyPreferencesRequest, UpdateUserRequest, User,
+    UserListQuery, UsersResponse,
+};
+use crate::modules::employees;
+use crate::modules::users::model::UserDocument;
+use crate::modules::users::repository;
+use argon2::Argon2;
+use argon2::password_hash::rand_core::OsRng;
+use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
+use axum::http::StatusCode;
+use mongodb::bson::oid::ObjectId;
+use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
+use std::collections::HashMap;
+
+/// Creates the owner's `admin` login for a freshly provisioned shop from a
+/// password hash the identity service already made (from the admin password the
+/// owner chose at shop creation), so the plaintext never reaches this service.
+/// Returns `false` when the shop already has an Admin: that Admin's display name
+/// is refreshed with identity's, its hash is never touched, so replaying a
+/// provisioning request is harmless. `pub` for the same reason as `create_user`:
+/// the tenants module reaches it across the private `repository` boundary.
+pub async fn create_owner_admin_if_absent(
+    db: &Db,
+    name: &str,
+    username: &str,
+    password_hash: &str,
+) -> AppResult<bool> {
+    validate_owner_login(name, username, password_hash)?;
+
+    // Replays are how identity re-syncs a profile: when the Admin already
+    // exists, identity is the source of truth for its display name. The password
+    // hash is deliberately left alone - the shop may have changed it locally.
+    if let Some(existing) = find_admin_document(db).await? {
+        let name = name.trim();
+        if existing.name != name
+            && let Some(id) = existing.id
+        {
+            repository::update_user(db, id, doc! { "name": name }).await?;
+        }
+        return Ok(false);
+    }
+
+    let username = normalize_username(username);
+    if repository::find_user_by_username(db, &username)
+        .await?
+        .is_some()
+    {
+        return Err(AppError::conflict(
+            codes::USERNAME_ALREADY_EXISTS,
+            format!("A user with username '{username}' already exists"),
+        ));
+    }
+
+    let now = BsonDateTime::now();
+    let document = UserDocument {
+        id: None,
+        key: generate_id(prefixes::USER),
+        name: name.trim().to_string(),
+        username,
+        password_hash: password_hash.to_string(),
+        role: Role::Admin,
+        is_active: true,
+        employee_key: None,
+        preferences: None,
+        pin_hash: None,
+        created_at: now,
+        updated_at: now,
+    };
+    repository::insert_user(db, document).await?;
+    Ok(true)
+}
+
+/// Unrestricted account creation. `pub`, not `pub(crate)`, so
+/// `src/bin/seed_admin.rs` (a separate binary crate) can create the
+/// bootstrap Admin through this exact validation/hashing path instead of
+/// duplicating Argon2 logic there — this is also the *only* path an Admin
+/// account can ever be created through, since `create_user_for_caller`
+/// (what the HTTP route actually calls) never allows `role: Admin` for any
+/// caller (see `manageable_roles`). Enforces the single-Admin invariant
+/// this deployment assumes: creating a second Admin is rejected outright,
+/// including on a `seed_admin` re-run with a different username.
+pub async fn create_user(db: &Db, body: CreateUserRequest) -> AppResult<User> {
+    if body.name.trim().is_empty() {
+        return Err(AppError::validation("Name is required"));
+    }
+    let username = normalize_username(&body.username);
+    validate_username(&username)?;
+    validate_password_strength(&body.password)?;
+    if body.role == Role::Admin && username != roles::ADMIN_USERNAME {
+        return Err(AppError::validation(format!(
+            "The Admin username is always '{}'",
+            roles::ADMIN_USERNAME
+        )));
+    }
+
+    if body.role == Role::Admin && repository::count_users_by_role(db, Role::Admin).await? > 0 {
+        return Err(AppError::custom(
+            StatusCode::CONFLICT,
+            codes::ADMIN_ALREADY_EXISTS,
+            "An Admin account already exists; this deployment supports only one Admin",
+        ));
+    }
+
+    if repository::find_user_by_username(db, &username)
+        .await?
+        .is_some()
+    {
+        return Err(AppError::conflict(
+            codes::USERNAME_ALREADY_EXISTS,
+            format!("A user with username '{username}' already exists"),
+        ));
+    }
+
+    let employee_key = match body.employee_key.as_deref().map(str::trim) {
+        None | Some("") => None,
+        Some(employee_key) => {
+            employees::service::get_employee_by_key(db, employee_key).await?;
+
+            if repository::find_user_by_employee_key(db, employee_key)
+                .await?
+                .is_some()
+            {
+                return Err(AppError::conflict(
+                    codes::EMPLOYEE_ALREADY_HAS_LOGIN,
+                    "This employee already has a login account",
+                ));
+            }
+
+            Some(employee_key.to_string())
+        }
+    };
+
+    let password_hash = hash_password(&body.password)?;
+    let now = BsonDateTime::now();
+    let document = UserDocument {
+        id: None,
+        key: generate_id(prefixes::USER),
+        name: body.name.trim().to_string(),
+        username,
+        password_hash,
+        role: body.role,
+        is_active: true,
+        employee_key: employee_key.clone(),
+        preferences: None,
+        pin_hash: None,
+        created_at: now,
+        updated_at: now,
+    };
+
+    let inserted = repository::insert_user(db, document).await?;
+
+    if let Some(employee_key) = &employee_key {
+        employees::service::touch_by_key(db, employee_key).await?;
+    }
+
+    Ok(inserted.into_user())
+}
+
+/// Scoped creation for `POST /users` — 403s (not 404, since there's no
+/// existing resource to hide) if `body.role` is outside
+/// `manageable_roles(caller_role)`, e.g. a Manager trying to create another
+/// Manager, or anyone trying to create an Admin.
+pub(crate) async fn create_user_for_caller(
+    db: &Db,
+    body: CreateUserRequest,
+    caller_role: Role,
+) -> AppResult<User> {
+    crate::core::logging::domain::tracked("users.created", async move {
+        if !manageable_roles(caller_role).contains(&body.role) {
+            return Err(AppError::forbidden_with_code(
+                format!(
+                    "You are not allowed to create a {} account",
+                    body.role.as_str()
+                ),
+                codes::PERMISSION_DENIED,
+            ));
+        }
+        create_user(db, body).await
+    })
+    .await
+}
+
+/// 404s if `id` resolves to an account outside `manageable_roles(caller_role)`
+/// (see `ensure_manageable`) — note this also means a caller can never
+/// delete their *own* account through this endpoint, since no role is ever
+/// in its own `manageable_roles` set (Admin doesn't manage Admin, Manager
+/// doesn't manage Manager); a dedicated self-delete guard is therefore
+/// unnecessary and was removed rather than kept as unreachable code.
+pub(crate) async fn delete_user(db: &Db, id: ObjectId, caller_role: Role) -> AppResult<User> {
+    crate::core::logging::domain::tracked("users.deleted", async move {
+        let existing = repository::find_user_by_id(db, id).await?.ok_or_else(|| {
+            AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND)
+        })?;
+        ensure_manageable(caller_role, existing.role)?;
+
+        let deleted = repository::delete_user(db, id).await?.ok_or_else(|| {
+            AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND)
+        })?;
+
+        if let Some(employee_key) = &deleted.employee_key {
+            // The employee just lost its login — see
+            // `employees::service::touch_by_key`'s doc comment.
+            employees::service::touch_by_key(db, employee_key).await?;
+        }
+
+        let user = deleted.into_user();
+        crate::core::middleware::auth::invalidate_account_status(&user.id);
+        Ok(user)
+    })
+    .await
+}
+
+/// 404s (rather than 403s) when `target_role` is outside what `caller_role`
+/// may manage — the target simply doesn't exist from this caller's point of
+/// view, so its existence isn't confirmed/denied any differently than a
+/// truly-missing id would be (e.g. a Manager gets the same response
+/// whether a given id belongs to another Manager or to no one at all).
+pub(super) fn ensure_manageable(caller_role: Role, target_role: Role) -> AppResult<()> {
+    if manageable_roles(caller_role).contains(&target_role) {
+        Ok(())
+    } else {
+        Err(AppError::not_found_with_code(
+            "User not found",
+            codes::USER_NOT_FOUND,
+        ))
+    }
+}
+
+/// The shop's single Admin document, if one exists.
+pub(super) async fn find_admin_document(db: &Db) -> AppResult<Option<UserDocument>> {
+    Ok(
+        repository::list_users(db, doc! { "role": Role::Admin.as_str() })
+            .await?
+            .into_iter()
+            .next(),
+    )
+}
+
+/// Resolves the local user behind an identity-server account token. A shop's
+/// owner is its single Admin (the `admin` login provisioned at shop creation),
+/// so the owner scope maps to that account. Identity owns the display name, so
+/// a changed `name` claim is written through. `None` when the shop has no Admin.
+pub(crate) async fn find_user_for_identity(db: &Db, name: Option<&str>) -> AppResult<Option<User>> {
+    let Some(mut document) = find_admin_document(db).await? else {
+        return Ok(None);
+    };
+    if let (Some(name), Some(id)) = (name.map(str::trim).filter(|n| !n.is_empty()), document.id)
+        && document.name != name
+        && let Some(updated) = repository::update_user(db, id, doc! { "name": name }).await?
+    {
+        document = updated;
+    }
+    Ok(Some(document.into_user()))
+}
+
+/// Batch variant of `find_user_summary_by_employee_key` — used by
+/// `modules::employees::service::list_employees`/`get_employees_by_keys`/
+/// `hydrate_sync_documents` to enrich a whole page of employees with their
+/// login summary in one query instead of one lookup per row.
+pub(crate) async fn find_user_summaries_by_employee_keys(
+    db: &Db,
+    employee_keys: &[String],
+) -> AppResult<HashMap<String, EmployeeLoginSummary>> {
+    let documents = repository::find_users_by_employee_keys(db, employee_keys).await?;
+    Ok(documents
+        .into_iter()
+        .filter_map(|document| {
+            document
+                .employee_key
+                .clone()
+                .map(|key| (key, to_login_summary(document)))
+        })
+        .collect())
+}
+
+/// Cross-module entry point `modules::employees::service` uses to answer
+/// "does this employee already have a login" — on create/update validation
+/// and on `delete_employee`'s `EMPLOYEE_HAS_LOGIN` guard.
+pub(crate) async fn find_user_summary_by_employee_key(
+    db: &Db,
+    employee_key: &str,
+) -> AppResult<Option<EmployeeLoginSummary>> {
+    Ok(repository::find_user_by_employee_key(db, employee_key)
+        .await?
+        .map(to_login_summary))
+}
+
+/// Unrestricted lookup by id — used cross-module by `auth::service::me`
+/// (a caller looking up *themselves*, regardless of role) and
+/// `auth::service::list_sessions` (resolving a `userId` filter for the
+/// audit log, a separate concern from user-management scope). The
+/// `users` module's own routes must never call this directly — see
+/// `get_user_for_caller` for the scoped equivalent they use instead.
+pub(crate) async fn get_user(db: &Db, id: ObjectId) -> AppResult<User> {
+    let document = repository::find_user_by_id(db, id)
+        .await?
+        .ok_or_else(|| AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND))?;
+
+    Ok(document.into_user())
+}
+
+/// Scoped lookup for `GET /users/{id}` — 404s if `id` resolves to an
+/// account outside `manageable_roles(caller_role)` (see `ensure_manageable`).
+pub(crate) async fn get_user_for_caller(
+    db: &Db,
+    id: ObjectId,
+    caller_role: Role,
+) -> AppResult<User> {
+    let document = repository::find_user_by_id(db, id)
+        .await?
+        .ok_or_else(|| AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND))?;
+    ensure_manageable(caller_role, document.role)?;
+
+    Ok(document.into_user())
+}
+
+pub(super) fn hash_password(password: &str) -> AppResult<String> {
+    let salt = SaltString::generate(&mut OsRng);
+    Argon2::default()
+        .hash_password(password.as_bytes(), &salt)
+        .map(|hash| hash.to_string())
+        .map_err(|err| AppError::internal(format!("failed to hash password: {err}")))
+}
+
+/// Builds the Mongo filter from query params (free-text search across
+/// name/username, plus an exact-role filter) — same construction style as
+/// `suppliers::service::list_suppliers`. Not paginated: a shop's staff
+/// roster is small enough to return in full. Always scoped to
+/// `manageable_roles(caller_role)` regardless of what `query.role` asks
+/// for — a Manager's list is always Staff-only, and an Admin's list never
+/// includes the (one) Admin account, matching `get`/`update`/`delete`'s
+/// same restriction. Asking for a role outside that scope (e.g. a Manager
+/// filtering `role=admin`) returns an empty list rather than an error, the
+/// same "just don't show it" spirit as `ensure_manageable`'s 404.
+pub(crate) async fn list_users(
+    db: &Db,
+    query: UserListQuery,
+    caller_role: Role,
+) -> AppResult<UsersResponse> {
+    let mut and_clauses: Vec<Document> = Vec::new();
+
+    if let Some(search) = query.search.filter(|s| !s.is_empty()) {
+        let pattern = crate::core::utils::build_bson_regex(&search);
+        and_clauses.push(doc! {
+            "$or": [
+                { "name": { "$regex": pattern.clone() } },
+                { "username": { "$regex": pattern } },
+            ]
+        });
+    }
+
+    let allowed = manageable_roles(caller_role);
+    match query.role {
+        Some(role) if allowed.contains(&role) => {
+            and_clauses.push(doc! { "role": role.as_str() });
+        }
+        Some(_) => and_clauses.push(doc! { "role": { "$in": Vec::<String>::new() } }),
+        None => {
+            let allowed_strs: Vec<&str> = allowed.iter().map(Role::as_str).collect();
+            and_clauses.push(doc! { "role": { "$in": allowed_strs } });
+        }
+    }
+
+    let filter = doc! { "$and": and_clauses };
+
+    let documents = repository::list_users(db, filter).await?;
+    let users = documents.into_iter().map(UserDocument::into_user).collect();
+
+    Ok(UsersResponse { users })
+}
+
+/// The roles a caller of `caller_role` may create/view/edit/delete through
+/// this module's endpoints: Admin manages Manager and Staff; Manager
+/// manages Staff only. An Admin account is never manageable through this
+/// API by anyone — not even by another Admin — since this is a
+/// single-shop POS deployment that only ever has one Admin, bootstrapped
+/// once via `src/bin/seed_admin.rs` (see `create_user`'s single-Admin
+/// guard below). Staff never reaches these functions at all (no
+/// `users:manage`/`users:manage:staff` permission to get past the route
+/// gate in the first place).
+pub(super) fn manageable_roles(caller_role: Role) -> &'static [Role] {
+    match caller_role {
+        Role::Admin => &[Role::Manager, Role::Staff],
+        Role::Manager => &[Role::Staff],
+        Role::Staff => &[],
+    }
+}
+
+pub(super) fn normalize_username(username: &str) -> String {
+    username.trim().to_lowercase()
+}
+
+/// Rotates the single Admin account's password in place (its username is always
+/// `admin`). `pub`, not `pub(crate)`, so `src/bin/reset_admin.rs` can reach it
+/// directly — there is no HTTP path that can do this, since `ensure_manageable`
+/// always 404s an Admin target for every caller (see `manageable_roles`) and
+/// this deployment has no self-service "forgot password" flow. Requires an
+/// Admin to already exist (use `create_user`/`seed_admin` to create the first
+/// one); overwrites the existing Admin's password with no undo.
+pub async fn reset_admin_credentials(db: &Db, password: &str) -> AppResult<User> {
+    validate_password_strength(password)?;
+
+    let admin = find_admin_document(db).await?.ok_or_else(|| {
+        AppError::not_found_with_code(
+            "No Admin account exists yet; run seed_admin first",
+            codes::USER_NOT_FOUND,
+        )
+    })?;
+    let admin_id = admin.id.expect("persisted user document must have an id");
+
+    let set_doc = doc! {
+        "password_hash": hash_password(password)?,
+        "updated_at": BsonDateTime::now(),
+    };
+
+    let updated = repository::update_user(db, admin_id, set_doc)
+        .await?
+        .ok_or_else(|| AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND))?;
+
+    let user = updated.into_user();
+    // Existing tokens for this account must be re-checked on their next use.
+    crate::core::middleware::auth::invalidate_account_status(&user.id);
+    Ok(user)
+}
+
+/// Sets or updates a numeric PIN for a user account.
+pub async fn set_user_pin(db: &Db, user_id_or_key: &str, pin: &str) -> AppResult<()> {
+    if pin.len() < 4 || pin.len() > 8 || !pin.chars().all(|c| c.is_ascii_digit()) {
+        return Err(AppError::validation("PIN must be 4 to 8 numeric digits"));
+    }
+    let user_doc = if let Ok(oid) = ObjectId::parse_str(user_id_or_key) {
+        repository::find_user_by_id(db, oid).await?
+    } else {
+        None
+    };
+    let user_doc = match user_doc {
+        Some(u) => u,
+        None => repository::find_user_by_username(db, user_id_or_key)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND)
+            })?,
+    };
+
+    let hashed = hash_password(pin)?;
+    let oid = user_doc.id.expect("persisted user must have id");
+    repository::update_user(
+        db,
+        oid,
+        doc! { "pin_hash": hashed, "updated_at": BsonDateTime::now() },
+    )
+    .await?;
+    Ok(())
+}
+
+pub(super) fn to_login_summary(document: UserDocument) -> EmployeeLoginSummary {
+    EmployeeLoginSummary {
+        user_id: document
+            .id
+            .expect("persisted user document must have an id")
+            .to_hex(),
+        username: document.username,
+        role: document.role,
+        is_active: document.is_active,
+    }
+}
+
+/// Merges `changes` into a login's own preferences. Callers have already
+/// resolved `id` from the authenticated token, so no role hierarchy applies:
+/// every login may edit its own preferences and nobody else's.
+pub(crate) async fn update_own_preferences(
+    db: &Db,
+    id: ObjectId,
+    changes: UpdateMyPreferencesRequest,
+) -> AppResult<User> {
+    if let Some(sort) = changes.billing_catalog_sort.as_deref()
+        && !CATALOG_SORT_IDS.contains(&sort)
+    {
+        return Err(AppError::validation(format!(
+            "Unknown billing catalog sort '{sort}'"
+        )));
+    }
+
+    let existing = repository::find_user_by_id(db, id)
+        .await?
+        .ok_or_else(|| AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND))?;
+
+    let mut merged = existing.preferences.unwrap_or_default();
+    if changes.billing_catalog_sort.is_some() {
+        merged.billing_catalog_sort = changes.billing_catalog_sort;
+    }
+    let preferences_doc = mongodb::bson::serialize_to_document(&merged)
+        .map_err(|e| AppError::internal(format!("failed to encode preferences: {e}")))?;
+
+    let updated = repository::update_user(
+        db,
+        id,
+        doc! { "preferences": preferences_doc, "updated_at": BsonDateTime::now() },
+    )
+    .await?
+    .ok_or_else(|| AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND))?;
+    Ok(updated.into_user())
+}
+
+/// Partial update for `PATCH /users/{id}` — every field in `body` is
+/// optional; required fields (name/username) fall back to the existing
+/// document's value before re-validation. `password` present means rehash
+/// to the new value; absent leaves the stored hash untouched. Username
+/// uniqueness is only re-checked when the username actually changed, so
+/// re-saving a user's existing username never trips the uniqueness guard
+/// against itself. `caller_role` gates two things: the *existing* account
+/// must be in `manageable_roles(caller_role)` (404 otherwise), and if
+/// `body.role` requests a role change, the *new* role must be too (403
+/// otherwise) — so a Manager can never promote a Staff account to Manager,
+/// and no one can ever promote anything to Admin through this endpoint.
+pub(crate) async fn update_user(
+    db: &Db,
+    id: ObjectId,
+    body: UpdateUserRequest,
+    caller_role: Role,
+) -> AppResult<User> {
+    crate::core::logging::domain::tracked("users.updated", async move {
+        let existing = repository::find_user_by_id(db, id).await?.ok_or_else(|| {
+            AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND)
+        })?;
+        ensure_manageable(caller_role, existing.role)?;
+
+        if let Some(new_role) = body.role
+            && !manageable_roles(caller_role).contains(&new_role)
+        {
+            return Err(AppError::forbidden_with_code(
+                format!("You are not allowed to set role to {}", new_role.as_str()),
+                codes::PERMISSION_DENIED,
+            ));
+        }
+
+        let name = body.name.unwrap_or(existing.name);
+        if name.trim().is_empty() {
+            return Err(AppError::validation("Name is required"));
+        }
+
+        let username = match body.username {
+            Some(username) => {
+                let normalized = normalize_username(&username);
+                validate_username(&normalized)?;
+                if normalized != existing.username
+                    && repository::find_user_by_username(db, &normalized)
+                        .await?
+                        .is_some()
+                {
+                    return Err(AppError::custom(
+                        StatusCode::CONFLICT,
+                        codes::USERNAME_ALREADY_EXISTS,
+                        format!("A user with username '{normalized}' already exists"),
+                    ));
+                }
+                normalized
+            }
+            None => existing.username,
+        };
+
+        let mut set_doc = doc! {
+            "name": &name,
+            "username": &username,
+            "updated_at": BsonDateTime::now(),
+        };
+        if let Some(password) = body.password {
+            validate_password_strength(&password)?;
+            set_doc.insert("password_hash", hash_password(&password)?);
+        }
+        if let Some(role) = body.role {
+            set_doc.insert("role", role.as_str());
+        }
+        if let Some(is_active) = body.is_active {
+            set_doc.insert("is_active", is_active);
+        }
+        let old_employee_key = existing.employee_key.clone();
+        let mut new_employee_key: Option<String> = None;
+        if let Some(employee_key) = body.employee_key {
+            if Some(&employee_key) != existing.employee_key.as_ref() {
+                employees::service::get_employee_by_key(db, &employee_key).await?;
+                if repository::find_user_by_employee_key(db, &employee_key)
+                    .await?
+                    .is_some()
+                {
+                    return Err(AppError::conflict(
+                        codes::EMPLOYEE_ALREADY_HAS_LOGIN,
+                        "This employee already has a login account",
+                    ));
+                }
+            }
+            new_employee_key = Some(employee_key.clone());
+            set_doc.insert("employee_key", employee_key);
+        }
+
+        let updated = repository::update_user(db, id, set_doc)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND)
+            })?;
+
+        // Bump both the old and new linked employee's `updated_at`/`version` so
+        // the next sync delta re-delivers each with its `login` field current —
+        // see `employees::service::touch_by_key`'s doc comment.
+        if new_employee_key.is_some() && new_employee_key != old_employee_key {
+            if let Some(key) = &new_employee_key {
+                employees::service::touch_by_key(db, key).await?;
+            }
+            if let Some(key) = &old_employee_key {
+                employees::service::touch_by_key(db, key).await?;
+            }
+        }
+
+        let user = updated.into_user();
+        // A deactivation or role change must reach the user's live tokens now.
+        crate::core::middleware::auth::invalidate_account_status(&user.id);
+        Ok(user)
+    })
+    .await
+}
+
+/// Checks an owner login handed over by the identity service without writing
+/// anything, so a provisioning request can be rejected before any tenant row is
+/// created. The username must be the fixed Admin username, and the hash must be
+/// an Argon2 PHC string: anything else could never be verified by
+/// `verify_password` and would create an Admin nobody can log in as.
+pub fn validate_owner_login(name: &str, username: &str, password_hash: &str) -> AppResult<()> {
+    if name.trim().is_empty() {
+        return Err(AppError::validation("Name is required"));
+    }
+    if normalize_username(username) != roles::ADMIN_USERNAME {
+        return Err(AppError::validation(format!(
+            "The owner username must be '{}'",
+            roles::ADMIN_USERNAME
+        )));
+    }
+    let not_argon2 = || AppError::validation("Owner password hash must be an Argon2 PHC string");
+    let parsed = PasswordHash::new(password_hash).map_err(|_| not_argon2())?;
+    if !parsed.algorithm.as_str().starts_with("argon2") {
+        return Err(not_argon2());
+    }
+    Ok(())
+}
+
+pub(super) fn validate_password_strength(password: &str) -> AppResult<()> {
+    if password.chars().count() < 8 {
+        return Err(AppError::validation(
+            "Password must be at least 8 characters",
+        ));
+    }
+    Ok(())
+}
+
+/// Login usernames are lowercase `a-z0-9._-`, 3-32 characters, starting and
+/// ending with a letter or digit. They are unique within a shop (the lookup is
+/// tenant-scoped), so the same name (e.g. `admin`) can exist in many shops.
+pub(super) fn validate_username(username: &str) -> AppResult<()> {
+    let len = username.chars().count();
+    let allowed = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit() || "._-".contains(c);
+    let edge_ok = |c: Option<char>| c.is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+    if !(3..=32).contains(&len)
+        || !username.chars().all(allowed)
+        || !edge_ok(username.chars().next())
+        || !edge_ok(username.chars().last())
+    {
+        return Err(AppError::validation(
+            "Username must be 3-32 characters: lowercase letters, digits, '.', '_' or '-'",
+        ));
+    }
+    Ok(())
+}
+
+/// A real Argon2 hash of a throwaway value, computed once, for
+/// `verify_credentials` to verify against when the username is unknown.
+static DUMMY_PASSWORD_HASH: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    hash_password("not-a-real-password").expect("hashing a constant cannot fail")
+});
+
+/// Cross-module entry point `auth::service::login` calls. "No such username"
+/// and "wrong password" both collapse to the same 401
+/// `INVALID_CREDENTIALS` (never distinguish which — avoids username
+/// enumeration); a correct password against a deactivated account gets its
+/// own 401 `USER_INACTIVE`, since at that point the caller has already
+/// proven they know the real password.
+pub(crate) async fn verify_credentials(db: &Db, username: &str, password: &str) -> AppResult<User> {
+    let normalized = normalize_username(username);
+    let Some(document) = repository::find_user_by_username(db, &normalized).await? else {
+        // Spend the same Argon2 work as a real check, so response time
+        // doesn't reveal whether the username exists.
+        let _ = verify_password(password, &DUMMY_PASSWORD_HASH);
+        return Err(AppError::unauthorized_with_code(
+            "Invalid username or password",
+            codes::INVALID_CREDENTIALS,
+        ));
+    };
+
+    if !verify_password(password, &document.password_hash)? {
+        return Err(AppError::unauthorized_with_code(
+            "Invalid username or password",
+            codes::INVALID_CREDENTIALS,
+        ));
+    }
+
+    if !document.is_active {
+        return Err(AppError::unauthorized_with_code(
+            "This account has been deactivated",
+            codes::USER_INACTIVE,
+        ));
+    }
+
+    Ok(document.into_user())
+}
+
+pub(super) fn verify_password(password: &str, hash: &str) -> AppResult<bool> {
+    let parsed_hash = PasswordHash::new(hash)
+        .map_err(|err| AppError::internal(format!("stored password hash is invalid: {err}")))?;
+    Ok(Argon2::default()
+        .verify_password(password.as_bytes(), &parsed_hash)
+        .is_ok())
+}
+
+/// Verifies a numeric PIN against active users with the required role.
+pub async fn verify_user_pin(
+    db: &Db,
+    pin: &str,
+    required_role: Option<&str>,
+) -> AppResult<Option<User>> {
+    let filter = doc! { "is_active": true };
+    let users = repository::list_users(db, filter).await?;
+    for user_doc in users {
+        let Some(pin_hash) = &user_doc.pin_hash else {
+            continue;
+        };
+        if let Some(req_role) = required_role {
+            match req_role.to_lowercase().as_str() {
+                "owner" | "admin" => {
+                    if user_doc.role != Role::Admin {
+                        continue;
+                    }
+                }
+                "manager" if user_doc.role != Role::Admin && user_doc.role != Role::Manager => {
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        if verify_password(pin, pin_hash).unwrap_or(false) {
+            return Ok(Some(user_doc.into_user()));
+        }
+    }
+    Ok(None)
+}

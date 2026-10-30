@@ -1,9 +1,8 @@
-mod decode_cursor;
-mod decoded_cursor;
-mod encode_cursor;
-mod tombstone_retention_days;
+//! The opaque pull cursor handed to devices.
 
-pub use decode_cursor::decode_cursor;
-pub use decoded_cursor::DecodedCursor;
-pub use encode_cursor::encode_cursor;
-pub use tombstone_retention_days::TOMBSTONE_RETENTION_DAYS;
+mod sync_cursor;
+
+pub use sync_cursor::DecodedCursor;
+pub use sync_cursor::TOMBSTONE_RETENTION_DAYS;
+pub use sync_cursor::decode_cursor;
+pub use sync_cursor::encode_cursor;

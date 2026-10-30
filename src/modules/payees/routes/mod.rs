@@ -1,8 +1,5 @@
-// HTTP layer for the payee directory.
+//! HTTP layer for the payee directory.
 
-mod create_payee;
-mod list_payees;
-mod router;
-mod update_payee;
+mod payees_routes;
 
-pub use router::router;
+pub use payees_routes::router;

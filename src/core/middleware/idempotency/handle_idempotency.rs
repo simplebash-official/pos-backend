@@ -1,5 +1,5 @@
-use super::idempotency_document::IdempotencyDocument;
-use super::max_idempotent_body_bytes::MAX_IDEMPOTENT_BODY_BYTES;
+use super::middleware_idempotency::IdempotencyDocument;
+use super::middleware_idempotency::MAX_IDEMPOTENT_BODY_BYTES;
 use crate::app::AppState;
 use crate::core::constants::codes;
 use crate::core::error::AppError;
@@ -100,6 +100,7 @@ async fn extract_user_id(
     Ok(Some(verified.user_id))
 }
 
+/// Middleware that replays the stored response of a repeated write carrying the same `Idempotency-Key`.
 pub async fn handle_idempotency(
     State(state): State<AppState>,
     request: Request,

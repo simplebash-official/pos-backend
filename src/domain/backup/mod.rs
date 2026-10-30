@@ -1,11 +1,8 @@
-// Pure domain types for full database backup export and transactional restore.
+//! Pure domain types for full database backup export and transactional restore.
 
-mod backup_export_data;
-mod export_backup_request;
-mod restore_backup_request;
-mod restore_backup_response;
+mod domain_backup;
 
-pub use backup_export_data::BackupExportData;
-pub use export_backup_request::ExportBackupRequest;
-pub use restore_backup_request::RestoreBackupRequest;
-pub use restore_backup_response::RestoreBackupResponse;
+pub use domain_backup::BackupExportData;
+pub use domain_backup::ExportBackupRequest;
+pub use domain_backup::RestoreBackupRequest;
+pub use domain_backup::RestoreBackupResponse;

@@ -1,9 +1,9 @@
-use super::secrets_match::secrets_match;
-use super::shop_activities_response::ShopActivitiesResponse;
-use super::shop_activity_item::ShopActivityItem;
-use super::shop_login_item::ShopLoginItem;
-use super::shop_logins_response::ShopLoginsResponse;
-use super::shop_user_response::ShopUserResponse;
+use super::tenants_routes::ShopActivitiesResponse;
+use super::tenants_routes::ShopActivityItem;
+use super::tenants_routes::ShopLoginItem;
+use super::tenants_routes::ShopLoginsResponse;
+use super::tenants_routes::ShopUserResponse;
+use super::tenants_routes::secrets_match;
 use crate::domain::users::Role;
 use chrono::Utc;
 

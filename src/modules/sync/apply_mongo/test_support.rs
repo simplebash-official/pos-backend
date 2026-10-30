@@ -1,4 +1,4 @@
-// Test support for MongoDB sync apply.
+//! Test support for MongoDB sync apply.
 
 use mongodb::bson::Document;
 use serde_json::Value;
