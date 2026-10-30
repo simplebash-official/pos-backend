@@ -1,7 +1,5 @@
-use mongodb::{
-    Client, Database,
-    options::{ClientOptions, ResolverConfig},
-};
+use mongodb::options::{ClientOptions, ResolverConfig};
+use mongodb::{Client, Database};
 
 pub async fn connect(uri: &str, db_name: &str) -> mongodb::error::Result<Database> {
     let mut last_err = None;

@@ -1,6 +1,10 @@
 // Compound index setup for MongoDB collections to accelerate analytical queries.
 
-use mongodb::{Database, IndexModel, bson::doc, options::IndexOptions};
+use mongodb::{Database, IndexModel};
+
+use mongodb::bson::doc;
+
+use mongodb::options::IndexOptions;
 use tracing::{info, warn};
 
 pub async fn ensure_analytics_indexes(db: &Database) {

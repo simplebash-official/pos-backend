@@ -1,12 +1,11 @@
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    calculations::{
-        CartLine, LineDiscount, LineSource, cart_totals, line_totals, percentage_discount_cents,
-    },
-    error::{CalcError, CalcResult},
+use crate::calculations::{
+    CartLine, LineDiscount, LineSource, cart_totals, line_totals, percentage_discount_cents,
 };
+
+use crate::error::{CalcError, CalcResult};
 
 const MAX_LINES: usize = 200;
 const MAX_CENTS: i64 = 10_000_000_000_000;

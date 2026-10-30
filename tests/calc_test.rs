@@ -4,18 +4,16 @@
 
 mod common;
 
-use axum::{
-    body::Body,
-    http::{
-        Request, StatusCode,
-        header::{AUTHORIZATION, CONTENT_TYPE},
-    },
-};
+use axum::body::Body;
+
+use axum::http::{Request, StatusCode};
+
+use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde_json::{Value, json};
-use simplebash_pos_backend::{
-    core::constants::roles,
-    domain::{cash_categories::category_key, sessions::CashMovementType, users::Role},
-};
+use simplebash_pos_backend::core::constants::roles;
+use simplebash_pos_backend::domain::cash_categories::category_key;
+use simplebash_pos_backend::domain::sessions::CashMovementType;
+use simplebash_pos_backend::domain::users::Role;
 use tower::ServiceExt;
 
 async fn post(

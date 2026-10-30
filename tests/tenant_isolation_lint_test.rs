@@ -4,10 +4,9 @@
 // platform collection are listed here explicitly; anything new fails this test
 // until a reviewer adds it to the list on purpose. No database needed.
 
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+use std::fs;
+
+use std::path::{Path, PathBuf};
 
 /// Raw, unfiltered driver handle (`TenantDatabase::unscoped()`).
 const UNSCOPED_ALLOWED: &[&str] = &[
@@ -15,19 +14,19 @@ const UNSCOPED_ALLOWED: &[&str] = &[
     "src/bin/",
     "src/main.rs",
     // Index creation for the analytics collections.
-    "src/modules/reports/engine/mod.rs",
+    "src/modules/reports/engine/analytics_engine.rs",
     // The change-stream consumer watches every tenant's writes and re-enters
     // `with_tenant` per event; compaction walks the platform-wide log.
     "src/modules/sync/cloud_capture.rs",
-    "src/modules/sync/compaction.rs",
+    "src/modules/sync/compaction/",
     // The realtime watcher reads every tenant's change-log inserts (read-only)
     // and hands each event only to subscribers of that row's own `tenant_id`.
-    "src/modules/sync/live.rs",
+    "src/modules/sync/live/",
 ];
 
 /// A collection that is never tenant-filtered (`platform_collection`).
 const PLATFORM_ALLOWED: &[&str] = &[
-    "src/clients/tenant_db.rs",
+    "src/clients/tenant_db/",
     // The shop-code directory belongs to no tenant.
     "src/modules/tenants/",
     // The consumer's lease/resume state is per deployment, not per tenant.
@@ -35,7 +34,16 @@ const PLATFORM_ALLOWED: &[&str] = &[
 ];
 
 /// The driver's own `Database` / `Collection` types bypass the wrapper.
-const RAW_TYPES_ALLOWED: &[&str] = &["src/clients/", "src/modules/reports/engine/indexes.rs"];
+const RAW_TYPES_ALLOWED: &[&str] = &[
+    "src/clients/",
+    "src/modules/reports/engine/indexes.rs",
+    // One-time MongoDB data migrations run against the raw database handle. (The old scan
+    // missed them only because rustfmt had split their multi-line `use mongodb::{...}`.)
+    "src/bin/",
+    "src/modules/cash_categories/migration/migrate_mongo.rs",
+    "src/modules/inventory/service/stock_batch_migration/migrate_mongo.rs",
+    "src/modules/purchases/service/receipt_migration/migrate_mongo.rs",
+];
 
 fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(dir).unwrap() {

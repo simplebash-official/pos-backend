@@ -1,3 +1,4 @@
+use simplebash_pos_backend::core::config::TenantMode;
 // `POST /api/internal/provision`: the identity service hands a newly registered
 // shop (and, for web sign-ups, its owner's Argon2id hash) to the POS. Runs the real
 // router in `TENANT_MODE=multi` against a real MongoDB (MONGODB_URI) in a uniquely
@@ -5,15 +6,15 @@
 
 mod common;
 
-use argon2::{
-    Argon2,
-    password_hash::{PasswordHasher, SaltString, rand_core::OsRng},
-};
-use axum::{
-    Router,
-    body::Body,
-    http::{Request, StatusCode, header::CONTENT_TYPE},
-};
+use argon2::Argon2;
+
+use argon2::password_hash::{PasswordHasher, SaltString};
+
+use argon2::password_hash::rand_core::OsRng;
+use axum::Router;
+use axum::body::Body;
+use axum::http::header::CONTENT_TYPE;
+use axum::http::{Request, StatusCode};
 use mongodb::bson::doc;
 use serde_json::{Value, json};
 use simplebash_pos_backend::clients::indexes::ensure_indexes;
@@ -130,7 +131,7 @@ async fn provisioning_creates_the_shop_and_an_owner_who_can_log_in_with_the_same
         return;
     }
     let app = common::spawn_app_multi_tenant_with_secret(Some(SECRET)).await;
-    ensure_indexes(&app.db, true).await;
+    ensure_indexes(&app.db, TenantMode::Multi).await;
 
     let (status, body) = post(
         &app.router,
@@ -201,7 +202,7 @@ async fn replaying_a_provisioning_request_changes_nothing() {
         return;
     }
     let app = common::spawn_app_multi_tenant_with_secret(Some(SECRET)).await;
-    ensure_indexes(&app.db, true).await;
+    ensure_indexes(&app.db, TenantMode::Multi).await;
     let hash = argon2_hash(PASSWORD);
 
     let (first, _) = post(
@@ -241,7 +242,7 @@ async fn a_desktop_sign_up_registers_the_shop_without_an_owner() {
         return;
     }
     let app = common::spawn_app_multi_tenant_with_secret(Some(SECRET)).await;
-    ensure_indexes(&app.db, true).await;
+    ensure_indexes(&app.db, TenantMode::Multi).await;
 
     let (status, body) = post(
         &app.router,
@@ -273,7 +274,7 @@ async fn the_shop_code_of_another_shop_is_refused() {
         return;
     }
     let app = common::spawn_app_multi_tenant_with_secret(Some(SECRET)).await;
-    ensure_indexes(&app.db, true).await;
+    ensure_indexes(&app.db, TenantMode::Multi).await;
 
     let (first, _) = post(
         &app.router,
@@ -319,7 +320,7 @@ async fn bad_input_is_rejected_before_anything_is_written() {
         return;
     }
     let app = common::spawn_app_multi_tenant_with_secret(Some(SECRET)).await;
-    ensure_indexes(&app.db, true).await;
+    ensure_indexes(&app.db, TenantMode::Multi).await;
 
     // A plaintext password (or any non-Argon2 value) can never be verified, so it is refused.
     let (status, _) = post(
@@ -368,7 +369,7 @@ async fn the_shared_secret_is_required_and_the_endpoint_is_off_without_one() {
         return;
     }
     let app = common::spawn_app_multi_tenant_with_secret(Some(SECRET)).await;
-    ensure_indexes(&app.db, true).await;
+    ensure_indexes(&app.db, TenantMode::Multi).await;
 
     let body = shop(TENANT_A, "ann-s-phones", None);
     let (status, _) = post(&app.router, "/api/internal/provision", None, body.clone()).await;
@@ -415,7 +416,7 @@ async fn multi_tenant_onboarding_and_sample_data_seeding() {
         return;
     }
     let app = common::spawn_app_multi_tenant_with_secret(Some(SECRET)).await;
-    ensure_indexes(&app.db, true).await;
+    ensure_indexes(&app.db, TenantMode::Multi).await;
 
     // 1. Provision shop with owner
     let (status, _) = post(
@@ -493,7 +494,7 @@ async fn replaying_with_a_new_name_refreshes_names_but_keeps_the_password() {
         return;
     }
     let app = common::spawn_app_multi_tenant_with_secret(Some(SECRET)).await;
-    ensure_indexes(&app.db, true).await;
+    ensure_indexes(&app.db, TenantMode::Multi).await;
     let hash = argon2_hash(PASSWORD);
 
     let (first, _) = post(

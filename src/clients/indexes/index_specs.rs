@@ -1,0 +1,504 @@
+use super::index_spec::IndexSpec;
+use crate::core::config::TenantMode;
+use crate::core::tenancy::TENANT_FIELD;
+use mongodb::bson::{Document, doc};
+
+use std::time::Duration;
+
+/// Collections that participate in `GET /sync/changes`.
+const SYNCED_COLLECTIONS: &[&str] = &[
+    "products",
+    "categories",
+    "subcategories",
+    "suppliers",
+    "supplier_products",
+    "purchases",
+    "stock_movements",
+    "stock_batches",
+    "customers",
+    "employees",
+    "repairs",
+    "print_jobs",
+    "invoices",
+    "payments",
+    "credit_notes",
+    "quotations",
+    "product_serials",
+];
+
+/// How long a completed idempotency record is replayable. Matches the
+/// 7-day window the client's outbox assumes when it retries a request whose
+/// response was lost.
+const IDEMPOTENCY_RETENTION: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+/// How long a push batch's stored acks stay replayable: a device that lost the
+/// response retries the same `batchId` well within this window.
+const SYNC_BATCH_RETENTION: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+/// How long a hard-delete marker outlives its publication. The consumer reads
+/// it within moments; the slack only covers a consumer outage.
+const SYNC_TOMBSTONE_RETENTION: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+/// Collects the specs, applying the tenant prefix in multi-tenant mode.
+#[derive(Debug)]
+pub(super) struct Specs {
+    pub(super) tenant_mode: TenantMode,
+    pub(super) out: Vec<IndexSpec>,
+}
+
+impl Specs {
+    /// A tenant-owned index: prefixed with `tenant_id` in multi-tenant mode.
+    pub(super) fn add(
+        &mut self,
+        collection: &'static str,
+        name: &str,
+        keys: Document,
+        unique: bool,
+    ) {
+        let (name, keys) = if self.tenant_mode == TenantMode::Multi {
+            let mut scoped = doc! { TENANT_FIELD: 1 };
+            scoped.extend(keys);
+            (format!("t_{name}"), scoped)
+        } else {
+            (name.to_string(), keys)
+        };
+        self.out.push(IndexSpec {
+            collection,
+            name,
+            keys,
+            unique,
+            ttl: None,
+        });
+    }
+
+    /// An index that is never tenant-prefixed (TTL indexes must be single-field).
+    pub(super) fn add_untenanted(&mut self, spec: IndexSpec) {
+        self.out.push(spec);
+    }
+}
+
+/// Every index `ensure_indexes` creates. Single-tenant output is exactly the
+/// historical set; see the module comment for what changes in multi-tenant mode.
+///
+/// Unique indexes that exist in MongoDB today are only `idempotency_keys
+/// (key, user_id)` and `product_serials.serial_number`; both become
+/// tenant-qualified. Uniqueness of `sku`, category/supplier names, usernames
+/// and invoice/credit-note/ticket numbers is enforced in the service layer on
+/// MongoDB (the SQLite schema has the table-level UNIQUEs), and services see
+/// only the tenant's rows, so it is already per tenant.
+#[must_use]
+pub fn index_specs(tenant_mode: TenantMode) -> Vec<IndexSpec> {
+    let mut specs = Specs {
+        tenant_mode,
+        out: Vec::new(),
+    };
+
+    for collection in SYNCED_COLLECTIONS {
+        specs.add(
+            collection,
+            "sync_updated_at_key",
+            doc! { "updated_at": 1, "key": 1 },
+            false,
+        );
+    }
+
+    // Analytics reporting (`modules::reports::repository::analytics`) matches
+    // and buckets on `created_at` across whole collections. Without these the
+    // POS has no `created_at` index at all and every analytics range query is
+    // a full collection scan.
+    for collection in ["invoices", "credit_notes", "purchases", "payments"] {
+        specs.add(
+            collection,
+            "analytics_created_at",
+            doc! { "created_at": 1 },
+            false,
+        );
+    }
+
+    // Per-cashier and per-customer analytics slices scan `invoices` filtered
+    // by one id and a date range.
+    specs.add(
+        "invoices",
+        "analytics_cashier_created_at",
+        doc! { "cashier_id": 1, "created_at": 1 },
+        false,
+    );
+    specs.add(
+        "invoices",
+        "analytics_customer_created_at",
+        doc! { "customer_key": 1, "created_at": 1 },
+        false,
+    );
+
+    // Register shift session invoice reads
+    specs.add(
+        "invoices",
+        "invoices_session_key",
+        doc! { "session_key": 1 },
+        false,
+    );
+
+    // Credit-reminder / receivables reads and repair & print-job reminders.
+    specs.add(
+        "invoices",
+        "reminders_status_due_date",
+        doc! { "status": 1, "due_date": 1 },
+        false,
+    );
+    for collection in ["repairs", "print_jobs"] {
+        specs.add(
+            collection,
+            "reminders_promised_ready_at_status",
+            doc! { "promised_ready_at": 1, "status": 1 },
+            false,
+        );
+    }
+
+    // `sales-by-category` joins invoice lines to `products` by `key`; the sync
+    // index has `key` second, so a `$lookup` on it alone can't use it.
+    specs.add("products", "products_key", doc! { "key": 1 }, false);
+
+    // Makes the duplicate-insert branch in `core::middleware::idempotency`
+    // reachable at all.
+    specs.add(
+        "idempotency_keys",
+        "idempotency_key_user_unique",
+        doc! { "key": 1, "user_id": 1 },
+        true,
+    );
+    specs.add_untenanted(IndexSpec {
+        collection: "idempotency_keys",
+        name: "idempotency_ttl".to_string(),
+        keys: doc! { "created_at": 1 },
+        unique: false,
+        ttl: Some(IDEMPOTENCY_RETENTION),
+    });
+
+    specs.add(
+        "product_serials",
+        "product_serials_serial_number_unique",
+        doc! { "serial_number": 1 },
+        true,
+    );
+    // Backs `GET /products/{key}/serials?status=`.
+    specs.add(
+        "product_serials",
+        "product_serials_product_key_status",
+        doc! { "product_key": 1, "status": 1 },
+        false,
+    );
+
+    // Backs every product read's price tiers and a sale's batch plan
+    // (`inventory::repository::stock_batch`), both keyed by product.
+    specs.add(
+        "stock_batches",
+        "stock_batches_product_key_remaining",
+        doc! { "product_key": 1, "remaining_quantity": 1 },
+        false,
+    );
+
+    // Drawer categories and the payee directory (`modules::cash_categories`,
+    // `modules::payees`): name lookups for the picker and the duplicate check, and the
+    // per-category / per-payee movement counts that rank them.
+    specs.add(
+        "cash_categories",
+        "cash_categories_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    specs.add(
+        "cash_categories",
+        "cash_categories_type_name",
+        doc! { "movement_type": 1, "normalized_name": 1 },
+        false,
+    );
+    specs.add("payees", "payees_key_unique", doc! { "key": 1 }, true);
+    specs.add(
+        "payees",
+        "payees_type_name",
+        doc! { "payee_type": 1, "normalized_name": 1 },
+        false,
+    );
+    // The expense ledger (`modules::expenses`): payments are read per expense, and the list
+    // is read by date.
+    // Supplier receipts (`modules::purchases`): looked up by key, by supplier plus invoice number
+    // (the duplicate check), and a receipt's lines are read by `receipt_key`.
+    specs.add(
+        "purchase_receipts",
+        "purchase_receipts_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    specs.add(
+        "purchase_receipts",
+        "purchase_receipts_supplier_reference",
+        doc! { "supplier_key": 1, "reference_no": 1 },
+        false,
+    );
+    specs.add(
+        "purchases",
+        "purchases_receipt_key",
+        doc! { "receipt_key": 1 },
+        false,
+    );
+    // A receipt's settlements are read by `receipt_key`; a payment's by `payment_key`.
+    specs.add(
+        "receipt_settlements",
+        "receipt_settlements_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    specs.add(
+        "receipt_settlements",
+        "receipt_settlements_receipt_key",
+        doc! { "receipt_key": 1 },
+        false,
+    );
+    specs.add(
+        "receipt_settlements",
+        "receipt_settlements_payment_key",
+        doc! { "payment_key": 1 },
+        false,
+    );
+    // A supplier's credits, and a receipt's.
+    specs.add(
+        "supplier_credits",
+        "supplier_credits_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    specs.add(
+        "supplier_credits",
+        "supplier_credits_supplier_key",
+        doc! { "supplier_key": 1 },
+        false,
+    );
+    specs.add(
+        "supplier_credits",
+        "supplier_credits_receipt_key",
+        doc! { "receipt_key": 1 },
+        false,
+    );
+    // A receipt's extra charges, and the charges a supplier billed (for its balance).
+    specs.add(
+        "receipt_charges",
+        "receipt_charges_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    specs.add(
+        "receipt_charges",
+        "receipt_charges_receipt_key",
+        doc! { "receipt_key": 1 },
+        false,
+    );
+    specs.add(
+        "receipt_charges",
+        "receipt_charges_supplier_key",
+        doc! { "supplier_key": 1 },
+        false,
+    );
+    specs.add("expenses", "expenses_key_unique", doc! { "key": 1 }, true);
+    specs.add(
+        "recurring_expenses",
+        "recurring_expenses_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    specs.add(
+        "expenses",
+        "expenses_date",
+        doc! { "expense_date": 1 },
+        false,
+    );
+    // The income ledger (`modules::incomes`): read by date.
+    specs.add("incomes", "incomes_key_unique", doc! { "key": 1 }, true);
+    specs.add("incomes", "incomes_date", doc! { "income_date": 1 }, false);
+    // Account opening balances (`modules::accounts`): one row per account kind.
+    specs.add(
+        "account_openings",
+        "account_openings_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    // Supplier and staff balances (`modules::balances`).
+    specs.add(
+        "balance_openings",
+        "balance_openings_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    specs.add(
+        "advance_recoveries",
+        "advance_recoveries_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    specs.add(
+        "advance_recoveries",
+        "advance_recoveries_employee_key",
+        doc! { "employee_key": 1 },
+        false,
+    );
+    // Receipt photos (`modules::attachments`): listed by the record they belong to.
+    specs.add(
+        "attachments",
+        "attachments_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    specs.add(
+        "attachments",
+        "attachments_owner",
+        doc! { "owner_kind": 1, "owner_key": 1 },
+        false,
+    );
+    // The shop's drawer rules (`modules::cash_settings`): one row.
+    specs.add(
+        "cash_settings",
+        "cash_settings_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    specs.add(
+        "expense_payments",
+        "expense_payments_expense_key",
+        doc! { "expense_key": 1 },
+        false,
+    );
+    specs.add(
+        "cash_movements",
+        "cash_movements_category_key",
+        doc! { "category_key": 1 },
+        false,
+    );
+    specs.add(
+        "cash_movements",
+        "cash_movements_payee_key",
+        doc! { "payee_key": 1 },
+        false,
+    );
+
+    specs.add(
+        "shop_profiles",
+        "shop_profiles_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+
+    // One document-template choice row per shop (`modules::settings`).
+    specs.add(
+        "document_template_settings",
+        "document_template_settings_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+
+    // A shop's own label designs (`modules::labels`).
+    specs.add(
+        "label_templates",
+        "label_templates_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    // Label print history (`modules::labels`): looked up by key, listed newest first.
+    specs.add(
+        "label_print_jobs",
+        "label_print_jobs_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    specs.add(
+        "label_print_jobs",
+        "label_print_jobs_created_at",
+        doc! { "created_at": -1 },
+        false,
+    );
+
+    // Platform directory (`modules::tenants`): shop codes are globally unique
+    // and the collection is not tenant-owned, so it is never tenant-prefixed.
+    if tenant_mode == TenantMode::Multi {
+        specs.add_untenanted(IndexSpec {
+            collection: "tenants",
+            name: "tenants_shop_code_unique".to_string(),
+            keys: doc! { "shop_code": 1 },
+            unique: true,
+            ttl: None,
+        });
+    }
+
+    // Sync v2 cloud collections (modules::sync). They only exist on the
+    // multi-tenant cloud, so single-tenant output stays the historical set.
+    if tenant_mode == TenantMode::Multi {
+        // Per-tenant monotonic `seq`: the pull cursor. Unique so a replayed
+        // change-stream event can never be assigned two sequence numbers.
+        specs.add(
+            "sync_changes",
+            "sync_changes_seq_unique",
+            doc! { "seq": 1 },
+            true,
+        );
+        // De-duplicates a change-stream event replayed after a consumer restart.
+        specs.add(
+            "sync_changes",
+            "sync_changes_source_token_unique",
+            doc! { "source_token": 1 },
+            true,
+        );
+        // Latest change of one entity (compaction, snapshot consistency checks).
+        specs.add(
+            "sync_changes",
+            "sync_changes_resource_key_seq",
+            doc! { "resource": 1, "key": 1, "seq": 1 },
+            false,
+        );
+        specs.add(
+            "sync_meta",
+            "sync_meta_kind_unique",
+            doc! { "kind": 1 },
+            true,
+        );
+        specs.add(
+            "sync_device_state",
+            "sync_device_state_device_unique",
+            doc! { "device_id": 1 },
+            true,
+        );
+        specs.add(
+            "sync_batches",
+            "sync_batches_device_batch_unique",
+            doc! { "device_id": 1, "batch_id": 1 },
+            true,
+        );
+        // A TTL index must be single-field, so it is not tenant-prefixed.
+        specs.add_untenanted(IndexSpec {
+            collection: "sync_batches",
+            name: "sync_batches_ttl".to_string(),
+            keys: doc! { "at": 1 },
+            unique: false,
+            ttl: Some(SYNC_BATCH_RETENTION),
+        });
+        // Hard-delete markers only live until the consumer has published them.
+        specs.add_untenanted(IndexSpec {
+            collection: "sync_tombstones",
+            name: "sync_tombstones_ttl".to_string(),
+            keys: doc! { "deleted_at": 1 },
+            unique: false,
+            ttl: Some(SYNC_TOMBSTONE_RETENTION),
+        });
+        specs.add(
+            "sync_conflicts",
+            "sync_conflicts_key_unique",
+            doc! { "key": 1 },
+            true,
+        );
+        specs.add(
+            "sync_conflicts",
+            "sync_conflicts_detected_at",
+            doc! { "detected_at": 1 },
+            false,
+        );
+    }
+
+    specs.out
+}

@@ -1,10 +1,11 @@
-use simplebash_pos_backend::{
-    clients,
-    core::config::Config,
-    domain::inventory::{CreateProductRequest, OpeningStockRequest, ProductListQuery},
-    modules::inventory::service::{category, product},
+use simplebash_pos_backend::clients;
+use simplebash_pos_backend::core::config::Config;
+use simplebash_pos_backend::domain::inventory::{
+    CreateProductRequest, OpeningStockRequest, ProductListQuery,
 };
+use simplebash_pos_backend::modules::inventory::service::{category, product};
 
+#[derive(Debug)]
 struct ProductTemplate {
     name: &'static str,
     cost_price_cents: i64,
@@ -5162,7 +5163,7 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     let config = Config::from_env().expect("invalid configuration");
-    let db = clients::db::connect_from_config(&config)
+    let db = clients::connect_from_config(&config)
         .await
         .expect("failed to connect to database");
 

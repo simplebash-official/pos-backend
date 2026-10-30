@@ -1,0 +1,42 @@
+use super::parse_object_id::parse_object_id;
+use crate::app::AppState;
+use crate::core::constants::modules;
+use crate::core::error::AppResult;
+use crate::core::middleware::auth::AdminUser;
+use crate::core::response::{ApiResponse, ErrorResponse};
+
+use crate::domain::suppliers::{Supplier, UpdateSupplierRequest};
+use crate::modules::suppliers::service;
+use axum::Json;
+use axum::extract::{Path, State};
+
+#[utoipa::path(patch, path = "/{id}", tag = modules::SUPPLIERS,
+    params(("id" = String, Path, description = "Supplier id")),
+    request_body = UpdateSupplierRequest,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Supplier updated", body = ApiResponse<Supplier>),
+        (status = 400, description = "Validation error", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Admin access required", body = ErrorResponse),
+        (status = 404, description = "Supplier not found", body = ErrorResponse),
+        (status = 409, description = "Version conflict", body = ErrorResponse),
+    )
+)]
+pub(super) async fn update_supplier(
+    _admin: AdminUser,
+    State(state): State<AppState>,
+    if_match: crate::core::middleware::sync_headers::IfMatch,
+    device_id: crate::core::middleware::sync_headers::DeviceId,
+    Path(id): Path<String>,
+    Json(body): Json<UpdateSupplierRequest>,
+) -> AppResult<Json<ApiResponse<Supplier>>> {
+    let object_id = parse_object_id(&id)?;
+    let supplier =
+        service::update_supplier(&state.db, object_id, body, if_match.0, device_id.0).await?;
+
+    Ok(Json(ApiResponse::success(
+        supplier,
+        "Supplier updated successfully",
+    )))
+}

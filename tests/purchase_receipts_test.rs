@@ -4,15 +4,14 @@
 
 mod common;
 
-use axum::{
-    body::Body,
-    http::{
-        Request, StatusCode,
-        header::{AUTHORIZATION, CONTENT_TYPE},
-    },
-};
+use axum::body::Body;
+
+use axum::http::{Request, StatusCode};
+
+use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde_json::{Value, json};
-use simplebash_pos_backend::{core::constants::roles, domain::users::Role};
+use simplebash_pos_backend::core::constants::roles;
+use simplebash_pos_backend::domain::users::Role;
 use tower::ServiceExt;
 
 async fn send(
@@ -380,9 +379,8 @@ async fn scenario(app: &common::TestApp) {
 /// What is paid as the stock arrives: from the drawer, from the owner's pocket, from the bank;
 /// in full, in part, or not at all; and what a refused or reversed payment leaves behind.
 async fn payment_scenario(app: &common::TestApp) {
-    use simplebash_pos_backend::domain::{
-        cash_categories::category_key, sessions::CashMovementType,
-    };
+    use simplebash_pos_backend::domain::cash_categories::category_key;
+    use simplebash_pos_backend::domain::sessions::CashMovementType;
 
     let router = &app.router;
     let admin = common::mint_token(
@@ -969,9 +967,8 @@ async fn payment_scenario(app: &common::TestApp) {
 /// Supplier credits (short or damaged goods, price differences) and what they do to a receipt,
 /// the supplier balance and the payables report.
 async fn credit_scenario(app: &common::TestApp) {
-    use simplebash_pos_backend::domain::{
-        cash_categories::category_key, sessions::CashMovementType,
-    };
+    use simplebash_pos_backend::domain::cash_categories::category_key;
+    use simplebash_pos_backend::domain::sessions::CashMovementType;
 
     let router = &app.router;
     let admin = common::mint_token(
@@ -1435,10 +1432,8 @@ async fn a_sqlite_database_from_before_receipts_is_migrated() {
 #[tokio::test]
 async fn a_mongo_database_from_before_receipts_is_migrated() {
     use mongodb::bson::{DateTime, Document, doc};
-    use simplebash_pos_backend::{
-        modules::inventory::service::stock_batch_migration::Mode,
-        modules::purchases::service::receipt_migration::migrate_mongo,
-    };
+    use simplebash_pos_backend::modules::inventory::service::stock_batch_migration::Mode;
+    use simplebash_pos_backend::modules::purchases::service::receipt_migration::migrate_mongo;
 
     let app = common::spawn_app_isolated().await;
     let purchases = app.db.collection::<Document>("purchases");

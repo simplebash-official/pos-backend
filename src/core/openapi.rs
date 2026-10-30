@@ -1,7 +1,5 @@
-use utoipa::{
-    Modify, OpenApi,
-    openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme},
-};
+use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
+use utoipa::{Modify, OpenApi};
 
 /// Root OpenAPI document. Paths are populated at router build time by
 /// merging each module's `OpenApiRouter` (see `app::build_router`) — this
@@ -47,6 +45,7 @@ use utoipa::{
         (name = "tenants", description = "Server-to-server shop provisioning (identity service only)"),
     )
 )]
+#[derive(Debug)]
 pub struct ApiDoc;
 
 /// Registers the `bearerAuth` security scheme referenced by every route's
@@ -54,6 +53,7 @@ pub struct ApiDoc;
 /// emit those annotations pointing at a scheme that doesn't exist in the
 /// generated document, and Swagger UI's "Authorize" button would have
 /// nothing to configure.
+#[derive(Debug)]
 struct SecurityAddon;
 
 impl Modify for SecurityAddon {

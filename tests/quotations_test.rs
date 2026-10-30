@@ -6,24 +6,19 @@
 
 mod common;
 
-use axum::{
-    body::Body,
-    http::{
-        Request, StatusCode,
-        header::{AUTHORIZATION, CONTENT_TYPE},
-    },
-};
+use axum::body::Body;
+
+use axum::http::{Request, StatusCode};
+
+use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use chrono::{Duration, Utc};
 use serde_json::{Value, json};
-use simplebash_pos_backend::{
-    app::{self, AppState},
-    clients::{self, db::Db},
-    core::{
-        config::{Config, DatabaseType},
-        constants::{permissions as perm, roles},
-    },
-    domain::users::Role,
-};
+use simplebash_pos_backend::app::AppState;
+use simplebash_pos_backend::clients::db::Db;
+use simplebash_pos_backend::core::config::{Config, DatabaseType};
+use simplebash_pos_backend::core::constants::{permissions as perm, roles};
+use simplebash_pos_backend::domain::users::Role;
+use simplebash_pos_backend::{app, clients};
 use std::sync::Arc;
 use tower::ServiceExt;
 use uuid::Uuid;

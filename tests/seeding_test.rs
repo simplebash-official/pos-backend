@@ -1,9 +1,8 @@
 mod common;
 
-use axum::{
-    body::Body,
-    http::{Request, StatusCode, header},
-};
+use axum::body::Body;
+
+use axum::http::{Request, StatusCode, header};
 use serde_json::json;
 use simplebash_pos_backend::seeds;
 use tower::ServiceExt;

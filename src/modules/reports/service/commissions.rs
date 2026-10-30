@@ -8,20 +8,14 @@
 use std::collections::HashMap;
 
 use super::dates;
-use crate::{
-    clients::db::Db,
-    core::error::AppResult,
-    domain::reports::{
-        EmployeeCommissionsQuery, EmployeeCommissionsReportResponse, EmployeePerformanceEntry,
-    },
-    modules::{
-        employees,
-        reports::repository::{
-            self,
-            commissions::{UNASSIGNED_PRINTER, UNASSIGNED_TECHNICIAN},
-        },
-    },
+use crate::clients::db::Db;
+use crate::core::error::AppResult;
+use crate::domain::reports::{
+    EmployeeCommissionsQuery, EmployeeCommissionsReportResponse, EmployeePerformanceEntry,
 };
+use crate::modules::employees;
+use crate::modules::reports::repository;
+use crate::modules::reports::repository::commissions::{UNASSIGNED_PRINTER, UNASSIGNED_TECHNICIAN};
 
 /// Retrieves the technician and staff job performance, profit generation, and earned commission splits.
 pub(crate) async fn get_employee_commissions_report(

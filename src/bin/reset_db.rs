@@ -1,4 +1,5 @@
-use simplebash_pos_backend::{clients, core::config::Config, seeds};
+use simplebash_pos_backend::core::config::Config;
+use simplebash_pos_backend::{clients, seeds};
 use std::fs;
 use std::path::Path;
 
@@ -8,7 +9,7 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     let config = Config::from_env().expect("invalid configuration");
-    let db = clients::db::connect_from_config(&config)
+    let db = clients::connect_from_config(&config)
         .await
         .expect("failed to connect to database");
 
@@ -38,11 +39,7 @@ async fn main() {
         println!("✅ All MongoDB collections dropped.");
 
         println!("Ensuring MongoDB indexes...");
-        clients::indexes::ensure_indexes(
-            mongo,
-            config.tenant_mode == simplebash_pos_backend::core::config::TenantMode::Multi,
-        )
-        .await;
+        clients::indexes::ensure_indexes(mongo, config.tenant_mode).await;
         println!("✅ Indexes recreated.");
     } else if let Some(pool) = db.as_sqlite() {
         println!("Resetting SQLite tables...");

@@ -3,18 +3,18 @@
 
 mod common;
 
-use axum::{
-    body::Body,
-    http::{
-        Request, StatusCode,
-        header::{AUTHORIZATION, CONTENT_TYPE},
-    },
-};
+use axum::body::Body;
+
+use axum::http::{Request, StatusCode};
+
+use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde_json::{Value, json};
-use simplebash_pos_backend::{
-    core::constants::roles,
-    domain::{cash_categories::category_key, sessions::CashMovementType, users::Role},
-};
+use simplebash_pos_backend::core::config::TenantMode;
+use simplebash_pos_backend::core::constants::roles;
+use simplebash_pos_backend::domain::cash_categories::category_key;
+use simplebash_pos_backend::domain::sessions::CashMovementType;
+use simplebash_pos_backend::domain::users::Role;
+use simplebash_pos_backend::modules::inventory::service::stock_batch_migration::Mode;
 use tower::ServiceExt;
 
 async fn send(
@@ -667,7 +667,8 @@ async fn seeding_the_built_in_categories_twice_changes_nothing() {
 /// A desktop database from before typed movements: the old six-type table with free-text reasons.
 #[tokio::test]
 async fn old_cash_movements_are_migrated_to_typed_movements_once() {
-    use sqlx::{Executor, Row, sqlite::SqlitePoolOptions};
+    use sqlx::sqlite::SqlitePoolOptions;
+    use sqlx::{Executor, Row};
 
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
@@ -849,7 +850,9 @@ async fn old_cash_movements_are_migrated_on_mongo_once() {
         .unwrap();
 
     let dry = simplebash_pos_backend::modules::cash_categories::migration::migrate_mongo(
-        &app.db, false, true,
+        &app.db,
+        TenantMode::Single,
+        Mode::DryRun,
     )
     .await
     .unwrap();
@@ -864,13 +867,17 @@ async fn old_cash_movements_are_migrated_on_mongo_once() {
     );
 
     let report = simplebash_pos_backend::modules::cash_categories::migration::migrate_mongo(
-        &app.db, false, false,
+        &app.db,
+        TenantMode::Single,
+        Mode::Apply,
     )
     .await
     .unwrap();
     assert_eq!(report.movements, 1);
     let again = simplebash_pos_backend::modules::cash_categories::migration::migrate_mongo(
-        &app.db, false, false,
+        &app.db,
+        TenantMode::Single,
+        Mode::Apply,
     )
     .await
     .unwrap();

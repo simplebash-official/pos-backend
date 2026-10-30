@@ -1,22 +1,18 @@
 mod common;
 
-use axum::{
-    body::Body,
-    http::{
-        Request, StatusCode,
-        header::{AUTHORIZATION, CONTENT_TYPE},
-    },
-};
+use axum::body::Body;
+
+use axum::http::{Request, StatusCode};
+
+use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use mongodb::bson::{DateTime as BsonDateTime, doc};
 use serde_json::{Value, json};
-use simplebash_pos_backend::{
-    core::{config::Config, constants::roles, id::generate_id},
-    domain::users::Role,
-    modules::{
-        billing::model::InvoiceDocument,
-        inventory::model::{CategoryDocument, SubcategoryDocument},
-    },
-};
+use simplebash_pos_backend::core::config::Config;
+use simplebash_pos_backend::core::constants::roles;
+use simplebash_pos_backend::core::id::generate_id;
+use simplebash_pos_backend::domain::users::Role;
+use simplebash_pos_backend::modules::billing::model::InvoiceDocument;
+use simplebash_pos_backend::modules::inventory::model::{CategoryDocument, SubcategoryDocument};
 use tower::ServiceExt;
 use uuid::Uuid;
 

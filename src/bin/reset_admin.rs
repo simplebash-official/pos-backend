@@ -1,6 +1,6 @@
-use simplebash_pos_backend::{
-    clients, core::config::Config, modules::users::service::reset_admin_credentials,
-};
+use simplebash_pos_backend::clients;
+use simplebash_pos_backend::core::config::Config;
+use simplebash_pos_backend::modules::users::service::reset_admin_credentials;
 
 /// Rotates the existing Admin account's password (its username is always
 /// `admin`) to `RESET_ADMIN_PASSWORD`
@@ -30,7 +30,7 @@ async fn main() {
     };
 
     let config = Config::from_env().expect("invalid configuration");
-    let db = clients::db::connect_from_config(&config)
+    let db = clients::connect_from_config(&config)
         .await
         .expect("failed to connect to database");
 

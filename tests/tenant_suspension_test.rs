@@ -1,18 +1,19 @@
+use simplebash_pos_backend::core::config::TenantMode;
 // Suspending a shop (`PUT /api/internal/tenants/{id}/status`) and the usage figures
 // (`GET /api/internal/tenants/{id}/usage`, `POST /api/internal/tenants/usage`). Real router in
 // `TENANT_MODE=multi` against a real MongoDB (MONGODB_URI) in a throwaway database.
 
 mod common;
 
-use argon2::{
-    Argon2,
-    password_hash::{PasswordHasher, SaltString, rand_core::OsRng},
-};
-use axum::{
-    Router,
-    body::Body,
-    http::{Request, StatusCode, header::CONTENT_TYPE},
-};
+use argon2::Argon2;
+
+use argon2::password_hash::{PasswordHasher, SaltString};
+
+use argon2::password_hash::rand_core::OsRng;
+use axum::Router;
+use axum::body::Body;
+use axum::http::header::CONTENT_TYPE;
+use axum::http::{Request, StatusCode};
 use mongodb::bson::{DateTime, Document, doc};
 use serde_json::{Value, json};
 use simplebash_pos_backend::clients::indexes::ensure_indexes;
@@ -138,7 +139,7 @@ async fn a_suspended_shop_is_refused_everywhere_and_can_be_reinstated() {
         return;
     }
     let app = common::spawn_app_multi_tenant_with_secret(Some(SECRET)).await;
-    ensure_indexes(&app.db, true).await;
+    ensure_indexes(&app.db, TenantMode::Multi).await;
     let (tenant, other) = (tenant_id(), tenant_id());
     provision(&app.router, &tenant, "ann-s-phones").await;
     provision(&app.router, &other, "bob-repairs").await;
@@ -253,7 +254,7 @@ async fn the_status_route_needs_the_secret_and_a_known_shop() {
         return;
     }
     let app = common::spawn_app_multi_tenant_with_secret(Some(SECRET)).await;
-    ensure_indexes(&app.db, true).await;
+    ensure_indexes(&app.db, TenantMode::Multi).await;
     let tenant = tenant_id();
     provision(&app.router, &tenant, "ann-s-phones").await;
 
@@ -363,7 +364,7 @@ async fn usage_counts_this_shop_only_and_leaves_out_voided_and_deleted_rows() {
         return;
     }
     let app = common::spawn_app_multi_tenant_with_secret(Some(SECRET)).await;
-    ensure_indexes(&app.db, true).await;
+    ensure_indexes(&app.db, TenantMode::Multi).await;
     let (tenant, other) = (tenant_id(), tenant_id());
     provision(&app.router, &tenant, "ann-s-phones").await;
     provision(&app.router, &other, "bob-repairs").await;
@@ -537,7 +538,7 @@ async fn a_suspended_shop_reports_what_it_still_holds_and_reinstating_changes_no
         return;
     }
     let app = common::spawn_app_multi_tenant_with_secret(Some(SECRET)).await;
-    ensure_indexes(&app.db, true).await;
+    ensure_indexes(&app.db, TenantMode::Multi).await;
     let (tenant, other) = (tenant_id(), tenant_id());
     provision(&app.router, &tenant, "ann-s-phones").await;
     provision(&app.router, &other, "bob-repairs").await;

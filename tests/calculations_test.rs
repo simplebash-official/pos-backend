@@ -1,10 +1,8 @@
-use simplebash_pos_backend::{
-    core::calculations::{
-        compute_change_due, compute_line_total, compute_order_discount, compute_sale_totals,
-        validate_split_payments,
-    },
-    domain::billing::{InvoiceItem, PricingAdjustments, SplitPayment},
+use simplebash_pos_backend::core::calculations::{
+    compute_change_due, compute_line_total, compute_order_discount, compute_sale_totals,
+    validate_split_payments,
 };
+use simplebash_pos_backend::domain::billing::{InvoiceItem, PricingAdjustments, SplitPayment};
 
 #[test]
 fn test_line_total_calculations() {

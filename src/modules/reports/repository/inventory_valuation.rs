@@ -8,11 +8,11 @@ use mongodb::bson::{Document, doc};
 
 use sqlx::Row;
 
-use crate::{
-    clients::db::Db,
-    core::error::AppResult,
-    domain::reports::{CategoryValuationEntry, InventoryValuationResponse},
-};
+use crate::clients::db::Db;
+
+use crate::core::error::AppResult;
+
+use crate::domain::reports::{CategoryValuationEntry, InventoryValuationResponse};
 
 fn products(db: &TenantDatabase) -> ScopedCollection<Document> {
     db.collection("products")

@@ -1,10 +1,10 @@
 use super::dates;
-use crate::{
-    clients::db::Db,
-    core::{error::AppResult, utils::shop_today_range},
-    domain::reports::{DailySalesQuery, DailySalesReportResponse, PaymentMethodBreakdown},
-    modules::reports::repository,
-};
+use super::dates::RangeBound;
+use crate::clients::db::Db;
+use crate::core::error::AppResult;
+use crate::core::utils::shop_today_range;
+use crate::domain::reports::{DailySalesQuery, DailySalesReportResponse, PaymentMethodBreakdown};
+use crate::modules::reports::repository;
 
 /// Generates daily sales summaries with breakdowns by stream and payment methods.
 pub(crate) async fn get_daily_sales_report(
@@ -12,8 +12,8 @@ pub(crate) async fn get_daily_sales_report(
     query: DailySalesQuery,
 ) -> AppResult<DailySalesReportResponse> {
     let (start, end) = if let Some(d) = query.date.filter(|s| !s.trim().is_empty()) {
-        let start = dates::parse_iso_or_ymd(d.trim(), false)?;
-        let end = dates::parse_iso_or_ymd(d.trim(), true)?;
+        let start = dates::parse_iso_or_ymd(d.trim(), RangeBound::Start)?;
+        let end = dates::parse_iso_or_ymd(d.trim(), RangeBound::End)?;
         (start, end)
     } else if query.from.is_some() || query.to.is_some() {
         dates::parse_date_range(None, query.from.as_deref(), query.to.as_deref())?

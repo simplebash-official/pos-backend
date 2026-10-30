@@ -1,10 +1,10 @@
 use super::dates;
-use crate::{
-    clients::db::Db,
-    core::error::AppResult,
-    domain::{employees::EmployeeEarningsResponse, reports::EmployeeCommissionsQuery},
-    modules::{employees, reports::repository},
-};
+use crate::clients::db::Db;
+use crate::core::error::AppResult;
+use crate::domain::employees::EmployeeEarningsResponse;
+use crate::domain::reports::EmployeeCommissionsQuery;
+use crate::modules::employees;
+use crate::modules::reports::repository;
 
 /// Retrieves the itemized (non-aggregated) commission line items for one
 /// employee. 404s via `employees::service::get_employee_by_key` if the key

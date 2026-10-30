@@ -1,15 +1,13 @@
-use simplebash_pos_backend::{
-    clients,
-    core::config::Config,
-    domain::inventory::ProductListQuery,
-    modules::inventory::service::{category, product},
-};
+use simplebash_pos_backend::clients;
+use simplebash_pos_backend::core::config::Config;
+use simplebash_pos_backend::domain::inventory::ProductListQuery;
+use simplebash_pos_backend::modules::inventory::service::{category, product};
 
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();
     let config = Config::from_env().expect("invalid configuration");
-    let db = clients::db::connect_from_config(&config)
+    let db = clients::connect_from_config(&config)
         .await
         .expect("failed to connect to database");
 

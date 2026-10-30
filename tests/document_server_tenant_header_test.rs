@@ -9,14 +9,16 @@
 
 use std::sync::{Arc, Mutex};
 
-use axum::{
-    Json, Router,
-    extract::Path,
-    http::HeaderMap,
-    routing::{get, post},
-};
+use axum::{Json, Router};
+
+use axum::extract::Path;
+
+use axum::http::HeaderMap;
+
+use axum::routing::{get, post};
 use serde_json::json;
-use simplebash_pos_backend::{clients::document_server::DocumentServerClient, core::tenancy};
+use simplebash_pos_backend::clients::document_server::DocumentServerClient;
+use simplebash_pos_backend::core::tenancy;
 
 /// Starts a mock that records every request's headers and answers just
 /// enough to satisfy `DocumentServerClient::render` (one template on

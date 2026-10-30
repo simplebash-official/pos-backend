@@ -7,7 +7,7 @@
 // its `repository`" rule `supplier_products`/`purchases` already follow for
 // `suppliers`/`inventory`. `model`/`repository`/`service` are private so
 // nothing outside this module tree can reach past `routes`.
-mod model;
+pub(crate) mod model;
 mod repository;
 pub mod routes;
 mod service;

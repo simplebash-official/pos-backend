@@ -6,7 +6,13 @@
 
 use std::sync::Arc;
 
-use simplebash_pos_backend::{app, app::AppState, clients, core::config::Config, core::logging};
+use simplebash_pos_backend::{app, clients};
+
+use simplebash_pos_backend::app::AppState;
+
+use simplebash_pos_backend::core::config::Config;
+
+use simplebash_pos_backend::core::logging;
 
 #[tokio::main]
 async fn main() {
@@ -42,7 +48,7 @@ async fn main() {
         database_type = ?config.database_type,
         "Connecting to database..."
     );
-    let db = clients::db::connect_from_config(&config)
+    let db = clients::connect_from_config(&config)
         .await
         .unwrap_or_else(|err| {
             tracing::error!(%err, "failed to connect to database");
@@ -52,11 +58,7 @@ async fn main() {
 
     if let Some(mongo_db) = db.as_mongo() {
         // Best-effort, and deliberately not fatal — see `ensure_indexes`.
-        clients::indexes::ensure_indexes(
-            mongo_db.unscoped(),
-            config.tenant_mode == simplebash_pos_backend::core::config::TenantMode::Multi,
-        )
-        .await;
+        clients::indexes::ensure_indexes(mongo_db.unscoped(), config.tenant_mode).await;
     }
 
     // The drawer's starting categories are required reference data, not demo data, so they

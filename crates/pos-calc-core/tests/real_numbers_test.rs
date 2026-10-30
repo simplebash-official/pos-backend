@@ -1,16 +1,15 @@
-use pos_calc_core::{
-    cash::{self, CalcCashCountRequest},
-    checkout::{
-        CalcCartLine, CalcCheckoutPayment, CalcCheckoutRequest, CalcDiscount, CalcDiscountType,
-        CalcPaymentMethod, CalcSource, compute_checkout,
-    },
-    earnings::{self, CalcEarningsRequest, SplitKind},
-    receipt::{
-        Allocation, BilledBy, CalcCharge, CalcChargesPayment, CalcLine, CalcPayment,
-        CalcReceiptRequest, ChargeKind, CostMode, PaymentMode, PaymentSource, PricingMode,
-        compute as compute_receipt,
-    },
+use pos_calc_core::cash::CalcCashCountRequest;
+use pos_calc_core::checkout::{
+    CalcCartLine, CalcCheckoutPayment, CalcCheckoutRequest, CalcDiscount, CalcDiscountType,
+    CalcPaymentMethod, CalcSource, compute_checkout,
 };
+use pos_calc_core::earnings::{CalcEarningsRequest, SplitKind};
+use pos_calc_core::receipt::{
+    Allocation, BilledBy, CalcCharge, CalcChargesPayment, CalcLine, CalcPayment,
+    CalcReceiptRequest, ChargeKind, CostMode, PaymentMode, PaymentSource, PricingMode,
+    compute as compute_receipt,
+};
+use pos_calc_core::{cash, earnings};
 use std::collections::HashMap;
 
 #[test]

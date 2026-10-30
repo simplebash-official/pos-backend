@@ -4,11 +4,11 @@
 // shop code reach the same data the devices sync; without it a new id is minted.
 // Requires TENANT_MODE=multi on MongoDB (see `.env.web.example`).
 
-use simplebash_pos_backend::{
-    clients,
-    core::config::{Config, TenantMode},
-    modules::tenants::service,
-};
+use simplebash_pos_backend::clients;
+
+use simplebash_pos_backend::core::config::{Config, TenantMode};
+
+use simplebash_pos_backend::modules::tenants::service;
 
 #[tokio::main]
 async fn main() {
@@ -25,11 +25,11 @@ async fn main() {
         eprintln!("create_tenant needs TENANT_MODE=multi (and DATABASE_TYPE=mongodb)");
         std::process::exit(2);
     }
-    let db = clients::db::connect_from_config(&config)
+    let db = clients::connect_from_config(&config)
         .await
         .expect("failed to connect to the database");
     if let Some(mongo) = db.as_mongo() {
-        clients::indexes::ensure_indexes(mongo.unscoped(), true).await;
+        clients::indexes::ensure_indexes(mongo.unscoped(), TenantMode::Multi).await;
     }
 
     let created = match tenant_id {

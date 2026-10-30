@@ -1,0 +1,47 @@
+mod adjust_product_stock_pipeline;
+mod aggregate_overview;
+mod build_product_where_clause;
+mod count_products_in_category;
+mod count_products_in_subcategory;
+mod count_stats;
+mod delete_product;
+mod delete_products;
+mod find_low_stock_products;
+mod find_product_by_barcode;
+mod find_product_by_barcode_excluding;
+mod find_product_by_id;
+mod find_product_by_key;
+mod find_product_by_sku;
+mod find_products_by_ids;
+mod insert_product;
+mod like_pattern;
+mod list_products_with_display_names;
+mod min_price_stages;
+mod min_selling_price;
+mod overview_aggregate_result;
+mod products;
+mod row_to_product_doc;
+mod sqlite_order_by;
+#[cfg(test)]
+mod tests;
+mod update_product;
+
+pub(crate) use adjust_product_stock_pipeline::adjust_product_stock_pipeline;
+pub(crate) use aggregate_overview::aggregate_overview;
+pub(crate) use count_products_in_category::count_products_in_category;
+pub(crate) use count_products_in_subcategory::count_products_in_subcategory;
+pub(crate) use count_stats::count_stats;
+pub(crate) use delete_product::delete_product;
+pub(crate) use delete_products::delete_products;
+pub(crate) use find_low_stock_products::find_low_stock_products;
+pub(crate) use find_product_by_barcode::find_product_by_barcode;
+pub(crate) use find_product_by_barcode_excluding::find_product_by_barcode_excluding;
+pub(crate) use find_product_by_id::find_product_by_id;
+pub(crate) use find_product_by_key::find_product_by_key;
+pub(crate) use find_product_by_sku::find_product_by_sku;
+pub(crate) use find_products_by_ids::find_products_by_ids;
+pub(crate) use insert_product::insert_product;
+pub(crate) use list_products_with_display_names::list_products_with_display_names;
+pub(crate) use min_selling_price::MIN_SELLING_PRICE;
+
+pub(crate) use update_product::update_product;

@@ -6,30 +6,26 @@
 
 use std::sync::Arc;
 
-use axum::{
-    body::Body,
-    http::{Request, StatusCode, header},
-};
+use axum::body::Body;
+
+use axum::http::{Request, StatusCode, header};
 use jsonwebtoken::{DecodingKey, Validation, decode};
 use serde_json::{Value, json};
-use simplebash_pos_backend::{
-    app::{self, AppState},
-    clients::{
-        self, db::Db, document_server::DocumentServerClient, mongo::connect,
-        tenant_db::TenantDatabase,
-    },
-    core::{
-        config::{Config, DatabaseType, TenantMode},
-        middleware::auth::Claims,
-        tenancy::{Tenant, with_tenant},
-    },
-    domain::users::{CreateUserRequest, Role},
-    modules::{
-        reports::engine::AnalyticsEngine,
-        tenants::service::{create_tenant, create_tenant_with_key, resolve_shop_code},
-        users::service::create_user,
-    },
+use simplebash_pos_backend::app::AppState;
+use simplebash_pos_backend::clients::db::Db;
+use simplebash_pos_backend::clients::document_server::DocumentServerClient;
+use simplebash_pos_backend::clients::mongo::connect;
+use simplebash_pos_backend::clients::tenant_db::TenantDatabase;
+use simplebash_pos_backend::core::config::{Config, DatabaseType, TenantMode};
+use simplebash_pos_backend::core::middleware::auth::Claims;
+use simplebash_pos_backend::core::tenancy::{Tenant, with_tenant};
+use simplebash_pos_backend::domain::users::{CreateUserRequest, Role};
+use simplebash_pos_backend::modules::reports::engine::AnalyticsEngine;
+use simplebash_pos_backend::modules::tenants::service::{
+    create_tenant, create_tenant_with_key, resolve_shop_code,
 };
+use simplebash_pos_backend::modules::users::service::create_user;
+use simplebash_pos_backend::{app, clients};
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -66,7 +62,7 @@ async fn tenant_directory_and_multi_tenant_login_roundtrip() {
     let raw = connect(&config.mongodb_uri, &config.mongodb_db_name)
         .await
         .expect("connect throwaway db");
-    clients::indexes::ensure_indexes(&raw, true).await;
+    clients::indexes::ensure_indexes(&raw, TenantMode::Multi).await;
     let db = Db::Mongo(TenantDatabase::multi_tenant(raw.clone()));
 
     // --- directory ---------------------------------------------------------

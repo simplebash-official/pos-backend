@@ -25,31 +25,33 @@
 // delete. Subcategory writes are not watched: they bump their parent
 // category, whose own event carries them.
 
-use std::{collections::HashMap, time::Duration};
+use std::collections::HashMap;
+
+use std::time::Duration;
 
 use futures_util::TryStreamExt;
 
 use chrono::Utc;
-use mongodb::{
-    bson::{self, Bson, DateTime as BsonDateTime, Document, doc},
-    change_stream::event::{ChangeStreamEvent, ResumeToken},
-    options::FullDocumentType,
-};
+use mongodb::bson;
+use mongodb::bson::{Bson, DateTime as BsonDateTime, Document, doc};
+use mongodb::change_stream::event::{ChangeStreamEvent, ResumeToken};
+use mongodb::options::FullDocumentType;
 
-use crate::{
-    clients::db::Db,
-    core::{
-        error::{AppError, AppResult},
-        id::generate_id,
-        tenancy::{DENY_TENANT, Tenant, with_tenant},
-    },
-    modules::sync::{
-        cloud_store::{self, CHANGES, TOMBSTONES, coll},
-        compaction,
-        resources::{Phase, ordered},
-        service::hydrate,
-    },
-};
+use crate::clients::db::Db;
+
+use crate::core::error::{AppError, AppResult};
+
+use crate::core::id::generate_id;
+
+use crate::core::tenancy::{DENY_TENANT, Tenant, with_tenant};
+
+use crate::modules::sync::{cloud_store, compaction};
+
+use crate::modules::sync::cloud_store::{CHANGES, TOMBSTONES, coll};
+
+use crate::modules::sync::resources::{Phase, ordered};
+
+use crate::modules::sync::service::hydrate;
 
 const LEASE_COLLECTION: &str = "sync_consumer";
 const LEASE_ID: &str = "consumer";
@@ -77,6 +79,7 @@ const STANDBY_DELAY: Duration = Duration::from_secs(5);
 
 /// Why the consumer stopped consuming. The errors are boxed so this stays a
 /// small `Err` type (`AppError` alone is over 100 bytes).
+#[derive(Debug)]
 enum Stop {
     /// Lease lost, stream ended or a database error: retake and resume.
     Retry(Box<AppError>),

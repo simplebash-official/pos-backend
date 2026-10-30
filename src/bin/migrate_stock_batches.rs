@@ -8,10 +8,12 @@
 // MUST run before deploying the batch-aware backend to an environment with
 // existing data. Run the dry run first and read its warnings.
 
-use simplebash_pos_backend::{
-    clients,
-    core::config::Config,
-    modules::inventory::service::stock_batch_migration::{Mode, Summary, migrate_mongo},
+use simplebash_pos_backend::clients;
+
+use simplebash_pos_backend::core::config::Config;
+
+use simplebash_pos_backend::modules::inventory::service::stock_batch_migration::{
+    Mode, Summary, migrate_mongo,
 };
 
 fn print_summary(label: &str, s: &Summary, dry_run: bool) {

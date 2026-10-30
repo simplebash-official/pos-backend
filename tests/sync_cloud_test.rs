@@ -9,28 +9,23 @@
 
 mod common;
 
-use axum::{
-    body::Body,
-    http::{
-        Request, StatusCode,
-        header::{AUTHORIZATION, CONTENT_TYPE},
-    },
-};
-use mongodb::bson::{Bson, Document, doc, oid::ObjectId};
+use axum::body::Body;
+
+use axum::http::{Request, StatusCode};
+
+use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
+use mongodb::bson::oid::ObjectId;
+use mongodb::bson::{Bson, Document, doc};
 use serde_json::{Value, json};
-use simplebash_pos_backend::{
-    core::{
-        constants::roles,
-        tenancy::{Tenant, with_tenant},
-    },
-    domain::users::Role,
-    modules::sync::{
-        apply_mongo::test_support::{encode_for_test, hydrate_for_test},
-        cloud_capture::run_consumer,
-        compaction::compact_tenant,
-    },
-    modules::tenants::service::create_tenant,
+use simplebash_pos_backend::core::constants::roles;
+use simplebash_pos_backend::core::tenancy::{Tenant, with_tenant};
+use simplebash_pos_backend::domain::users::Role;
+use simplebash_pos_backend::modules::sync::apply_mongo::test_support::{
+    encode_for_test, hydrate_for_test,
 };
+use simplebash_pos_backend::modules::sync::cloud_capture::run_consumer;
+use simplebash_pos_backend::modules::sync::compaction::compact_tenant;
+use simplebash_pos_backend::modules::tenants::service::create_tenant;
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -1394,10 +1389,9 @@ async fn snapshot_pagination_is_consistent() {
 
 #[tokio::test]
 async fn a_pushed_cashier_logs_in_by_shop_code_and_a_web_delete_reaches_devices() {
-    use argon2::{
-        Argon2,
-        password_hash::{PasswordHasher, SaltString, rand_core::OsRng},
-    };
+    use argon2::Argon2;
+    use argon2::password_hash::rand_core::OsRng;
+    use argon2::password_hash::{PasswordHasher, SaltString};
     let _guard = SERIAL.lock().await;
     let app = common::spawn_app_multi_tenant().await;
     start(&app).await;

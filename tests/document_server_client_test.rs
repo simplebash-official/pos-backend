@@ -3,12 +3,17 @@
 // throwaway in-process mock server — no router, no Mongo needed, same
 // no-live-dependency style as `tests/response_format_test.rs`.
 
-use std::sync::{
-    Arc,
-    atomic::{AtomicU32, Ordering},
-};
+use std::sync::Arc;
 
-use axum::{Json, Router, http::StatusCode, response::IntoResponse, routing::get};
+use std::sync::atomic::{AtomicU32, Ordering};
+
+use axum::{Json, Router};
+
+use axum::http::StatusCode;
+
+use axum::response::IntoResponse;
+
+use axum::routing::get;
 use serde_json::json;
 use simplebash_pos_backend::clients::document_server::DocumentServerClient;
 

@@ -4,12 +4,12 @@
 // single-shop handle must keep the bare `_id` it always used.
 
 use mongodb::bson::{Document, doc};
-use simplebash_pos_backend::{
-    clients::{db::Db, mongo::connect, tenant_db::TenantDatabase},
-    core::tenancy::{Tenant, with_tenant},
-    domain::sequences::ReserveSequenceRequest,
-    modules::sequences::service::reserve_sequence,
-};
+use simplebash_pos_backend::clients::db::Db;
+use simplebash_pos_backend::clients::mongo::connect;
+use simplebash_pos_backend::clients::tenant_db::TenantDatabase;
+use simplebash_pos_backend::core::tenancy::{Tenant, with_tenant};
+use simplebash_pos_backend::domain::sequences::ReserveSequenceRequest;
+use simplebash_pos_backend::modules::sequences::service::reserve_sequence;
 use uuid::Uuid;
 
 fn request(size: u64) -> ReserveSequenceRequest {

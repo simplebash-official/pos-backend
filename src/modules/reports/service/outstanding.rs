@@ -1,9 +1,8 @@
-use crate::{
-    clients::db::Db,
-    core::{error::AppResult, utils::calculate_pagination},
-    domain::reports::{OutstandingReceivablesQuery, OutstandingReceivablesResponse},
-    modules::reports::repository,
-};
+use crate::clients::db::Db;
+use crate::core::error::AppResult;
+use crate::core::utils::calculate_pagination;
+use crate::domain::reports::{OutstandingReceivablesQuery, OutstandingReceivablesResponse};
+use crate::modules::reports::repository;
 
 /// Retrieves the total uncollected credit, overdue amounts, and paginated unpaid invoices.
 pub(crate) async fn get_outstanding_report(

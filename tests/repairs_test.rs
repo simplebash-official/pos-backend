@@ -1,19 +1,16 @@
 mod common;
 
-use axum::{
-    body::Body,
-    http::{
-        Request, StatusCode,
-        header::{AUTHORIZATION, CONTENT_TYPE},
-    },
-};
+use axum::body::Body;
+
+use axum::http::{Request, StatusCode};
+
+use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use mongodb::bson::DateTime as BsonDateTime;
 use serde_json::{Value, json};
-use simplebash_pos_backend::{
-    core::{constants::roles, id::generate_id},
-    domain::users::Role,
-    modules::repairs::model::RepairDocument,
-};
+use simplebash_pos_backend::core::constants::roles;
+use simplebash_pos_backend::core::id::generate_id;
+use simplebash_pos_backend::domain::users::Role;
+use simplebash_pos_backend::modules::repairs::model::RepairDocument;
 use tower::ServiceExt;
 
 async fn execute(router: &axum::Router, request: Request<Body>) -> (StatusCode, Value) {

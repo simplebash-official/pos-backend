@@ -5,18 +5,18 @@
 
 use mongodb::bson::{Document, doc};
 
-use crate::{
-    clients::db::Db,
-    core::{
-        error::AppResult,
-        utils::{build_bson_regex, calculate_pagination},
-    },
-    domain::inventory::{
-        InventoryCategoryOverview, InventoryMetrics, InventoryOverviewQuery,
-        InventoryOverviewResponse, InventorySubcategoryOverview, PaginationMeta,
-    },
-    modules::inventory::repository,
+use crate::clients::db::Db;
+
+use crate::core::error::AppResult;
+
+use crate::core::utils::{build_bson_regex, calculate_pagination};
+
+use crate::domain::inventory::{
+    InventoryCategoryOverview, InventoryMetrics, InventoryOverviewQuery, InventoryOverviewResponse,
+    InventorySubcategoryOverview, PaginationMeta,
 };
+
+use crate::modules::inventory::repository;
 
 /// Computes the complete hierarchical overview for the Inventory & Stock frontend page.
 /// Performs MongoDB aggregation pipelines to calculate dashboard metrics and group item counts.

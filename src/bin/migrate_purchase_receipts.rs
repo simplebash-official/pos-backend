@@ -7,14 +7,13 @@
 //
 // MUST run before deploying the receipt-aware backend to an environment with existing data.
 
-use simplebash_pos_backend::{
-    clients,
-    core::config::Config,
-    modules::{
-        inventory::service::stock_batch_migration::Mode,
-        purchases::service::receipt_migration::migrate_mongo,
-    },
-};
+use simplebash_pos_backend::clients;
+
+use simplebash_pos_backend::core::config::Config;
+
+use simplebash_pos_backend::modules::inventory::service::stock_batch_migration::Mode;
+
+use simplebash_pos_backend::modules::purchases::service::receipt_migration::migrate_mongo;
 
 #[tokio::main]
 async fn main() {

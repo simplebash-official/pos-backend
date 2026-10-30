@@ -1,14 +1,12 @@
 mod common;
 
-use axum::{
-    body::Body,
-    http::{Request, StatusCode},
-};
-use simplebash_pos_backend::{
-    app::{self, AppState},
-    clients::{self, db::Db},
-    core::config::{Config, DatabaseType, TenantMode},
-};
+use axum::body::Body;
+
+use axum::http::{Request, StatusCode};
+use simplebash_pos_backend::app::AppState;
+use simplebash_pos_backend::clients::db::Db;
+use simplebash_pos_backend::core::config::{Config, DatabaseType, TenantMode};
+use simplebash_pos_backend::{app, clients};
 use std::sync::Arc;
 use tower::ServiceExt;
 

@@ -2,14 +2,18 @@
 // for credit notes, voiding, and closing.
 
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
-use mongodb::bson::{DateTime as BsonDateTime, doc, oid::ObjectId};
+use mongodb::bson::oid::ObjectId;
+use mongodb::bson::{DateTime as BsonDateTime, doc};
 
-use crate::{
-    clients::{db::Db, sqlite::now_utc_iso},
-    core::error::AppResult,
-    domain::billing::InvoiceItem,
-    modules::billing::model::InvoiceDocument,
-};
+use crate::clients::db::Db;
+
+use crate::clients::sqlite::now_utc_iso;
+
+use crate::core::error::AppResult;
+
+use crate::domain::billing::InvoiceItem;
+
+use crate::modules::billing::model::InvoiceDocument;
 
 fn invoices(db: &TenantDatabase) -> ScopedCollection<InvoiceDocument> {
     db.collection("invoices")

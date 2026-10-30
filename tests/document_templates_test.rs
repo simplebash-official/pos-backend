@@ -10,16 +10,15 @@
 
 mod common;
 
-use axum::{
-    body::Body,
-    http::{
-        Request, StatusCode,
-        header::{AUTHORIZATION, CONTENT_TYPE},
-    },
-};
+use axum::body::Body;
+
+use axum::http::{Request, StatusCode};
+
+use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use mongodb::bson::{Document, doc};
 use serde_json::{Value, json};
-use simplebash_pos_backend::{core::constants::roles, domain::users::Role};
+use simplebash_pos_backend::core::constants::roles;
+use simplebash_pos_backend::domain::users::Role;
 use tower::ServiceExt;
 
 const CLASSIC: &str = "doc_temp_vEf0Y7jQHQj2rIuO";

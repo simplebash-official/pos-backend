@@ -5,25 +5,22 @@
 // document-server answers each tenant its own list). Uses a tiny controllable
 // mock — no database needed.
 
-use std::{
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-    },
-    time::Duration,
-};
+use std::sync::{Arc, Mutex};
 
-use axum::{
-    Json, Router,
-    extract::State,
-    http::{HeaderMap, StatusCode},
-    routing::get,
-};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+use std::time::Duration;
+
+use axum::{Json, Router};
+
+use axum::extract::State;
+
+use axum::http::{HeaderMap, StatusCode};
+
+use axum::routing::get;
 use serde_json::{Value, json};
-use simplebash_pos_backend::{
-    clients::document_server::DocumentServerClient,
-    core::tenancy::{Tenant, with_tenant},
-};
+use simplebash_pos_backend::clients::document_server::DocumentServerClient;
+use simplebash_pos_backend::core::tenancy::{Tenant, with_tenant};
 
 #[derive(Default)]
 struct Mock {

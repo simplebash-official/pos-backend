@@ -6,11 +6,12 @@
 //
 // MUST run before deploying the typed-movement backend to an environment with existing data.
 
-use simplebash_pos_backend::{
-    clients,
-    core::config::{Config, TenantMode},
-    modules::cash_categories::migration::migrate_mongo,
-};
+use simplebash_pos_backend::clients;
+
+use simplebash_pos_backend::core::config::Config;
+
+use simplebash_pos_backend::modules::cash_categories::migration::migrate_mongo;
+use simplebash_pos_backend::modules::inventory::service::stock_batch_migration::Mode;
 
 #[tokio::main]
 async fn main() {
@@ -18,6 +19,7 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     let dry_run = std::env::args().any(|arg| arg == "--dry-run");
+    let mode = if dry_run { Mode::DryRun } else { Mode::Apply };
     let config = Config::from_env().expect("invalid configuration");
     println!(
         "{} cash movement migration on database '{}'",
@@ -32,7 +34,7 @@ async fn main() {
         .await
         .expect("failed to connect to MongoDB");
 
-    let report = migrate_mongo(&db, config.tenant_mode == TenantMode::Multi, dry_run)
+    let report = migrate_mongo(&db, config.tenant_mode, mode)
         .await
         .expect("cash movement migration failed");
     let verb = if dry_run { "would be" } else { "were" };

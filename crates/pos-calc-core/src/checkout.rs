@@ -1,12 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    calculations::{
-        CartLine, LineDiscount, LineSource, PaymentInput, TenderMethod, cart_totals, payment_state,
-        quick_tender_suggestions,
-    },
-    error::{CalcError, CalcResult},
+use crate::calculations::{
+    CartLine, LineDiscount, LineSource, PaymentInput, TenderMethod, cart_totals, payment_state,
+    quick_tender_suggestions,
 };
+
+use crate::error::{CalcError, CalcResult};
 
 const MAX_LINES: usize = 500;
 const MAX_LEGS: usize = 20;

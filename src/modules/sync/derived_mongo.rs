@@ -12,20 +12,23 @@
 use std::collections::BTreeSet;
 
 use futures_util::TryStreamExt;
-use mongodb::bson::{self, Bson, Document, doc, oid::ObjectId};
+use mongodb::bson;
+use mongodb::bson::oid::ObjectId;
+use mongodb::bson::{Bson, Document, doc};
 
-use crate::{
-    clients::db::Db,
-    core::error::{AppError, AppResult},
-    domain::{
-        billing::{InvoiceItem, InvoiceStatus},
-        sync_v2::{ConflictKind, DerivedScope, NewConflict},
-    },
-    modules::{
-        billing::service::credit_notes::{LineHint, line_match},
-        sync::{apply_mongo::num_i64, cloud_store::coll},
-    },
-};
+use crate::clients::db::Db;
+
+use crate::core::error::{AppError, AppResult};
+
+use crate::domain::billing::{InvoiceItem, InvoiceStatus};
+
+use crate::domain::sync_v2::{ConflictKind, DerivedScope, NewConflict};
+
+use crate::modules::billing::service::credit_notes::{LineHint, line_match};
+
+use crate::modules::sync::apply_mongo::num_i64;
+
+use crate::modules::sync::cloud_store::coll;
 
 /// Recomputes every derived field touched by `scope`; returns the invariant
 /// conflicts found (over-refund, negative stock).

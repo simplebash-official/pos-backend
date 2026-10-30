@@ -1,18 +1,15 @@
 mod common;
 
-use axum::{
-    body::Body,
-    http::{
-        Request, StatusCode,
-        header::{AUTHORIZATION, CONTENT_TYPE},
-    },
-};
+use axum::body::Body;
+
+use axum::http::{Request, StatusCode};
+
+use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use jsonwebtoken::{DecodingKey, Validation, decode};
 use serde_json::{Value, json};
-use simplebash_pos_backend::{
-    core::{constants::roles, middleware::auth::Claims},
-    domain::users::Role,
-};
+use simplebash_pos_backend::core::constants::roles;
+use simplebash_pos_backend::core::middleware::auth::Claims;
+use simplebash_pos_backend::domain::users::Role;
 use tower::ServiceExt;
 use uuid::Uuid;
 

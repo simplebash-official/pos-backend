@@ -1,21 +1,15 @@
 mod common;
 
-use axum::{
-    body::Body,
-    http::{
-        Request, StatusCode,
-        header::{AUTHORIZATION, CONTENT_TYPE},
-    },
-};
+use axum::body::Body;
+
+use axum::http::{Request, StatusCode};
+
+use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde_json::{Value, json};
-use simplebash_pos_backend::{
-    core::{
-        constants::{codes, roles},
-        error::AppError,
-    },
-    domain::users::{CreateUserRequest, Role},
-    modules::users::service::create_user,
-};
+use simplebash_pos_backend::core::constants::{codes, roles};
+use simplebash_pos_backend::core::error::AppError;
+use simplebash_pos_backend::domain::users::{CreateUserRequest, Role};
+use simplebash_pos_backend::modules::users::service::create_user;
 use tower::ServiceExt;
 use uuid::Uuid;
 

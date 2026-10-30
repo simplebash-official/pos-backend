@@ -3,25 +3,20 @@ mod common;
 use std::sync::Arc;
 use std::time::Instant;
 
-use axum::{
-    body::Body,
-    http::{
-        Request, StatusCode,
-        header::{AUTHORIZATION, CONTENT_TYPE},
-    },
-};
+use axum::body::Body;
+
+use axum::http::{Request, StatusCode};
+
+use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use chrono::{Duration, Utc};
 use futures_util::future::join_all;
 use mongodb::bson::DateTime as BsonDateTime;
 use serde_json::{Value, json};
-use simplebash_pos_backend::{
-    core::{constants::roles, id::generate_id},
-    domain::{
-        billing::{InvoiceItem, InvoiceStatus},
-        users::Role,
-    },
-    modules::billing::model::InvoiceDocument,
-};
+use simplebash_pos_backend::core::constants::roles;
+use simplebash_pos_backend::core::id::generate_id;
+use simplebash_pos_backend::domain::billing::{InvoiceItem, InvoiceStatus};
+use simplebash_pos_backend::domain::users::Role;
+use simplebash_pos_backend::modules::billing::model::InvoiceDocument;
 use tower::ServiceExt;
 
 /// These tests deliberately fire hundreds of requests from one client, which

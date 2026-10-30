@@ -5,21 +5,19 @@
 
 mod common;
 
-use axum::{
-    body::Body,
-    http::{
-        Request, StatusCode,
-        header::{AUTHORIZATION, CONTENT_TYPE},
-    },
-};
+use axum::body::Body;
+
+use axum::http::{Request, StatusCode};
+
+use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use jsonwebtoken::{EncodingKey, Header, encode};
 use serde_json::{Value, json};
-use simplebash_pos_backend::{
-    clients::sqlite::map_sqlite_row_to_document,
-    core::constants::roles,
-    domain::{sequences::ReserveSequenceRequest, sync_v2::DerivedScope, users::Role},
-    modules::sync::derived_sqlite,
-};
+use simplebash_pos_backend::clients::sqlite::map_sqlite_row_to_document;
+use simplebash_pos_backend::core::constants::roles;
+use simplebash_pos_backend::domain::sequences::ReserveSequenceRequest;
+use simplebash_pos_backend::domain::sync_v2::DerivedScope;
+use simplebash_pos_backend::domain::users::Role;
+use simplebash_pos_backend::modules::sync::derived_sqlite;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 

@@ -11,15 +11,17 @@ use chrono::{DateTime, Utc};
 use futures_util::TryStreamExt;
 use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
 
-use crate::{
-    clients::{db::Db, sqlite::map_sqlite_row_to_document},
-    core::{
-        calculations::{commission_cents, job_profit_cents},
-        error::AppResult,
-    },
-    domain::employees::EmployeeEarningRecord,
-    modules::reports::repository::commissions::get_i64_flexible,
-};
+use crate::clients::db::Db;
+
+use crate::clients::sqlite::map_sqlite_row_to_document;
+
+use crate::core::calculations::{commission_cents, job_profit_cents};
+
+use crate::core::error::AppResult;
+
+use crate::domain::employees::EmployeeEarningRecord;
+
+use crate::modules::reports::repository::commissions::get_i64_flexible;
 
 fn repairs(db: &TenantDatabase) -> ScopedCollection<Document> {
     db.collection("repairs")

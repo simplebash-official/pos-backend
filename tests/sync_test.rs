@@ -1,32 +1,23 @@
 mod common;
 
-use axum::{
-    body::Body,
-    http::{Request, StatusCode, header},
-};
+use axum::body::Body;
+
+use axum::http::{Request, StatusCode, header};
 use bson::DateTime as BsonDateTime;
 use chrono::Utc;
-use simplebash_pos_backend::{
-    core::{
-        config::Config,
-        constants::{prefixes, roles},
-        id::generate_id,
-    },
-    domain::{
-        billing::{Invoice, InvoiceStatus, PaymentRecord},
-        inventory::{BatchSource, Product},
-        sequences::SequenceReservationResponse,
-        sync::SyncChangesResponse,
-        users::Role,
-    },
-    modules::{
-        billing::model::{InvoiceDocument, PaymentDocument},
-        inventory::model::{
-            CategoryDocument, ProductDocument, StockBatchDocument, SubcategoryDocument,
-        },
-        sync::cursor::encode_cursor,
-    },
+use simplebash_pos_backend::core::config::Config;
+use simplebash_pos_backend::core::constants::{prefixes, roles};
+use simplebash_pos_backend::core::id::generate_id;
+use simplebash_pos_backend::domain::billing::{Invoice, InvoiceStatus, PaymentRecord};
+use simplebash_pos_backend::domain::inventory::{BatchSource, Product};
+use simplebash_pos_backend::domain::sequences::SequenceReservationResponse;
+use simplebash_pos_backend::domain::sync::SyncChangesResponse;
+use simplebash_pos_backend::domain::users::Role;
+use simplebash_pos_backend::modules::billing::model::{InvoiceDocument, PaymentDocument};
+use simplebash_pos_backend::modules::inventory::model::{
+    CategoryDocument, ProductDocument, StockBatchDocument, SubcategoryDocument,
 };
+use simplebash_pos_backend::modules::sync::cursor::encode_cursor;
 use tower::ServiceExt;
 use uuid::Uuid;
 

@@ -3,9 +3,12 @@
 // tiers (see CLAUDE.md); use this style for anything about the
 // response/error envelope itself, not endpoint behavior.
 
-use axum::{http::StatusCode, response::IntoResponse};
+use axum::http::StatusCode;
+
+use axum::response::IntoResponse;
 use serde_json::json;
-use simplebash_pos_backend::core::{error::AppError, response::ApiResponse};
+use simplebash_pos_backend::core::error::AppError;
+use simplebash_pos_backend::core::response::ApiResponse;
 
 #[tokio::test]
 async fn test_success_response_format() {

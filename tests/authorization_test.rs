@@ -30,7 +30,9 @@ use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
 use mongodb::Client;
 use mongodb::options::{ClientOptions, ResolverConfig};
-use simplebash_pos_backend::{app, app::AppState, clients, core::config::Config};
+use simplebash_pos_backend::app::AppState;
+use simplebash_pos_backend::core::config::Config;
+use simplebash_pos_backend::{app, clients};
 use tower::ServiceExt;
 
 /// Every route that is allowed to answer without a token, as
@@ -74,6 +76,9 @@ const PUBLIC_ROUTES: &[(&str, &str)] = &[
         "POST",
         "/api/internal/tenants/{tenant_id}/document-selections/reset",
     ),
+    ("GET", "/api/internal/tenants/{tenant_id}/users"),
+    ("GET", "/api/internal/tenants/{tenant_id}/logins"),
+    ("GET", "/api/internal/tenants/{tenant_id}/activities"),
 ];
 
 async fn build_test_app() -> axum::Router {

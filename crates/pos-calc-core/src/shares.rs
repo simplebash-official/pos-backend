@@ -1,9 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    calculations::share_basis_points,
-    error::{CalcError, CalcResult},
-};
+use crate::calculations::share_basis_points;
+
+use crate::error::{CalcError, CalcResult};
 
 const MAX_PARTS: usize = 200;
 const MAX_CENTS: i64 = 10_000_000_000_000;

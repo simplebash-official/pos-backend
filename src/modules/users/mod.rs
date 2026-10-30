@@ -5,7 +5,7 @@
 // for the reference pattern this mirrors); `service` is `pub` (not
 // `pub(crate)`) so `modules::auth` can reach `verify_credentials`/`get_user`
 // and `src/bin/seed_admin.rs` can reach `create_user`.
-mod model;
+pub(crate) mod model;
 mod repository;
 pub mod routes;
 pub mod service;

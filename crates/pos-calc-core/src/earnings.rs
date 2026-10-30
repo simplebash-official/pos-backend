@@ -1,9 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    calculations::{commission_cents, job_profit_cents},
-    error::{CalcError, CalcResult},
-};
+use crate::calculations::{commission_cents, job_profit_cents};
+
+use crate::error::{CalcError, CalcResult};
 
 const MAX_CENTS: i64 = 10_000_000_000_000;
 

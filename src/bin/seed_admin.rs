@@ -1,4 +1,5 @@
-use simplebash_pos_backend::{clients, core::config::Config, seeds};
+use simplebash_pos_backend::core::config::Config;
+use simplebash_pos_backend::{clients, seeds};
 
 /// Bootstraps the first Admin account with username `admin` and the password from `SEED_ADMIN_PASSWORD`.
 ///
@@ -12,7 +13,7 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     let config = Config::from_env().expect("invalid configuration");
-    let db = clients::db::connect_from_config(&config)
+    let db = clients::connect_from_config(&config)
         .await
         .expect("failed to connect to database");
 

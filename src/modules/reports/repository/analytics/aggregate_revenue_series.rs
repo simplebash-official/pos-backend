@@ -1,0 +1,185 @@
+use super::super::sales::get_i64_flexible;
+use super::align_bucket_instant::align_bucket_instant;
+use super::date_match::date_match;
+use super::invoices::invoices;
+use super::raw_series_bucket::RawSeriesBucket;
+use super::trunc::trunc;
+use crate::clients::db::Db;
+use crate::clients::sqlite::map_sqlite_row_to_document;
+
+use crate::core::error::AppResult;
+use crate::domain::reports::Granularity;
+use chrono::{DateTime, Utc};
+use futures_util::TryStreamExt;
+use mongodb::bson::{Document, doc};
+
+/// Revenue / retail-COGS / discount / invoice-count per `$dateTrunc` bucket.
+/// Sparse — empty buckets are absent and the service layer gap-fills them.
+pub(crate) async fn aggregate_revenue_series(
+    db: &Db,
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+    granularity: Granularity,
+) -> AppResult<Vec<RawSeriesBucket>> {
+    match db {
+        Db::Mongo(db) => {
+            let unit = granularity.as_mongo_unit();
+            let source_type = doc! { "$ifNull": ["$items.sourceType", "$items.source_type"] };
+            let line_total = doc! { "$ifNull": ["$items.totalCents", "$items.total_cents"] };
+            let unit_cost = doc! { "$ifNull": ["$items.unitCostCents", "$items.unit_cost_cents"] };
+
+            let pipeline = vec![
+                doc! { "$match": date_match(start, end) },
+                doc! { "$addFields": { "bucket": trunc(unit) } },
+                doc! {
+                    "$facet": {
+                        "invoiceBuckets": [
+                            {
+                                "$group": {
+                                    "_id": "$bucket",
+                                    "count": { "$sum": 1 },
+                                    "discount": { "$sum": "$discount_cents" },
+                                }
+                            }
+                        ],
+                        "streamBuckets": [
+                            { "$unwind": "$items" },
+                            {
+                                "$group": {
+                                    "_id": { "bucket": "$bucket", "sourceType": source_type.clone() },
+                                    "revenue": { "$sum": line_total.clone() },
+                                    "cogs": {
+                                        "$sum": {
+                                            "$multiply": [
+                                                { "$ifNull": [unit_cost.clone(), 0] },
+                                                { "$ifNull": ["$items.quantity", 0] },
+                                            ]
+                                        }
+                                    },
+                                }
+                            }
+                        ],
+                    }
+                },
+            ];
+
+            let mut cursor = invoices(db).aggregate(pipeline).await?;
+            let mut map: std::collections::BTreeMap<i64, RawSeriesBucket> =
+                std::collections::BTreeMap::new();
+
+            let bucket_instant = |doc: &Document, key: &str| -> Option<DateTime<Utc>> {
+                doc.get_datetime(key).ok().map(|d| d.to_chrono())
+            };
+
+            if let Some(result) = cursor.try_next().await? {
+                if let Ok(rows) = result.get_array("invoiceBuckets") {
+                    for row in rows.iter().filter_map(|r| r.as_document()) {
+                        let Some(ts) = bucket_instant(row, "_id") else {
+                            continue;
+                        };
+                        let entry =
+                            map.entry(ts.timestamp_millis())
+                                .or_insert_with(|| RawSeriesBucket {
+                                    period_start: ts,
+                                    ..Default::default()
+                                });
+                        entry.invoice_count += get_i64_flexible(row, "count") as u64;
+                        entry.discount_cents += get_i64_flexible(row, "discount");
+                    }
+                }
+
+                if let Ok(rows) = result.get_array("streamBuckets") {
+                    for row in rows.iter().filter_map(|r| r.as_document()) {
+                        let Ok(id) = row.get_document("_id") else {
+                            continue;
+                        };
+                        let Some(ts) = bucket_instant(id, "bucket") else {
+                            continue;
+                        };
+                        let revenue = get_i64_flexible(row, "revenue");
+                        let cogs = get_i64_flexible(row, "cogs");
+                        let entry =
+                            map.entry(ts.timestamp_millis())
+                                .or_insert_with(|| RawSeriesBucket {
+                                    period_start: ts,
+                                    ..Default::default()
+                                });
+                        entry.cogs_cents += cogs;
+                        match id.get_str("sourceType").unwrap_or("") {
+                            "retail" => entry.retail_revenue_cents += revenue,
+                            "repair" => entry.repair_revenue_cents += revenue,
+                            "print" => entry.print_revenue_cents += revenue,
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
+            Ok(map.into_values().collect())
+        }
+        Db::Sqlite(pool) => {
+            let start_iso = start.to_rfc3339();
+            let end_iso = end.to_rfc3339();
+            let rows = sqlx::query(
+                "SELECT created_at, discount_cents, items FROM invoices WHERE status != 'voided' AND created_at >= ? AND created_at < ?"
+            )
+            .bind(&start_iso)
+            .bind(&end_iso)
+            .fetch_all(pool)
+            .await?;
+
+            let mut map: std::collections::BTreeMap<DateTime<Utc>, RawSeriesBucket> =
+                std::collections::BTreeMap::new();
+
+            for row in &rows {
+                let doc = map_sqlite_row_to_document(row);
+                let created_at = if let Ok(bdt) = doc.get_datetime("created_at") {
+                    bdt.to_chrono()
+                } else {
+                    continue;
+                };
+                let bucket_start = align_bucket_instant(created_at, granularity);
+                let entry = map.entry(bucket_start).or_insert_with(|| RawSeriesBucket {
+                    period_start: bucket_start,
+                    ..Default::default()
+                });
+                entry.invoice_count += 1;
+                entry.discount_cents += get_i64_flexible(&doc, "discount_cents");
+
+                if let Ok(items) = doc.get_array("items") {
+                    for item in items.iter().filter_map(|i| i.as_document()) {
+                        let source_type = item
+                            .get_str("sourceType")
+                            .or_else(|_| item.get_str("source_type"))
+                            .unwrap_or("");
+                        let line_total = if item.contains_key("totalCents") {
+                            get_i64_flexible(item, "totalCents")
+                        } else {
+                            get_i64_flexible(item, "total_cents")
+                        };
+                        let unit_cost = if item.contains_key("unitCostCents") {
+                            item.get_i64("unitCostCents").ok()
+                        } else {
+                            item.get_i64("unit_cost_cents").ok()
+                        };
+                        let qty = get_i64_flexible(item, "quantity");
+
+                        match source_type {
+                            "retail" => {
+                                entry.retail_revenue_cents += line_total;
+                                if let Some(cost) = unit_cost {
+                                    entry.cogs_cents += cost * qty;
+                                }
+                            }
+                            "repair" => entry.repair_revenue_cents += line_total,
+                            "print" => entry.print_revenue_cents += line_total,
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
+            Ok(map.into_values().collect())
+        }
+    }
+}

@@ -4,10 +4,13 @@
 // exists purely so the frontend's dashboard header doesn't have to fetch
 // that entire tree just to render 4 numbers.
 
-use crate::{
-    clients::db::Db, core::error::AppResult, domain::inventory::InventoryMetrics,
-    modules::inventory::repository,
-};
+use crate::clients::db::Db;
+
+use crate::core::error::AppResult;
+
+use crate::domain::inventory::InventoryMetrics;
+
+use crate::modules::inventory::repository;
 
 /// Computes the 4 KPI cards for the Inventory & Stock screen's dashboard
 /// header. Reuses `InventoryMetrics` — the same DTO `/inventory/overview`

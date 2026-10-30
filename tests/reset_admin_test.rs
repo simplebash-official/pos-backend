@@ -8,12 +8,13 @@
 
 mod common;
 
-use axum::{
-    body::Body,
-    http::{Request, StatusCode, header},
-};
+use axum::body::Body;
+
+use axum::http::{Request, StatusCode, header};
 use serde_json::json;
-use simplebash_pos_backend::{core::error::AppError, modules::users::service, seeds};
+use simplebash_pos_backend::core::error::AppError;
+use simplebash_pos_backend::modules::users::service;
+use simplebash_pos_backend::seeds;
 use tower::ServiceExt;
 
 async fn send(

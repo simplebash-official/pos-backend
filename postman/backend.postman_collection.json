@@ -7709,6 +7709,123 @@
             }
           },
           "response": []
+        },
+        {
+          "name": "List Shop POS Users (admin console)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-provision-secret",
+                "value": "{{provisionSecret}}"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/internal/tenants/{{tenantId}}/users",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "internal",
+                "tenants",
+                "{{tenantId}}",
+                "users"
+              ],
+              "query": []
+            },
+            "description": "Lists all POS staff accounts in the shop with role and last login. Requires x-provision-secret."
+          },
+          "response": []
+        },
+        {
+          "name": "List Shop Logins (admin console)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-provision-secret",
+                "value": "{{provisionSecret}}"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/internal/tenants/{{tenantId}}/logins?page=1&limit=25",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "internal",
+                "tenants",
+                "{{tenantId}}",
+                "logins"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "25"
+                },
+                {
+                  "key": "userKey",
+                  "value": "usr_xxxxxxxxxxxxxxxx",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Paginated staff login session history for the shop. Requires x-provision-secret."
+          },
+          "response": []
+        },
+        {
+          "name": "List Shop Activities (admin console)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-provision-secret",
+                "value": "{{provisionSecret}}"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/internal/tenants/{{tenantId}}/activities?page=1&limit=25",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "internal",
+                "tenants",
+                "{{tenantId}}",
+                "activities"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "25"
+                },
+                {
+                  "key": "kind",
+                  "value": "sale",
+                  "disabled": true
+                },
+                {
+                  "key": "userKey",
+                  "value": "usr_xxxxxxxxxxxxxxxx",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Unified chronological business activity feed for the shop (sales, shifts, cash drawer movements, returns, repairs, print jobs). Requires x-provision-secret."
+          },
+          "response": []
         }
       ]
     }

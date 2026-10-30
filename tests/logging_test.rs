@@ -14,7 +14,9 @@ use std::sync::{Arc, Mutex};
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use simplebash_pos_backend::{app, app::AppState, clients, core::config::Config};
+use simplebash_pos_backend::app::AppState;
+use simplebash_pos_backend::core::config::Config;
+use simplebash_pos_backend::{app, clients};
 use tower::ServiceExt;
 
 #[derive(Clone, Default)]

@@ -5,10 +5,10 @@
 // as a wrong count or a leaked row instead of passing by luck.
 
 use mongodb::bson::{Document, doc};
-use simplebash_pos_backend::{
-    clients::{db::Db, mongo::connect, tenant_db::TenantDatabase},
-    core::tenancy::{Tenant, with_tenant},
-};
+use simplebash_pos_backend::clients::db::Db;
+use simplebash_pos_backend::clients::mongo::connect;
+use simplebash_pos_backend::clients::tenant_db::TenantDatabase;
+use simplebash_pos_backend::core::tenancy::{Tenant, with_tenant};
 use uuid::Uuid;
 
 struct Fixture {

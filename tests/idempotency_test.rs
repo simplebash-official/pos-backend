@@ -1,9 +1,8 @@
 mod common;
 
-use axum::{
-    body::Body,
-    http::{Request, StatusCode, header},
-};
+use axum::body::Body;
+
+use axum::http::{Request, StatusCode, header};
 use mongodb::bson::DateTime as BsonDateTime;
 use simplebash_pos_backend::core::middleware::idempotency::IdempotencyDocument;
 use simplebash_pos_backend::domain::users::Role;

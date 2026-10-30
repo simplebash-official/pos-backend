@@ -4,18 +4,18 @@ use chrono::Utc;
 
 use super::movement;
 
-use crate::{
-    clients::db::Db,
-    core::{
-        constants::codes,
-        error::{AppError, AppResult},
-    },
-    domain::sessions::{
-        CashMovementType, ZReportCashReconciliation, ZReportMovementGroup,
-        ZReportPaymentMethodSummary, ZReportResponse,
-    },
-    modules::sessions::repository::{movements, sessions},
+use crate::clients::db::Db;
+
+use crate::core::constants::codes;
+
+use crate::core::error::{AppError, AppResult};
+
+use crate::domain::sessions::{
+    CashMovementType, ZReportCashReconciliation, ZReportMovementGroup, ZReportPaymentMethodSummary,
+    ZReportResponse,
 };
+
+use crate::modules::sessions::repository::{movements, sessions};
 
 /// Totals the shift's movements by kind and category. Kinds come in the order they are picked in the cash
 /// form; within a kind the biggest total leads. A reversed movement and its reversal are both left out.

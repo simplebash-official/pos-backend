@@ -9,21 +9,18 @@
 
 mod common;
 
-use axum::{
-    body::Body,
-    http::{
-        Request, StatusCode,
-        header::{AUTHORIZATION, CONTENT_TYPE},
-    },
-};
+use axum::body::Body;
+
+use axum::http::{Request, StatusCode};
+
+use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use jsonwebtoken::{EncodingKey, Header, encode};
 use mongodb::bson::{Document, doc};
 use serde_json::{Value, json};
-use simplebash_pos_backend::{
-    core::{constants::roles, tenancy::Tenant},
-    domain::users::Role,
-    modules::sync::cloud_capture::run_consumer,
-};
+use simplebash_pos_backend::core::constants::roles;
+use simplebash_pos_backend::core::tenancy::Tenant;
+use simplebash_pos_backend::domain::users::Role;
+use simplebash_pos_backend::modules::sync::cloud_capture::run_consumer;
 use sqlx::SqlitePool;
 use std::collections::BTreeSet;
 use tower::ServiceExt;

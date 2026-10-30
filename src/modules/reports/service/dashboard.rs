@@ -1,10 +1,8 @@
 use super::dates;
-use crate::{
-    clients::db::Db,
-    core::error::AppResult,
-    domain::reports::{ReportDateRangeQuery, ReportsDashboardResponse},
-    modules::reports::repository,
-};
+use crate::clients::db::Db;
+use crate::core::error::AppResult;
+use crate::domain::reports::{ReportDateRangeQuery, ReportsDashboardResponse};
+use crate::modules::reports::repository;
 
 /// Computes unified executive KPI metrics across sales, revenue streams, commissions,
 /// profit calculations, and credit receivables.

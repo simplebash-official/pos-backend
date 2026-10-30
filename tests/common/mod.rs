@@ -4,10 +4,11 @@ use axum::Router;
 use jsonwebtoken::{EncodingKey, Header, encode};
 use mongodb::Database;
 use serde_json::json;
-use simplebash_pos_backend::{
-    app, app::AppState, clients, core::config::Config, core::middleware::auth::Claims,
-    domain::users::Role,
-};
+use simplebash_pos_backend::app::AppState;
+use simplebash_pos_backend::core::config::Config;
+use simplebash_pos_backend::core::middleware::auth::Claims;
+use simplebash_pos_backend::domain::users::Role;
+use simplebash_pos_backend::{app, clients};
 
 pub struct TestApp {
     #[allow(dead_code)]
@@ -308,14 +309,12 @@ fn mock_templates_json() -> serde_json::Value {
 async fn start_mock_document_server_with_templates(
     templates_response: serde_json::Value,
 ) -> String {
-    use axum::{
-        Json,
-        body::Body,
-        extract::Path,
-        http::{HeaderMap, StatusCode, header},
-        response::IntoResponse,
-        routing::{get, post},
-    };
+    use axum::Json;
+    use axum::body::Body;
+    use axum::extract::Path;
+    use axum::http::{HeaderMap, StatusCode, header};
+    use axum::response::IntoResponse;
+    use axum::routing::{get, post};
 
     let mock_app = Router::new()
         .route(
@@ -552,7 +551,7 @@ pub async fn spawn_app_sqlite_with_document_server_url(document_server_url: Stri
     let test_db_path = format!("data/test_{test_id}.db");
     config.database_url = format!("sqlite://{test_db_path}?mode=rwc");
 
-    let db_handle = clients::db::connect_from_config(&config)
+    let db_handle = clients::connect_from_config(&config)
         .await
         .expect("failed to connect to test SQLite database");
     simplebash_pos_backend::modules::cash_categories::service::ensure_system_categories(&db_handle)

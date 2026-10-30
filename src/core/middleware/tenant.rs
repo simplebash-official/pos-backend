@@ -8,21 +8,21 @@
 // registered device of a device token, else the browser's `X-Device-Id`, else
 // `cloud`. Every write to a synced collection is stamped with it.
 
-use axum::{
-    extract::{Request, State},
-    middleware::Next,
-    response::{IntoResponse, Response},
-};
+use axum::extract::{Request, State};
 
-use crate::{
-    app::AppState,
-    core::{
-        config::TenantMode,
-        middleware::auth::verify_bearer,
-        sync_origin::{origin_for, with_origin},
-        tenancy::{Tenant, with_tenant},
-    },
-};
+use axum::middleware::Next;
+
+use axum::response::{IntoResponse, Response};
+
+use crate::app::AppState;
+
+use crate::core::config::TenantMode;
+
+use crate::core::middleware::auth::verify_bearer;
+
+use crate::core::sync_origin::{origin_for, with_origin};
+
+use crate::core::tenancy::{Tenant, with_tenant};
 
 pub async fn tenant_context(State(state): State<AppState>, req: Request, next: Next) -> Response {
     if state.config.tenant_mode != TenantMode::Multi {
