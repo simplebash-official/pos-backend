@@ -23,26 +23,20 @@ pub struct CreateSupplierRequest {
     /// Supplier name.
     pub name: String,
     /// Main contact person's name (optional if `contact_persons` is provided).
-    #[serde(default)]
     pub contact_person: Option<String>,
     /// Primary phone number (optional if `contact_persons` is provided).
-    #[serde(default)]
     pub primary_phone: Option<String>,
     /// Optional secondary phone number.
-    #[serde(default)]
     pub secondary_phone: Option<String>,
     /// Contact persons with up to 2 phone numbers each.
-    #[serde(default)]
     pub contact_persons: Option<Vec<ContactPerson>>,
     /// Address of supplier.
     pub address: String,
     /// List of supplied product categories.
     pub supplied_categories: Vec<String>,
     /// Optional email address.
-    #[serde(default)]
     pub email: Option<String>,
     /// Optional remarks or notes.
-    #[serde(default)]
     pub notes: Option<String>,
 }
 

@@ -52,7 +52,6 @@ impl std::str::FromStr for BarcodeSource {
 #[serde(rename_all = "camelCase")]
 pub struct CreateProductRequest {
     /// Optional manual barcode (omitted or null to skip).
-    #[serde(default)]
     pub barcode: Option<String>,
     /// True to automatically generate a sequential EAN-13 barcode.
     #[serde(default)]
@@ -64,7 +63,6 @@ pub struct CreateProductRequest {
     /// Subcategory key under which the product belongs.
     pub subcategory_key: String,
     /// Units on hand that did not come from a supplier purchase.
-    #[serde(default)]
     pub opening_stock: Option<OpeningStockRequest>,
     /// Minimum stock alert threshold.
     #[serde(default)]
@@ -78,7 +76,6 @@ pub struct CreateProductRequest {
     #[serde(default)]
     pub is_serialized: bool,
     /// Warranty length in months for units of this product, if any.
-    #[serde(default)]
     pub warranty_months: Option<i64>,
 }
 
@@ -197,7 +194,7 @@ pub struct Product {
     pub price_tiers: Vec<PriceTier>,
     /// Most recent unit selling price recorded on historical batches.
     /// Present even when current stock is 0. None only if product never had batches.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub last_selling_price_cents: Option<i64>,
     /// Current count of items in stock (the sum of every batch's remaining
     /// quantity — derived from the stock-movement ledger).
@@ -291,10 +288,8 @@ pub struct ProductSupplierIntake {
     /// Price the units of this intake sell at, in cents.
     pub selling_price_cents: i64,
     /// Supplier invoice or shipment reference number.
-    #[serde(default)]
     pub reference_no: Option<String>,
     /// Optional remarks or notes for this intake.
-    #[serde(default)]
     pub notes: Option<String>,
 }
 

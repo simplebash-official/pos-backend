@@ -33,12 +33,12 @@ pub struct RepairDocument {
     /// Date the job was promised ready for the customer (YYYY-MM-DD), if a
     /// hand-back date was agreed. `#[serde(default)]` keeps older stored
     /// documents (written before this field existed) deserializing cleanly.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub promised_ready_at: Option<String>,
     /// Lifecycle status ("received", "in_progress", "completed", "delivered", "cancelled").
     pub status: String,
     /// Estimated or final charge to customer in cents. Absent until quoted.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub estimated_cost_cents: Option<i64>,
     /// Direct cost of replacement parts/materials used in cents.
     #[serde(skip_serializing_if = "Option::is_none")]

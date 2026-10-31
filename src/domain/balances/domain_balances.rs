@@ -65,7 +65,6 @@ pub struct CreateAdvanceRecoveryRequest {
     pub amount_cents: i64,
     /// `YYYY-MM-DD`.
     pub recovered_on: String,
-    #[serde(default)]
     pub note: Option<String>,
 }
 

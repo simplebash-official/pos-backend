@@ -18,18 +18,14 @@ pub struct CreatePrintJobRequest {
     /// Quantity of copies/items.
     pub quantity: i32,
     /// Optional date the job was promised ready (YYYY-MM-DD).
-    #[serde(default)]
     pub promised_ready_at: Option<String>,
     /// Initial status (defaults to "received").
-    #[serde(default)]
     pub status: Option<String>,
     /// Estimated total customer cost in cents.
     pub estimated_cost_cents: i64,
     /// Optional material cost in cents.
-    #[serde(default)]
     pub material_cost_cents: Option<i64>,
     /// Staff assignment details.
-    #[serde(default)]
     pub assignment: Option<PrintJobAssignment>,
 }
 
@@ -109,16 +105,12 @@ fn default_version() -> i64 {
 #[serde(rename_all = "camelCase")]
 pub struct PrintJobAssignment {
     /// User ID of employee assigned to job.
-    #[serde(default)]
     pub assigned_employee_id: Option<String>,
     /// Name of employee assigned to job.
-    #[serde(default)]
     pub assigned_employee_name: Option<String>,
     /// Commission split type ("percentage" or "fixed").
-    #[serde(default)]
     pub split_type: Option<String>,
     /// Commission rate or fixed amount.
-    #[serde(default)]
     pub split_value: Option<f64>,
 }
 
@@ -129,13 +121,10 @@ pub struct PrintJobAssignment {
 #[serde(rename_all = "camelCase")]
 pub struct PrintJobCustomer {
     /// Registered customer key.
-    #[serde(default)]
     pub customer_key: Option<String>,
     /// Walk-in customer name.
-    #[serde(default)]
     pub customer_name: Option<String>,
     /// Walk-in customer phone number.
-    #[serde(default)]
     pub customer_phone: Option<String>,
 }
 

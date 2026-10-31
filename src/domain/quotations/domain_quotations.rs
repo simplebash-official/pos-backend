@@ -10,14 +10,10 @@ use utoipa::{IntoParams, ToSchema};
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateQuotationItem {
-    #[serde(default)]
     pub product_key: Option<String>,
-    #[serde(default)]
     pub name: Option<String>,
-    #[serde(default)]
     pub unit_price_cents: Option<i64>,
     /// For a product line: the price picked from the product's current prices.
-    #[serde(default)]
     pub selling_price_cents: Option<i64>,
     /// Units offered; must be at least 1.
     pub quantity: i64,
@@ -35,17 +31,13 @@ pub struct CreateQuotationRequest {
     pub customer: QuotationCustomer,
     pub items: Vec<CreateQuotationItem>,
     /// Order-level discount; omitted means none.
-    #[serde(default)]
     pub pricing_adjustments: Option<PricingAdjustments>,
     /// Last day the offer holds, `YYYY-MM-DD`; today or later.
     pub valid_until: String,
-    #[serde(default)]
     pub notes: Option<String>,
     /// Terms and conditions printed on the quotation.
-    #[serde(default)]
     pub terms: Option<String>,
     /// Name of the person who prepared it (display only).
-    #[serde(default)]
     pub prepared_by: Option<String>,
 }
 
@@ -103,16 +95,12 @@ pub struct Quotation {
 #[serde(rename_all = "camelCase")]
 pub struct QuotationCustomer {
     /// Registered customer key.
-    #[serde(default)]
     pub customer_key: Option<String>,
     /// Walk-in customer name (required when there is no `customerKey`).
-    #[serde(default)]
     pub customer_name: Option<String>,
     /// Walk-in customer phone number.
-    #[serde(default)]
     pub customer_phone: Option<String>,
     /// Walk-in customer address.
-    #[serde(default)]
     pub customer_address: Option<String>,
 }
 
@@ -124,12 +112,12 @@ pub struct QuotationCustomer {
 #[serde(rename_all = "camelCase")]
 pub struct QuotationItem {
     /// Catalog product this line was priced from, if any.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub product_key: Option<String>,
     /// Item description shown on the printed quotation.
     pub name: String,
     /// Stock Keeping Unit, if the line came from the catalog.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub sku: Option<String>,
     /// Price per unit in cents.
     pub unit_price_cents: i64,

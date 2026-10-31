@@ -55,16 +55,12 @@ pub fn compute_is_overdue(status: InvoiceStatus, due_date: Option<&str>) -> bool
 #[serde(rename_all = "camelCase")]
 pub struct CustomerRef {
     /// Key of an existing registered customer.
-    #[serde(default)]
     pub customer_key: Option<String>,
     /// Walk-in customer name if not registered.
-    #[serde(default)]
     pub customer_name: Option<String>,
     /// Walk-in customer phone number if not registered.
-    #[serde(default)]
     pub customer_phone: Option<String>,
     /// Walk-in customer address if not registered.
-    #[serde(default)]
     pub customer_address: Option<String>,
 }
 
@@ -232,7 +228,7 @@ pub struct InvoiceItem {
     /// product/ticket to resolve against, and on every invoice created before
     /// this field existed — treat a missing value as "cost unknown", never as
     /// zero, in any margin calculation that must not silently understate cost.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub unit_cost_cents: Option<i64>,
     /// Source category: `"retail"`, `"repair"`, or `"print"`.
     pub source_type: String,

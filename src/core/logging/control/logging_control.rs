@@ -29,7 +29,6 @@ pub struct ControlLine {
     pub enabled: bool,
     #[serde(default)]
     pub http_bodies: bool,
-    #[serde(default)]
     pub sql: Option<String>,
 }
 

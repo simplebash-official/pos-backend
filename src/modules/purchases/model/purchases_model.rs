@@ -221,7 +221,7 @@ pub struct ReceiptChargeDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payee_key: Option<String>,
     /// What an `other` charge is; absent for every other kind and for old rows.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payment_kind: Option<PaymentKind>,

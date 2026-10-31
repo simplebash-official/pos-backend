@@ -108,6 +108,5 @@ pub struct ProcessImportRequest {
     /// Parsed records extracted by the frontend.
     pub rows: Vec<serde_json::Value>,
     /// Optional processing switches.
-    #[serde(default)]
     pub options: Option<ImportOptions>,
 }

@@ -42,15 +42,12 @@ pub struct ApplyOutcome {
 pub struct ApplyRequest {
     pub mode: ApplyMode,
     pub changes: Vec<PulledChange>,
-    #[serde(default)]
     pub advance_cursor_to: Option<i64>,
     /// Bootstrap only, on the final page: the cloud shop has finished its own
     /// first-time setup. Absent or false = it has not, so this device must not
     /// declare its setup done on its own (the owner still chooses demo vs clean).
-    #[serde(default)]
     pub setup_completed: Option<bool>,
     /// Bootstrap only: that cloud setup loaded the demo data.
-    #[serde(default)]
     pub sample_data_loaded: Option<bool>,
 }
 
@@ -73,7 +70,7 @@ pub struct ChangeAck {
     /// Stable reason string: IMMUTABLE_MISMATCH, UNKNOWN_RESOURCE,
     /// INVALID_PAYLOAD, CLOCK_CLAMPED, LWW_LOSER, SERIAL_DOUBLE_SOLD,
     /// DEVICE_REVOKED.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     /// True when the server clamped a future `updatedAt` (status stays applied).
     #[serde(default)]
@@ -100,7 +97,7 @@ pub struct ChangeRecord {
     pub version: i64,
     pub updated_at: DateTime<Utc>,
     pub device_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub payload: Option<serde_json::Value>,
 }
 
@@ -182,7 +179,7 @@ pub struct PullResponse {
 /// One change delivered to a device by a pull.
 pub struct PulledChange {
     pub seq: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub origin_device_id: Option<String>,
     #[serde(flatten)]
     pub record: ChangeRecord,
@@ -213,6 +210,6 @@ pub struct PushResponse {
 pub struct SnapshotResponse {
     pub as_of_seq: i64,
     pub changes: Vec<ChangeRecord>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub next_page: Option<String>,
 }

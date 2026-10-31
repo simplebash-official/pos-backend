@@ -17,32 +17,24 @@ pub struct PaymentDetails {
     /// Indicates if this transaction is recorded as unpaid credit.
     pub is_credit: bool,
     /// Total amount of money handed in by the customer in cents.
-    #[serde(default)]
     pub amount_received_cents: Option<i64>,
     /// List of payment breakdown portions if payment method is "split".
-    #[serde(default)]
     pub split_payments: Option<Vec<SplitPayment>>,
     /// Last 4 digits of payment card if paid by card.
-    #[serde(default)]
     pub card_last4: Option<String>,
     /// Authorization code or reference number from card terminal.
-    #[serde(default)]
     pub card_ref: Option<String>,
     /// Transaction ID or reference number for online payment.
-    #[serde(default)]
     pub online_ref: Option<String>,
     /// Optional note or description for online transfer.
-    #[serde(default)]
     pub online_note: Option<String>,
     /// Due date for credit invoice repayment (YYYY-MM-DD).
-    #[serde(default)]
     pub due_date: Option<String>,
     /// How an up-front partial payment on a credit sale was taken:
     /// `"cash"` or `"card"`. Only meaningful when `is_credit` is true and
     /// `amount_received_cents` is a non-zero amount below the total — it
     /// selects the method recorded on the deposit's payment row. The
     /// invoice's own `payment_method` still stays `"credit"`.
-    #[serde(default)]
     pub deposit_method: Option<String>,
 }
 
@@ -100,10 +92,8 @@ pub struct RecordPaymentRequest {
     /// Payment method used ("cash", "card", "online").
     pub payment_method: String,
     /// Optional reference note or description.
-    #[serde(default)]
     pub notes: Option<String>,
     /// Register session key if taken during an open cashier shift.
-    #[serde(default)]
     pub session_key: Option<String>,
 }
 

@@ -115,14 +115,11 @@ impl ChargeKind {
 pub struct ChargesPayment {
     pub source: PaymentSource,
     /// This register's terminal. Required for the drawer and the owner's pocket, refused otherwise.
-    #[serde(default)]
     pub terminal_id: Option<String>,
     /// The open shift the cash is booked on; omitted only between shifts.
-    #[serde(default)]
     pub session_key: Option<String>,
     /// `YYYY-MM-DD` the money left the account. Required for the bank, a card and online,
     /// refused for the drawer and the owner's pocket.
-    #[serde(default)]
     pub paid_on: Option<String>,
 }
 
@@ -134,17 +131,14 @@ pub struct CreateReceiptRequest {
     /// Foreign key of the supplier.
     pub supplier_key: String,
     /// The supplier's invoice or delivery-note number.
-    #[serde(default)]
     pub reference_no: Option<String>,
     /// Day the stock was received.
     pub date: DateTime<Utc>,
     /// Optional remarks.
-    #[serde(default)]
     pub notes: Option<String>,
     /// At least one line; a product may appear on only one line.
     pub lines: Vec<ReceiptLineRequest>,
     /// What is paid as the stock is received. Absent means the whole receipt is on credit.
-    #[serde(default)]
     pub payment: Option<ReceiptPayment>,
     /// Extra charges: shipping, duty, handling, insurance, a discount. They go into the cost of the
     /// stock; the ones the supplier bills also change what is owed to the supplier.
@@ -152,10 +146,8 @@ pub struct CreateReceiptRequest {
     pub charges: Vec<ReceiptChargeRequest>,
     /// How the third-party charges are paid. Required when any charge is `third_party`, refused
     /// otherwise.
-    #[serde(default)]
     pub charges_payment: Option<ChargesPayment>,
     /// Manager or owner approval for the drawer cash this request takes out.
-    #[serde(default)]
     pub approval: Option<ReceiptApproval>,
     /// Set after a `DUPLICATE_RECEIPT` warning to record the receipt anyway.
     #[serde(default)]
@@ -268,7 +260,6 @@ pub struct ReceiptApproval {
     /// A manager or owner PIN.
     pub manager_pin: String,
     /// Why more is paid out than the drawer holds.
-    #[serde(default)]
     pub override_reason: Option<String>,
 }
 
@@ -314,15 +305,12 @@ pub struct ReceiptChargeRequest {
     pub billed_by: BilledBy,
     /// How it is spread over the products. Required when the receipt has two or more lines,
     /// refused when it has one.
-    #[serde(default)]
     pub allocation: Option<Allocation>,
     /// The saved payee (courier, agent) a third-party charge is paid to. Required for
     /// `third_party`, refused for `supplier`.
-    #[serde(default)]
     pub payee_key: Option<String>,
     /// What an `other` charge is, in a few words (at most 80 characters). Optional, and refused
     /// for every other kind.
-    #[serde(default)]
     pub description: Option<String>,
 }
 
@@ -341,7 +329,6 @@ pub struct ReceiptLineRequest {
     pub selling_price_cents: i64,
     /// One serial number per unit, required (and counted against `quantity`) when the product
     /// is serialized; omitted otherwise.
-    #[serde(default)]
     pub serial_numbers: Option<Vec<String>>,
 }
 
@@ -380,14 +367,11 @@ pub struct ReceiptPayment {
     pub category_key: String,
     /// This register's terminal. Required for the drawer and the owner's pocket, refused for
     /// the bank, a card and online.
-    #[serde(default)]
     pub terminal_id: Option<String>,
     /// The open shift the cash is booked on; omitted only between shifts.
-    #[serde(default)]
     pub session_key: Option<String>,
     /// `YYYY-MM-DD` the money left the account. Required for the bank, a card and online,
     /// refused for the drawer and the owner's pocket (cash is booked when it is recorded).
-    #[serde(default)]
     pub paid_on: Option<String>,
 }
 

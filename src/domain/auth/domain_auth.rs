@@ -13,7 +13,7 @@ pub struct LoginRequest {
     pub password: String,
     /// Shop (tenant) the account belongs to. Required on multi-tenant
     /// deployments (`TENANT_MODE=multi`), ignored on single-shop ones.
-    #[serde(default, alias = "shop_code")]
+    #[serde(alias = "shop_code")]
     pub shop_code: Option<String>,
 }
 

@@ -21,13 +21,11 @@ pub enum BillStatus {
 #[serde(rename_all = "camelCase")]
 pub struct CreateRecurringExpenseRequest {
     pub category_key: String,
-    #[serde(default)]
     pub payee_key: Option<String>,
     pub amount_cents: i64,
     pub due_day: i64,
     pub remind_days_before: i64,
     pub paid_from: PaidFrom,
-    #[serde(default)]
     pub note: Option<String>,
 }
 
@@ -131,16 +129,10 @@ pub struct RecurringExpenseListQuery {
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateRecurringExpenseRequest {
-    #[serde(default)]
     pub amount_cents: Option<i64>,
-    #[serde(default)]
     pub due_day: Option<i64>,
-    #[serde(default)]
     pub remind_days_before: Option<i64>,
-    #[serde(default)]
     pub paid_from: Option<PaidFrom>,
-    #[serde(default)]
     pub note: Option<String>,
-    #[serde(default)]
     pub active: Option<bool>,
 }

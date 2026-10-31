@@ -259,16 +259,11 @@ impl CashMovementType {
 #[serde(rename_all = "camelCase")]
 pub struct CloseSessionRequest {
     pub counted_cash_cents: i64,
-    #[serde(default)]
     pub closing_denominations: Option<serde_json::Value>,
     pub closing_float_cents: i64,
-    #[serde(default)]
     pub cash_drop_to_safe_cents: Option<i64>,
-    #[serde(default)]
     pub closing_note: Option<String>,
-    #[serde(default)]
     pub variance_reason: Option<String>,
-    #[serde(default)]
     pub manager_pin: Option<String>,
 }
 
@@ -290,28 +285,18 @@ pub struct CreateCashMovementRequest {
     pub amount_cents: i64,
     /// The open shift this belongs to. Absent only for cash taken out between shifts, which the
     /// drawer ledger carries into the next shift's opening count.
-    #[serde(default)]
     pub session_key: Option<String>,
     pub terminal_id: String,
     pub category_key: String,
-    #[serde(default)]
     pub custom_label: Option<String>,
-    #[serde(default)]
     pub payee_key: Option<String>,
-    #[serde(default)]
     pub payee_name: Option<String>,
-    #[serde(default)]
     pub period_start: Option<String>,
-    #[serde(default)]
     pub period_end: Option<String>,
-    #[serde(default)]
     pub reference_no: Option<String>,
-    #[serde(default)]
     pub note: Option<String>,
-    #[serde(default)]
     pub manager_pin: Option<String>,
     /// Why a payout bigger than the cash in the drawer is allowed; required together with a manager PIN in that case.
-    #[serde(default)]
     pub override_reason: Option<String>,
     /// Set to record a rent or bill payment for a month that is already paid.
     #[serde(default)]
@@ -346,13 +331,9 @@ pub struct DrawerState {
 pub struct OpenSessionRequest {
     pub terminal_id: String,
     pub opening_float_cents: i64,
-    #[serde(default)]
     pub opening_denominations: Option<serde_json::Value>,
-    #[serde(default)]
     pub opening_note: Option<String>,
-    #[serde(default)]
     pub discrepancy_reason: Option<String>,
-    #[serde(default)]
     pub manager_pin: Option<String>,
 }
 
@@ -441,7 +422,6 @@ pub struct ReopenSessionRequest {
 #[serde(rename_all = "camelCase")]
 pub struct ReverseCashMovementRequest {
     /// Required once the undo window has passed; optional inside it.
-    #[serde(default)]
     pub reason: Option<String>,
 }
 
@@ -512,7 +492,6 @@ impl SessionStatus {
 #[serde(rename_all = "camelCase")]
 pub struct SetPinRequest {
     pub pin: String,
-    #[serde(default)]
     pub target_user_id: Option<String>,
 }
 
@@ -521,7 +500,6 @@ pub struct SetPinRequest {
 #[serde(rename_all = "camelCase")]
 pub struct SubmitBlindCountRequest {
     pub counted_cash_cents: i64,
-    #[serde(default)]
     pub closing_denominations: Option<serde_json::Value>,
 }
 
@@ -537,7 +515,6 @@ pub const VARIANCE_TOLERANCE_CENTS: i64 = 500;
 #[serde(rename_all = "camelCase")]
 pub struct VerifyPinRequest {
     pub pin: String,
-    #[serde(default)]
     pub required_role: Option<String>,
 }
 

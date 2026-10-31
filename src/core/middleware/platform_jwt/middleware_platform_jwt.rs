@@ -185,18 +185,14 @@ pub(super) struct PlatformClaims {
     /// Account id of the caller.
     pub(super) sub: String,
     /// Tenant (business) the token is valid for.
-    #[serde(default)]
     pub(super) tid: Option<String>,
     /// Space-separated scope values, e.g. `owner` or `device`.
     #[serde(default)]
     pub(super) scope: String,
     /// Registered device the token was issued to (device tokens only).
-    #[serde(default)]
     pub(super) did: Option<String>,
     /// The account's email and display name (interactive identity tokens only).
-    #[serde(default)]
     pub(super) email: Option<String>,
-    #[serde(default)]
     pub(super) name: Option<String>,
 }
 

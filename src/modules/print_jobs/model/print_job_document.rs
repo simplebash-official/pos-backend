@@ -31,7 +31,7 @@ pub struct PrintJobDocument {
     pub quantity: i32,
     /// Date the job was promised ready (YYYY-MM-DD), if agreed.
     /// `#[serde(default)]` keeps older stored documents deserializing cleanly.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub promised_ready_at: Option<String>,
     /// Job lifecycle status ("received", "in_progress", "completed", "delivered", "cancelled").
     pub status: String,

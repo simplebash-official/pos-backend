@@ -13,9 +13,7 @@ pub struct CreateExpensePaymentRequest {
     pub paid_from: PaidFrom,
     /// `YYYY-MM-DD`.
     pub paid_on: String,
-    #[serde(default)]
     pub reference_no: Option<String>,
-    #[serde(default)]
     pub note: Option<String>,
 }
 
@@ -26,19 +24,14 @@ pub struct CreateExpenseRequest {
     /// `YYYY-MM-DD`.
     pub expense_date: String,
     pub category_key: String,
-    #[serde(default)]
     pub payee_key: Option<String>,
-    #[serde(default)]
     pub payee_name: Option<String>,
     pub amount_cents: i64,
     /// `bank`, `card`, `online` (paid now, in full) or `unpaid` (a bill to pay later).
     pub paid_from: PaidFrom,
     /// `YYYY-MM-DD`; only for an unpaid bill.
-    #[serde(default)]
     pub due_date: Option<String>,
-    #[serde(default)]
     pub reference_no: Option<String>,
-    #[serde(default)]
     pub note: Option<String>,
     /// For a supplier payment paid on entry: the supplier receipts (invoices) it pays, and how
     /// much of it each.

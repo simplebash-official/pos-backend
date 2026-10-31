@@ -102,9 +102,7 @@ pub struct UpsertSupplierProductLinkRequest {
     /// Foreign key of the product to link.
     pub product_key: String,
     /// Optional agreed cost price in cents.
-    #[serde(default)]
     pub cost_price_cents: Option<i64>,
     /// Optional supplier notes.
-    #[serde(default)]
     pub notes: Option<String>,
 }

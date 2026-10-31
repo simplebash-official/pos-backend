@@ -21,17 +21,17 @@ pub struct QuotationDocument {
     /// True when this quotation was created with items that were out of stock.
     #[serde(default)]
     pub has_out_of_stock_items: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub fulfilled_by_invoice_key: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub fulfilled_at: Option<BsonDateTime>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub customer_key: Option<String>,
     /// Customer name frozen at creation.
     pub customer_name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub customer_phone: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub customer_address: Option<String>,
     pub items: Vec<QuotationItem>,
     pub subtotal_cents: i64,
@@ -42,11 +42,11 @@ pub struct QuotationDocument {
     /// Last day the offer holds (`YYYY-MM-DD`). A string so Mongo and SQLite
     /// compare it identically.
     pub valid_until: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub terms: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub prepared_by: Option<String>,
     /// The shop profile as it was when the quotation was made, so a reprint
     /// after the shop changes its address or logo still matches the original.
@@ -61,10 +61,10 @@ pub struct QuotationDocument {
     pub version: i64,
     /// Always `None`: quotations are cancelled, never deleted. The column exists
     /// because the sync apply path writes it for every resource.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub deleted_at: Option<BsonDateTime>,
     /// Device (or `web:<id>` / `cloud`) that last wrote this quotation.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by_device: Option<String>,
 }
 

@@ -38,20 +38,16 @@ pub struct CompleteSaleResponse {
 #[serde(rename_all = "camelCase")]
 pub struct CreateSaleItemRequest {
     /// Product key for standard retail inventory items.
-    #[serde(default)]
     pub product_key: Option<String>,
     /// Custom item name for ad-hoc/custom retail items.
-    #[serde(default)]
     pub name: Option<String>,
     /// Unit price in cents for ad-hoc/custom items.
-    #[serde(default)]
     pub unit_price_cents: Option<i64>,
     /// The price tier the cashier picked for a non-serialized product line:
     /// the selling price, in cents, of the stock batches the units come from
     /// (see `Product.price_tiers`). Required for such a line, rejected when
     /// no in-stock batch sells at it. A serialized line's price comes from
     /// its serials' batch instead, and an ad-hoc line uses `unitPriceCents`.
-    #[serde(default)]
     pub selling_price_cents: Option<i64>,
     /// Quantity of items being purchased.
     pub quantity: i64,
@@ -60,16 +56,13 @@ pub struct CreateSaleItemRequest {
     /// Line type: `"retail"`, `"repair"`, or `"print"`.
     pub source_type: String,
     /// Ticket key if checking out a completed repair or print job.
-    #[serde(default)]
     pub source_ticket_key: Option<String>,
     /// Employee assigned to the job if applicable.
-    #[serde(default)]
     pub assigned_employee_name: Option<String>,
     /// The specific serialized units being sold, required (exact-count
     /// validated against `quantity`) when the resolved product is
     /// serialized; omitted for non-serialized retail lines and for
     /// repair/print lines.
-    #[serde(default)]
     pub serial_numbers: Option<Vec<String>>,
 }
 
@@ -102,30 +95,23 @@ pub struct CreateSaleRequest {
     /// Cashier staff details.
     pub staff: StaffRef,
     /// Key of the active register session on this terminal.
-    #[serde(default)]
     pub session_key: Option<String>,
     /// Customer information or reference key.
-    #[serde(default)]
     pub customer: Option<CustomerRef>,
     /// List of sale line items.
     pub items: Vec<CreateSaleItemRequest>,
     /// Optional sale-wide discount setting.
-    #[serde(default)]
     pub pricing_adjustments: Option<PricingAdjustments>,
     /// Payment method and amounts.
     pub payment: PaymentDetails,
     /// Optional note printed on invoice.
-    #[serde(default)]
     pub notes: Option<String>,
     /// Snapshot of current shop settings for receipt formatting.
     pub shop_profile_snapshot: serde_json::Value,
     /// Warranty conditions to snapshot onto the invoice.
-    #[serde(default)]
     pub warranty_terms_snapshot: Option<String>,
     /// Document template style preference.
-    #[serde(default)]
     pub document_selection: Option<String>,
     /// Quotation key if this sale fulfills a quotation.
-    #[serde(default)]
     pub quotation_key: Option<String>,
 }

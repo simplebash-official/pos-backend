@@ -52,7 +52,7 @@ pub struct CashMovementDocument {
     pub original_variance_session_key: Option<String>,
     /// The supplier receipt this movement was recorded with (paid on delivery, or the own-pocket
     /// pair), when it was; later payments against a receipt do not carry it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub receipt_key: Option<String>,
     #[serde(default = "default_version")]
     pub version: i64,

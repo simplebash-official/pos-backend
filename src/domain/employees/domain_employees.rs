@@ -9,14 +9,11 @@ use utoipa::{IntoParams, ToSchema};
 pub struct CreateEmployeeRequest {
     pub name: String,
     pub phone: String,
-    #[serde(default)]
     pub nic_or_id: Option<String>,
     pub role: EmployeeRole,
     pub default_split_type: SplitType,
     pub default_split_value: f64,
-    #[serde(default)]
     pub status: Option<EmployeeStatus>,
-    #[serde(default)]
     pub notes: Option<String>,
 }
 

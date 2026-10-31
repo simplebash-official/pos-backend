@@ -33,10 +33,10 @@ pub struct SetupSystemRequest {
     #[serde(alias = "load_sample_data")]
     pub load_sample_data: bool,
     /// Administrator display name (defaults to "System Admin").
-    #[serde(default, alias = "admin_name")]
+    #[serde(alias = "admin_name")]
     pub admin_name: Option<String>,
     /// Administrator password. Required; the Admin username is always `admin`.
-    #[serde(default, alias = "admin_password")]
+    #[serde(alias = "admin_password")]
     pub admin_password: Option<String>,
 }
 

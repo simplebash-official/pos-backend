@@ -36,26 +36,20 @@ pub struct CreateRepairRequest {
     /// Device model/brand.
     pub device_model: String,
     /// Optional serial number or IMEI.
-    #[serde(default)]
     pub serial_number: Option<String>,
     /// Reported issue or symptom description.
     pub issue_description: String,
     /// Optional date the job was promised ready (YYYY-MM-DD).
-    #[serde(default)]
     pub promised_ready_at: Option<String>,
     /// Initial status (defaults to "received").
-    #[serde(default)]
     pub status: Option<String>,
     /// Estimated charge to customer in cents. Optional: a ticket can be
     /// created before a technician has diagnosed the device and quoted a
     /// price; see `service::validate_price_required_for_status`.
-    #[serde(default)]
     pub estimated_cost_cents: Option<i64>,
     /// Optional cost of parts/materials in cents.
-    #[serde(default)]
     pub material_cost_cents: Option<i64>,
     /// Optional technician assignment.
-    #[serde(default)]
     pub assignment: Option<RepairAssignment>,
 }
 
@@ -152,16 +146,12 @@ fn default_version() -> i64 {
 #[serde(rename_all = "camelCase")]
 pub struct RepairAssignment {
     /// Staff ID of assigned technician.
-    #[serde(default)]
     pub assigned_employee_id: Option<String>,
     /// Name of assigned technician.
-    #[serde(default)]
     pub assigned_employee_name: Option<String>,
     /// Commission split method ("percentage" or "fixed").
-    #[serde(default)]
     pub split_type: Option<String>,
     /// Commission rate or fixed amount.
-    #[serde(default)]
     pub split_value: Option<f64>,
 }
 
@@ -179,13 +169,10 @@ pub struct RepairAssignment {
 #[serde(rename_all = "camelCase")]
 pub struct RepairCustomer {
     /// Key of registered customer.
-    #[serde(default)]
     pub customer_key: Option<String>,
     /// Walk-in customer name.
-    #[serde(default)]
     pub customer_name: Option<String>,
     /// Walk-in customer phone number.
-    #[serde(default)]
     pub customer_phone: Option<String>,
 }
 

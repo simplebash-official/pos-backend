@@ -35,7 +35,6 @@ pub struct CreateUserRequest {
     /// Key of the `Employee` profile this login belongs to. Optional, but
     /// every login created through the Employee "Create Login" action
     /// supplies it — see `service::create_user`'s validation.
-    #[serde(default)]
     pub employee_key: Option<String>,
 }
 
@@ -182,7 +181,7 @@ pub struct UserListQuery {
 #[serde(rename_all = "camelCase")]
 pub struct UserPreferences {
     /// Last sort method picked on the billing catalog (one of `CATALOG_SORT_IDS`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub billing_catalog_sort: Option<String>,
 }
 

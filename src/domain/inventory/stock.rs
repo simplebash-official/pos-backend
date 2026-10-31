@@ -105,16 +105,12 @@ pub struct StockAdjustmentRequest {
     /// Signed integer change in stock quantity (+/-).
     pub delta: i64,
     /// Reason or note for manual stock adjustment.
-    #[serde(default)]
     pub reason: Option<String>,
     /// The batch a negative delta is taken from.
-    #[serde(default)]
     pub batch_key: Option<String>,
     /// Unit cost of the units a positive delta brings in, in cents.
-    #[serde(default)]
     pub unit_cost_cents: Option<i64>,
     /// Selling price of the units a positive delta brings in, in cents.
-    #[serde(default)]
     pub selling_price_cents: Option<i64>,
 }
 

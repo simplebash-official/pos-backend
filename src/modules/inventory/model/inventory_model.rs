@@ -348,7 +348,7 @@ pub struct StockMovementDocument {
     pub product_id: ObjectId,
     /// Key of the stock batch whose units moved; absent only on the
     /// audit-only return movements that move no quantity.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub batch_key: Option<String>,
     /// Quantity change (positive for additions, negative for reductions).
     pub quantity_delta: i64,

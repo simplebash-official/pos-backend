@@ -25,7 +25,7 @@ pub struct UserDocument {
     /// Argon2id hashed password string.
     pub password_hash: String,
     /// Argon2id hashed PIN string for register overrides.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub pin_hash: Option<String>,
     /// System role assigned to this account (Admin, Manager, or Staff).
     pub role: Role,
@@ -34,10 +34,10 @@ pub struct UserDocument {
     pub is_active: bool,
     /// Key of the `Employee` HR/commission profile this login belongs to,
     /// if any — see `domain::users::User`'s doc comment.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub employee_key: Option<String>,
     /// Per-login UI preferences; absent on legacy documents.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub preferences: Option<UserPreferences>,
     /// Timestamp when user account was created.
     #[serde(default = "BsonDateTime::now")]

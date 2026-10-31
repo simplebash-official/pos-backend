@@ -26,13 +26,10 @@ pub(crate) struct GeneratedDocumentDocument {
     /// The document-server template name (`doc_temp_...`, one per design
     /// version) the PDF was rendered with. `None` only for rows written before
     /// designs were recorded.
-    #[serde(default)]
     pub template_ref: Option<String>,
     /// That template's title when it was rendered.
-    #[serde(default)]
     pub template_title: Option<String>,
     /// That template's design-family version when it was rendered.
-    #[serde(default)]
     pub template_version: Option<i64>,
     /// Relative filesystem path to the saved PDF file.
     pub file_path: String,

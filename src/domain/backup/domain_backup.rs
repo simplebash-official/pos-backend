@@ -21,7 +21,7 @@ pub struct BackupExportData {
     /// Map of table names to row records serialized as JSON objects.
     pub tables: HashMap<String, Vec<serde_json::Value>>,
     /// Optional snapshot of frontend settings (shop profile, branding, printer, templates).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub settings: Option<serde_json::Value>,
 }
 
@@ -33,7 +33,7 @@ pub struct ExportBackupRequest {
     #[serde(default)]
     pub include_settings: bool,
     /// Frontend settings snapshot (shop profile, branding, etc.) if requested.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub settings: Option<serde_json::Value>,
 }
 
@@ -58,6 +58,6 @@ pub struct RestoreBackupResponse {
     /// Breakdown of record counts restored per table name.
     pub restored_counts: HashMap<String, usize>,
     /// Restored frontend settings, if any were present in the backup.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub settings: Option<serde_json::Value>,
 }
