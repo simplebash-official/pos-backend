@@ -44,8 +44,7 @@ pub(crate) async fn insert_batch(
                 .id
                 .map(|o| o.to_hex())
                 .unwrap_or_else(generate_id_hex);
-            let errors_json =
-                serde_json::to_string(&document.errors).unwrap_or_else(|_| "[]".to_string());
+            let errors_json = serde_json::to_string(&document.errors)?;
             let created_at_iso = bson_to_iso(&document.created_at);
             let updated_at_iso = bson_to_iso(&document.updated_at);
             let processed_rows = (document.successful_rows + document.failed_rows) as i64;
@@ -153,7 +152,7 @@ pub(super) fn map_sqlite_row_to_batch(
     let id = ObjectId::parse_str(&id_str).ok();
     let errors_str: Option<String> = row.get("errors");
     let errors: Vec<ImportRowErrorDocument> = match errors_str {
-        Some(s) if !s.is_empty() => serde_json::from_str(&s).unwrap_or_default(),
+        Some(s) if !s.is_empty() => serde_json::from_str(&s)?,
         _ => Vec::new(),
     };
     let created_at_str: String = row.get("created_at");
@@ -218,7 +217,7 @@ pub(crate) async fn update_batch_result(
         }
         Db::Sqlite(pool) => {
             let updated_at_iso = now_utc_iso();
-            let errors_json = serde_json::to_string(&errors).unwrap_or_else(|_| "[]".to_string());
+            let errors_json = serde_json::to_string(&errors)?;
             let processed_rows = (successful_rows + failed_rows) as i64;
 
             sqlx::query(

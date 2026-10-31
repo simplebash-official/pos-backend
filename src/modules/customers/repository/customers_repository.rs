@@ -1,7 +1,7 @@
 use crate::clients::db::Db;
 use crate::clients::sqlite::{bson_to_iso, generate_id_hex, to_bson_datetime};
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
-use crate::core::error::AppResult;
+use crate::core::error::{AppError, AppResult};
 use crate::modules::customers::model::CustomerDocument;
 use futures_util::TryStreamExt;
 use mongodb::bson::oid::ObjectId;
@@ -72,18 +72,21 @@ pub(crate) async fn adjust_customer_financials(
     }
 }
 
-fn i64_from_facet_branch(result: &Document, branch: &str, field: &str) -> i64 {
-    result
+/// A scalar `i64` pushed by a `$group` facet branch (`[{ "_id": null, field: N }]`). An empty
+/// branch means nothing matched, so zero; a missing branch or non-integer field is an error.
+fn i64_from_facet_branch(result: &Document, branch: &str, field: &str) -> AppResult<i64> {
+    let rows = result
         .get_array(branch)
-        .ok()
-        .and_then(|arr| arr.first())
-        .and_then(|val| val.as_document())
-        .and_then(|doc| {
-            doc.get_i64(field)
-                .ok()
-                .or_else(|| doc.get_i32(field).ok().map(i64::from))
-        })
-        .unwrap_or(0)
+        .map_err(|err| AppError::internal(format!("facet branch `{branch}` is missing: {err}")))?;
+    let Some(first) = rows.first() else {
+        return Ok(0);
+    };
+    let doc = first.as_document().ok_or_else(|| {
+        AppError::internal(format!("facet branch `{branch}` row is not a document"))
+    })?;
+    doc.get_i64(field)
+        .or_else(|_| doc.get_i32(field).map(i64::from))
+        .map_err(|err| AppError::internal(format!("facet field `{field}` is invalid: {err}")))
 }
 
 pub(crate) async fn aggregate_stats(db: &Db) -> AppResult<StatsAggregateResult> {
@@ -112,9 +115,9 @@ pub(crate) async fn aggregate_stats(db: &Db) -> AppResult<StatsAggregateResult> 
                 });
             };
 
-            let total_customers = i64_from_facet_branch(&result, "total", "count") as u64;
-            let total_balance_due_cents = i64_from_facet_branch(&result, "debtors", "sum");
-            let active_debtors_count = i64_from_facet_branch(&result, "debtors", "count") as u64;
+            let total_customers = i64_from_facet_branch(&result, "total", "count")? as u64;
+            let total_balance_due_cents = i64_from_facet_branch(&result, "debtors", "sum")?;
+            let active_debtors_count = i64_from_facet_branch(&result, "debtors", "count")? as u64;
 
             Ok(StatsAggregateResult {
                 total_customers,
@@ -175,7 +178,7 @@ pub(super) struct CustomerSqliteRow {
 
 impl CustomerSqliteRow {
     pub(super) fn into_document(self) -> AppResult<CustomerDocument> {
-        let tags: Vec<String> = serde_json::from_str(&self.tags).unwrap_or_default();
+        let tags: Vec<String> = serde_json::from_str(&self.tags)?;
         Ok(CustomerDocument {
             id: ObjectId::parse_str(&self.id).ok(),
             key: self.key,
@@ -403,8 +406,7 @@ pub(crate) async fn insert_customer(
                 .id
                 .map(|oid| oid.to_hex())
                 .unwrap_or_else(generate_id_hex);
-            let tags_json =
-                serde_json::to_string(&document.tags).unwrap_or_else(|_| "[]".to_string());
+            let tags_json = serde_json::to_string(&document.tags)?;
             let created_at = bson_to_iso(&document.created_at);
             let updated_at = bson_to_iso(&document.updated_at);
             let deleted_at = document.deleted_at.as_ref().map(bson_to_iso);
@@ -645,7 +647,7 @@ pub(crate) async fn update_customer(
             cust.version += 1;
             cust.updated_at = BsonDateTime::now();
 
-            let tags_json = serde_json::to_string(&cust.tags).unwrap_or_else(|_| "[]".to_string());
+            let tags_json = serde_json::to_string(&cust.tags)?;
             let updated_at_iso = bson_to_iso(&cust.updated_at);
 
             sqlx::query(

@@ -1,7 +1,7 @@
 use crate::clients::db::Db;
 use crate::core::error::{AppError, AppResult};
 use crate::domain::sync_v2::{ChangeOp, ChangeRecord, SnapshotResponse};
-use crate::modules::sync::apply_mongo::num_i64;
+use crate::modules::sync::apply_mongo::{required_i64, required_str};
 use crate::modules::sync::cloud_store;
 use crate::modules::sync::cloud_store::coll;
 use crate::modules::sync::resources::{Phase, ordered};
@@ -21,7 +21,7 @@ pub(super) struct PageToken {
 }
 
 fn encode_token(token: &PageToken) -> String {
-    URL_SAFE_NO_PAD.encode(serde_json::to_vec(token).unwrap_or_default())
+    URL_SAFE_NO_PAD.encode(serde_json::to_vec(token).expect("a page token serializes"))
 }
 
 fn decode_token(text: &str) -> AppResult<PageToken> {
@@ -79,21 +79,20 @@ pub async fn build_snapshot(
             ));
         }
         for (row, payload) in docs.iter().zip(payloads) {
-            let key = row.get_str("key").unwrap_or_default().to_string();
+            let key = required_str(row, "key")?.to_string();
             token.after_key = Some(key.clone());
             changes.push(ChangeRecord {
                 resource: spec.name.to_string(),
                 key,
                 op: ChangeOp::Upsert,
-                version: num_i64(row, "version").unwrap_or(1),
+                version: required_i64(row, "version")?,
                 updated_at: row
                     .get_datetime("updated_at")
                     .map(|d| d.to_chrono())
-                    .unwrap_or_default(),
-                device_id: row
-                    .get_str("updated_by_device")
-                    .unwrap_or("cloud")
-                    .to_string(),
+                    .map_err(|err| {
+                        AppError::internal(format!("stored document has no updated_at: {err}"))
+                    })?,
+                device_id: required_str(row, "updated_by_device")?.to_string(),
                 payload: Some(payload),
             });
         }

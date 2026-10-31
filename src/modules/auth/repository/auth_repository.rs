@@ -1,8 +1,7 @@
 use crate::clients::db::Db;
 use crate::clients::sqlite::{bson_to_iso, generate_id_hex, to_bson_datetime};
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
-use crate::core::error::AppResult;
-use crate::domain::users::Role;
+use crate::core::error::{AppError, AppResult};
 use crate::modules::auth::model::LoginSessionDocument;
 use futures_util::TryStreamExt;
 use mongodb::bson::oid::ObjectId;
@@ -103,7 +102,12 @@ impl LoginSessionSqliteRow {
             user_key: self.user_key,
             name_at_login: self.name_at_login,
             username_at_login: self.username_at_login,
-            role_at_login: self.role_at_login.parse().unwrap_or(Role::Staff),
+            role_at_login: self.role_at_login.parse().map_err(|_| {
+                AppError::internal(format!(
+                    "stored login role `{}` is unknown",
+                    self.role_at_login
+                ))
+            })?,
             ip_address: self.ip_address,
             user_agent: self.user_agent,
             created_at: to_bson_datetime(&self.created_at)?,

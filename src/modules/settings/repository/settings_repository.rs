@@ -184,8 +184,7 @@ pub(crate) async fn upsert_document_template_settings(
 pub(crate) async fn upsert_shop_profile(db: &Db, doc: &ShopProfileDocument) -> AppResult<()> {
     match db {
         Db::Sqlite(pool) => {
-            let address_lines_json =
-                serde_json::to_string(&doc.address_lines).unwrap_or_else(|_| "[]".to_string());
+            let address_lines_json = serde_json::to_string(&doc.address_lines)?;
             let created_at = bson_to_iso(&doc.created_at);
             let updated_at = bson_to_iso(&doc.updated_at);
 

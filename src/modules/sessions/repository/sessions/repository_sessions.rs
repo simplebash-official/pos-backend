@@ -2,7 +2,7 @@ use crate::clients::db::Db;
 use crate::clients::sqlite::{bson_to_iso, generate_id_hex, to_bson_datetime};
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use crate::clients::uow::{Backend, Unit};
-use crate::core::error::AppResult;
+use crate::core::error::{AppError, AppResult};
 use crate::domain::sessions::{CashMovementType, SessionListQuery, SessionStatus};
 use crate::modules::sessions::model::RegisterSessionDocument;
 use futures_util::TryStreamExt;
@@ -551,16 +551,14 @@ pub(crate) fn session_from_sqlite_row(
     })?;
 
     let opening_denominations_str: Option<String> = row.get("opening_denominations");
-    let opening_denominations =
-        opening_denominations_str
-            .map(|text| serde_json::from_str(&text))
-            .transpose()?;
+    let opening_denominations = opening_denominations_str
+        .map(|text| serde_json::from_str(&text))
+        .transpose()?;
 
     let closing_denominations_str: Option<String> = row.get("closing_denominations");
-    let closing_denominations =
-        closing_denominations_str
-            .map(|text| serde_json::from_str(&text))
-            .transpose()?;
+    let closing_denominations = closing_denominations_str
+        .map(|text| serde_json::from_str(&text))
+        .transpose()?;
 
     let opened_at_str: String = row.get("opened_at");
     let closed_at_str: Option<String> = row.get("closed_at");

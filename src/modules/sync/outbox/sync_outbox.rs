@@ -1,6 +1,6 @@
 use crate::clients::db::Db;
 use crate::clients::sqlite::map_sqlite_row_to_document;
-use crate::core::error::AppResult;
+use crate::core::error::{AppError, AppResult};
 use crate::domain::sync_local::{
     OutboxItem, OutboxQuery, OutboxResponse, PendingItem, PendingQuery, PendingResponse,
 };
@@ -54,7 +54,7 @@ pub async fn list_outbox(db: &Db, query: OutboxQuery) -> AppResult<OutboxRespons
         .await?;
         let (updated_at, device_id, meta_version) = match &meta {
             Some(m) => (
-                ms_to_datetime(m.get("updated_at_ms")),
+                ms_to_datetime(m.get("updated_at_ms"))?,
                 m.get::<String, _>("device_id"),
                 m.get::<i64, _>("version"),
             ),
@@ -114,15 +114,15 @@ pub async fn list_outbox(db: &Db, query: OutboxQuery) -> AppResult<OutboxRespons
         items.push(OutboxItem { seq, record });
     }
 
-    let epoch: Option<String> =
-        sqlx::query_scalar("SELECT outbox_epoch FROM sync_state WHERE id = 1")
-            .fetch_optional(pool)
+    let epoch: String =
+        sqlx::query_scalar::<_, Option<String>>("SELECT outbox_epoch FROM sync_state WHERE id = 1")
+            .fetch_one(pool)
             .await?
-            .flatten();
+            .ok_or_else(|| AppError::internal("sync_state has no outbox epoch"))?;
     Ok(OutboxResponse {
         items,
         last_seq,
-        epoch: epoch.unwrap_or_default(),
+        epoch,
     })
 }
 
@@ -200,6 +200,7 @@ pub async fn list_pending(db: &Db, query: PendingQuery) -> AppResult<PendingResp
     Ok(PendingResponse { items, total })
 }
 
-pub(crate) fn ms_to_datetime(ms: i64) -> DateTime<Utc> {
-    DateTime::from_timestamp_millis(ms).unwrap_or_else(Utc::now)
+pub(crate) fn ms_to_datetime(ms: i64) -> AppResult<DateTime<Utc>> {
+    DateTime::from_timestamp_millis(ms)
+        .ok_or_else(|| AppError::internal(format!("timestamp {ms} ms is out of range")))
 }

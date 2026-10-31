@@ -55,12 +55,7 @@ pub(crate) async fn get_shop_profile(
     let mut response = ShopProfileResponse::default();
 
     if let Some(tid) = tenant_id {
-        response.trading_name = tenants_repository::find_tenant_by_key(db, tid)
-            .await
-            .ok()
-            .flatten()
-            .map(|t| t.name)
-            .unwrap_or_default();
+        response.trading_name = trading_name_of(db, tid).await?;
     }
 
     Ok(response)
@@ -198,12 +193,7 @@ pub(crate) async fn update_shop_profile(
             },
             None => {
                 let initial_trading_name = if let Some(tid) = tenant_id {
-                    tenants_repository::find_tenant_by_key(db, tid)
-                        .await
-                        .ok()
-                        .flatten()
-                        .map(|t| t.name)
-                        .unwrap_or_default()
+                    trading_name_of(db, tid).await?
                 } else {
                     String::new()
                 };
@@ -337,4 +327,12 @@ pub(crate) async fn update_shop_profile(
         Ok(doc.into_response())
     })
     .await
+}
+
+/// The tenant's registered name. A tenant with no record yet has no trading name.
+async fn trading_name_of(db: &Db, tenant_key: &str) -> AppResult<String> {
+    match tenants_repository::find_tenant_by_key(db, tenant_key).await? {
+        Some(tenant) => Ok(tenant.name),
+        None => Ok(String::new()),
+    }
 }

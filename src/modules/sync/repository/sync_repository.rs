@@ -1,7 +1,7 @@
 use crate::clients::db::Db;
 use crate::clients::sqlite::map_sqlite_row_to_document;
 use crate::clients::tenant_db::ScopedCollection;
-use crate::core::error::AppResult;
+use crate::core::error::{AppError, AppResult};
 use crate::modules::sync::cursor::DecodedCursor;
 use futures_util::TryStreamExt;
 use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
@@ -118,11 +118,14 @@ pub(crate) async fn fetch_latest_change_marker(
                 .sort(doc! { "updated_at": -1, "key": -1 })
                 .await?;
 
-            Ok(doc.and_then(|d| {
-                let updated_at = d.get_datetime("updated_at").copied().ok()?;
-                let key = d.get_str("key").unwrap_or_default().to_string();
-                Some((updated_at, key))
-            }))
+            doc.map(|d| {
+                let updated_at = d.get_datetime("updated_at").copied().map_err(|err| {
+                    AppError::internal(format!("stored document has no updated_at: {err}"))
+                })?;
+                let key = crate::modules::sync::apply_mongo::required_str(&d, "key")?.to_string();
+                Ok((updated_at, key))
+            })
+            .transpose()
         }
         Db::Sqlite(pool) => {
             let table = collection_name;

@@ -232,10 +232,8 @@ pub(crate) async fn insert_supplier(
                 .id
                 .map(|oid| oid.to_hex())
                 .unwrap_or_else(generate_id_hex);
-            let categories_json = serde_json::to_string(&document.supplied_categories)
-                .unwrap_or_else(|_| "[]".to_string());
-            let contact_persons_json = serde_json::to_string(&document.contact_persons)
-                .unwrap_or_else(|_| "[]".to_string());
+            let categories_json = serde_json::to_string(&document.supplied_categories)?;
+            let contact_persons_json = serde_json::to_string(&document.contact_persons)?;
             let created_at = bson_to_iso(&document.created_at);
             let updated_at = bson_to_iso(&document.updated_at);
             let deleted_at = document.deleted_at.as_ref().map(bson_to_iso);
@@ -380,13 +378,11 @@ pub(super) struct SupplierSqliteRow {
 
 impl SupplierSqliteRow {
     pub(super) fn into_document(self) -> AppResult<SupplierDocument> {
-        let supplied_categories: Vec<String> =
-            serde_json::from_str(&self.supplied_categories).unwrap_or_default();
-        let contact_persons: Vec<ContactPerson> = self
-            .contact_persons
-            .as_deref()
-            .and_then(|s| serde_json::from_str(s).ok())
-            .unwrap_or_default();
+        let supplied_categories: Vec<String> = serde_json::from_str(&self.supplied_categories)?;
+        let contact_persons: Vec<ContactPerson> = match self.contact_persons.as_deref() {
+            Some(text) => serde_json::from_str(text)?,
+            None => Vec::new(),
+        };
         Ok(SupplierDocument {
             id: ObjectId::parse_str(&self.id).ok(),
             key: self.key,
@@ -483,10 +479,8 @@ pub(crate) async fn update_supplier(
             sup.version += 1;
             sup.updated_at = BsonDateTime::now();
 
-            let categories_json = serde_json::to_string(&sup.supplied_categories)
-                .unwrap_or_else(|_| "[]".to_string());
-            let contact_persons_json =
-                serde_json::to_string(&sup.contact_persons).unwrap_or_else(|_| "[]".to_string());
+            let categories_json = serde_json::to_string(&sup.supplied_categories)?;
+            let contact_persons_json = serde_json::to_string(&sup.contact_persons)?;
             let updated_at_iso = bson_to_iso(&sup.updated_at);
 
             sqlx::query(

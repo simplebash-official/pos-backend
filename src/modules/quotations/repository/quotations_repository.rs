@@ -363,10 +363,9 @@ pub(super) fn row_to_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<QuotationDo
     let created_at: String = row.get("created_at");
     let updated_at: String = row.get("updated_at");
     let deleted_at: Option<String> = row.get("deleted_at");
-    let fulfilled_by_invoice_key: Option<String> =
-        row.try_get("fulfilled_by_invoice_key").ok().flatten();
-    let fulfilled_at: Option<String> = row.try_get("fulfilled_at").ok().flatten();
-    let has_out_of_stock_items: bool = row.try_get("has_out_of_stock_items").unwrap_or(false);
+    let fulfilled_by_invoice_key: Option<String> = row.get("fulfilled_by_invoice_key");
+    let fulfilled_at: Option<String> = row.get("fulfilled_at");
+    let has_out_of_stock_items: bool = row.get("has_out_of_stock_items");
 
     Ok(QuotationDocument {
         id: ObjectId::parse_str(&id_str).ok(),

@@ -1,7 +1,7 @@
 use crate::clients::db::Db;
 use crate::clients::sqlite::{generate_id_hex, to_bson_datetime};
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
-use crate::core::error::AppResult;
+use crate::core::error::{AppError, AppResult};
 use crate::domain::users::Role;
 use crate::modules::users::model::UserDocument;
 use futures_util::TryStreamExt;
@@ -355,15 +355,16 @@ pub(super) fn user_from_sqlite_row(r: &sqlx::sqlite::SqliteRow) -> AppResult<Use
         name: r.get("name"),
         username: r.get("username"),
         password_hash: r.get("password_hash"),
-        pin_hash: r.try_get::<Option<String>, _>("pin_hash").ok().flatten(),
-        role: Role::from_str(&role_str).unwrap_or(Role::Staff),
+        pin_hash: r.get("pin_hash"),
+        role: Role::from_str(&role_str).ok_or_else(|| {
+            AppError::internal(format!("stored user role `{role_str}` is unknown"))
+        })?,
         is_active: is_active_int != 0,
         employee_key: r.get("employee_key"),
         preferences: r
-            .try_get::<Option<String>, _>("preferences_json")
-            .ok()
-            .flatten()
-            .and_then(|raw| serde_json::from_str(&raw).ok()),
+            .get::<Option<String>, _>("preferences_json")
+            .map(|raw| serde_json::from_str(&raw))
+            .transpose()?,
         created_at: to_bson_datetime(&created_str)?,
         updated_at: to_bson_datetime(&updated_str)?,
     })

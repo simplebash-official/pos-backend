@@ -172,24 +172,34 @@ pub(crate) async fn get_installation(db: &Db) -> AppResult<Option<SystemInstalla
 
             if let Some(doc) = doc_opt {
                 Ok(Some(SystemInstallation {
-                    key: doc.get_str("key").unwrap_or_default().to_string(),
-                    id: doc.get_str("id").unwrap_or_default().to_string(),
-                    installation_id: doc
-                        .get_str("installation_id")
-                        .unwrap_or_default()
-                        .to_string(),
-                    app_version: doc.get_str("app_version").unwrap_or_default().to_string(),
-                    platform: doc.get_str("platform").unwrap_or_default().to_string(),
-                    installed_at: doc.get_str("installed_at").unwrap_or_default().to_string(),
-                    setup_completed: doc.get_bool("setup_completed").unwrap_or(false),
+                    key: text(&doc, "key")?,
+                    id: text(&doc, "id")?,
+                    installation_id: text(&doc, "installation_id")?,
+                    app_version: text(&doc, "app_version")?,
+                    platform: text(&doc, "platform")?,
+                    installed_at: text(&doc, "installed_at")?,
+                    setup_completed: flag(&doc, "setup_completed")?,
                     setup_completed_at: doc.get_str("setup_completed_at").ok().map(String::from),
-                    sample_data_loaded: doc.get_bool("sample_data_loaded").unwrap_or(false),
-                    created_at: doc.get_str("created_at").unwrap_or_default().to_string(),
-                    updated_at: doc.get_str("updated_at").unwrap_or_default().to_string(),
+                    sample_data_loaded: flag(&doc, "sample_data_loaded")?,
+                    created_at: text(&doc, "created_at")?,
+                    updated_at: text(&doc, "updated_at")?,
                 }))
             } else {
                 Ok(None)
             }
         }
     }
+}
+
+/// A required string field of a stored installation document.
+fn text(doc: &mongodb::bson::Document, field: &str) -> AppResult<String> {
+    doc.get_str(field)
+        .map(str::to_string)
+        .map_err(|err| AppError::internal(format!("installation has no `{field}`: {err}")))
+}
+
+/// A required boolean field of a stored installation document.
+fn flag(doc: &mongodb::bson::Document, field: &str) -> AppResult<bool> {
+    doc.get_bool(field)
+        .map_err(|err| AppError::internal(format!("installation has no `{field}`: {err}")))
 }

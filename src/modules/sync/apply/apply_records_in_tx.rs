@@ -159,6 +159,13 @@ fn wire_field(table: &str, column: &str) -> String {
     }
 }
 
+/// An RFC 3339 timestamp for a change's millisecond clock; an out-of-range clock is an error.
+fn datetime_text(ms: i64) -> Result<String, sqlx::Error> {
+    ms_to_datetime(ms)
+        .map(|time| time.to_rfc3339())
+        .map_err(|err| sqlx::Error::Protocol(err.to_string()))
+}
+
 async fn upsert_row(
     conn: &mut SqliteConnection,
     cols: &[Col],
@@ -178,7 +185,7 @@ async fn upsert_row(
                 _ => V::Text(generate_id_hex()),
             }),
             "version" => Some(V::Int(w.version)),
-            "updated_at" => Some(V::Text(ms_to_datetime(w.ms).to_rfc3339())),
+            "updated_at" => Some(V::Text(datetime_text(w.ms)?)),
             "deleted_at" => Some(V::Null),
             "updated_by_device" => Some(V::Text(w.device.to_string())),
             "created_at" => Some(match w.payload.get("createdAt") {
@@ -350,7 +357,7 @@ async fn rename_stored_row(
         "UPDATE {table} SET {column} = ?, updated_at = ?, updated_by_device = ?, version = ? WHERE key = ?"
     ))
     .bind(new_value)
-    .bind(ms_to_datetime(ms).to_rfc3339())
+    .bind(datetime_text(ms)?)
     .bind(&own_device)
     .bind(version + 1)
     .bind(key)
@@ -572,7 +579,7 @@ pub(super) async fn apply_records_in_tx(
                         detail: serde_json::json!({
                             "losingPayload": without_secrets(spec.name, losing),
                             "winningDeviceId": meta.as_ref().map(|m| m.device_id.clone()),
-                            "winningUpdatedAt": meta.as_ref().map(|m| ms_to_datetime(m.updated_at_ms)),
+                            "winningUpdatedAt": meta.as_ref().map(|m| ms_to_datetime(m.updated_at_ms)).transpose()?,
                         }),
                     });
                 }
@@ -638,8 +645,8 @@ pub(super) async fn apply_records_in_tx(
                             "UPDATE {t} SET deleted_at = ?, updated_at = ?, version = MAX(version, ?), updated_by_device = ? WHERE key = ?",
                             t = spec.table
                         ))
-                        .bind(ms_to_datetime(ms).to_rfc3339())
-                        .bind(ms_to_datetime(ms).to_rfc3339())
+                        .bind(datetime_text(ms)?)
+                        .bind(datetime_text(ms)?)
                         .bind(rec.version)
                         .bind(device)
                         .bind(&rec.key)

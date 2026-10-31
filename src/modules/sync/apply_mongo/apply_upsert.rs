@@ -4,6 +4,8 @@ use super::sync_apply_mongo::build_document;
 use super::sync_apply_mongo::millis;
 use super::sync_apply_mongo::note_scope;
 use super::sync_apply_mongo::num_i64;
+use super::sync_apply_mongo::required_i64;
+use super::sync_apply_mongo::required_str;
 use crate::clients::db::Db;
 use crate::core::error::{AppError, AppResult};
 
@@ -86,9 +88,9 @@ async fn resolve_unique_collisions(
         if key < clash_key.as_str() {
             // The incoming row is the deterministic winner: it keeps `value`
             // unchanged. The already-stored clash row moves aside instead.
-            let clash_tag = device_tag(clash.get_str("updated_by_device").unwrap_or(device_id));
+            let clash_tag = device_tag(required_str(&clash, "updated_by_device")?);
             let stored = format!("{value}-{clash_tag}");
-            let clash_version = num_i64(&clash, "version").unwrap_or(1);
+            let clash_version = required_i64(&clash, "version")?;
             collection
                 .update_one(
                     doc! { "key": &clash_key },
@@ -271,7 +273,7 @@ fn serial_double_sale(existing: &ExistingRow, payload: &Value, key: &str) -> Opt
         resource: "productSerials".to_string(),
         entity_key: key.to_string(),
         detail: serde_json::json!({
-            "serialNumber": existing.doc.get_str("serial_number").unwrap_or_default(),
+            "serialNumber": existing.doc.get_str("serial_number").ok(),
             "invoiceKeys": [existing_invoice, incoming_invoice],
         }),
     })

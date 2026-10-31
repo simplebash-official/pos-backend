@@ -267,12 +267,14 @@ async fn catch_up(db: &Db, since: BsonDateTime) -> AppResult<usize> {
                 continue;
             }
             let tenant = Tenant::id(tenant_id)?;
-            let key = full.get_str("key").unwrap_or_default().to_string();
-            let version = crate::modules::sync::apply_mongo::num_i64(&full, "version").unwrap_or(1);
+            let key = crate::modules::sync::apply_mongo::required_str(&full, "key")?.to_string();
+            let version = crate::modules::sync::apply_mongo::required_i64(&full, "version")?;
             let updated_ms = full
                 .get_datetime("updated_at")
-                .map(|t| t.timestamp_millis())
-                .unwrap_or_default();
+                .map_err(|err| {
+                    AppError::internal(format!("stored document has no updated_at: {err}"))
+                })?
+                .timestamp_millis();
             let token = format!("catchup:{}:{key}:{updated_ms}:{version}", spec.table);
             with_tenant(tenant, publish(db, spec.table, full, &token)).await?;
             published += 1;
@@ -295,8 +297,7 @@ async fn catch_up(db: &Db, since: BsonDateTime) -> AppResult<usize> {
             "catchup:tombstone:{}",
             marker
                 .get("_id")
-                .map(|id| id.to_string())
-                .unwrap_or_default()
+                .ok_or_else(|| AppError::internal("tombstone has no _id"))?
         );
         with_tenant(tenant, publish_tombstone(db, marker, &token)).await?;
         published += 1;
@@ -500,7 +501,7 @@ async fn publish_tombstone(db: &Db, marker: Document, source_token: &str) -> App
     let deleted_at = marker
         .get_datetime("deleted_at")
         .copied()
-        .unwrap_or_else(|_| BsonDateTime::now());
+        .map_err(|err| AppError::internal(format!("tombstone has no deleted_at: {err}")))?;
     let row = doc! {
         "resource": spec.name,
         "key": key,
@@ -534,13 +535,7 @@ async fn publish(db: &Db, collection: &str, full: Document, source_token: &str) 
         return Ok(());
     };
 
-    let key = doc_for_change
-        .get_str("key")
-        .unwrap_or_default()
-        .to_string();
-    if key.is_empty() {
-        return Ok(());
-    }
+    let key = crate::modules::sync::apply_mongo::required_str(&doc_for_change, "key")?.to_string();
     let deleted = doc_for_change
         .get("deleted_at")
         .is_some_and(|v| !matches!(v, Bson::Null));
@@ -568,12 +563,13 @@ async fn publish(db: &Db, collection: &str, full: Document, source_token: &str) 
         "resource": spec.name,
         "key": &key,
         "op": if deleted { "delete" } else { "upsert" },
-        "version": crate::modules::sync::apply_mongo::num_i64(&doc_for_change, "version").unwrap_or(1),
-        "updated_at": doc_for_change
-            .get_datetime("updated_at")
-            .copied()
-            .unwrap_or_else(|_| BsonDateTime::now()),
-        "device_id": device.clone().unwrap_or_else(|| "cloud".to_string()),
+        "version": crate::modules::sync::apply_mongo::required_i64(&doc_for_change, "version")?,
+        "updated_at": doc_for_change.get_datetime("updated_at").copied().map_err(|err| {
+            AppError::internal(format!("stored document has no updated_at: {err}"))
+        })?,
+        "device_id": device
+            .clone()
+            .unwrap_or_else(|| crate::core::sync_origin::CLOUD_ORIGIN.to_string()),
         "received_at": BsonDateTime::now(),
         "source_token": source_token,
     };

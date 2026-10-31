@@ -42,7 +42,7 @@ pub fn cloud_events(
                     Ok(event) => Event::default()
                         .event("change")
                         .id(event.seq.to_string())
-                        .data(serde_json::to_string(&event).unwrap_or_default()),
+                        .data(serde_json::to_string(&event).expect("a change event serializes")),
                     Err(broadcast::error::RecvError::Lagged(_)) => {
                         Event::default().event("resync").data("{}")
                     }

@@ -37,9 +37,8 @@ pub(crate) struct DeviceNumber {
 /// `next_raw_number`.
 pub(crate) async fn device_numeric_tag(pool: &SqlitePool) -> AppResult<i64> {
     let device_id: String = sqlx::query_scalar("SELECT device_id FROM sync_state WHERE id = 1")
-        .fetch_optional(pool)
-        .await?
-        .unwrap_or_default();
+        .fetch_one(pool)
+        .await?;
     Ok(device_id
         .bytes()
         .fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32)) as i64
@@ -82,9 +81,8 @@ pub(crate) async fn next_number(
     padding: usize,
 ) -> AppResult<Option<DeviceNumber>> {
     let linked: i64 = sqlx::query_scalar("SELECT linked FROM sync_state WHERE id = 1")
-        .fetch_optional(pool)
-        .await?
-        .unwrap_or(0);
+        .fetch_one(pool)
+        .await?;
     if linked == 0 {
         return Ok(None);
     }
@@ -146,9 +144,8 @@ pub(crate) async fn next_number(
 /// device tag when this returns `None`.
 pub(crate) async fn next_raw_number(pool: &SqlitePool, name: &str) -> AppResult<Option<i64>> {
     let linked: i64 = sqlx::query_scalar("SELECT linked FROM sync_state WHERE id = 1")
-        .fetch_optional(pool)
-        .await?
-        .unwrap_or(0);
+        .fetch_one(pool)
+        .await?;
     if linked == 0 {
         return Ok(None);
     }

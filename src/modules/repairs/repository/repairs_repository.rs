@@ -3,7 +3,7 @@ use crate::clients::sqlite::{
     SqlFilter, bson_to_iso, generate_id_hex, now_utc_iso, to_bson_datetime,
 };
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
-use crate::core::error::AppResult;
+use crate::core::error::{AppError, AppResult};
 use crate::modules::repairs::model::RepairDocument;
 use chrono::{DateTime, Utc};
 use futures_util::TryStreamExt;
@@ -12,21 +12,21 @@ use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
 use mongodb::options::ReturnDocument;
 use sqlx::Row;
 
-/// Extracts a scalar `i64` field pushed by a `$group` facet branch, out of
-/// that branch's array-of-one-document shape (`[{ "_id": null, field: N }]`,
-/// empty array if the branch matched nothing).
-fn i64_from_facet_branch(result: &Document, branch: &str, field: &str) -> i64 {
-    result
+/// A scalar `i64` pushed by a `$group` facet branch (`[{ "_id": null, field: N }]`). An empty
+/// branch means nothing matched, so zero; a missing branch or non-integer field is an error.
+fn i64_from_facet_branch(result: &Document, branch: &str, field: &str) -> AppResult<i64> {
+    let rows = result
         .get_array(branch)
-        .ok()
-        .and_then(|arr| arr.first())
-        .and_then(|val| val.as_document())
-        .and_then(|doc| {
-            doc.get_i64(field)
-                .ok()
-                .or_else(|| doc.get_i32(field).ok().map(i64::from))
-        })
-        .unwrap_or(0)
+        .map_err(|err| AppError::internal(format!("facet branch `{branch}` is missing: {err}")))?;
+    let Some(first) = rows.first() else {
+        return Ok(0);
+    };
+    let doc = first.as_document().ok_or_else(|| {
+        AppError::internal(format!("facet branch `{branch}` row is not a document"))
+    })?;
+    doc.get_i64(field)
+        .or_else(|_| doc.get_i32(field).map(i64::from))
+        .map_err(|err| AppError::internal(format!("facet field `{field}` is invalid: {err}")))
 }
 
 /// Runs a single `$facet` aggregation over `repairs` to compute the Repair
@@ -80,9 +80,9 @@ pub(crate) async fn aggregate_stats(
                 });
             };
 
-            let today_job_count = i64_from_facet_branch(&result, "today", "count") as u64;
-            let today_revenue_cents = i64_from_facet_branch(&result, "today", "sum");
-            let pending_job_count = i64_from_facet_branch(&result, "pending", "count") as u64;
+            let today_job_count = i64_from_facet_branch(&result, "today", "count")? as u64;
+            let today_revenue_cents = i64_from_facet_branch(&result, "today", "sum")?;
+            let pending_job_count = i64_from_facet_branch(&result, "pending", "count")? as u64;
 
             Ok(StatsAggregateResult {
                 today_job_count,

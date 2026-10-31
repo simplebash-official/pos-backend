@@ -750,7 +750,7 @@ pub async fn verify_user_pin(
                 _ => {}
             }
         }
-        if verify_password(pin, pin_hash).unwrap_or(false) {
+        if verify_password(pin, pin_hash)? {
             return Ok(Some(user_doc.into_user()));
         }
     }

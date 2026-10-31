@@ -164,24 +164,30 @@ pub async fn list_conflicts(db: &Db) -> AppResult<Vec<ConflictItem>> {
     )
     .fetch_all(pool)
     .await?;
-    let parse = |s: String| -> DateTime<Utc> {
+    let parse = |s: String| -> AppResult<DateTime<Utc>> {
         DateTime::parse_from_rfc3339(&s)
             .map(|d| d.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now())
+            .map_err(|err| {
+                AppError::internal(format!("stored conflict time `{s}` is invalid: {err}"))
+            })
     };
-    Ok(rows
-        .into_iter()
-        .map(|row| ConflictItem {
-            key: row.get("key"),
-            kind: row.get("kind"),
-            resource: row.get("resource"),
-            entity_key: row.get("entity_key"),
-            detail: serde_json::from_str(&row.get::<String, _>("detail")).unwrap_or_default(),
-            detected_at: parse(row.get("detected_at")),
-            resolved_at: row.get::<Option<String>, _>("resolved_at").map(parse),
-            resolution: row.get("resolution"),
+    rows.into_iter()
+        .map(|row| {
+            Ok(ConflictItem {
+                key: row.get("key"),
+                kind: row.get("kind"),
+                resource: row.get("resource"),
+                entity_key: row.get("entity_key"),
+                detail: serde_json::from_str(&row.get::<String, _>("detail"))?,
+                detected_at: parse(row.get("detected_at"))?,
+                resolved_at: row
+                    .get::<Option<String>, _>("resolved_at")
+                    .map(parse)
+                    .transpose()?,
+                resolution: row.get("resolution"),
+            })
         })
-        .collect())
+        .collect()
 }
 
 /// Gives every product whose `stock_quantity` is not explained by its

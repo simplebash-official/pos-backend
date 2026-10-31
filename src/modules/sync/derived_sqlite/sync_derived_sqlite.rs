@@ -1,4 +1,4 @@
-use crate::core::error::AppResult;
+use crate::core::error::{AppError, AppResult};
 use crate::core::id::generate_id;
 use crate::domain::billing::{InvoiceItem, InvoiceStatus};
 use crate::domain::sync_v2::{ConflictKind, DerivedScope, NewConflict};
@@ -39,9 +39,10 @@ pub async fn recompute(
 
 fn status_str(status: InvoiceStatus) -> String {
     serde_json::to_value(status)
-        .ok()
-        .and_then(|v| v.as_str().map(str::to_string))
-        .unwrap_or_default()
+        .expect("an invoice status serializes")
+        .as_str()
+        .expect("an invoice status serializes as a string")
+        .to_string()
 }
 
 /// Refund totals, per-line returned quantity and (for credit sales) the
@@ -71,7 +72,7 @@ async fn recompute_invoice(
     let old_count: i64 = row.get("credit_note_count");
     let customer_key: Option<String> = row.get("customer_key");
 
-    let old_items: Vec<InvoiceItem> = serde_json::from_str(&items_json).unwrap_or_default();
+    let old_items: Vec<InvoiceItem> = serde_json::from_str(&items_json)?;
     let mut items = old_items.clone();
     for item in &mut items {
         item.returned_quantity = 0;
@@ -90,11 +91,17 @@ async fn recompute_invoice(
         refunded +=
             note.get::<i64, _>("refund_cash_cents") + note.get::<i64, _>("balance_reduction_cents");
         let returned: serde_json::Value =
-            serde_json::from_str(&note.get::<String, _>("returned_items")).unwrap_or_default();
-        let lines = returned.as_array().cloned().unwrap_or_default();
+            serde_json::from_str(&note.get::<String, _>("returned_items"))?;
+        let lines = returned
+            .as_array()
+            .cloned()
+            .ok_or_else(|| AppError::internal("a credit note's returned_items is not an array"))?;
         let sole = items.len() == 1 && lines.len() == 1;
         for line in &lines {
-            let quantity = line.get("quantity").and_then(|q| q.as_i64()).unwrap_or(0);
+            let quantity = line
+                .get("quantity")
+                .and_then(|q| q.as_i64())
+                .ok_or_else(|| AppError::internal("a returned line has no quantity"))?;
             let product_key = line.get("productKey").and_then(|v| v.as_str());
             let ticket_key = line.get("sourceTicketKey").and_then(|v| v.as_str());
             let name = line.get("name").and_then(|v| v.as_str());

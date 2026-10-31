@@ -72,9 +72,10 @@ async fn sum_field(db: &Db, collection: &str, filter: Document, field: &str) -> 
 
 fn status_str(status: InvoiceStatus) -> String {
     serde_json::to_value(status)
-        .ok()
-        .and_then(|v| v.as_str().map(str::to_string))
-        .unwrap_or_default()
+        .expect("an invoice status serializes")
+        .as_str()
+        .expect("an invoice status serializes as a string")
+        .to_string()
 }
 
 /// Refund totals, per-line returned quantity and (for credit sales) the
@@ -98,13 +99,13 @@ async fn recompute_invoice(
     let old_count = num_i64(&invoice, "credit_note_count");
     let customer_key = invoice.get_str("customer_key").ok().map(str::to_string);
 
-    let old_items: Vec<InvoiceItem> = invoice
-        .get("items")
-        .cloned()
-        .map(bson::deserialize_from_bson)
-        .transpose()
-        .map_err(|e| AppError::internal(format!("invoice items are unreadable: {e}")))?
-        .unwrap_or_default();
+    let old_items: Vec<InvoiceItem> = bson::deserialize_from_bson(
+        invoice
+            .get("items")
+            .cloned()
+            .ok_or_else(|| AppError::internal("stored invoice has no items"))?,
+    )
+    .map_err(|e| AppError::internal(format!("invoice items are unreadable: {e}")))?;
     let mut items = old_items.clone();
     for item in &mut items {
         item.returned_quantity = 0;
@@ -122,8 +123,14 @@ async fn recompute_invoice(
             + required_i64(&note, "balance_reduction_cents")?;
         let lines: Vec<Document> = note
             .get_array("returned_items")
-            .map(|a| a.iter().filter_map(|b| b.as_document().cloned()).collect())
-            .unwrap_or_default();
+            .map_err(|err| AppError::internal(format!("credit note has no returned_items: {err}")))?
+            .iter()
+            .map(|line| {
+                line.as_document().cloned().ok_or_else(|| {
+                    AppError::internal("a credit note's returned line is not a document")
+                })
+            })
+            .collect::<AppResult<_>>()?;
         let sole = items.len() == 1 && lines.len() == 1;
         for line in &lines {
             let quantity = required_i64(line, "quantity")?;

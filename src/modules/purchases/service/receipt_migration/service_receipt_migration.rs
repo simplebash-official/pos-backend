@@ -5,6 +5,13 @@ use mongodb::Database;
 use mongodb::bson::{Bson, Document, doc};
 use std::collections::BTreeMap;
 
+/// A required string field of a legacy purchase; a purchase without it cannot be grouped.
+fn required<'a>(purchase: &'a Document, field: &str) -> mongodb::error::Result<&'a str> {
+    purchase.get_str(field).map_err(|err| {
+        mongodb::error::Error::custom(format!("purchase has no valid `{field}`: {err}"))
+    })
+}
+
 fn text(document: &Document, field: &str) -> Option<String> {
     document
         .get_str(field)
@@ -32,22 +39,18 @@ pub async fn migrate_mongo(db: &Database, mode: Mode) -> mongodb::error::Result<
         .await?;
 
     // (shop, supplier, invoice number or own key, day) -> the group's purchases.
-    let mut groups: BTreeMap<(String, String, String, String), Vec<&Document>> = BTreeMap::new();
+    // A single-shop database has no tenant field, so the shop part of the key is optional.
+    type GroupKey = (Option<String>, String, String, i64);
+    let mut groups: BTreeMap<GroupKey, Vec<&Document>> = BTreeMap::new();
     for purchase in &unmigrated {
-        let key = purchase.get_str("key").unwrap_or_default().to_string();
-        let shop = purchase
-            .get(TENANT_FIELD)
-            .map(|t| t.to_string())
-            .unwrap_or_default();
-        let supplier = purchase
-            .get_str("supplier_key")
-            .unwrap_or_default()
-            .to_string();
+        let key = required(purchase, "key")?.to_string();
+        let shop = purchase.get(TENANT_FIELD).map(|t| t.to_string());
+        let supplier = required(purchase, "supplier_key")?.to_string();
         let invoice = text(purchase, "reference_no").unwrap_or_else(|| key.clone());
         let date = purchase
             .get_datetime("date")
-            .map(|d| d.timestamp_millis().to_string())
-            .unwrap_or_default();
+            .map_err(|err| mongodb::error::Error::custom(format!("purchase has no date: {err}")))?
+            .timestamp_millis();
         groups
             .entry((shop, supplier, invoice, date))
             .or_default()
@@ -58,9 +61,11 @@ pub async fn migrate_mongo(db: &Database, mode: Mode) -> mongodb::error::Result<
     for members in groups.values() {
         let first = members
             .iter()
-            .filter_map(|p| p.get_str("key").ok())
+            .map(|p| required(p, "key"))
+            .collect::<mongodb::error::Result<Vec<_>>>()?
+            .into_iter()
             .min()
-            .unwrap_or_default()
+            .expect("a group holds at least one purchase")
             .to_string();
         let representative = members[0];
         let receipt_key = format!("prc_leg_{first}");
@@ -72,8 +77,11 @@ pub async fn migrate_mongo(db: &Database, mode: Mode) -> mongodb::error::Result<
         let mut receipt = doc! {
             "key": &receipt_key,
             "receipt_number": format!("PUR-L{}", tail(&first, 10)),
-            "supplier_key": representative.get_str("supplier_key").unwrap_or_default(),
-            "date": representative.get("date").cloned().unwrap_or(Bson::Null),
+            "supplier_key": required(representative, "supplier_key")?,
+            "date": representative
+                .get_datetime("date")
+                .copied()
+                .map_err(|err| mongodb::error::Error::custom(format!("purchase has no date: {err}")))?,
             "version": 1_i64,
         };
         if let Some(reference) = members.iter().find_map(|p| text(p, "reference_no")) {

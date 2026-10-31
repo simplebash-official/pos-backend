@@ -36,15 +36,16 @@ pub(crate) fn change_from_doc(row: &Document) -> AppResult<PulledChange> {
         _ => None,
     };
     Ok(PulledChange {
-        seq: row.get_i64("seq").unwrap_or_default(),
+        seq: crate::modules::sync::apply_mongo::required_i64(row, "seq")?,
         origin_device_id: row.get_str("origin_device_id").ok().map(str::to_string),
         record: ChangeRecord {
             resource: text("resource")?,
             key: text("key")?,
             op,
-            version: crate::modules::sync::apply_mongo::num_i64(row, "version").unwrap_or(1),
+            version: crate::modules::sync::apply_mongo::required_i64(row, "version")?,
             updated_at,
-            device_id: row.get_str("device_id").unwrap_or("cloud").to_string(),
+            device_id: crate::modules::sync::apply_mongo::required_str(row, "device_id")?
+                .to_string(),
             payload: payload.filter(|v: &Value| v.is_object()),
         },
     })
@@ -62,7 +63,7 @@ const TOUCH_EVERY: Duration = Duration::from_secs(60);
 /// Whether this pull should record the device as seen (per tenant + device).
 fn touch_due(device_id: &str) -> bool {
     static LAST: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
-    let key = format!("{}|{device_id}", current_tenant_id().unwrap_or_default());
+    let key = format!("{:?}|{device_id}", current_tenant_id());
     let mut last = LAST
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
@@ -118,10 +119,10 @@ pub async fn pull_since(
     let has_more = rows.len() as i64 > limit;
     rows.truncate(limit as usize);
     // The cursor advances over everything scanned, echoes included.
-    let next_seq = rows
-        .last()
-        .and_then(|r| r.get_i64("seq").ok())
-        .unwrap_or(since);
+    let next_seq = match rows.last() {
+        Some(last) => crate::modules::sync::apply_mongo::required_i64(last, "seq")?,
+        None => since,
+    };
 
     let mut changes = Vec::with_capacity(rows.len());
     for row in &rows {

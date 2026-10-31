@@ -1,6 +1,6 @@
 //! Cashier performance and commission series.
 
-use super::super::sales::get_i64_flexible;
+use super::super::sales::{get_i64_flexible, recorded_cents};
 use super::analytics_shared::{align_bucket_instant, date_match, invoices, trunc};
 
 use crate::clients::db::Db;
@@ -153,9 +153,9 @@ pub(crate) async fn aggregate_cashier_performance(
                                 get_i64_flexible(item, "total_cents")?
                             };
                             let unit_cost = if item.contains_key("unitCostCents") {
-                                get_i64_flexible(item, "unitCostCents")?
+                                recorded_cents(item, "unitCostCents")?
                             } else {
-                                get_i64_flexible(item, "unit_cost_cents")?
+                                recorded_cents(item, "unit_cost_cents")?
                             };
                             entry.items_sold += qty;
                             entry.retail_revenue_cents += line_total;
@@ -216,8 +216,8 @@ pub(crate) async fn aggregate_commission_series(
                     let Some(ts) = row.get_datetime("bucket").ok().map(|d| d.to_chrono()) else {
                         continue;
                     };
-                    let revenue = get_i64_flexible(&row, "estimated_cost_cents")?;
-                    let material = get_i64_flexible(&row, "material_cost_cents")?;
+                    let revenue = recorded_cents(&row, "estimated_cost_cents")?;
+                    let material = recorded_cents(&row, "material_cost_cents")?;
                     let profit = crate::core::calculations::job_profit_cents(revenue, material);
                     let split_type = row.get_str("split_type").ok();
                     let split_value = row
@@ -257,8 +257,8 @@ pub(crate) async fn aggregate_commission_series(
                         continue;
                     };
                     let bucket_start = align_bucket_instant(created_at, granularity);
-                    let revenue = get_i64_flexible(&doc, "estimated_cost_cents")?;
-                    let material = get_i64_flexible(&doc, "material_cost_cents")?;
+                    let revenue = recorded_cents(&doc, "estimated_cost_cents")?;
+                    let material = recorded_cents(&doc, "material_cost_cents")?;
                     let profit = crate::core::calculations::job_profit_cents(revenue, material);
                     let split_type = doc.get_str("split_type").ok();
                     let split_value = doc

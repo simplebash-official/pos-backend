@@ -1,8 +1,7 @@
 use crate::clients::db::Db;
 use crate::clients::sqlite::{bson_to_iso, generate_id_hex, now_utc_iso, to_bson_datetime};
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
-use crate::core::error::AppResult;
-use crate::domain::employees::{EmployeeRole, EmployeeStatus, SplitType};
+use crate::core::error::{AppError, AppResult};
 use crate::modules::employees::model::EmployeeDocument;
 use futures_util::TryStreamExt;
 use mongodb::bson::oid::ObjectId;
@@ -92,13 +91,16 @@ impl EmployeeSqliteRow {
             name: self.name,
             phone: self.phone,
             nic_or_id: self.nic_or_id,
-            role: self.role.parse().unwrap_or(EmployeeRole::General),
-            default_split_type: self
-                .default_split_type
-                .parse()
-                .unwrap_or(SplitType::Percentage),
+            role: self.role.parse().map_err(|err| {
+                AppError::internal(format!("stored employee role is invalid: {err}"))
+            })?,
+            default_split_type: self.default_split_type.parse().map_err(|err| {
+                AppError::internal(format!("stored employee split type is invalid: {err}"))
+            })?,
             default_split_value: self.default_split_value,
-            status: self.status.parse().unwrap_or(EmployeeStatus::Active),
+            status: self.status.parse().map_err(|err| {
+                AppError::internal(format!("stored employee status is invalid: {err}"))
+            })?,
             notes: self.notes,
             version: self.version,
             created_at: to_bson_datetime(&self.created_at)?,

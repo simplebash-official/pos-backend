@@ -171,7 +171,7 @@ pub async fn get_changes(
         let mut last_key = decoded_cursor.as_ref().and_then(|c| c.key.clone());
 
         for doc in docs {
-            let key = doc.get_str("key").unwrap_or_default().to_string();
+            let key = crate::modules::sync::apply_mongo::required_str(doc, "key")?.to_string();
             let is_deleted = doc
                 .get("deleted_at")
                 .is_some_and(|v| !matches!(v, mongodb::bson::Bson::Null));

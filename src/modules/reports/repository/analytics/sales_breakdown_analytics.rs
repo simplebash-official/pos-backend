@@ -1,7 +1,7 @@
 //! Sales by category, sales patterns and top customers.
 
 use super::super::super::service::dates::REPORT_TZ_MONGO;
-use super::super::sales::get_i64_flexible;
+use super::super::sales::{get_i64_flexible, recorded_cents};
 use super::analytics_shared::{date_match, invoices};
 
 use crate::clients::db::Db;
@@ -214,9 +214,9 @@ pub(crate) async fn aggregate_sales_by_category(
                             get_i64_flexible(item, "discount_cents")?
                         };
                         let unit_cost = if item.contains_key("unitCostCents") {
-                            get_i64_flexible(item, "unitCostCents")?
+                            recorded_cents(item, "unitCostCents")?
                         } else {
-                            get_i64_flexible(item, "unit_cost_cents")?
+                            recorded_cents(item, "unit_cost_cents")?
                         };
                         let qty = get_i64_flexible(item, "quantity")?;
 
@@ -475,9 +475,9 @@ pub(crate) async fn aggregate_top_customers(
                                 get_i64_flexible(item, "total_cents")?
                             };
                             let unit_cost = if item.contains_key("unitCostCents") {
-                                get_i64_flexible(item, "unitCostCents")?
+                                recorded_cents(item, "unitCostCents")?
                             } else {
-                                get_i64_flexible(item, "unit_cost_cents")?
+                                recorded_cents(item, "unit_cost_cents")?
                             };
                             let qty = get_i64_flexible(item, "quantity")?;
                             let cogs = unit_cost * qty;

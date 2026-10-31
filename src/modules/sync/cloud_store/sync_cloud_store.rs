@@ -4,7 +4,7 @@ use crate::core::error::{AppError, AppResult};
 use crate::core::id::generate_id;
 use crate::domain::sync_v2::{ChangeAck, NewConflict};
 use mongodb::bson;
-use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
+use mongodb::bson::{Bson, DateTime as BsonDateTime, Document, doc};
 use mongodb::options::ReturnDocument;
 
 /// Allocates the next per-tenant sequence number (the pull cursor). Only the
@@ -60,7 +60,12 @@ pub(crate) async fn ensure_device_active(db: &Db, device_id: &str) -> AppResult<
         .find_one(doc! { "device_id": device_id })
         .await?
     {
-        return Ok(!known.get_bool("revoked").unwrap_or(false));
+        let revoked = known.get_bool("revoked").map_err(|e| {
+            AppError::internal(format!(
+                "device {device_id} has no readable `revoked` flag: {e}"
+            ))
+        })?;
+        return Ok(!revoked);
     }
     let state = coll(db, DEVICES)?
         .find_one_and_update(
@@ -76,9 +81,11 @@ pub(crate) async fn ensure_device_active(db: &Db, device_id: &str) -> AppResult<
         .upsert(true)
         .return_document(ReturnDocument::After)
         .await?;
-    Ok(!state
-        .and_then(|d| d.get_bool("revoked").ok())
-        .unwrap_or(false))
+    let state = state.ok_or_else(|| AppError::internal("device upsert returned no document"))?;
+    let revoked = state.get_bool("revoked").map_err(|e| {
+        AppError::internal(format!("device {device_id} has no `revoked` flag: {e}"))
+    })?;
+    Ok(!revoked)
 }
 
 /// Refuses a device whose registered app is older than
@@ -118,12 +125,20 @@ pub(crate) async fn find_batch_acks(
 
 pub(crate) const META: &str = "sync_meta";
 
+/// A counter in the tenant's meta document. No meta document, or a counter not
+/// yet written, means nothing has been allocated or compacted: zero. A counter
+/// of the wrong type is an error.
 pub(super) async fn meta_i64(db: &Db, field: &str) -> AppResult<i64> {
-    Ok(coll(db, META)?
-        .find_one(doc! { "kind": "meta" })
-        .await?
-        .and_then(|d| d.get_i64(field).ok())
-        .unwrap_or(0))
+    let Some(meta) = coll(db, META)?.find_one(doc! { "kind": "meta" }).await? else {
+        return Ok(0);
+    };
+    match meta.get(field) {
+        None => Ok(0),
+        Some(Bson::Int64(value)) => Ok(*value),
+        Some(other) => Err(AppError::internal(format!(
+            "meta `{field}` is not an i64: {other}"
+        ))),
+    }
 }
 
 /// The oldest desktop app that may sync with this cloud: 1.24.0 is the first

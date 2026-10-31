@@ -5,7 +5,7 @@ use crate::core::tenancy::{Tenant, with_tenant};
 use crate::modules::sync::cloud_store;
 use crate::modules::tenants::repository;
 use futures_util::{StreamExt, TryStreamExt, stream};
-use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
+use mongodb::bson::{Bson, DateTime as BsonDateTime, Document, doc};
 use serde::Serialize;
 use utoipa::ToSchema;
 
@@ -57,11 +57,22 @@ fn iso(dt: BsonDateTime) -> String {
     dt.to_chrono().to_rfc3339()
 }
 
-fn int(d: &Document, key: &str) -> i64 {
-    d.get_i32(key)
-        .map(i64::from)
-        .or_else(|_| d.get_i64(key))
-        .unwrap_or(0)
+/// A count or sum of a `$group` result. A group over no documents has no such field, which
+/// is the zero of an empty set; a field that is present but not an integer is an error.
+fn int(d: &Document, key: &str) -> AppResult<i64> {
+    match d.get(key) {
+        None => Ok(0),
+        Some(Bson::Int32(v)) => Ok(i64::from(*v)),
+        Some(Bson::Int64(v)) => Ok(*v),
+        Some(_) => Err(AppError::internal(format!(
+            "usage field `{key}` is not an integer"
+        ))),
+    }
+}
+
+/// The empty group result of an aggregation that matched nothing.
+fn empty_group() -> Document {
+    Document::new()
 }
 
 async fn first(cursor: mongodb::Cursor<Document>) -> AppResult<Option<Document>> {
@@ -122,32 +133,37 @@ pub async fn usage_for(db: &Db, tenant_id: &str) -> AppResult<TenantUsage> {
                 .await?,
         )
         .await?
-        .unwrap_or_default();
-        let one = |name: &str| -> Document {
-            facets
-                .get_array(name)
-                .ok()
-                .and_then(|a| a.first())
-                .and_then(|b| b.as_document())
-                .cloned()
-                .unwrap_or_default()
+        .ok_or_else(|| AppError::internal("the usage facet returned no document"))?;
+        let one = |name: &str| -> AppResult<Document> {
+            let rows = facets.get_array(name).map_err(|err| {
+                AppError::internal(format!("usage facet `{name}` is missing: {err}"))
+            })?;
+            match rows.first() {
+                None => Ok(empty_group()),
+                Some(row) => row.as_document().cloned().ok_or_else(|| {
+                    AppError::internal(format!("usage facet `{name}` row is not a document"))
+                }),
+            }
         };
-        let (all, d30, d7) = (one("all"), one("d30"), one("d7"));
-        let by_day: Vec<DayUsage> = facets
+        let (all, d30, d7) = (one("all")?, one("d30")?, one("d7")?);
+        let by_day = facets
             .get_array("by_day")
-            .map(|a| {
-                a.iter()
-                    .filter_map(|b| b.as_document())
-                    .filter_map(|d| {
-                        Some(DayUsage {
-                            date: d.get_str("_id").ok()?.to_string(),
-                            bills: int(d, "n") as u64,
-                            sales_cents: int(d, "cents"),
-                        })
-                    })
-                    .collect()
+            .map_err(|err| AppError::internal(format!("usage facet `by_day` is missing: {err}")))?
+            .iter()
+            .map(|row| {
+                let d = row.as_document().ok_or_else(|| {
+                    AppError::internal("usage facet `by_day` row is not a document")
+                })?;
+                Ok(DayUsage {
+                    date: d
+                        .get_str("_id")
+                        .map_err(|err| AppError::internal(format!("usage day has no date: {err}")))?
+                        .to_string(),
+                    bills: int(d, "n")? as u64,
+                    sales_cents: int(d, "cents")?,
+                })
             })
-            .unwrap_or_default();
+            .collect::<AppResult<Vec<DayUsage>>>()?;
 
         let products = mongo
             .collection::<Document>("products")
@@ -172,23 +188,23 @@ pub async fn usage_for(db: &Db, tenant_id: &str) -> AppResult<TenantUsage> {
                 .await?,
         )
         .await?
-        .unwrap_or_default();
+        .unwrap_or_else(empty_group);
 
         Ok(TenantUsage {
             tenant_id: tenant.key.clone(),
             shop_code: tenant.shop_code.clone(),
             name: tenant.name.clone(),
             suspended: tenant.suspended_at.is_some(),
-            bills_total: int(&all, "n") as u64,
-            bills_30d: int(&d30, "n") as u64,
-            bills_7d: int(&d7, "n") as u64,
-            sales_total_cents: int(&all, "cents"),
-            sales_30d_cents: int(&d30, "cents"),
+            bills_total: int(&all, "n")? as u64,
+            bills_30d: int(&d30, "n")? as u64,
+            bills_7d: int(&d7, "n")? as u64,
+            sales_total_cents: int(&all, "cents")?,
+            sales_30d_cents: int(&d30, "cents")?,
             last_bill_at: all.get_datetime("last").ok().copied().map(iso),
             products,
             customers,
             users,
-            devices: int(&devices, "n") as u64,
+            devices: int(&devices, "n")? as u64,
             last_sync_at: devices.get_datetime("last").ok().copied().map(iso),
             bills_by_day: by_day,
         })
