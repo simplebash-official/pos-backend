@@ -30,19 +30,28 @@ async fn send(
     let request = match body {
         Some(value) => {
             builder = builder.header(CONTENT_TYPE, "application/json");
-            builder.body(Body::from(value.to_string())).unwrap()
+            builder
+                .body(Body::from(value.to_string()))
+                .expect("the request is well formed")
         }
-        None => builder.body(Body::empty()).unwrap(),
+        None => builder
+            .body(Body::empty())
+            .expect("the request is well formed"),
     };
-    let response = app.router.clone().oneshot(request).await.unwrap();
+    let response = app
+        .router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let json = if bytes.is_empty() {
         Value::Null
     } else {
-        serde_json::from_slice(&bytes).unwrap()
+        serde_json::from_slice(&bytes).expect("the text is valid JSON")
     };
     (status, json)
 }
@@ -57,10 +66,10 @@ fn today() -> String {
 fn supplier_row<'a>(body: &'a Value, key: &str) -> &'a Value {
     body["data"]["suppliers"]
         .as_array()
-        .unwrap()
+        .expect("the value is an array")
         .iter()
         .find(|s| s["supplierKey"] == key)
-        .unwrap()
+        .expect("a match exists")
 }
 
 async fn scenario(app: &common::TestApp) {
@@ -90,7 +99,10 @@ async fn scenario(app: &common::TestApp) {
         &admin,
     )
     .await;
-    let category_key_ = category["data"]["key"].as_str().unwrap().to_string();
+    let category_key_ = category["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     let (_, sub) = send(
         app,
         "POST",
@@ -101,7 +113,7 @@ async fn scenario(app: &common::TestApp) {
     .await;
     let subcategory_key = sub["data"]["subcategories"][0]["key"]
         .as_str()
-        .unwrap()
+        .expect("the value is a string")
         .to_string();
     let (status, supplier) = send(
         app,
@@ -115,7 +127,10 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{supplier}");
-    let supplier_key = supplier["data"]["key"].as_str().unwrap().to_string();
+    let supplier_key = supplier["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     let (_, product) = send(
         app,
         "POST",
@@ -257,7 +272,10 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{employee}");
-    let employee_key = employee["data"]["key"].as_str().unwrap().to_string();
+    let employee_key = employee["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     let (status, body) = send(
         app,
         "POST",
@@ -288,10 +306,10 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(status, StatusCode::OK, "{body}");
     let me = body["data"]["staff"]
         .as_array()
-        .unwrap()
+        .expect("the value is an array")
         .iter()
         .find(|s| s["employeeKey"] == employee_key.as_str())
-        .unwrap();
+        .expect("a match exists");
     assert_eq!(me["givenCents"], 80_000);
     assert_eq!(me["outstandingCents"], 80_000);
 
@@ -306,7 +324,13 @@ async fn scenario(app: &common::TestApp) {
     let (status, body) = send(app, "POST", &uri, Some(recover(30_000)), &manager).await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
     assert_eq!(body["data"]["summary"]["outstandingCents"], 50_000);
-    assert_eq!(body["data"]["recoveries"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        body["data"]["recoveries"]
+            .as_array()
+            .expect("the value is an array")
+            .len(),
+        1
+    );
     let (status, body) = send(app, "POST", &uri, Some(recover(50_001)), &manager).await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_eq!(body["code"], "ADVANCE_OVER_RECOVERED");
@@ -320,7 +344,13 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["data"]["given"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        body["data"]["given"]
+            .as_array()
+            .expect("the value is an array")
+            .len(),
+        1
+    );
     assert_eq!(body["data"]["given"][0]["categoryName"], "Advance");
     let (status, _) = send(app, "GET", "/api/balances/staff/emp_nope", None, &manager).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
@@ -359,5 +389,5 @@ async fn balances_on_sqlite() {
 async fn balances_on_mongo() {
     let app = common::spawn_app_isolated().await;
     scenario(&app).await;
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }

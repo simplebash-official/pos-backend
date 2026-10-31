@@ -115,16 +115,16 @@ async fn all_routes(router: &axum::Router) -> Vec<(String, String, bool)> {
             Request::builder()
                 .uri("/api-docs/openapi.json")
                 .body(Body::empty())
-                .unwrap(),
+                .expect("the request is well formed"),
         )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        .expect("the awaited step succeeds");
+    let json: serde_json::Value = serde_json::from_slice(&body).expect("the text is valid JSON");
 
     let mut routes = Vec::new();
     for (path, item) in json["paths"].as_object().expect("paths object") {
@@ -177,16 +177,21 @@ fn concrete_path(path: &str) -> String {
 
 async fn status_without_token(router: &axum::Router, method: &str, path: &str) -> StatusCode {
     let request = Request::builder()
-        .method(Method::from_bytes(method.as_bytes()).unwrap())
+        .method(Method::from_bytes(method.as_bytes()).expect("the step succeeds"))
         .uri(concrete_path(path))
         // Each probe is its own client: the API's per-client rate limit (burst 200) would
         // otherwise answer 429 once the route surface outgrows it, hiding the 401 under test.
         .header("x-real-ip", format!("probe {method} {path}"))
         .header(axum::http::header::CONTENT_TYPE, "application/json")
         .body(Body::empty())
-        .unwrap();
+        .expect("the request is well formed");
 
-    router.clone().oneshot(request).await.unwrap().status()
+    router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds")
+        .status()
 }
 
 fn is_public(method: &str, path: &str) -> bool {

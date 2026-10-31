@@ -19,21 +19,19 @@ fn request(size: u64) -> ReserveSequenceRequest {
     }
 }
 
-async fn throwaway() -> Option<(mongodb::Database, String)> {
+async fn throwaway() -> (mongodb::Database, String) {
     dotenvy::dotenv().ok();
-    let uri = std::env::var("MONGODB_URI").ok()?;
+    let uri = std::env::var("MONGODB_URI")
+        .expect("Mongo-backed tests need MONGODB_URI (use `make check-atlas`)");
     let name = format!("jtcnt_{}", &Uuid::new_v4().simple().to_string()[..24]);
-    Some((connect(&uri, &name).await.expect("connect"), name))
+    (connect(&uri, &name).await.expect("connect"), name)
 }
 
 #[tokio::test]
 async fn sequence_blocks_are_independent_per_tenant() {
-    let Some((raw, _)) = throwaway().await else {
-        eprintln!("MONGODB_URI not set - skipping");
-        return;
-    };
+    let (raw, _) = throwaway().await;
     let db = Db::Mongo(TenantDatabase::multi_tenant(raw.clone()));
-    let tenant = |id: &str| Tenant::id(id).unwrap();
+    let tenant = |id: &str| Tenant::id(id).expect("the tenant id is valid");
 
     // Both tenants reserve "invoice": each starts at 1, and continues on its own.
     let mut seen = Vec::new();
@@ -44,7 +42,7 @@ async fn sequence_blocks_are_independent_per_tenant() {
                 reserve_sequence(&db, "invoice".into(), request(5)),
             )
             .await
-            .unwrap();
+            .expect("the awaited step succeeds");
             seen.push((t, r.start, r.end));
         }
     }
@@ -60,12 +58,18 @@ async fn sequence_blocks_are_independent_per_tenant() {
 
     // Stored counter ids are tenant-qualified, one document per tenant.
     let counters = raw.collection::<Document>("sequence_counters");
-    assert_eq!(counters.count_documents(doc! {}).await.unwrap(), 2);
+    assert_eq!(
+        counters
+            .count_documents(doc! {})
+            .await
+            .expect("the awaited step succeeds"),
+        2
+    );
     assert_eq!(
         counters
             .count_documents(doc! { "_id": "shop_a:invoice", "tenant_id": "shop_a" })
             .await
-            .unwrap(),
+            .expect("the awaited step succeeds"),
         1
     );
 
@@ -76,7 +80,7 @@ async fn sequence_blocks_are_independent_per_tenant() {
         counters
             .count_documents(doc! { "_id": "shop_a:invoice" })
             .await
-            .unwrap(),
+            .expect("the awaited step succeeds"),
         1
     );
 
@@ -85,30 +89,27 @@ async fn sequence_blocks_are_independent_per_tenant() {
 
 #[tokio::test]
 async fn single_shop_handle_keeps_bare_counter_ids() {
-    let Some((raw, _)) = throwaway().await else {
-        eprintln!("MONGODB_URI not set - skipping");
-        return;
-    };
+    let (raw, _) = throwaway().await;
     let db = Db::from_mongo(raw.clone());
 
     let r = reserve_sequence(&db, "invoice".into(), request(3))
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     assert_eq!((r.start, r.end), (1, 3));
     let counters = raw.collection::<Document>("sequence_counters");
     assert_eq!(
         counters
             .count_documents(doc! { "_id": "invoice" })
             .await
-            .unwrap(),
+            .expect("the awaited step succeeds"),
         1,
         "single-shop deployments keep the bare _id"
     );
     let stored = counters
         .find_one(doc! { "_id": "invoice" })
         .await
-        .unwrap()
-        .unwrap();
+        .expect("the awaited step succeeds")
+        .expect("the step succeeds");
     assert!(
         stored.get("tenant_id").is_none(),
         "no tenant field in single-shop mode"

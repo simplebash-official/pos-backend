@@ -1,10 +1,11 @@
+//! Generates a random API key and inserts it into the `api_keys` table/collection.
+//! Safe to run against SQLite or MongoDB.
+//!
+//! Run with: `cargo run --bin seed_api_key`
+
 use simplebash_pos_backend::core::config::Config;
 use simplebash_pos_backend::{clients, seeds};
 
-/// Generates a random API key and inserts it into the `api_keys` table/collection.
-/// Safe to run against SQLite or MongoDB.
-///
-/// Run with: `cargo run --bin seed_api_key`
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();

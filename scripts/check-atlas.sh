@@ -57,10 +57,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "== clippy (CI flags) =="
-cargo clippy --all-targets --all-features -- -D warnings
+echo "== fmt + clippy (CI flags) =="
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-echo "== cargo test --no-fail-fast on Atlas db $DB =="
+echo "== cargo test --workspace --no-fail-fast on Atlas db $DB =="
 # Each parallel Mongo test holds a ~42-collection database, so unbounded threads (one per core)
 # can alone pass the 500 quota. 4 threads keep a full run near 170 on top of the baseline.
-RUST_TEST_THREADS="${CHECK_ATLAS_THREADS:-4}" cargo test --no-fail-fast
+RUST_TEST_THREADS="${CHECK_ATLAS_THREADS:-4}" cargo test --workspace --no-fail-fast

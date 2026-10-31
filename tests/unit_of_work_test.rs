@@ -31,12 +31,16 @@ async fn send(
         .header(AUTHORIZATION, format!("Bearer {token}"))
         .header(CONTENT_TYPE, "application/json")
         .body(body.map_or_else(Body::empty, |b| Body::from(b.to_string())))
-        .unwrap();
-    let response = router.clone().oneshot(request).await.unwrap();
+        .expect("the request is well formed");
+    let response = router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let json = if bytes.is_empty() {
         Value::Null
     } else {
@@ -63,7 +67,10 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{category}");
-    let category_key = category["data"]["key"].as_str().unwrap().to_string();
+    let category_key = category["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     let (status, sub) = send(
         router,
         "POST",
@@ -75,7 +82,7 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(status, StatusCode::CREATED, "{sub}");
     let subcategory_key = sub["data"]["subcategories"][0]["key"]
         .as_str()
-        .unwrap()
+        .expect("the value is a string")
         .to_string();
     let (status, supplier) = send(
         router,
@@ -92,7 +99,10 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{supplier}");
-    let supplier_key = supplier["data"]["key"].as_str().unwrap().to_string();
+    let supplier_key = supplier["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     let (status, product) = send(
         router,
         "POST",
@@ -109,8 +119,14 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{product}");
-    let product_id = product["data"]["id"].as_str().unwrap().to_string();
-    let product_key = product["data"]["key"].as_str().unwrap().to_string();
+    let product_id = product["data"]["id"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
+    let product_key = product["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
 
     let receive = |serials: Vec<String>| {
         json!({
@@ -167,7 +183,13 @@ async fn scenario(app: &common::TestApp) {
         &admin,
     )
     .await;
-    assert_eq!(serials["data"]["items"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        serials["data"]["items"]
+            .as_array()
+            .expect("the value is an array")
+            .len(),
+        2
+    );
 
     // Two receipts race for the same serial. Whichever loses may pass the pre-check, so it can
     // fail only after its receipt, line, batch and movement are written: none of that may stay.
@@ -219,7 +241,13 @@ async fn scenario(app: &common::TestApp) {
         &admin,
     )
     .await;
-    assert_eq!(serials["data"]["items"].as_array().unwrap().len(), 3);
+    assert_eq!(
+        serials["data"]["items"]
+            .as_array()
+            .expect("the value is an array")
+            .len(),
+        3
+    );
     let (_, batches) = send(
         router,
         "GET",
@@ -228,7 +256,13 @@ async fn scenario(app: &common::TestApp) {
         &admin,
     )
     .await;
-    assert_eq!(batches["data"]["items"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        batches["data"]["items"]
+            .as_array()
+            .expect("the value is an array")
+            .len(),
+        2
+    );
     let (_, receipts) = send(
         router,
         "GET",
@@ -238,7 +272,10 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(
-        receipts["data"]["items"].as_array().unwrap().len(),
+        receipts["data"]["items"]
+            .as_array()
+            .expect("the value is an array")
+            .len(),
         2,
         "the loser's receipt must not remain"
     );
@@ -309,7 +346,7 @@ async fn a_failed_receipt_leaves_nothing_behind_on_mongo() {
     let app = common::spawn_app_isolated().await;
     // The unique serial index (created at start-up in production) is what makes
     // the second twin fail after the first one was written.
-    app.db
+    app.mongo()
         .collection::<mongodb::bson::Document>("product_serials")
         .create_index(
             mongodb::IndexModel::builder()
@@ -322,7 +359,7 @@ async fn a_failed_receipt_leaves_nothing_behind_on_mongo() {
                 .build(),
         )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     scenario(&app).await;
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }

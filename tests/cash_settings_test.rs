@@ -30,19 +30,28 @@ async fn send(
     let request = match body {
         Some(value) => {
             builder = builder.header(CONTENT_TYPE, "application/json");
-            builder.body(Body::from(value.to_string())).unwrap()
+            builder
+                .body(Body::from(value.to_string()))
+                .expect("the request is well formed")
         }
-        None => builder.body(Body::empty()).unwrap(),
+        None => builder
+            .body(Body::empty())
+            .expect("the request is well formed"),
     };
-    let response = app.router.clone().oneshot(request).await.unwrap();
+    let response = app
+        .router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let json = if bytes.is_empty() {
         Value::Null
     } else {
-        serde_json::from_slice(&bytes).unwrap()
+        serde_json::from_slice(&bytes).expect("the text is valid JSON")
     };
     (status, json)
 }
@@ -141,10 +150,18 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
-    let created =
-        chrono::DateTime::parse_from_rfc3339(body["data"]["createdAt"].as_str().unwrap()).unwrap();
-    let until =
-        chrono::DateTime::parse_from_rfc3339(body["data"]["undoUntil"].as_str().unwrap()).unwrap();
+    let created = chrono::DateTime::parse_from_rfc3339(
+        body["data"]["createdAt"]
+            .as_str()
+            .expect("the value is a string"),
+    )
+    .expect("the step succeeds");
+    let until = chrono::DateTime::parse_from_rfc3339(
+        body["data"]["undoUntil"]
+            .as_str()
+            .expect("the value is a string"),
+    )
+    .expect("the step succeeds");
     assert_eq!((until - created).num_seconds(), 30);
 
     // The shop-wide limit asks for a manager PIN above it, whatever the category.
@@ -195,5 +212,5 @@ async fn cash_settings_on_sqlite() {
 async fn cash_settings_on_mongo() {
     let app = common::spawn_app_isolated().await;
     scenario(&app).await;
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }

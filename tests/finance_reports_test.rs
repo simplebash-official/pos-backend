@@ -29,19 +29,28 @@ async fn send(
     let request = match body {
         Some(value) => {
             builder = builder.header(CONTENT_TYPE, "application/json");
-            builder.body(Body::from(value.to_string())).unwrap()
+            builder
+                .body(Body::from(value.to_string()))
+                .expect("the request is well formed")
         }
-        None => builder.body(Body::empty()).unwrap(),
+        None => builder
+            .body(Body::empty())
+            .expect("the request is well formed"),
     };
-    let response = app.router.clone().oneshot(request).await.unwrap();
+    let response = app
+        .router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let json = if bytes.is_empty() {
         Value::Null
     } else {
-        serde_json::from_slice(&bytes).unwrap()
+        serde_json::from_slice(&bytes).expect("the text is valid JSON")
     };
     (status, json)
 }
@@ -60,28 +69,32 @@ fn today() -> String {
 fn account<'a>(body: &'a Value, kind: &str) -> &'a Value {
     body["data"]["accounts"]
         .as_array()
-        .unwrap()
+        .expect("the value is an array")
         .iter()
         .find(|a| a["kind"] == kind)
-        .unwrap()
+        .expect("a match exists")
 }
 
 fn line_in(account: &Value, code: &str) -> i64 {
     account["lines"]
         .as_array()
-        .unwrap()
+        .expect("the value is an array")
         .iter()
         .find(|l| l["code"] == code)
-        .map_or(0, |l| l["inCents"].as_i64().unwrap())
+        .map_or(0, |l| {
+            l["inCents"].as_i64().expect("the value is an integer")
+        })
 }
 
 fn line_out(account: &Value, code: &str) -> i64 {
     account["lines"]
         .as_array()
-        .unwrap()
+        .expect("the value is an array")
         .iter()
         .find(|l| l["code"] == code)
-        .map_or(0, |l| l["outCents"].as_i64().unwrap())
+        .map_or(0, |l| {
+            l["outCents"].as_i64().expect("the value is an integer")
+        })
 }
 
 async fn scenario(app: &common::TestApp) {
@@ -243,14 +256,21 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(pl["salesCents"], 150_000);
     assert_eq!(
         pl["grossProfitCents"],
-        150_000 - pl["costOfGoodsCents"].as_i64().unwrap()
+        150_000
+            - pl["costOfGoodsCents"]
+                .as_i64()
+                .expect("the value is an integer")
     );
     assert_eq!(pl["otherIncomeCents"], 450_000);
     assert_eq!(pl["expensesCents"], 220_000);
     assert_eq!(pl["expenses"][0]["group"], "operating_expense");
     assert_eq!(
         pl["netProfitCents"],
-        pl["grossProfitCents"].as_i64().unwrap() + 450_000 - 220_000
+        pl["grossProfitCents"]
+            .as_i64()
+            .expect("the value is an integer")
+            + 450_000
+            - 220_000
     );
 
     // Costs by category and month: the same 2,200, biggest first, every month of the period present.
@@ -269,7 +289,13 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(body["data"]["categories"][0]["sharePercent"], 55);
     assert_eq!(body["data"]["chart"][0]["name"], "Electricity");
     assert_eq!(body["data"]["chart"][0]["isOther"], false);
-    assert_eq!(body["data"]["months"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        body["data"]["months"]
+            .as_array()
+            .expect("the value is an array")
+            .len(),
+        1
+    );
 
     // Cash flow per account.
     let (status, body) = send(
@@ -317,7 +343,10 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(body["data"]["bills"][0]["isOverdue"], true);
     assert_eq!(
         body["data"]["totalCents"],
-        80_000 + body["data"]["suppliersCents"].as_i64().unwrap()
+        80_000
+            + body["data"]["suppliersCents"]
+                .as_i64()
+                .expect("the value is an integer")
     );
 }
 
@@ -331,5 +360,5 @@ async fn the_finance_reports_on_sqlite() {
 async fn the_finance_reports_on_mongo() {
     let app = common::spawn_app_isolated().await;
     scenario(&app).await;
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }

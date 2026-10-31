@@ -31,19 +31,28 @@ async fn raw(
     let request = match body {
         Some(value) => {
             builder = builder.header(CONTENT_TYPE, "application/json");
-            builder.body(Body::from(value.to_string())).unwrap()
+            builder
+                .body(Body::from(value.to_string()))
+                .expect("the request is well formed")
         }
-        None => builder.body(Body::empty()).unwrap(),
+        None => builder
+            .body(Body::empty())
+            .expect("the request is well formed"),
     };
-    let response = app.router.clone().oneshot(request).await.unwrap();
+    let response = app
+        .router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     let status = response.status();
     let content_type = response
         .headers()
         .get(CONTENT_TYPE)
-        .map(|v| v.to_str().unwrap().to_string());
+        .map(|v| v.to_str().expect("the header is text").to_string());
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap()
+        .expect("the awaited step succeeds")
         .to_vec();
     (status, content_type, bytes)
 }
@@ -59,7 +68,7 @@ async fn send(
     let json = if bytes.is_empty() {
         Value::Null
     } else {
-        serde_json::from_slice(&bytes).unwrap()
+        serde_json::from_slice(&bytes).expect("the text is valid JSON")
     };
     (status, json)
 }
@@ -124,7 +133,10 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
-    let movement_key = body["data"]["key"].as_str().unwrap().to_string();
+    let movement_key = body["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     let (_, body) = send(
         app,
         "POST",
@@ -136,7 +148,10 @@ async fn scenario(app: &common::TestApp) {
         &manager,
     )
     .await;
-    let expense_key = body["data"]["expense"]["key"].as_str().unwrap().to_string();
+    let expense_key = body["data"]["expense"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
 
     // The cashier attaches the receipt to their own movement, and sees it.
     let (status, body) = send(
@@ -153,7 +168,10 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
-    let key = body["data"]["key"].as_str().unwrap().to_string();
+    let key = body["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     assert_eq!(body["data"]["contentType"], "image/jpeg");
     assert_eq!(body["data"]["sizeBytes"], jpeg().len());
     assert!(
@@ -169,7 +187,13 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["data"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        body["data"]
+            .as_array()
+            .expect("the value is an array")
+            .len(),
+        1
+    );
 
     // The image comes back byte for byte with its type.
     let (status, content_type, bytes) = raw(
@@ -285,7 +309,13 @@ async fn scenario(app: &common::TestApp) {
         &manager,
     )
     .await;
-    assert_eq!(body["data"].as_array().unwrap().len(), 4);
+    assert_eq!(
+        body["data"]
+            .as_array()
+            .expect("the value is an array")
+            .len(),
+        4
+    );
     let (status, _) = send(
         app,
         "POST",
@@ -317,5 +347,5 @@ async fn receipt_photos_on_sqlite() {
 async fn receipt_photos_on_mongo() {
     let app = common::spawn_app_isolated().await;
     scenario(&app).await;
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }

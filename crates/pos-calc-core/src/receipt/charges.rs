@@ -1,5 +1,8 @@
+//! Extra charges on a receipt (shipping, customs, ...): how they are signed, spread over the lines and totalled.
+
 use serde::{Deserialize, Serialize};
 
+/// What an extra charge on a receipt is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -15,6 +18,8 @@ pub enum ChargeKind {
 }
 
 impl ChargeKind {
+    /// The name stored for this kind.
+    #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
             ChargeKind::Shipping => "shipping",
@@ -26,6 +31,8 @@ impl ChargeKind {
         }
     }
 
+    /// Reads a stored name; `None` when it names no kind.
+    #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "shipping" => Some(ChargeKind::Shipping),
@@ -39,6 +46,7 @@ impl ChargeKind {
     }
 }
 
+/// Who billed the charge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -50,6 +58,8 @@ pub enum BilledBy {
 }
 
 impl BilledBy {
+    /// The name stored for this biller.
+    #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
             BilledBy::Supplier => "supplier",
@@ -57,6 +67,8 @@ impl BilledBy {
         }
     }
 
+    /// Reads a stored name; `None` when it names no biller.
+    #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "supplier" => Some(BilledBy::Supplier),
@@ -66,6 +78,7 @@ impl BilledBy {
     }
 }
 
+/// How a charge is spread over the receipt's lines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -77,6 +90,8 @@ pub enum Allocation {
 }
 
 impl Allocation {
+    /// The name stored for this allocation.
+    #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
             Allocation::Value => "value",
@@ -84,6 +99,8 @@ impl Allocation {
         }
     }
 
+    /// Reads a stored name; `None` when it names no allocation.
+    #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "value" => Some(Allocation::Value),
@@ -94,6 +111,7 @@ impl Allocation {
 }
 
 /// The amount of a charge with its sign: a discount takes money off, everything else adds.
+#[must_use]
 pub fn signed_amount(kind: ChargeKind, amount_cents: i64) -> i64 {
     if kind == ChargeKind::Discount {
         -amount_cents
@@ -103,6 +121,7 @@ pub fn signed_amount(kind: ChargeKind, amount_cents: i64) -> i64 {
 }
 
 /// The weight each line carries when a charge is spread: what it costs, or how many units it has.
+#[must_use]
 pub fn weights(allocation: Allocation, lines: &[(i64, i64)]) -> Vec<i64> {
     lines
         .iter()
@@ -117,6 +136,7 @@ pub fn weights(allocation: Allocation, lines: &[(i64, i64)]) -> Vec<i64> {
 /// first gets its whole-cent share, then the cents left over go one each to the lines with the
 /// largest fractional remainders (ties to the earlier line). The shares always add up to the
 /// amount. The weights must be positive and not empty.
+#[must_use]
 pub fn allocate(amount_cents: i64, weights: &[i64]) -> Vec<i64> {
     let total_weight: i128 = weights.iter().map(|&w| i128::from(w)).sum();
     debug_assert!(total_weight > 0, "weights must add up to something");
@@ -155,6 +175,7 @@ pub struct BatchCost {
 /// Splits a line's landed total over its units so the batches add up to it exactly. If the total
 /// divides evenly it is one batch; otherwise `remainder` units cost one cent more than the rest
 /// (two batches, the cheaper one first). `quantity` must be at least 1 and `total_cents` positive.
+#[must_use]
 pub fn split_cost(total_cents: i64, quantity: i64) -> Vec<BatchCost> {
     let each = total_cents / quantity;
     let remainder = total_cents % quantity;
@@ -178,6 +199,7 @@ pub fn split_cost(total_cents: i64, quantity: i64) -> Vec<BatchCost> {
 }
 
 /// The landed total per unit to the nearest cent, for display. Stock is costed with `split_cost`.
+#[must_use]
 pub fn rounded_unit(total_cents: i64, quantity: i64) -> i64 {
     if quantity <= 0 {
         return 0;
@@ -208,6 +230,8 @@ pub struct ChargeTotals {
     pub paid_to_others_cents: i64,
 }
 
+/// Adds up the charges: what is added to the cost, what is taken off, and the net.
+#[must_use]
 pub fn charge_totals(charges: &[ChargeFigure]) -> ChargeTotals {
     let mut totals = ChargeTotals::default();
     for charge in charges {
@@ -222,6 +246,7 @@ pub fn charge_totals(charges: &[ChargeFigure]) -> ChargeTotals {
 
 /// What a receipt owes the supplier before credits and payments: the goods plus the charges the
 /// supplier billed. The one definition behind the receipt total and the supplier balance.
+#[must_use]
 pub fn owed_total(goods_cents: i64, totals: ChargeTotals) -> i64 {
     goods_cents + totals.supplier_billed_cents
 }

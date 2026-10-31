@@ -30,19 +30,28 @@ async fn send(
     let request = match body {
         Some(value) => {
             builder = builder.header(CONTENT_TYPE, "application/json");
-            builder.body(Body::from(value.to_string())).unwrap()
+            builder
+                .body(Body::from(value.to_string()))
+                .expect("the request is well formed")
         }
-        None => builder.body(Body::empty()).unwrap(),
+        None => builder
+            .body(Body::empty())
+            .expect("the request is well formed"),
     };
-    let response = app.router.clone().oneshot(request).await.unwrap();
+    let response = app
+        .router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let json = if bytes.is_empty() {
         Value::Null
     } else {
-        serde_json::from_slice(&bytes).unwrap()
+        serde_json::from_slice(&bytes).expect("the text is valid JSON")
     };
     (status, json)
 }
@@ -50,9 +59,14 @@ async fn send(
 fn names(body: &Value) -> Vec<String> {
     body["data"]
         .as_array()
-        .unwrap()
+        .expect("the value is an array")
         .iter()
-        .map(|p| p["name"].as_str().unwrap().to_string())
+        .map(|p| {
+            p["name"]
+                .as_str()
+                .expect("the value is a string")
+                .to_string()
+        })
         .collect()
 }
 
@@ -80,7 +94,10 @@ async fn scenario(app: &common::TestApp) {
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
     assert_eq!(body["data"]["active"], true);
-    let landlord = body["data"]["key"].as_str().unwrap().to_string();
+    let landlord = body["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     let (status, body) = send(
         app,
         "POST",
@@ -201,7 +218,10 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
-    let bill = body["data"]["key"].as_str().unwrap().to_string();
+    let bill = body["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
 
     // Hiding takes the payee out of the pickers; the manager's list can still show it.
     let (status, body) = send(
@@ -233,10 +253,10 @@ async fn scenario(app: &common::TestApp) {
     );
     let hidden = body["data"]
         .as_array()
-        .unwrap()
+        .expect("the value is an array")
         .iter()
         .find(|p| p["key"] == landlord.as_str())
-        .unwrap();
+        .expect("a match exists");
     assert_eq!(hidden["active"], false);
 
     // A hidden name cannot be added again, and a hidden payee cannot be used on a new record.
@@ -269,10 +289,10 @@ async fn scenario(app: &common::TestApp) {
     let (_, body) = send(app, "GET", "/api/recurring-expenses", None, &manager).await;
     let row = body["data"]
         .as_array()
-        .unwrap()
+        .expect("the value is an array")
         .iter()
         .find(|b| b["template"]["key"] == bill.as_str())
-        .unwrap();
+        .expect("a match exists");
     assert_eq!(row["template"]["payeeName"], "Mrs. Landlady");
 
     // Showing it again puts it back in the pickers.
@@ -295,8 +315,8 @@ async fn scenario(app: &common::TestApp) {
     let movement = |extra: Value| {
         let mut base = json!({ "terminalId": "term_payees_test", "amountCents": 1500 });
         base.as_object_mut()
-            .unwrap()
-            .extend(extra.as_object().unwrap().clone());
+            .expect("the value is an object")
+            .extend(extra.as_object().expect("the value is an object").clone());
         base
     };
     let (status, body) = send(
@@ -325,7 +345,10 @@ async fn scenario(app: &common::TestApp) {
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
     let (_, body) = send(app, "GET", "/api/payees?payeeType=other", None, &staff).await;
-    let corner = body["data"][0]["key"].as_str().unwrap().to_string();
+    let corner = body["data"][0]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     assert_eq!(body["data"][0]["name"], "Corner shop");
     assert_eq!(body["data"][0]["usageCount"], 1);
     let (status, _) = send(
@@ -347,7 +370,13 @@ async fn scenario(app: &common::TestApp) {
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
     let (_, body) = send(app, "GET", "/api/payees?payeeType=other", None, &staff).await;
-    assert!(body["data"].as_array().unwrap().is_empty(), "{body}");
+    assert!(
+        body["data"]
+            .as_array()
+            .expect("the value is an array")
+            .is_empty(),
+        "{body}"
+    );
     let (_, body) = send(
         app,
         "GET",
@@ -370,7 +399,7 @@ async fn payees_can_be_renamed_hidden_and_shown_on_sqlite() {
 async fn payees_can_be_renamed_hidden_and_shown_on_mongo() {
     let app = common::spawn_app_isolated().await;
     scenario(&app).await;
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }
 
 // A Manager registers a supplier from the cash window; it is listed as a payee at once and a
@@ -406,13 +435,16 @@ async fn manager_registered_supplier_scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
-    let supplier_key = body["data"]["key"].as_str().unwrap().to_string();
+    let supplier_key = body["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
 
     let (status, body) = send(app, "GET", "/api/payees?payeeType=supplier", None, &manager).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let listed = body["data"]
         .as_array()
-        .unwrap()
+        .expect("the value is an array")
         .iter()
         .find(|p| p["key"] == supplier_key.as_str())
         .unwrap_or_else(|| panic!("new supplier missing from payees: {body}"));
@@ -461,5 +493,5 @@ async fn a_manager_can_register_a_supplier_and_pay_it_on_sqlite() {
 async fn a_manager_can_register_a_supplier_and_pay_it_on_mongo() {
     let app = common::spawn_app_isolated().await;
     manager_registered_supplier_scenario(&app).await;
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }

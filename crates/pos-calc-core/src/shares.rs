@@ -1,3 +1,5 @@
+//! Each part's share of a whole, for the split-of-sales screens.
+
 use serde::{Deserialize, Serialize};
 
 use crate::calculations::share_basis_points;
@@ -7,6 +9,7 @@ use crate::error::{CalcError, CalcResult};
 const MAX_PARTS: usize = 200;
 const MAX_CENTS: i64 = 10_000_000_000_000;
 
+/// One part whose share of the whole is wanted.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -20,6 +23,7 @@ pub struct SharePart {
     pub whole_cents: Option<i64>,
 }
 
+/// The parts to take shares of.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -29,6 +33,7 @@ pub struct CalcSharesRequest {
     pub parts: Vec<SharePart>,
 }
 
+/// The share of the whole one part makes up.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -42,6 +47,7 @@ pub struct ShareLine {
     pub percent: i64,
 }
 
+/// Every part's share, and the total of all the parts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -53,6 +59,11 @@ pub struct CalcSharesReply {
     pub parts: Vec<ShareLine>,
 }
 
+/// Works out each part's share of its whole.
+///
+/// # Errors
+///
+/// Fails when there are too many parts or an amount is out of range.
 pub fn compute(request: &CalcSharesRequest) -> CalcResult<CalcSharesReply> {
     if request.parts.len() > MAX_PARTS {
         return Err(CalcError::validation("Too many parts"));

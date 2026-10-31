@@ -12,15 +12,19 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 async fn execute(router: &axum::Router, request: Request<Body>) -> (StatusCode, Value) {
-    let response = router.clone().oneshot(request).await.unwrap();
+    let response = router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let json = if bytes.is_empty() {
         Value::Null
     } else {
-        serde_json::from_slice(&bytes).unwrap()
+        serde_json::from_slice(&bytes).expect("the text is valid JSON")
     };
     (status, json)
 }
@@ -41,7 +45,7 @@ async fn send_authed(
             Some(value) => Body::from(value.to_string()),
             None => Body::empty(),
         })
-        .unwrap();
+        .expect("the request is well formed");
     execute(router, request).await
 }
 
@@ -92,7 +96,10 @@ async fn create_employee_via_api(router: &axum::Router, token: &str) -> (String,
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body:?}");
-    let id = body["data"]["id"].as_str().unwrap().to_string();
+    let id = body["data"]["id"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     (id, body["data"].clone())
 }
 
@@ -170,7 +177,7 @@ async fn staff_can_list_and_get_employees() {
     assert!(
         body["data"]["employees"]
             .as_array()
-            .unwrap()
+            .expect("the value is an array")
             .iter()
             .any(|e| e["id"] == id)
     );
@@ -222,7 +229,7 @@ async fn update_employee_version_conflict() {
         .header(AUTHORIZATION, format!("Bearer {token}"))
         .header("If-Match", "999")
         .body(Body::from(json!({ "name": "Renamed" }).to_string()))
-        .unwrap();
+        .expect("the request is well formed");
     let (status, body) = execute(&app.router, request).await;
     assert_eq!(status, StatusCode::CONFLICT, "{body:?}");
     assert_eq!(body["code"], "VERSION_CONFLICT");
@@ -252,7 +259,7 @@ async fn delete_employee_with_login_is_blocked() {
     let app = common::spawn_app().await;
     let token = admin_token(&app.config);
     let (_id, employee) = create_employee_via_api(&app.router, &token).await;
-    let employee_key = employee["key"].as_str().unwrap();
+    let employee_key = employee["key"].as_str().expect("the value is a string");
 
     let (status, body) = send_authed(
         &app.router,
@@ -275,7 +282,10 @@ async fn delete_employee_with_login_is_blocked() {
     let (status, body) = send_authed(
         &app.router,
         "DELETE",
-        &format!("/api/employees/{}", employee["id"].as_str().unwrap()),
+        &format!(
+            "/api/employees/{}",
+            employee["id"].as_str().expect("the value is a string")
+        ),
         None,
         &token,
     )
@@ -289,7 +299,7 @@ async fn get_employee_reflects_linked_login() {
     let app = common::spawn_app().await;
     let token = admin_token(&app.config);
     let (id, employee) = create_employee_via_api(&app.router, &token).await;
-    let employee_key = employee["key"].as_str().unwrap();
+    let employee_key = employee["key"].as_str().expect("the value is a string");
     let username = format!("has-login-{}", &Uuid::new_v4().simple().to_string()[..12]);
 
     let (status, _) = send_authed(
@@ -339,7 +349,7 @@ async fn batch_delete_employees_skips_ones_with_a_login() {
             "username": format!("batch-{}", &Uuid::new_v4().simple().to_string()[..12]),
             "password": "Password123!",
             "role": "staff",
-            "employeeKey": employee2["key"].as_str().unwrap(),
+            "employeeKey": employee2["key"].as_str().expect("the value is a string"),
         })),
         &token,
     )

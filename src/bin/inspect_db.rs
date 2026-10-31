@@ -1,3 +1,7 @@
+//! Prints how many categories, subcategories and products the configured database holds.
+//!
+//! Read only: `cargo run --bin inspect_db`
+
 use simplebash_pos_backend::clients;
 use simplebash_pos_backend::core::config::Config;
 use simplebash_pos_backend::domain::inventory::ProductListQuery;

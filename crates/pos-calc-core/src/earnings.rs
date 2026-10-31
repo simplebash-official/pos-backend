@@ -1,3 +1,5 @@
+//! What a repair job earns: profit, the employee commission and what the shop keeps.
+
 use serde::{Deserialize, Serialize};
 
 use crate::calculations::{commission_cents, job_profit_cents};
@@ -6,6 +8,7 @@ use crate::error::{CalcError, CalcResult};
 
 const MAX_CENTS: i64 = 10_000_000_000_000;
 
+/// How an employee's commission is worked out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -19,6 +22,8 @@ pub enum SplitKind {
 }
 
 impl SplitKind {
+    /// The name stored for this split kind.
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             SplitKind::Percentage => "percentage",
@@ -27,6 +32,7 @@ impl SplitKind {
     }
 }
 
+/// A job's price and costs, and the commission split of its employee.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -43,6 +49,7 @@ pub struct CalcEarningsRequest {
     pub split_value: f64,
 }
 
+/// What a job earns, split between the employee and the shop.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -61,6 +68,11 @@ pub struct CalcEarningsReply {
     pub shop_keeps_cents: i64,
 }
 
+/// Works out the profit, commission and the shop's share of a job.
+///
+/// # Errors
+///
+/// Fails when an amount is out of range.
 pub fn compute(request: &CalcEarningsRequest) -> CalcResult<CalcEarningsReply> {
     let in_range = |cents: i64| (0..=MAX_CENTS).contains(&cents);
     if !in_range(request.material_cost_cents)

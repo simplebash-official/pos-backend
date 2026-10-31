@@ -32,7 +32,7 @@ async fn start_capturing_mock() -> (String, Arc<Mutex<Vec<HeaderMap>>>) {
         .route(
             "/api/templates",
             get(move |headers: HeaderMap| {
-                captured_for_templates.lock().unwrap().push(headers);
+                captured_for_templates.lock().expect("the mutex is not poisoned").push(headers);
                 async move {
                     Json(json!({
                         "success": true,
@@ -51,14 +51,18 @@ async fn start_capturing_mock() -> (String, Arc<Mutex<Vec<HeaderMap>>>) {
             "/api/render/{template_key}",
             post(
                 move |Path(_template_key): Path<String>, headers: HeaderMap, _body: axum::body::Bytes| {
-                    captured_for_render.lock().unwrap().push(headers);
+                    captured_for_render.lock().expect("the mutex is not poisoned").push(headers);
                     async move { axum::response::Response::new(axum::body::Body::from(b"%PDF-fake".to_vec())) }
                 },
             ),
         );
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("the awaited step succeeds");
+    let addr = listener
+        .local_addr()
+        .expect("the listener has a local address");
     tokio::spawn(async move {
         axum::serve(listener, router).await.ok();
     });
@@ -79,7 +83,7 @@ async fn multi_tenant_scope_sends_the_tenant_header_single_shop_omits_it() {
 
     // Multi-tenant: the call happens inside `with_tenant`, so the client
     // must forward the exact tenant id as `X-Tenant-Key`.
-    let tenant = tenancy::Tenant::id("tnt_test_header_check").unwrap();
+    let tenant = tenancy::Tenant::id("tnt_test_header_check").expect("the tenant id is valid");
     tenancy::with_tenant(tenant, async {
         client
             .render("thermal-receipt", json!({ "invoiceNumber": "INV-2" }))
@@ -88,7 +92,7 @@ async fn multi_tenant_scope_sends_the_tenant_header_single_shop_omits_it() {
     })
     .await;
 
-    let seen = captured.lock().unwrap().clone();
+    let seen = captured.lock().expect("the mutex is not poisoned").clone();
     // Two requests per render (GET /api/templates on first cache miss is
     // shared across both calls since the client caches by description, so
     // only the second render's POST necessarily re-hits the network) — find

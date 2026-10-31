@@ -29,19 +29,28 @@ async fn send(
     let request = match body {
         Some(value) => {
             builder = builder.header(CONTENT_TYPE, "application/json");
-            builder.body(Body::from(value.to_string())).unwrap()
+            builder
+                .body(Body::from(value.to_string()))
+                .expect("the request is well formed")
         }
-        None => builder.body(Body::empty()).unwrap(),
+        None => builder
+            .body(Body::empty())
+            .expect("the request is well formed"),
     };
-    let response = app.router.clone().oneshot(request).await.unwrap();
+    let response = app
+        .router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let json = if bytes.is_empty() {
         Value::Null
     } else {
-        serde_json::from_slice(&bytes).unwrap()
+        serde_json::from_slice(&bytes).expect("the text is valid JSON")
     };
     (status, json)
 }
@@ -99,15 +108,29 @@ async fn scenario(app: &common::TestApp) {
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
     let paid = &body["data"]["expense"];
-    assert!(paid["number"].as_str().unwrap().starts_with("EXP-"));
+    assert!(
+        paid["number"]
+            .as_str()
+            .expect("the value is a string")
+            .starts_with("EXP-")
+    );
     assert_eq!(paid["status"], "paid");
     assert_eq!(paid["paidFrom"], "bank");
     assert_eq!(paid["balanceCents"], 0);
     assert_eq!(paid["source"], "ledger");
     assert_eq!(paid["categoryName"], "Electricity");
-    assert_eq!(body["data"]["payments"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        body["data"]["payments"]
+            .as_array()
+            .expect("the value is an array")
+            .len(),
+        1
+    );
     assert!(
-        paid["payeeKey"].as_str().unwrap().starts_with("pye_other_"),
+        paid["payeeKey"]
+            .as_str()
+            .expect("the value is a string")
+            .starts_with("pye_other_"),
         "the typed name is saved for next time"
     );
 
@@ -124,18 +147,27 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
-    let bill_key = body["data"]["expense"]["key"].as_str().unwrap().to_string();
+    let bill_key = body["data"]["expense"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     assert_eq!(body["data"]["expense"]["status"], "unpaid");
     assert_eq!(body["data"]["expense"]["paidFrom"], "unpaid");
     assert_eq!(body["data"]["expense"]["isOverdue"], true);
-    assert_eq!(body["data"]["payments"].as_array().unwrap().len(), 0);
+    assert_eq!(
+        body["data"]["payments"]
+            .as_array()
+            .expect("the value is an array")
+            .len(),
+        0
+    );
 
     // What can and cannot be entered.
     let bad = |extra: Value| {
         let mut base = json!({ "expenseDate": today(), "categoryKey": electricity, "amountCents": 100, "paidFrom": "bank" });
         base.as_object_mut()
-            .unwrap()
-            .extend(extra.as_object().unwrap().clone());
+            .expect("the value is an object")
+            .extend(extra.as_object().expect("the value is an object").clone());
         base
     };
     for (what, extra) in [
@@ -213,7 +245,13 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(status, StatusCode::CREATED, "{body}");
     assert_eq!(body["data"]["expense"]["status"], "paid");
     assert_eq!(body["data"]["expense"]["isOverdue"], false);
-    assert_eq!(body["data"]["payments"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        body["data"]["payments"]
+            .as_array()
+            .expect("the value is an array")
+            .len(),
+        2
+    );
     let (status, _) = send(app, "GET", "/api/expenses/exp_nope", None, &manager).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
@@ -242,7 +280,10 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
-    let voucher = body["data"]["movementNumber"].as_str().unwrap().to_string();
+    let voucher = body["data"]["movementNumber"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     // A loan instalment paid from the drawer is not a business cost, so it stays out of the list.
     let (status, vendor) = send(
         app,
@@ -269,7 +310,9 @@ async fn scenario(app: &common::TestApp) {
 
     let (status, body) = send(app, "GET", "/api/expenses?source=drawer", None, &manager).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    let drawer = body["data"]["expenses"].as_array().unwrap();
+    let drawer = body["data"]["expenses"]
+        .as_array()
+        .expect("the value is an array");
     assert_eq!(drawer.len(), 1, "{body}");
     assert_eq!(drawer[0]["number"], voucher.as_str());
     assert_eq!(drawer[0]["source"], "drawer");
@@ -333,5 +376,5 @@ async fn the_expense_ledger_on_sqlite() {
 async fn the_expense_ledger_on_mongo() {
     let app = common::spawn_app_isolated().await;
     scenario(&app).await;
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }

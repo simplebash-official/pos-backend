@@ -375,6 +375,11 @@ impl From<pos_calc_core::CalcError> for AppError {
     fn from(err: pos_calc_core::CalcError) -> Self {
         match err {
             pos_calc_core::CalcError::Validation(msg) => AppError::validation(msg),
+            // `CalcError` is `non_exhaustive`: a variant added later is a server fault until mapped.
+            other => {
+                tracing::error!(error = %other, "unmapped calculation error");
+                AppError::internal("A calculation failed. Please try again.")
+            }
         }
     }
 }

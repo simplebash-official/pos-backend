@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-The Rust/Axum API backend for **simplebash-pos**, a point-of-sale system for a repair/retail shop (billing, repairs, print jobs, inventory, customers, reports, suppliers). Persistence supports dual database engines: **SQLite** (`DATABASE_TYPE=sqlite`, default, at `pos.db` or via `DATABASE_URL`) and **MongoDB** (`DATABASE_TYPE=mongodb` via `MONGODB_URI`). The sibling `../frontend` (React + Vite + Mantine) is the client this API serves, expecting endpoints under `env.apiBaseUrl` (`/api` by default).
+The Rust/Axum API backend for **simplebash-pos**, a point-of-sale system for a repair/retail shop (billing, repairs, print jobs, inventory, customers, reports, suppliers). Persistence supports dual database engines: **SQLite** (`DATABASE_TYPE=sqlite`, at the file named by `DATABASE_URL`) and **MongoDB** (`DATABASE_TYPE=mongodb` via `MONGODB_URI`). The sibling `../frontend` (React + Vite + Mantine) is the client this API serves, expecting endpoints under `env.apiBaseUrl` (`/api` by default).
 
 ### Keep the two checkouts in sync (check before doing anything)
 
@@ -42,10 +42,10 @@ A task is not done until everything in this codebase that *can* be tested, and e
 **Run all of these before you say a backend task is finished** (a feature once reached CI with 12 clippy errors, a Staff token able to list login sessions, and undocumented routes, none of which a partial run would have caught):
 
 1. `cargo clippy --all-targets --all-features -- -D warnings` on the current stable Rust (`rustup update` first). This is exactly what CI runs; `cargo clippy --fix --allow-dirty` clears most of it. Do not rely on `cargo build` or `cargo test` alone: clippy has its own errors.
-2. The **whole** `cargo test` (use `--no-fail-fast` so one failing binary does not hide the rest), against Atlas, on a **fresh throwaway database**: `MONGODB_DB_NAME=jt<area>_<20 hex> MONGODB_TEST_DB_NAME=<same>`. The shared `simplebash_pos_test` database accumulates data, and tests such as the reminders ones then fail for reasons that have nothing to do with your change.
+2. The **whole** `cargo test` (use `--no-fail-fast` so one failing binary does not hide the rest), against Atlas, on a **fresh throwaway database**: `MONGODB_DB_NAME=jt<area>_<20 hex> MONGODB_TEST_DB_NAME=<same>`. The harness refuses any test database name that does not start with `jt`, and a shared database accumulates data, so tests such as the reminders ones then fail for reasons that have nothing to do with your change.
 3. For every new or changed route: a `security(("bearerAuth" = []))` entry in its `#[utoipa::path]` when it needs a token (`authorization_test` checks it), and its permission checks tested for each role.
 4. A new permission gets its own constant in `core/constants/permissions.rs`; never reuse an existing permission string for a different feature (`sessions:view` guards the login-session list, register shifts use `register_sessions:*`). Re-check what `ADMIN`/`MANAGER`/`STAFF_PERMISSIONS` now grant.
-5. `cargo fmt --check` is not enforced in CI yet (the tree is not formatted); still do not make it worse in the files you touch.
+5. `cargo fmt --all --check` (`max_width = 100`, the workspace `rustfmt.toml`) is enforced in CI and in `make check`; run `cargo fmt --all` before you finish.
 6. After pushing, watch the run (`gh run list --limit 3`, `gh run view <id> --log-failed`) until it is green. Pushing is a separate, deliberate step, so ask first.
 
 # Where the rest of the guidance lives
@@ -66,11 +66,11 @@ The invariants below apply everywhere and are easy to violate, so they stay resi
 
 ## Commands
 
-- `cargo run` — run the server (equivalent to `cargo run --bin simplebash_pos_backend`; required explicitly if disambiguating from the seed binaries). Respects `AUTO_SEED=true` to automatically run seeders on startup.
+- `cargo run` — run the server (equivalent to `cargo run --bin simplebash_pos_backend`; required explicitly if disambiguating from the seed binaries). Runs the seeders on startup when `AUTO_SEED=true`.
 - `cargo test` — run all tests. `tests/sqlite_integration_test.rs`, `tests/seeding_test.rs`, `tests/openapi_test.rs`, and `tests/response_format_test.rs` run without live MongoDB; Mongo-specific integration tests require a reachable MongoDB instance.
 - `cargo test --test scenarios_test health_route_returns_success_format` — run a single integration test by name
 - `cargo run --bin seed_all` — runs all seeds in dependency order (`admin`, `providers`, `cash_categories`, `suppliers`, `customers`, `inventory`, `api_key`) across SQLite or MongoDB
-- `cargo run --bin seed_admin` — create-if-missing bootstrap of the first Admin account (username `admin` / `admin@1234`, name: `"System Admin"`). Optional overrides via `SEED_ADMIN_PASSWORD`/`SEED_ADMIN_NAME` env vars.
+- `cargo run --bin seed_admin` — create-if-missing bootstrap of the first Admin account (username `admin`; the name and password come from the required `SEED_ADMIN_NAME` / `SEED_ADMIN_PASSWORD`, which the config refuses when they are the old documented default).
 - `cargo run --bin seed_providers` — upserts default category/subcategory reference data into the `categories`/`subcategories` tables/collections
 - `cargo run --bin seed_suppliers` — upserts sample repair/retail suppliers into the `suppliers` table/collection
 - `cargo run --bin seed_customers` — upserts 20 realistic retail/repair/corporate/print customer profiles into the `customers` table/collection
@@ -95,26 +95,36 @@ make check
 
 Config is loaded from `.env` (via `dotenvy`) in every binary and integration test. Two dedicated configuration templates are provided:
 - `.env.desktop.example`: Configures embedded SQLite (`DATABASE_TYPE=sqlite`), loopback listener (`BIND_ADDR=127.0.0.1`), and local document-server for desktop/Tauri operations.
-- `PROVISION_SECRET` (multi-tenant web only, 16+ chars, shared with identity-server) enables `POST /api/internal/provision`; leave it unset everywhere else (the route then 404s). Details in `src/CLAUDE.md` → *Shop provisioning*.
+- `PROVISION_SECRET` (multi-tenant web only, 16+ chars, shared with identity-server) is required when `PROVISIONING=enabled` and enables `POST /api/internal/provision`; every other deployment sets `PROVISIONING=disabled` (the route then 404s). Details in `src/CLAUDE.md` → *Shop provisioning*.
 - `.env.web.example`: Configures MongoDB cluster persistence (`DATABASE_TYPE=mongodb`, `MONGODB_URI`), multi-interface listener (`BIND_ADDR=0.0.0.0`), and containerized document-server for web/server deployments.
-Default `DATABASE_TYPE=sqlite` requires no external services (creates `pos.db` automatically). If `DATABASE_TYPE=mongodb`, copy `.env.web.example` to `.env` and point `MONGODB_URI` at a running MongoDB instance before running or testing — `Config::from_env()` fails fast (process exits) on missing/invalid vars.
+`DATABASE_TYPE=sqlite` needs no external services (it creates the file named by `DATABASE_URL`). If `DATABASE_TYPE=mongodb`, copy `.env.web.example` to `.env` and point `MONGODB_URI` at a running MongoDB instance before running or testing — `Config::from_env()` fails fast (process exits) on missing/invalid vars.
 
 The integration test files, each a different tradeoff between speed and realism:
 - `tests/sqlite_integration_test.rs` — tests complete end-to-end POS lifecycle (products, sales, payments, credit notes, stock tracking) directly against in-memory SQLite.
 - `tests/seeding_test.rs` — tests seed idempotency, complete database population, and sale transactions against seeded data.
-- `tests/scenarios_test.rs` (+ `tests/common/mod.rs::spawn_app()`) — builds the real router against a **real** MongoDB (no mocking), using `MONGODB_TEST_DB_NAME` (defaults to `simplebash_pos_test`) instead of the dev database so it never touches dev data. Use for anything that actually reads/writes Mongo.
-- `tests/inventory_test.rs` / `tests/suppliers_test.rs` / `tests/auth_test.rs` / `tests/users_test.rs` / `tests/reports_test.rs` / etc. — the same `spawn_app()` real-Mongo style as `scenarios_test.rs`, just split into their own files per feature area. Follow this pattern (own `tests/<area>_test.rs` file, `mod common;`, `send`/`send_authed` request helpers, `common::mint_token` for hand-minted role/permission tokens) when a new module needs real-Mongo coverage.
+- `tests/scenarios_test.rs` (+ `tests/common::spawn_app()`) — builds the real router against a **real** MongoDB (no mocking), using the required `MONGODB_TEST_DB_NAME` (a throwaway `jt*` database) instead of the dev database so it never touches dev data. Use for anything that actually reads/writes Mongo.
+- `tests/inventory_test.rs` / `tests/suppliers_test.rs` / `tests/auth_test.rs` / `tests/users_test.rs` / `tests/reports_test.rs` / etc. — the same `spawn_app()` real-Mongo style as `scenarios_test.rs`, just split into their own files per feature area. Follow this pattern (own `tests/<area>_test.rs` file, or a `tests/<area>_test/` directory with `main.rs`, `helpers.rs` and one module per topic once it passes about 1,000 lines — `main.rs` declares `#[path = "../common/mod.rs"] mod common;` — `send`/`send_authed` request helpers, `common::mint_token` for hand-minted role/permission tokens) when a new module needs real-Mongo coverage.
 - `tests/openapi_test.rs` — builds the real router with a `mongodb::Client` that is never pinged (still needs `MONGODB_URI` to be a syntactically valid connection string via `.env`, but no live Mongo needed). Asserts the OpenAPI spec lists every module path and Swagger UI serves. Use for anything about routing/docs wiring rather than data.
 - `tests/authorization_test.rs` — same no-live-Mongo construction as `openapi_test.rs`. Walks **every** operation in the generated OpenAPI document, sends it an unauthenticated request, and asserts 401 unless the route is on its `PUBLIC_ROUTES` allowlist (health, `POST /auth/login`, and the module-status stubs) — plus the converse, that those public routes still answer, and that a route's `security(...)` annotation matches whether it really enforces auth. This is the guard for the fact that auth is opt-in per handler: a new route registered through `routes!()` is audited the moment it exists, with no edit to this file. If it fails, the fix is almost always a missing `CurrentUser`/`AdminUser` handler argument — add to `PUBLIC_ROUTES` only when a route is genuinely meant to be open, and mirror it in `app::build_router`'s comment.
 - `tests/calc_test.rs` — live calculations over HTTP on SQLite (they write nothing, so no Mongo): permissions, range checks, and the golden request/reply pairs in `tests/golden/calc/` that the frontend contract is built on (`UPDATE_GOLDEN=1` re-records them; review the diff).
 - `tests/response_format_test.rs` — no router, no Mongo at all; calls `core::response::ApiResponse`/`core::error::AppError` directly and asserts the JSON shape. Use for anything about the response/error envelope itself.
 
-## Route File Organization
+## Rust style (Google Rust Style Guide) and file layout
 
-Every module's `routes.rs` MUST follow a clean, structured ordering using section banners (`// ============================================================================`) in this exact sequence:
-1. `// Router`: `pub fn router() -> OpenApiRouter<AppState>` with `routes!(...)` calls grouped and commented by feature to mirror the file layout.
-2. `// Helpers`: Private helper functions for that module (e.g. `parse_object_id`, whitelist mapping, numeric validation).
-3. `// <Feature Sections>`: Grouped feature handler blocks (e.g., `// Module status`, `// Products`, `// Stock`, `// Categories`, `// Subcategories`). Read/validation endpoints (such as `/categories/valid`) belong inside their primary domain section next to other reads rather than at the bottom of the file.
+The Google Rust Style Guide governs all Rust here (the `rust-style-guide` skill has the full text); where it is silent, the official Rust style guide and API guidelines apply. What is binding and easy to get wrong:
+
+- **One module per `use`, no globs.** `use a::{B, C}` is fine; `use a::{B, c::D}` is not. `use super::*` only inside an inline `#[cfg(test)] mod tests`. Call free functions through their module (`fs::read`), import types and traits unqualified. Import a trait inside the function that needs it unless the whole file uses it.
+- **Files are named after their primary item; non-leaf modules hold only `mod` lines and `pub use` re-exports** (`mod.rs` never contains code). A module is a directory with `mod.rs` plus `<feature>_routes.rs`, `<feature>_service.rs`, one file per large item or per cohesive group of small related items. Helpers live in the file of their one user. Grouping closely related small items in one file is fine; one item per file is not a rule. Aim for files under about 600 lines. `routes` / `service` / `repository` / `model` / `utils` are directory and layer names, never file names.
+- **Layering is unchanged:** routes (HTTP only) -> service (business rules) -> repository (persistence only). `repository` and `service` stay private to the module; other modules reach in through `pub(crate)` service functions.
+- **No fallbacks, no defaults.** Never `unwrap_or`, `unwrap_or_default` or `.ok()` to hide a failure or invent a value: a missing or corrupt stored value is an error (`AppError::internal`), a missing required setting stops the process at startup, and a request field that is absent stays `Option` and is mapped explicitly. The allowed exceptions are written down where they apply: the zero of an empty set (a sum over no rows), the documented empty-form value in `pos-calc-core`, pagination limits as named constants, and the legacy-shape readers in the old-backup upgrader and the one-time migrations.
+- **Configuration has no defaults.** Every variable in `core/config` is required; a missing or invalid one exits with its name. Nothing outside `core/config` reads `std::env` (the `src/bin` tools read config through `Config` too). Tests build their configuration in `tests/common/test_config.rs`.
+- **Errors and panics:** `Result`/`Option` for failure, `expect("why this cannot fail")` instead of `unwrap()` (tests included), never recover a poisoned mutex (`.lock().expect("<name> mutex poisoned")`), no `let _ =` on a fallible call unless it is documented best-effort cleanup.
+- **Types:** `#[derive(Debug)]` on everything (manual redacting impls for anything holding a secret), `#[must_use]` on pure functions whose result matters, named structs instead of tuples returned from public functions, enums instead of bool parameters, `&[T]` / `&str` instead of `&Vec<T>` / `&String`, `#[non_exhaustive]` on public enums that other crates match on (and list the variants you care about plus a wildcard that fails loudly).
+- **Docs:** every module starts with `//!` (what it owns, what it deliberately does not do); every `pub` item gets a `///` that adds something the name does not (a repository function names the query intent, a service function the business rule, a struct the non-obvious field). `//` is for implementation notes explaining *why*. Do not restate the code.
+- **Format:** `cargo fmt --all` with the workspace `max_width = 100`. `cargo clippy --workspace --all-targets --all-features -- -D warnings` on current stable.
+
+### Route files
+A module's routes file declares `pub fn router() -> OpenApiRouter<AppState>` (the `routes!(...)` list, grouped and commented by feature) and the handlers, each with its `#[utoipa::path]`. Large modules put one handler or one cohesive group of handlers per file under `routes/`, with `<module>_routes.rs` holding the router. Read and validation endpoints (such as `/categories/valid`) sit with their domain's other reads.
 
 ## Custom Prefixed Unique Model Keys
 
@@ -126,12 +136,7 @@ Every MongoDB collection document model (and its API domain representation) MUST
 
 ## Code Comments
 
-Every file should make it obvious what it does and why without the reader having to reverse-engineer intent from the code alone. Apply this whenever you touch a file, not just when writing something new:
-
-1. **Module-level banner**: every file — even a 3-line re-export `mod.rs` — opens with a plain `//` comment (not `//!`) stating what it owns and, where relevant, what it deliberately does *not* do. See `domain/inventory.rs` ("no I/O, no Mongo/Axum types...") or `modules/inventory/repository/mod.rs`.
-2. **Doc comments (`///`) on `pub`/`pub(crate)` items** whose purpose isn't obvious from the signature alone: every `repository::*` function gets a one-liner naming the query intent, every `service::*` function gets a one-liner naming the business rule it enforces, every `domain`/`model` struct or enum gets a one-liner on non-obvious fields (why a field exists, why it's `Option`, why an enum has the variants it has). Trivial CRUD wrappers still get a short one-liner for consistency — not a paragraph.
-3. **Inline comments explain *why*, not *what***: a non-obvious invariant, a workaround, or a decision a future reader would otherwise have to reverse-engineer (e.g. the `$expr`/`$lte` low-stock query shape in `modules/inventory/repository/product.rs`, the cascade-delete-of-subcategories-on-category-delete safety argument in `modules/inventory/service/category.rs`, the DNS resolver workaround in `clients/mongo.rs`). Never restate what a line of code already says — if removing the comment wouldn't confuse a future reader, don't write it.
-4. **Reference examples**: `clients/mongo.rs` (DNS resolver workaround), `core/middleware/auth.rs` (why `CurrentUser`/`AdminUser` exist and how they gate routes), `modules/inventory/service/category.rs` (key-based-reference/cascade-delete rationale), `modules/inventory/model.rs` (`CategoryDocument`'s DB-backed-source-of-truth rationale and the `ProductDocument`/`SubcategoryDocument` key-FK pattern), `core/error.rs` (`AppError`'s variant/`Custom`-escape-hatch design).
+See **Rust style** above for the `//!` / `///` / `//` rules. Reference examples of comments that explain *why*: `clients/mongo.rs` (DNS resolver workaround), `core/middleware/auth/` (why `CurrentUser`/`AdminUser` exist and how they gate routes), `modules/inventory/service/category/` (key-based-reference and cascade-delete rationale), `core/error/` (`AppError`'s variant and `Custom` escape-hatch design).
 
 ## graphify
 

@@ -31,19 +31,28 @@ async fn send(
     let request = match body {
         Some(value) => {
             builder = builder.header(CONTENT_TYPE, "application/json");
-            builder.body(Body::from(value.to_string())).unwrap()
+            builder
+                .body(Body::from(value.to_string()))
+                .expect("the request is well formed")
         }
-        None => builder.body(Body::empty()).unwrap(),
+        None => builder
+            .body(Body::empty())
+            .expect("the request is well formed"),
     };
-    let response = app.router.clone().oneshot(request).await.unwrap();
+    let response = app
+        .router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let json = if bytes.is_empty() {
         Value::Null
     } else {
-        serde_json::from_slice(&bytes).unwrap()
+        serde_json::from_slice(&bytes).expect("the text is valid JSON")
     };
     (status, json)
 }
@@ -85,7 +94,7 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    let petty = body["data"].as_array().unwrap();
+    let petty = body["data"].as_array().expect("the value is an array");
     // Ten everyday ones plus the system "Stock charges" a receipt files its courier payments under.
     assert_eq!(petty.len(), 11);
     assert!(petty.iter().any(|c| c["name"] == "Stock charges"));
@@ -110,7 +119,10 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(body["data"]["reviewStatus"], "needs_review");
     assert_eq!(body["data"]["reportGroup"], "operating_expense");
     assert_eq!(body["data"]["isSystem"], false);
-    let diesel_key = body["data"]["key"].as_str().unwrap().to_string();
+    let diesel_key = body["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     assert_eq!(
         diesel_key,
         key(CashMovementType::PettyExpense, "generator diesel")
@@ -234,8 +246,8 @@ async fn scenario(app: &common::TestApp) {
     let movement = |extra: Value| {
         let mut base = json!({ "terminalId": "term_cat_test", "amountCents": 1500 });
         base.as_object_mut()
-            .unwrap()
-            .extend(extra.as_object().unwrap().clone());
+            .expect("the value is an object")
+            .extend(extra.as_object().expect("the value is an object").clone());
         base
     };
     // Payouts need cash in the drawer, so put some in first.
@@ -265,7 +277,10 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(body["data"]["direction"], "out");
     assert_eq!(body["data"]["categoryName"], "Tea and refreshments");
     assert_eq!(body["data"]["payeeName"], "Corner shop");
-    let corner_key = body["data"]["payeeKey"].as_str().unwrap().to_string();
+    let corner_key = body["data"]["payeeKey"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     assert!(corner_key.starts_with("pye_other_"));
 
     // The typed payee is saved for next time, and frequent ones come first.
@@ -402,7 +417,10 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
-    let landlord = body["data"]["key"].as_str().unwrap().to_string();
+    let landlord = body["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     let (status, _) = send(
         app,
         "POST",
@@ -480,7 +498,10 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
-    let teas = body["data"]["key"].as_str().unwrap().to_string();
+    let teas = body["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     let (status, _) = send(
         app,
         "POST",
@@ -514,7 +535,7 @@ async fn scenario(app: &common::TestApp) {
     assert!(
         body["data"]
             .as_array()
-            .unwrap()
+            .expect("the value is an array")
             .iter()
             .all(|c| c["key"] != teas.as_str())
     );
@@ -528,7 +549,7 @@ async fn scenario(app: &common::TestApp) {
     .await;
     let merged_rows: Vec<&Value> = body["data"]["movements"]
         .as_array()
-        .unwrap()
+        .expect("the value is an array")
         .iter()
         .filter(|m| m["categoryKey"] == teas.as_str())
         .collect();
@@ -578,7 +599,7 @@ async fn scenario(app: &common::TestApp) {
     assert!(
         body["data"]
             .as_array()
-            .unwrap()
+            .expect("the value is an array")
             .iter()
             .all(|c| c["name"] != "Fuel")
     );
@@ -602,7 +623,7 @@ async fn scenario(app: &common::TestApp) {
     assert!(
         body["data"]
             .as_array()
-            .unwrap()
+            .expect("the value is an array")
             .iter()
             .any(|c| c["name"] == "Fuel" && c["active"] == false)
     );
@@ -629,7 +650,7 @@ async fn scenario(app: &common::TestApp) {
     assert!(
         body["data"]
             .as_array()
-            .unwrap()
+            .expect("the value is an array")
             .iter()
             .all(|c| c["reviewStatus"] == "needs_review")
     );
@@ -645,7 +666,7 @@ async fn cash_categories_and_typed_movements_on_sqlite() {
 async fn cash_categories_and_typed_movements_on_mongo() {
     let app = common::spawn_app_isolated().await;
     scenario(&app).await;
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }
 
 #[tokio::test]
@@ -656,7 +677,7 @@ async fn seeding_the_built_in_categories_twice_changes_nothing() {
             &app.db_handle,
         )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     assert_eq!(again.created, 0);
     assert_eq!(
         again.existing,
@@ -674,7 +695,7 @@ async fn old_cash_movements_are_migrated_to_typed_movements_once() {
         .max_connections(1)
         .connect("sqlite::memory:")
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     pool.execute(
         "CREATE TABLE cash_movements (
             key TEXT PRIMARY KEY, id TEXT NOT NULL, movement_number TEXT NOT NULL UNIQUE,
@@ -688,7 +709,7 @@ async fn old_cash_movements_are_migrated_to_typed_movements_once() {
         )",
     )
     .await
-    .unwrap();
+    .expect("the awaited step succeeds");
     for (n, kind, amount, reason, who, supplier) in [
         (1, "pay_in", 5000, "Change float", Some("Owner"), None),
         (2, "pay_out_expense", 200, "Tea", Some("Corner shop"), None),
@@ -727,16 +748,16 @@ async fn old_cash_movements_are_migrated_to_typed_movements_once() {
         .bind(supplier)
         .execute(&pool)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     }
 
     simplebash_pos_backend::clients::sqlite::init_db(&pool)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     // Running it again must change nothing.
     simplebash_pos_backend::clients::sqlite::init_db(&pool)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 
     let rows = sqlx::query(
         "SELECT movement_type, direction, category_key, note, payee_name, payee_key, amount_cents
@@ -744,7 +765,7 @@ async fn old_cash_movements_are_migrated_to_typed_movements_once() {
     )
     .fetch_all(&pool)
     .await
-    .unwrap();
+    .expect("the awaited step succeeds");
     type Migrated = (
         String,
         String,
@@ -824,7 +845,7 @@ async fn old_cash_movements_are_migrated_to_typed_movements_once() {
         sqlx::query_scalar("SELECT name FROM pragma_table_info('cash_movements')")
             .fetch_all(&pool)
             .await
-            .unwrap();
+            .expect("the awaited step succeeds");
     assert!(
         !columns
             .iter()
@@ -837,7 +858,7 @@ async fn old_cash_movements_are_migrated_on_mongo_once() {
     use mongodb::bson::{Document, doc};
 
     let app = common::spawn_app_isolated().await;
-    let movements = app.db.collection::<Document>("cash_movements");
+    let movements = app.mongo().collection::<Document>("cash_movements");
     movements
         .insert_one(doc! {
             "key": "cshm_old1", "movement_number": "CSH-000001", "movement_type": "pay_out_supplier",
@@ -847,59 +868,83 @@ async fn old_cash_movements_are_migrated_on_mongo_once() {
             "version": 1_i64,
         })
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 
     let dry = simplebash_pos_backend::modules::cash_categories::migration::migrate_mongo(
-        &app.db,
+        app.mongo(),
         TenantMode::Single,
         Mode::DryRun,
     )
     .await
-    .unwrap();
+    .expect("the awaited step succeeds");
     assert_eq!(dry.movements, 1);
     assert!(
         movements
             .find_one(doc! { "reason": { "$exists": true } })
             .await
-            .unwrap()
+            .expect("the awaited step succeeds")
             .is_some(),
         "a dry run writes nothing"
     );
 
     let report = simplebash_pos_backend::modules::cash_categories::migration::migrate_mongo(
-        &app.db,
+        app.mongo(),
         TenantMode::Single,
         Mode::Apply,
     )
     .await
-    .unwrap();
+    .expect("the awaited step succeeds");
     assert_eq!(report.movements, 1);
     let again = simplebash_pos_backend::modules::cash_categories::migration::migrate_mongo(
-        &app.db,
+        app.mongo(),
         TenantMode::Single,
         Mode::Apply,
     )
     .await
-    .unwrap();
+    .expect("the awaited step succeeds");
     assert_eq!(again.movements, 0);
 
     let migrated = movements
         .find_one(doc! { "key": "cshm_old1" })
         .await
-        .unwrap()
-        .unwrap();
+        .expect("the awaited step succeeds")
+        .expect("the step succeeds");
     assert_eq!(
-        migrated.get_str("movement_type").unwrap(),
+        migrated
+            .get_str("movement_type")
+            .expect("the document has this string field"),
         "supplier_payment"
     );
-    assert_eq!(migrated.get_str("direction").unwrap(), "out");
     assert_eq!(
-        migrated.get_str("category_key").unwrap(),
+        migrated
+            .get_str("direction")
+            .expect("the document has this string field"),
+        "out"
+    );
+    assert_eq!(
+        migrated
+            .get_str("category_key")
+            .expect("the document has this string field"),
         key(CashMovementType::SupplierPayment, "Other")
     );
-    assert_eq!(migrated.get_str("note").unwrap(), "Cables");
-    assert_eq!(migrated.get_str("payee_name").unwrap(), "ABC Traders");
-    assert_eq!(migrated.get_str("payee_key").unwrap(), "sup_abc");
+    assert_eq!(
+        migrated
+            .get_str("note")
+            .expect("the document has this string field"),
+        "Cables"
+    );
+    assert_eq!(
+        migrated
+            .get_str("payee_name")
+            .expect("the document has this string field"),
+        "ABC Traders"
+    );
+    assert_eq!(
+        migrated
+            .get_str("payee_key")
+            .expect("the document has this string field"),
+        "sup_abc"
+    );
     assert!(migrated.get("reason").is_none() && migrated.get("supplier_key").is_none());
 
     // And it reads through the normal API shape with the category's name.
@@ -914,5 +959,5 @@ async fn old_cash_movements_are_migrated_on_mongo_once() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["data"]["categoryName"], "Other");
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }

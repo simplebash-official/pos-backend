@@ -5,8 +5,8 @@ check-atlas:
 	bash scripts/check-atlas.sh
 
 check:
-	cargo fmt --check
-	cargo clippy --all-targets --all-features -- -D warnings
-	cargo test
+	cargo fmt --all --check
+	cargo clippy --workspace --all-targets --all-features -- -D warnings
+	cargo test --workspace
 
 ci: check

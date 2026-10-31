@@ -18,21 +18,28 @@ struct Fixture {
 }
 
 impl Fixture {
-    async fn new() -> Option<Fixture> {
+    async fn new() -> Fixture {
         dotenvy::dotenv().ok();
-        let uri = std::env::var("MONGODB_URI").ok()?;
+        let uri = std::env::var("MONGODB_URI")
+            .expect("Mongo-backed tests need MONGODB_URI (use `make check-atlas`)");
         let name = format!("jtten_{}", &Uuid::new_v4().simple().to_string()[..24]);
         let raw = connect(&uri, &name).await.expect("connect throwaway db");
         let global = Db::from_mongo(raw);
-        Some(Fixture {
-            a: global.for_tenant(Tenant::id("tenant_a").unwrap()),
-            b: global.for_tenant(Tenant::id("tenant_b").unwrap()),
+        Fixture {
+            a: global.for_tenant(Tenant::id("tenant_a").expect("the tenant id is valid")),
+            b: global.for_tenant(Tenant::id("tenant_b").expect("the tenant id is valid")),
             global,
-        })
+        }
     }
 
     async fn cleanup(self) {
-        self.global.as_mongo().unwrap().unscoped().drop().await.ok();
+        self.global
+            .as_mongo()
+            .expect("the app runs on MongoDB")
+            .unscoped()
+            .drop()
+            .await
+            .ok();
     }
 }
 
@@ -40,63 +47,79 @@ fn coll(
     db: &Db,
     name: &str,
 ) -> simplebash_pos_backend::clients::tenant_db::ScopedCollection<Document> {
-    db.as_mongo().unwrap().collection::<Document>(name)
+    db.as_mongo()
+        .expect("the app runs on MongoDB")
+        .collection::<Document>(name)
 }
 
 #[tokio::test]
 async fn reads_writes_and_deletes_stay_inside_the_tenant() {
-    let Some(f) = Fixture::new().await else {
-        eprintln!("MONGODB_URI not set - skipping");
-        return;
-    };
+    let f = Fixture::new().await;
 
     for (db, qty) in [(&f.a, 1), (&f.b, 100)] {
         coll(db, "items")
             .insert_one(doc! { "key": "item_1", "qty": qty })
             .await
-            .unwrap();
+            .expect("the awaited step succeeds");
         coll(db, "items")
             .insert_one(doc! { "key": "item_2", "qty": qty })
             .await
-            .unwrap();
+            .expect("the awaited step succeeds");
     }
 
     // Same keys exist in both tenants; each sees only its own.
     assert_eq!(
-        coll(&f.a, "items").count_documents(doc! {}).await.unwrap(),
+        coll(&f.a, "items")
+            .count_documents(doc! {})
+            .await
+            .expect("the awaited step succeeds"),
         2
     );
     assert_eq!(
-        coll(&f.b, "items").count_documents(doc! {}).await.unwrap(),
+        coll(&f.b, "items")
+            .count_documents(doc! {})
+            .await
+            .expect("the awaited step succeeds"),
         2
     );
     assert_eq!(
         coll(&f.global, "items")
             .count_documents(doc! {})
             .await
-            .unwrap(),
+            .expect("the awaited step succeeds"),
         4
     );
 
     let a_item = coll(&f.a, "items")
         .find_one(doc! { "key": "item_1" })
         .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(a_item.get_i32("qty").unwrap(), 1);
-    assert_eq!(a_item.get_str("tenant_id").unwrap(), "tenant_a");
+        .expect("the awaited step succeeds")
+        .expect("the step succeeds");
+    assert_eq!(
+        a_item.get_i32("qty").expect("the document has this field"),
+        1
+    );
+    assert_eq!(
+        a_item
+            .get_str("tenant_id")
+            .expect("the document has this string field"),
+        "tenant_a"
+    );
 
     // An update by tenant A never touches tenant B's identically keyed row.
     coll(&f.a, "items")
         .update_many(doc! { "key": "item_1" }, doc! { "$set": { "qty": 7 } })
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let b_item = coll(&f.b, "items")
         .find_one(doc! { "key": "item_1" })
         .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(b_item.get_i32("qty").unwrap(), 100);
+        .expect("the awaited step succeeds")
+        .expect("the step succeeds");
+    assert_eq!(
+        b_item.get_i32("qty").expect("the document has this field"),
+        100
+    );
 
     // find_one_and_update cannot reach across tenants either.
     let miss = coll(&f.a, "items")
@@ -105,24 +128,33 @@ async fn reads_writes_and_deletes_stay_inside_the_tenant() {
             doc! { "$set": { "qty": 0 } },
         )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     assert!(miss.is_none());
 
     // A filter that names another tenant explicitly matches nothing.
     let mut forged = coll(&f.a, "items")
         .find(doc! { "tenant_id": "tenant_b" })
         .await
-        .unwrap();
-    assert!(!forged.advance().await.unwrap());
+        .expect("the awaited step succeeds");
+    assert!(!forged.advance().await.expect("the awaited step succeeds"));
 
     // Deletes are scoped as well.
-    coll(&f.a, "items").delete_many(doc! {}).await.unwrap();
+    coll(&f.a, "items")
+        .delete_many(doc! {})
+        .await
+        .expect("the awaited step succeeds");
     assert_eq!(
-        coll(&f.a, "items").count_documents(doc! {}).await.unwrap(),
+        coll(&f.a, "items")
+            .count_documents(doc! {})
+            .await
+            .expect("the awaited step succeeds"),
         0
     );
     assert_eq!(
-        coll(&f.b, "items").count_documents(doc! {}).await.unwrap(),
+        coll(&f.b, "items")
+            .count_documents(doc! {})
+            .await
+            .expect("the awaited step succeeds"),
         2
     );
 
@@ -131,22 +163,25 @@ async fn reads_writes_and_deletes_stay_inside_the_tenant() {
 
 #[tokio::test]
 async fn upsert_and_insert_cannot_escape_the_tenant() {
-    let Some(f) = Fixture::new().await else {
-        eprintln!("MONGODB_URI not set - skipping");
-        return;
-    };
+    let f = Fixture::new().await;
 
     // A caller-supplied tenant_id on insert is overwritten with the scope.
     coll(&f.a, "docs")
         .insert_one(doc! { "key": "d1", "tenant_id": "tenant_b" })
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     assert_eq!(
-        coll(&f.b, "docs").count_documents(doc! {}).await.unwrap(),
+        coll(&f.b, "docs")
+            .count_documents(doc! {})
+            .await
+            .expect("the awaited step succeeds"),
         0
     );
     assert_eq!(
-        coll(&f.a, "docs").count_documents(doc! {}).await.unwrap(),
+        coll(&f.a, "docs")
+            .count_documents(doc! {})
+            .await
+            .expect("the awaited step succeeds"),
         1
     );
 
@@ -155,18 +190,23 @@ async fn upsert_and_insert_cannot_escape_the_tenant() {
         .find_one_and_update(doc! { "_name": "seq" }, doc! { "$inc": { "n": 1 } })
         .upsert(true)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let created = coll(&f.global, "counters")
         .find_one(doc! { "_name": "seq" })
         .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(created.get_str("tenant_id").unwrap(), "tenant_b");
+        .expect("the awaited step succeeds")
+        .expect("the step succeeds");
+    assert_eq!(
+        created
+            .get_str("tenant_id")
+            .expect("the document has this string field"),
+        "tenant_b"
+    );
     assert_eq!(
         coll(&f.a, "counters")
             .count_documents(doc! {})
             .await
-            .unwrap(),
+            .expect("the awaited step succeeds"),
         0
     );
 
@@ -175,22 +215,19 @@ async fn upsert_and_insert_cannot_escape_the_tenant() {
 
 #[tokio::test]
 async fn aggregation_lookups_and_facets_are_tenant_scoped() {
-    let Some(f) = Fixture::new().await else {
-        eprintln!("MONGODB_URI not set - skipping");
-        return;
-    };
+    let f = Fixture::new().await;
 
     // Both tenants own an invoice "inv_1" with payments; A has 1, B has 3.
     for (db, payments) in [(&f.a, 1), (&f.b, 3)] {
         coll(db, "invoices")
             .insert_one(doc! { "key": "inv_1", "total": 10 })
             .await
-            .unwrap();
+            .expect("the awaited step succeeds");
         for i in 0..payments {
             coll(db, "payments")
                 .insert_one(doc! { "key": format!("pay_{i}"), "invoice_key": "inv_1", "amount": 5 })
                 .await
-                .unwrap();
+                .expect("the awaited step succeeds");
         }
     }
 
@@ -201,23 +238,33 @@ async fn aggregation_lookups_and_facets_are_tenant_scoped() {
     let mut cursor = coll(&f.a, "invoices")
         .aggregate(pipeline.clone())
         .await
-        .unwrap();
-    assert!(cursor.advance().await.unwrap());
-    let row = cursor.deserialize_current().unwrap();
-    assert_eq!(row.get_array("pays").unwrap().len(), 1);
+        .expect("the awaited step succeeds");
+    assert!(cursor.advance().await.expect("the awaited step succeeds"));
+    let row = cursor
+        .deserialize_current()
+        .expect("the cursor yields a document");
+    assert_eq!(
+        row.get_array("pays")
+            .expect("the document has this array field")
+            .len(),
+        1
+    );
     assert!(
-        !cursor.advance().await.unwrap(),
+        !cursor.advance().await.expect("the awaited step succeeds"),
         "only tenant A's invoice is returned"
     );
 
-    let mut cursor = coll(&f.b, "invoices").aggregate(pipeline).await.unwrap();
-    assert!(cursor.advance().await.unwrap());
+    let mut cursor = coll(&f.b, "invoices")
+        .aggregate(pipeline)
+        .await
+        .expect("the awaited step succeeds");
+    assert!(cursor.advance().await.expect("the awaited step succeeds"));
     assert_eq!(
         cursor
             .deserialize_current()
-            .unwrap()
+            .expect("the cursor yields a document")
             .get_array("pays")
-            .unwrap()
+            .expect("the document has this array field")
             .len(),
         3
     );
@@ -228,17 +275,24 @@ async fn aggregation_lookups_and_facets_are_tenant_scoped() {
         "from": "payments", "localField": "key",
         "foreignField": "invoice_key", "as": "pays" } } ],
     "n": [ { "$count": "n" } ] } }];
-    let mut cursor = coll(&f.a, "invoices").aggregate(faceted).await.unwrap();
-    assert!(cursor.advance().await.unwrap());
-    let row = cursor.deserialize_current().unwrap();
-    let joined = row.get_array("joined").unwrap();
+    let mut cursor = coll(&f.a, "invoices")
+        .aggregate(faceted)
+        .await
+        .expect("the awaited step succeeds");
+    assert!(cursor.advance().await.expect("the awaited step succeeds"));
+    let row = cursor
+        .deserialize_current()
+        .expect("the cursor yields a document");
+    let joined = row
+        .get_array("joined")
+        .expect("the document has this array field");
     assert_eq!(joined.len(), 1);
     assert_eq!(
         joined[0]
             .as_document()
-            .unwrap()
+            .expect("the entry is a document")
             .get_array("pays")
-            .unwrap()
+            .expect("the document has this array field")
             .len(),
         1
     );
@@ -255,28 +309,26 @@ async fn aggregation_lookups_and_facets_are_tenant_scoped() {
 #[tokio::test]
 async fn ambient_tenant_scopes_a_shared_multi_tenant_handle_and_fails_closed() {
     dotenvy::dotenv().ok();
-    let Ok(uri) = std::env::var("MONGODB_URI") else {
-        eprintln!("MONGODB_URI not set - skipping");
-        return;
-    };
+    let uri = std::env::var("MONGODB_URI")
+        .expect("Mongo-backed tests need MONGODB_URI (use `make check-atlas`)");
     let name = format!("jtten_{}", &Uuid::new_v4().simple().to_string()[..24]);
     let raw = connect(&uri, &name).await.expect("connect throwaway db");
     // One handle, like AppState.db: the tenant comes from the running request.
     let shared = Db::Mongo(TenantDatabase::multi_tenant(raw.clone()));
-    let tenant = |id: &str| Tenant::id(id).unwrap();
+    let tenant = |id: &str| Tenant::id(id).expect("the tenant id is valid");
 
     with_tenant(tenant("shop_a"), async {
         coll(&shared, "items")
             .insert_one(doc! { "key": "k1", "owner": "a" })
             .await
-            .unwrap();
+            .expect("the awaited step succeeds");
     })
     .await;
     with_tenant(tenant("shop_b"), async {
         coll(&shared, "items")
             .insert_one(doc! { "key": "k1", "owner": "b" })
             .await
-            .unwrap();
+            .expect("the awaited step succeeds");
     })
     .await;
 
@@ -287,9 +339,11 @@ async fn ambient_tenant_scopes_a_shared_multi_tenant_handle_and_fails_closed() {
                 let row = coll(&shared, "items")
                     .find_one(doc! { "key": "k1" })
                     .await
-                    .unwrap()
-                    .unwrap();
-                row.get_str("owner").unwrap().to_string()
+                    .expect("the awaited step succeeds")
+                    .expect("the step succeeds");
+                row.get_str("owner")
+                    .expect("the document has this string field")
+                    .to_string()
             })
             .await
         }
@@ -302,20 +356,20 @@ async fn ambient_tenant_scopes_a_shared_multi_tenant_handle_and_fails_closed() {
         coll(&shared, "items")
             .count_documents(doc! {})
             .await
-            .unwrap(),
+            .expect("the awaited step succeeds"),
         0
     );
     // ...and a stray write is quarantined, never placed in a real tenant.
     coll(&shared, "items")
         .insert_one(doc! { "key": "stray" })
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     for id in ["shop_a", "shop_b"] {
         let n = with_tenant(tenant(id), async {
             coll(&shared, "items")
                 .count_documents(doc! { "key": "stray" })
                 .await
-                .unwrap()
+                .expect("the awaited step succeeds")
         })
         .await;
         assert_eq!(n, 0, "stray write leaked into {id}");
@@ -324,7 +378,7 @@ async fn ambient_tenant_scopes_a_shared_multi_tenant_handle_and_fails_closed() {
         .collection::<Document>("items")
         .count_documents(doc! { "tenant_id": "__deny__" })
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     assert_eq!(quarantined, 1);
 
     raw.drop().await.ok();

@@ -98,10 +98,10 @@ async fn export_backup_authorization_gates() {
                 .uri("/api/backup/export")
                 .header(CONTENT_TYPE, "application/json")
                 .body(Body::from(json!({}).to_string()))
-                .unwrap(),
+                .expect("the request is well formed"),
         )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 
     // 2. Staff user token returns 403 Forbidden
@@ -117,10 +117,10 @@ async fn export_backup_authorization_gates() {
                 .header(AUTHORIZATION, format!("Bearer {staff_token}"))
                 .header(CONTENT_TYPE, "application/json")
                 .body(Body::from(json!({}).to_string()))
-                .unwrap(),
+                .expect("the request is well formed"),
         )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 
     // 3. Admin user token returns 200 OK
@@ -136,10 +136,10 @@ async fn export_backup_authorization_gates() {
                 .header(AUTHORIZATION, format!("Bearer {admin_token}"))
                 .header(CONTENT_TYPE, "application/json")
                 .body(Body::from(json!({ "includeSettings": true }).to_string()))
-                .unwrap(),
+                .expect("the request is well formed"),
         )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     assert_eq!(res.status(), StatusCode::OK);
 }
 
@@ -156,7 +156,7 @@ async fn export_and_restore_backup_roundtrip() {
     )
     .execute(&ctx.pool)
     .await
-    .unwrap();
+    .expect("the awaited step succeeds");
 
     sqlx::query(
         "INSERT INTO subcategories (key, id, category_key, name, version, created_at, updated_at) \
@@ -164,7 +164,7 @@ async fn export_and_restore_backup_roundtrip() {
     )
     .execute(&ctx.pool)
     .await
-    .unwrap();
+    .expect("the awaited step succeeds");
 
     sqlx::query(
         "INSERT INTO products (key, id, sku, name, category_key, subcategory_key, stock_quantity, version, created_at, updated_at) \
@@ -172,7 +172,7 @@ async fn export_and_restore_backup_roundtrip() {
     )
     .execute(&ctx.pool)
     .await
-    .unwrap();
+    .expect("the awaited step succeeds");
 
     sqlx::query(
         "INSERT INTO stock_batches (key, id, product_key, source, received_quantity, remaining_quantity, unit_cost_cents, selling_price_cents, received_at, version, created_at, updated_at) \
@@ -180,7 +180,7 @@ async fn export_and_restore_backup_roundtrip() {
     )
     .execute(&ctx.pool)
     .await
-    .unwrap();
+    .expect("the awaited step succeeds");
 
     // 1. Export backup with client settings
     let client_settings = json!({
@@ -204,17 +204,21 @@ async fn export_and_restore_backup_roundtrip() {
                     })
                     .to_string(),
                 ))
-                .unwrap(),
+                .expect("the step succeeds"),
         )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 
     assert_eq!(res.status(), StatusCode::OK);
     let body_bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
         .await
-        .unwrap();
-    let export_res: Value = serde_json::from_slice(&body_bytes).unwrap();
-    assert!(export_res["success"].as_bool().unwrap());
+        .expect("the awaited step succeeds");
+    let export_res: Value = serde_json::from_slice(&body_bytes).expect("the text is valid JSON");
+    assert!(
+        export_res["success"]
+            .as_bool()
+            .expect("the value is a boolean")
+    );
     let backup_data = export_res["data"].clone();
 
     // Verify backup contains our product and settings
@@ -222,7 +226,9 @@ async fn export_and_restore_backup_roundtrip() {
         backup_data["settings"]["shopProfile"]["tradingName"],
         "Backup Test Shop"
     );
-    let products_array = backup_data["tables"]["products"].as_array().unwrap();
+    let products_array = backup_data["tables"]["products"]
+        .as_array()
+        .expect("the value is an array");
     assert_eq!(products_array.len(), 1);
     assert_eq!(products_array[0]["name"], "Asus ROG");
 
@@ -230,21 +236,21 @@ async fn export_and_restore_backup_roundtrip() {
     sqlx::query("DELETE FROM products")
         .execute(&ctx.pool)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     sqlx::query("DELETE FROM subcategories")
         .execute(&ctx.pool)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     sqlx::query("DELETE FROM categories")
         .execute(&ctx.pool)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 
     // Verify table is empty
     let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM products")
         .fetch_one(&ctx.pool)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     assert_eq!(count.0, 0);
 
     // 3. Restore backup
@@ -258,17 +264,21 @@ async fn export_and_restore_backup_roundtrip() {
                 .header(AUTHORIZATION, format!("Bearer {admin_token}"))
                 .header(CONTENT_TYPE, "application/json")
                 .body(Body::from(json!({ "backup": backup_data }).to_string()))
-                .unwrap(),
+                .expect("the request is well formed"),
         )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 
     assert_eq!(res.status(), StatusCode::OK);
     let body_bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
         .await
-        .unwrap();
-    let restore_res: Value = serde_json::from_slice(&body_bytes).unwrap();
-    assert!(restore_res["success"].as_bool().unwrap());
+        .expect("the awaited step succeeds");
+    let restore_res: Value = serde_json::from_slice(&body_bytes).expect("the text is valid JSON");
+    assert!(
+        restore_res["success"]
+            .as_bool()
+            .expect("the value is a boolean")
+    );
     assert_eq!(
         restore_res["data"]["settings"]["shopProfile"]["tradingName"],
         "Backup Test Shop"
@@ -279,14 +289,14 @@ async fn export_and_restore_backup_roundtrip() {
         sqlx::query_as("SELECT key, name FROM products WHERE key = 'prod_1'")
             .fetch_one(&ctx.pool)
             .await
-            .unwrap();
+            .expect("the awaited step succeeds");
     assert_eq!(restored_prod.1, "Asus ROG");
     let restored_batch: (i64, i64) = sqlx::query_as(
         "SELECT remaining_quantity, selling_price_cents FROM stock_batches WHERE key = 'stb_1'",
     )
     .fetch_one(&ctx.pool)
     .await
-    .unwrap();
+    .expect("the awaited step succeeds");
     assert_eq!(restored_batch, (5, 200000));
 }
 
@@ -342,14 +352,14 @@ async fn restoring_a_pre_batch_backup_creates_opening_batches() {
                 .header(AUTHORIZATION, format!("Bearer {admin_token}"))
                 .header(CONTENT_TYPE, "application/json")
                 .body(Body::from(json!({ "backup": backup }).to_string()))
-                .unwrap(),
+                .expect("the request is well formed"),
         )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let status = res.status();
     let body = axum::body::to_bytes(res.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
 
     let batch: (String, i64, i64, i64) = sqlx::query_as(
@@ -357,19 +367,19 @@ async fn restoring_a_pre_batch_backup_creates_opening_batches() {
     )
     .fetch_one(&ctx.pool)
     .await
-    .unwrap();
+    .expect("the awaited step succeeds");
     assert_eq!(batch, ("stb_open_prod_old".to_string(), 5, 1000, 1200));
     let movement_batch: (Option<String>,) =
         sqlx::query_as("SELECT batch_key FROM stock_movements WHERE key = 'sm_old'")
             .fetch_one(&ctx.pool)
             .await
-            .unwrap();
+            .expect("the awaited step succeeds");
     assert_eq!(movement_batch.0.as_deref(), Some("stb_open_prod_old"));
     let purchase_price: (i64,) =
         sqlx::query_as("SELECT selling_price_cents FROM purchases WHERE key = 'pur_old'")
             .fetch_one(&ctx.pool)
             .await
-            .unwrap();
+            .expect("the awaited step succeeds");
     assert_eq!(purchase_price.0, 1200);
 }
 
@@ -399,10 +409,10 @@ async fn restore_rejects_incompatible_version() {
                 .header(AUTHORIZATION, format!("Bearer {admin_token}"))
                 .header(CONTENT_TYPE, "application/json")
                 .body(Body::from(json!({ "backup": invalid_backup }).to_string()))
-                .unwrap(),
+                .expect("the request is well formed"),
         )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
@@ -456,23 +466,27 @@ async fn restore_handles_future_schema_evolution_tables_and_columns() {
                 .header(AUTHORIZATION, format!("Bearer {admin_token}"))
                 .header(CONTENT_TYPE, "application/json")
                 .body(Body::from(json!({ "backup": evolving_backup }).to_string()))
-                .unwrap(),
+                .expect("the request is well formed"),
         )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 
     assert_eq!(res.status(), StatusCode::OK);
     let body_bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
         .await
-        .unwrap();
-    let restore_res: Value = serde_json::from_slice(&body_bytes).unwrap();
-    assert!(restore_res["success"].as_bool().unwrap());
+        .expect("the awaited step succeeds");
+    let restore_res: Value = serde_json::from_slice(&body_bytes).expect("the text is valid JSON");
+    assert!(
+        restore_res["success"]
+            .as_bool()
+            .expect("the value is a boolean")
+    );
 
     // Verify category was restored successfully and the nonexistent table was skipped
     let restored_cat: (String, String) =
         sqlx::query_as("SELECT key, name FROM categories WHERE key = 'cat_evolve_1'")
             .fetch_one(&ctx.pool)
             .await
-            .unwrap();
+            .expect("the awaited step succeeds");
     assert_eq!(restored_cat.1, "Evolving Category");
 }

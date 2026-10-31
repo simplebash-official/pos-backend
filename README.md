@@ -169,7 +169,7 @@ cargo test --test sqlite_integration_test   # one file
 
 The SQLite, OpenAPI and authorization tests need no external services. Tests
 that exercise MongoDB need a reachable instance in `MONGODB_URI` — they use
-their own database (`MONGODB_TEST_DB_NAME`, default `simplebash_pos_test`),
+their own database (the required `MONGODB_TEST_DB_NAME`, a throwaway `jt*` name),
 never your real one. CI runs them against a throwaway MongoDB replica set.
 
 Useful binaries (`cargo run --bin <name>`): `seed_all`, `seed_admin`,

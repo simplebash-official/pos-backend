@@ -1,3 +1,5 @@
+//! The checkout screen: cart totals, discounts and payment state computed together.
+
 use serde::{Deserialize, Serialize};
 
 use crate::calculations::{
@@ -13,6 +15,7 @@ const MAX_LEGS: usize = 20;
 const MAX_CENTS: i64 = 10_000_000_000_000;
 const MAX_QUANTITY: i64 = 1_000_000;
 
+/// Where a cart line came from; sales are broken down by it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -24,6 +27,7 @@ pub enum CalcSource {
     Print,
 }
 
+/// How the sale is being paid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -36,6 +40,7 @@ pub enum CalcPaymentMethod {
     Split,
 }
 
+/// Whether a discount value is a percentage or a fixed amount in cents.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -46,6 +51,7 @@ pub enum CalcDiscountType {
     Fixed,
 }
 
+/// One line of the cart sent for calculation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -63,6 +69,7 @@ pub struct CalcCartLine {
     pub source_type: CalcSource,
 }
 
+/// A discount typed on the order.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -75,6 +82,7 @@ pub struct CalcDiscount {
     pub value: f64,
 }
 
+/// The payment typed on the checkout screen.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -93,6 +101,7 @@ pub struct CalcCheckoutPayment {
     pub credit_deposit_cents: i64,
 }
 
+/// A whole cart and its payment, sent to be calculated.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -104,6 +113,7 @@ pub struct CalcCheckoutRequest {
     pub payment: CalcCheckoutPayment,
 }
 
+/// The figures for one cart line.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -117,6 +127,7 @@ pub struct CalcLineReply {
     pub total_cents: i64,
 }
 
+/// The sale total split by where each line came from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -128,6 +139,7 @@ pub struct CalcSourceBreakdown {
     pub print_cents: i64,
 }
 
+/// The payment state of the sale: change, shortfall, split and credit figures.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -152,6 +164,7 @@ pub struct CalcPaymentReply {
     pub max_credit_deposit_cents: i64,
 }
 
+/// The calculated cart: every line, the totals, the payment state and quick tender amounts.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -179,6 +192,11 @@ fn discount_in_range(discount: &CalcDiscount) -> bool {
     discount.value.is_finite() && (0.0..=1e13).contains(&discount.value)
 }
 
+/// Works out a cart and its payment.
+///
+/// # Errors
+///
+/// Fails when an amount, quantity or discount is out of range, or the cart has too many lines or split legs.
 pub fn compute_checkout(req: &CalcCheckoutRequest) -> CalcResult<CalcCheckoutReply> {
     let out_of_range = || CalcError::validation("An amount or count is out of range");
     if req.items.len() > MAX_LINES || req.payment.split_legs_cents.len() > MAX_LEGS {

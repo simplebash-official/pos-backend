@@ -1,10 +1,11 @@
+//! Seeds the suppliers collection/table with sample suppliers.
+//! Upserts idempotently, safe to run against SQLite or MongoDB.
+//!
+//! Run with: `cargo run --bin seed_suppliers`
+
 use simplebash_pos_backend::core::config::Config;
 use simplebash_pos_backend::{clients, seeds};
 
-/// Seeds the suppliers collection/table with sample suppliers.
-/// Upserts idempotently, safe to run against SQLite or MongoDB.
-///
-/// Run with: `cargo run --bin seed_suppliers`
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();

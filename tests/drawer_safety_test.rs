@@ -31,19 +31,28 @@ async fn send(
     let request = match body {
         Some(value) => {
             builder = builder.header(CONTENT_TYPE, "application/json");
-            builder.body(Body::from(value.to_string())).unwrap()
+            builder
+                .body(Body::from(value.to_string()))
+                .expect("the request is well formed")
         }
-        None => builder.body(Body::empty()).unwrap(),
+        None => builder
+            .body(Body::empty())
+            .expect("the request is well formed"),
     };
-    let response = app.router.clone().oneshot(request).await.unwrap();
+    let response = app
+        .router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let json = if bytes.is_empty() {
         Value::Null
     } else {
-        serde_json::from_slice(&bytes).unwrap()
+        serde_json::from_slice(&bytes).expect("the text is valid JSON")
     };
     (status, json)
 }
@@ -67,7 +76,7 @@ fn token_for(app: &common::TestApp, user: &str, role: Role, name: &str) -> Strin
         &claims,
         &jsonwebtoken::EncodingKey::from_secret(app.config.jwt_secret.as_bytes()),
     )
-    .unwrap()
+    .expect("the token encodes")
 }
 
 fn cat(t: CashMovementType, name: &str) -> String {
@@ -77,7 +86,7 @@ fn cat(t: CashMovementType, name: &str) -> String {
 async fn scenario(app: &common::TestApp) {
     simplebash_pos_backend::seeds::admin::seed_admin(&app.db_handle, &app.config.seed_admin)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let admin = token_for(app, "admin", Role::Admin, "Admin");
 
     let make = |name: &'static str, role: &'static str| {
@@ -95,7 +104,10 @@ async fn scenario(app: &common::TestApp) {
             )
             .await;
             assert_eq!(status, StatusCode::CREATED, "{body}");
-            body["data"]["id"].as_str().unwrap().to_string()
+            body["data"]["id"]
+                .as_str()
+                .expect("the value is a string")
+                .to_string()
         }
     };
     let manager_id = make("mgr", "manager").await;
@@ -125,7 +137,10 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
-    let session = body["data"]["key"].as_str().unwrap().to_string();
+    let session = body["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
 
     let tea = cat(CashMovementType::PettyExpense, "Tea and refreshments");
     let expense = |amount: i64, extra: Value| {
@@ -134,8 +149,8 @@ async fn scenario(app: &common::TestApp) {
             "terminalId": terminal, "categoryKey": tea
         });
         base.as_object_mut()
-            .unwrap()
-            .extend(extra.as_object().unwrap().clone());
+            .expect("the value is an object")
+            .extend(extra.as_object().expect("the value is an object").clone());
         base
     };
     let expected = |app| {
@@ -150,7 +165,9 @@ async fn scenario(app: &common::TestApp) {
                 &alice,
             )
             .await;
-            body["data"]["expectedCashCents"].as_i64().unwrap()
+            body["data"]["expectedCashCents"]
+                .as_i64()
+                .expect("the value is an integer")
         }
     };
     assert_eq!(expected(app).await, 10_000);
@@ -167,7 +184,10 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_eq!(body["code"], "DRAWER_CASH_EXCEEDED");
     assert!(
-        body["message"].as_str().unwrap().contains("Rs. 100.00"),
+        body["message"]
+            .as_str()
+            .expect("the value is a string")
+            .contains("Rs. 100.00"),
         "{body}"
     );
     // A PIN alone is not enough: the manager must also say why.
@@ -226,7 +246,10 @@ async fn scenario(app: &common::TestApp) {
         body["data"]["approvalReason"],
         "Supplier waiting at the door"
     );
-    let over = body["data"]["key"].as_str().unwrap().to_string();
+    let over = body["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     assert_eq!(expected(app).await, -10_000);
 
     // A drop is a payout too.
@@ -259,7 +282,7 @@ async fn scenario(app: &common::TestApp) {
     assert!(
         reversal["note"]
             .as_str()
-            .unwrap()
+            .expect("the value is a string")
             .starts_with("Reversal of CSH-")
     );
     assert!(
@@ -298,7 +321,7 @@ async fn scenario(app: &common::TestApp) {
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_eq!(body["code"], "MOVEMENT_ALREADY_REVERSED");
-    let rev_key = reversal["key"].as_str().unwrap();
+    let rev_key = reversal["key"].as_str().expect("the value is a string");
     let (status, _) = send(
         app,
         "POST",
@@ -319,7 +342,10 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
-    let small = body["data"]["key"].as_str().unwrap().to_string();
+    let small = body["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     assert!(
         body["data"]["undoUntil"].is_string(),
         "a fresh movement can be undone for a while"
@@ -363,7 +389,10 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert!(body["data"].get("undoUntil").is_none());
-    let no_sale = body["data"]["key"].as_str().unwrap().to_string();
+    let no_sale = body["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     let (status, _) = send(
         app,
         "POST",
@@ -427,5 +456,5 @@ async fn drawer_safety_on_sqlite() {
 async fn drawer_safety_on_mongo() {
     let app = common::spawn_app_isolated().await;
     scenario(&app).await;
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }

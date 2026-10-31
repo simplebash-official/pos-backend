@@ -14,15 +14,19 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 async fn execute(router: &axum::Router, request: Request<Body>) -> (StatusCode, Value) {
-    let response = router.clone().oneshot(request).await.unwrap();
+    let response = router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let json = if bytes.is_empty() {
         Value::Null
     } else {
-        serde_json::from_slice(&bytes).unwrap()
+        serde_json::from_slice(&bytes).expect("the text is valid JSON")
     };
     (status, json)
 }
@@ -41,7 +45,7 @@ async fn send(
             Some(value) => Body::from(value.to_string()),
             None => Body::empty(),
         })
-        .unwrap();
+        .expect("the request is well formed");
     execute(router, request).await
 }
 
@@ -61,7 +65,7 @@ async fn send_authed(
             Some(value) => Body::from(value.to_string()),
             None => Body::empty(),
         })
-        .unwrap();
+        .expect("the request is well formed");
     execute(router, request).await
 }
 
@@ -119,8 +123,14 @@ async fn create_user_via_api(
         StatusCode::CREATED,
         "failed to create test user: {body}"
     );
-    let id = body["data"]["id"].as_str().unwrap().to_string();
-    let key = body["data"]["key"].as_str().unwrap().to_string();
+    let id = body["data"]["id"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
+    let key = body["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     (id, key, body["data"].clone())
 }
 
@@ -268,10 +278,10 @@ async fn usernames_are_case_insensitive_and_login_rejects_emails() {
                 .body(Body::from(
                     json!({ "email": "someone@shop.com", "password": "Password123!" }).to_string(),
                 ))
-                .unwrap(),
+                .expect("the request is well formed"),
         )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     assert!(
         response.status().is_client_error(),
         "an email login body is not accepted"
@@ -324,7 +334,7 @@ async fn caller_without_users_permission_gets_403_creating_user() {
 #[tokio::test]
 async fn single_admin_invariant_and_admin_invisible_via_users_api() {
     let app = common::spawn_app().await;
-    app.db
+    app.mongo()
         .collection::<mongodb::bson::Document>("users")
         .delete_many(mongodb::bson::doc! { "role": "admin" })
         .await
@@ -368,7 +378,10 @@ async fn single_admin_invariant_and_admin_invisible_via_users_api() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    let admin_id = body["data"]["user"]["id"].as_str().unwrap().to_string();
+    let admin_id = body["data"]["user"]["id"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
 
     let caller = admin_token(&app.config);
     let (status, body) = send_authed(
@@ -415,7 +428,9 @@ async fn manager_list_only_shows_staff_accounts() {
     let manager = manager_token(&app.config);
     let (status, body) = send_authed(&app.router, "GET", "/api/users", None, &manager).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    let users = body["data"]["users"].as_array().unwrap();
+    let users = body["data"]["users"]
+        .as_array()
+        .expect("the value is an array");
 
     assert!(
         users.iter().all(|u| u["role"] == "staff"),
@@ -556,7 +571,10 @@ async fn updated_password_takes_effect_on_next_login() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
-    let user_id = body["data"]["id"].as_str().unwrap().to_string();
+    let user_id = body["data"]["id"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
 
     let (status, _) = send(
         &app.router,
@@ -691,7 +709,7 @@ async fn creating_user_with_employee_key_links_it() {
     let app = common::spawn_app().await;
     let token = admin_token(&app.config);
     let employee = create_employee_via_api(&app.router, &token).await;
-    let employee_key = employee["key"].as_str().unwrap();
+    let employee_key = employee["key"].as_str().expect("the value is a string");
 
     let (status, body) = send_authed(
         &app.router,
@@ -739,7 +757,7 @@ async fn creating_second_login_for_already_linked_employee_is_rejected() {
     let app = common::spawn_app().await;
     let token = admin_token(&app.config);
     let employee = create_employee_via_api(&app.router, &token).await;
-    let employee_key = employee["key"].as_str().unwrap();
+    let employee_key = employee["key"].as_str().expect("the value is a string");
 
     let (status, body) = send_authed(
         &app.router,

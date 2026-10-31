@@ -1,5 +1,5 @@
 //! One-time data migration for the Invoice Status Model + Credit Note
-//! upgrade (see /Users/mayura/.claude/plans/now-here-is-the-enchanted-storm.md).
+//! upgrade.
 //! Rewrites pre-migration data left over from the old `"cancelled"` invoice
 //! status / `returns` collection / `restock_action` field shape into the new
 //! `InvoiceStatus::Voided` / `credit_notes` collection / `condition`+

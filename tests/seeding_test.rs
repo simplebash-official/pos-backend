@@ -23,17 +23,25 @@ async fn send_request(
     let request = if let Some(json_body) = body {
         builder
             .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(serde_json::to_vec(&json_body).unwrap()))
-            .unwrap()
+            .body(Body::from(
+                serde_json::to_vec(&json_body).expect("the value serializes to JSON"),
+            ))
+            .expect("the value serializes to JSON")
     } else {
-        builder.body(Body::empty()).unwrap()
+        builder
+            .body(Body::empty())
+            .expect("the value serializes to JSON")
     };
 
-    let response = router.clone().oneshot(request).await.unwrap();
+    let response = router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     let status = response.status();
     let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 
     let json: serde_json::Value = if body_bytes.is_empty() {
         serde_json::Value::Null
@@ -172,7 +180,9 @@ async fn test_seeded_data_works_in_sale_transaction() {
     )
     .await;
 
-    let token = login_res["data"]["token"].as_str().unwrap();
+    let token = login_res["data"]["token"]
+        .as_str()
+        .expect("the value is a string");
 
     // Fetch product
     let (_, prod_res) = send_request(
@@ -183,11 +193,13 @@ async fn test_seeded_data_works_in_sale_transaction() {
         None,
     )
     .await;
-    let product_key = prod_res["data"]["items"][0]["key"].as_str().unwrap();
+    let product_key = prod_res["data"]["items"][0]["key"]
+        .as_str()
+        .expect("the value is a string");
     // A seeded product's units sit in one opening batch, at one price.
     let unit_price_cents = prod_res["data"]["items"][0]["priceTiers"][0]["sellingPriceCents"]
         .as_i64()
-        .unwrap();
+        .expect("the value is an integer");
 
     // Fetch customer
     let (_, cust_res) = send_request(
@@ -198,7 +210,9 @@ async fn test_seeded_data_works_in_sale_transaction() {
         None,
     )
     .await;
-    let customer_key = cust_res["data"]["customers"][0]["key"].as_str().unwrap();
+    let customer_key = cust_res["data"]["customers"][0]["key"]
+        .as_str()
+        .expect("the value is a string");
 
     // Complete a sale with the seeded product and customer
     let sale_payload = json!({

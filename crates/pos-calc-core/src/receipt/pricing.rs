@@ -1,3 +1,5 @@
+//! Landed cost and selling price of a receipt line, from its cost, charges share and margin.
+
 use serde::{Deserialize, Serialize};
 
 use crate::error::{CalcError, CalcResult};

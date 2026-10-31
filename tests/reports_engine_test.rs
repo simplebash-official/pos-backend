@@ -18,15 +18,19 @@ use simplebash_pos_backend::modules::reports::engine::charts::enrich_timeseries;
 use tower::ServiceExt;
 
 async fn execute(router: &axum::Router, request: Request<Body>) -> (StatusCode, Value) {
-    let response = router.clone().oneshot(request).await.unwrap();
+    let response = router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let json = if bytes.is_empty() {
         Value::Null
     } else {
-        serde_json::from_slice(&bytes).unwrap()
+        serde_json::from_slice(&bytes).expect("the text is valid JSON")
     };
     (status, json)
 }
@@ -47,7 +51,7 @@ async fn send_authed(
             Some(value) => Body::from(value.to_string()),
             None => Body::empty(),
         })
-        .unwrap();
+        .expect("the request is well formed");
     execute(router, request).await
 }
 
@@ -131,11 +135,11 @@ async fn test_engine_feed_overview_and_cache_hit() {
     // Seed test invoice
     let now = Utc::now();
     let invoice = seed_invoice("inv_engine_1", now, 20_000, 10_000);
-    app.db
+    app.mongo()
         .collection::<InvoiceDocument>("invoices")
         .insert_one(invoice)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 
     // First request: Cold run (Cache MISS)
     let (status, body1) = send_authed(

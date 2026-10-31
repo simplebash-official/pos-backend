@@ -14,15 +14,19 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 async fn execute(router: &axum::Router, request: Request<Body>) -> (StatusCode, Value) {
-    let response = router.clone().oneshot(request).await.unwrap();
+    let response = router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let json = if bytes.is_empty() {
         Value::Null
     } else {
-        serde_json::from_slice(&bytes).unwrap()
+        serde_json::from_slice(&bytes).expect("the text is valid JSON")
     };
     (status, json)
 }
@@ -41,7 +45,7 @@ async fn send(
             Some(value) => Body::from(value.to_string()),
             None => Body::empty(),
         })
-        .unwrap();
+        .expect("the request is well formed");
     execute(router, request).await
 }
 
@@ -61,7 +65,7 @@ async fn send_authed(
             Some(value) => Body::from(value.to_string()),
             None => Body::empty(),
         })
-        .unwrap();
+        .expect("the request is well formed");
     execute(router, request).await
 }
 
@@ -96,7 +100,10 @@ async fn create_user(router: &axum::Router, admin: &str, role: &str) -> (String,
         StatusCode::CREATED,
         "failed to create test user: {body}"
     );
-    let id = body["data"]["id"].as_str().unwrap().to_string();
+    let id = body["data"]["id"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     (id, username, password)
 }
 
@@ -119,8 +126,15 @@ async fn login_with_valid_credentials_returns_token_and_user_with_expected_role_
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
 
-    let token = body["data"]["token"].as_str().unwrap();
-    assert!(body["data"]["expiresIn"].as_i64().unwrap() > 0);
+    let token = body["data"]["token"]
+        .as_str()
+        .expect("the value is a string");
+    assert!(
+        body["data"]["expiresIn"]
+            .as_i64()
+            .expect("the value is an integer")
+            > 0
+    );
     assert_eq!(body["data"]["user"]["username"], username);
     assert_eq!(body["data"]["user"]["role"], "staff");
 
@@ -222,7 +236,10 @@ async fn me_returns_current_user_info() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let token = body["data"]["token"].as_str().unwrap().to_string();
+    let token = body["data"]["token"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
 
     let (status, body) = send_authed(&app.router, "GET", "/api/auth/me", None, &token).await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -251,7 +268,10 @@ async fn me_for_account_deactivated_after_token_issuance_returns_401() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let token = body["data"]["token"].as_str().unwrap().to_string();
+    let token = body["data"]["token"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
 
     // The token is still cryptographically valid — deactivate the account
     // out from under it and confirm /me (which re-reads from Mongo) is the
@@ -292,7 +312,9 @@ async fn login_records_a_session_visible_via_sessions_endpoint() {
 
     let (status, body) = send_authed(&app.router, "GET", "/api/auth/sessions", None, &admin).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    let sessions = body["data"]["sessions"].as_array().unwrap();
+    let sessions = body["data"]["sessions"]
+        .as_array()
+        .expect("the value is an array");
     assert!(
         sessions
             .iter()
@@ -342,7 +364,9 @@ async fn sessions_filter_by_user_id() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    let sessions = body["data"]["sessions"].as_array().unwrap();
+    let sessions = body["data"]["sessions"]
+        .as_array()
+        .expect("the value is an array");
     assert!(!sessions.is_empty());
     assert!(sessions.iter().all(|s| s["username"] == username_a));
 }
@@ -360,7 +384,10 @@ async fn login_token(router: &axum::Router, username: &str, password: &str) -> S
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    body["data"]["token"].as_str().unwrap().to_string()
+    body["data"]["token"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string()
 }
 
 #[tokio::test]

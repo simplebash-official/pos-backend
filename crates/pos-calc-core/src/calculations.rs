@@ -1,8 +1,11 @@
+//! Money maths shared by checkout, quotations and receipts. Every amount is an integer in cents; no function here touches floating point except to read a typed percentage.
+
 use crate::error::{CalcError, CalcResult};
 use serde::{Deserialize, Serialize};
 
 /// Computes the net line total in cents from unit price, quantity, and discount.
 #[inline]
+#[must_use]
 pub fn compute_line_total(unit_price_cents: i64, quantity: i64, discount_cents: i64) -> i64 {
     let gross = unit_price_cents.max(0) * quantity.max(0);
     (gross - discount_cents.max(0)).max(0)
@@ -10,11 +13,13 @@ pub fn compute_line_total(unit_price_cents: i64, quantity: i64, discount_cents: 
 
 /// Computes change due in cents if tendered amount was provided.
 #[inline]
+#[must_use]
 pub fn compute_change_due(amount_received_cents: Option<i64>, total_cents: i64) -> Option<i64> {
     amount_received_cents.map(|received| (received - total_cents).max(0))
 }
 
 /// `n / d` rounded half up (towards +infinity), the same as JavaScript's `Math.round`.
+#[must_use]
 pub fn round_half_up(n: i128, d: i128) -> i128 {
     (2 * n + d).div_euclid(2 * d)
 }
@@ -22,6 +27,7 @@ pub fn round_half_up(n: i128, d: i128) -> i128 {
 /// A percentage (0-100, at most two decimals are kept) of `base_cents`, rounded half up and never
 /// more than `base_cents`. Done in whole numbers: the percent is turned into basis points once at
 /// the edge, so no floating point touches the money.
+#[must_use]
 pub fn percentage_discount_cents(base_cents: i64, percent: f64) -> i64 {
     if base_cents <= 0 {
         return 0;
@@ -34,6 +40,7 @@ pub fn percentage_discount_cents(base_cents: i64, percent: f64) -> i64 {
 /// A part as a share of its whole, in basis points (percent x 100), rounded half up and kept between
 /// 0 and the whole: a progress bar or a pie slice never goes past full. A whole of nothing has no
 /// share.
+#[must_use]
 pub fn share_basis_points(part_cents: i64, whole_cents: i64) -> i64 {
     if whole_cents <= 0 || part_cents <= 0 {
         return 0;
@@ -45,6 +52,7 @@ pub fn share_basis_points(part_cents: i64, whole_cents: i64) -> i64 {
 /// What a customer has paid on an invoice and what they still owe. A credit invoice owes its total
 /// less what was paid and less what was returned (credit notes), never below zero; a sale paid at
 /// the till owes nothing and counts as paid in full.
+#[must_use]
 pub fn invoice_paid_and_balance(
     is_credit: bool,
     total_cents: i64,
@@ -63,12 +71,14 @@ pub fn invoice_paid_and_balance(
 }
 
 /// What a repair or print job earned the shop: the price less what the parts cost, never below zero.
+#[must_use]
 pub fn job_profit_cents(price_cents: i64, material_cost_cents: i64) -> i64 {
     price_cents.saturating_sub(material_cost_cents).max(0)
 }
 
 /// What the assigned employee earns on a job. A percentage is taken of the job's profit; a fixed
 /// amount (cents) is paid in full but never more than the profit. No split rule means no commission.
+#[must_use]
 pub fn commission_cents(profit_cents: i64, split_type: Option<&str>, split_value: f64) -> i64 {
     match split_type {
         Some("percentage") => percentage_discount_cents(profit_cents, split_value),
@@ -109,6 +119,7 @@ pub fn line_totals(
 
 /// The order discount in cents for a discount type ("percentage" or "fixed", a fixed value being
 /// cents) against a subtotal. Anything else, or no value, is no discount.
+#[must_use]
 pub fn order_discount_cents(subtotal_cents: i64, discount_type: &str, discount_value: f64) -> i64 {
     if subtotal_cents <= 0 || discount_value <= 0.0 {
         return 0;
@@ -145,6 +156,7 @@ pub enum LineDiscount {
     Percentage(f64),
 }
 
+/// One cart line as the totals maths sees it.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "tsify", derive(tsify::Tsify))]
@@ -156,6 +168,7 @@ pub struct CartLine {
     pub source: LineSource,
 }
 
+/// Everything a cart adds up to: each line, the subtotal, the order discount and the total.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "tsify", derive(tsify::Tsify))]
@@ -229,6 +242,7 @@ pub enum TenderMethod {
     Split,
 }
 
+/// What the payment maths needs to know about a sale being paid.
 #[derive(Debug, Clone)]
 pub struct PaymentInput<'a> {
     pub total_cents: i64,
@@ -241,6 +255,7 @@ pub struct PaymentInput<'a> {
     pub credit_deposit_cents: i64,
 }
 
+/// How far a payment gets, as the till screen shows it: change due, shortfall and credit position.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "tsify", derive(tsify::Tsify))]
@@ -332,6 +347,7 @@ pub fn payment_state(input: &PaymentInput) -> CalcResult<PaymentState> {
 
 /// The cash amounts to offer as quick buttons: the exact total, the next whole rupee, the notes
 /// above it, and the next round 500 / 1,000 / 5,000 for larger bills. Sorted, no repeats.
+#[must_use]
 pub fn quick_tender_suggestions(total_cents: i64) -> Vec<i64> {
     use std::collections::BTreeSet;
     if total_cents <= 0 {
@@ -363,6 +379,7 @@ pub fn quick_tender_suggestions(total_cents: i64) -> Vec<i64> {
 /// What one unit of a returned invoice line is worth back: the line's net total (after its
 /// discount) divided by the units sold, to the whole cent below. A line with no units sold falls
 /// back to its listed unit price.
+#[must_use]
 pub fn returned_unit_price_cents(
     line_total_cents: i64,
     quantity_sold: i64,
@@ -378,6 +395,7 @@ pub fn returned_unit_price_cents(
 /// Splits `total` across `weights` in proportion, rounding down per leg and giving the last leg
 /// whatever the rounding left over, so the legs always add up to exactly `total`. No weights (or
 /// none positive) means one leg of the whole.
+#[must_use]
 pub fn proportional_split(total: i64, weights: &[i64]) -> Vec<i64> {
     let weight_sum: i64 = weights.iter().sum();
     if weight_sum <= 0 || weights.is_empty() {
@@ -398,6 +416,7 @@ pub fn proportional_split(total: i64, weights: &[i64]) -> Vec<i64> {
 /// How a net refund is paid out: the cash that goes back, and what only reduces what the customer
 /// owes. A positive refund on a real invoice is capped at what was actually paid on it; a no-receipt
 /// return has no invoice to cap against and a negative net (the customer pays extra) is never capped.
+#[must_use]
 pub fn refund_amounts(
     net_refund_cents: i64,
     already_paid_cents: i64,
@@ -413,6 +432,7 @@ pub fn refund_amounts(
 
 /// Where the refund cash goes by default: in proportion to the invoice's original payment legs when
 /// it was paid in more than one, otherwise one leg by the fallback method. Nothing to refund, no legs.
+#[must_use]
 pub fn default_refund_legs(
     refund_cash_cents: i64,
     invoice_legs: &[(String, i64)],

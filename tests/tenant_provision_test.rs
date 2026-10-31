@@ -25,19 +25,10 @@ const PASSWORD: &str = "correct-horse-1";
 const TENANT_A: &str = "tnt_aaaaaaaaaaaaaaaa";
 const TENANT_B: &str = "tnt_bbbbbbbbbbbbbbbb";
 
-fn has_mongo() -> bool {
-    dotenvy::dotenv().ok();
-    if std::env::var("MONGODB_URI").is_err() {
-        eprintln!("MONGODB_URI not set - skipping");
-        return false;
-    }
-    true
-}
-
 fn argon2_hash(password: &str) -> String {
     Argon2::default()
         .hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng))
-        .unwrap()
+        .expect("the password hashes")
         .to_string()
 }
 
@@ -56,13 +47,17 @@ async fn post(
     }
     let response = router
         .clone()
-        .oneshot(request.body(Body::from(body.to_string())).unwrap())
+        .oneshot(
+            request
+                .body(Body::from(body.to_string()))
+                .expect("the request is well formed"),
+        )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     (
         status,
         serde_json::from_slice(&bytes).unwrap_or(Value::Null),
@@ -76,13 +71,17 @@ async fn get_with_token(router: &Router, uri: &str, token: Option<&str>) -> (Sta
     }
     let response = router
         .clone()
-        .oneshot(request.body(Body::empty()).unwrap())
+        .oneshot(
+            request
+                .body(Body::empty())
+                .expect("the request is well formed"),
+        )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     (
         status,
         serde_json::from_slice(&bytes).unwrap_or(Value::Null),
@@ -104,13 +103,17 @@ async fn post_with_token(
     }
     let response = router
         .clone()
-        .oneshot(request.body(Body::from(body.to_string())).unwrap())
+        .oneshot(
+            request
+                .body(Body::from(body.to_string()))
+                .expect("the request is well formed"),
+        )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     (
         status,
         serde_json::from_slice(&bytes).unwrap_or(Value::Null),
@@ -127,11 +130,8 @@ fn shop(tenant_id: &str, shop_code: &str, owner_hash: Option<&str>) -> Value {
 
 #[tokio::test]
 async fn provisioning_creates_the_shop_and_an_owner_who_can_log_in_with_the_same_password() {
-    if !has_mongo() {
-        return;
-    }
     let app = common::spawn_app_multi_tenant_with_secret(Some(SECRET)).await;
-    ensure_indexes(&app.db, TenantMode::Multi).await;
+    ensure_indexes(app.mongo(), TenantMode::Multi).await;
 
     let (status, body) = post(
         &app.router,
@@ -157,24 +157,29 @@ async fn provisioning_creates_the_shop_and_an_owner_who_can_log_in_with_the_same
 
     // The Admin belongs to the new tenant, not to the platform scope.
     let stored = app
-        .db
+        .mongo()
         .collection::<mongodb::bson::Document>("users")
         .find_one(doc! { "username": "admin" })
         .await
-        .unwrap()
+        .expect("the awaited step succeeds")
         .expect("owner user stored");
-    assert_eq!(stored.get_str("tenant_id").unwrap(), TENANT_A);
+    assert_eq!(
+        stored
+            .get_str("tenant_id")
+            .expect("the document has this string field"),
+        TENANT_A
+    );
 
     // The new shop starts with the drawer's built-in cash categories, once, even if provisioning is replayed.
     let built_in = simplebash_pos_backend::seeds::cash_categories::SYSTEM_CATEGORIES.len() as u64;
     let categories = app
-        .db
+        .mongo()
         .collection::<mongodb::bson::Document>("cash_categories");
     assert_eq!(
         categories
             .count_documents(doc! { "tenant_id": TENANT_A })
             .await
-            .unwrap(),
+            .expect("the awaited step succeeds"),
         built_in
     );
     let (status, _) = post(
@@ -189,20 +194,17 @@ async fn provisioning_creates_the_shop_and_an_owner_who_can_log_in_with_the_same
         categories
             .count_documents(doc! { "tenant_id": TENANT_A })
             .await
-            .unwrap(),
+            .expect("the awaited step succeeds"),
         built_in
     );
 
-    let _ = app.db.drop().await;
+    let _ = app.mongo().drop().await;
 }
 
 #[tokio::test]
 async fn replaying_a_provisioning_request_changes_nothing() {
-    if !has_mongo() {
-        return;
-    }
     let app = common::spawn_app_multi_tenant_with_secret(Some(SECRET)).await;
-    ensure_indexes(&app.db, TenantMode::Multi).await;
+    ensure_indexes(app.mongo(), TenantMode::Multi).await;
     let hash = argon2_hash(PASSWORD);
 
     let (first, _) = post(
@@ -226,23 +228,20 @@ async fn replaying_a_provisioning_request_changes_nothing() {
     assert_eq!(body["data"]["adminCreated"], false);
 
     let users = app
-        .db
+        .mongo()
         .collection::<mongodb::bson::Document>("users")
         .count_documents(doc! {})
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     assert_eq!(users, 1, "a replay must not create a second Admin");
 
-    let _ = app.db.drop().await;
+    let _ = app.mongo().drop().await;
 }
 
 #[tokio::test]
 async fn a_desktop_sign_up_registers_the_shop_without_an_owner() {
-    if !has_mongo() {
-        return;
-    }
     let app = common::spawn_app_multi_tenant_with_secret(Some(SECRET)).await;
-    ensure_indexes(&app.db, TenantMode::Multi).await;
+    ensure_indexes(app.mongo(), TenantMode::Multi).await;
 
     let (status, body) = post(
         &app.router,
@@ -265,16 +264,13 @@ async fn a_desktop_sign_up_registers_the_shop_without_an_owner() {
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
-    let _ = app.db.drop().await;
+    let _ = app.mongo().drop().await;
 }
 
 #[tokio::test]
 async fn the_shop_code_of_another_shop_is_refused() {
-    if !has_mongo() {
-        return;
-    }
     let app = common::spawn_app_multi_tenant_with_secret(Some(SECRET)).await;
-    ensure_indexes(&app.db, TenantMode::Multi).await;
+    ensure_indexes(app.mongo(), TenantMode::Multi).await;
 
     let (first, _) = post(
         &app.router,
@@ -311,16 +307,13 @@ async fn the_shop_code_of_another_shop_is_refused() {
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_eq!(body["code"], "TENANT_ALREADY_EXISTS");
 
-    let _ = app.db.drop().await;
+    let _ = app.mongo().drop().await;
 }
 
 #[tokio::test]
 async fn bad_input_is_rejected_before_anything_is_written() {
-    if !has_mongo() {
-        return;
-    }
     let app = common::spawn_app_multi_tenant_with_secret(Some(SECRET)).await;
-    ensure_indexes(&app.db, TenantMode::Multi).await;
+    ensure_indexes(app.mongo(), TenantMode::Multi).await;
 
     // A plaintext password (or any non-Argon2 value) can never be verified, so it is refused.
     let (status, _) = post(
@@ -353,23 +346,20 @@ async fn bad_input_is_rejected_before_anything_is_written() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
 
     let tenants = app
-        .db
+        .mongo()
         .collection::<mongodb::bson::Document>("tenants")
         .count_documents(doc! {})
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     assert_eq!(tenants, 0);
 
-    let _ = app.db.drop().await;
+    let _ = app.mongo().drop().await;
 }
 
 #[tokio::test]
 async fn the_shared_secret_is_required_and_the_endpoint_is_off_without_one() {
-    if !has_mongo() {
-        return;
-    }
     let app = common::spawn_app_multi_tenant_with_secret(Some(SECRET)).await;
-    ensure_indexes(&app.db, TenantMode::Multi).await;
+    ensure_indexes(app.mongo(), TenantMode::Multi).await;
 
     let body = shop(TENANT_A, "ann-s-phones", None);
     let (status, _) = post(&app.router, "/api/internal/provision", None, body.clone()).await;
@@ -392,31 +382,28 @@ async fn the_shared_secret_is_required_and_the_endpoint_is_off_without_one() {
     assert_eq!(status, StatusCode::UNAUTHORIZED, "a prefix of the secret");
 
     let tenants = app
-        .db
+        .mongo()
         .collection::<mongodb::bson::Document>("tenants")
         .count_documents(doc! {})
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     assert_eq!(
         tenants, 0,
         "nothing is written for an unauthenticated caller"
     );
-    let _ = app.db.drop().await;
+    let _ = app.mongo().drop().await;
 
     // A deployment with no PROVISION_SECRET behaves as if the route did not exist.
     let off = common::spawn_app_multi_tenant_with_secret(None).await;
     let (status, _) = post(&off.router, "/api/internal/provision", Some(SECRET), body).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
-    let _ = off.db.drop().await;
+    let _ = off.mongo().drop().await;
 }
 
 #[tokio::test]
 async fn multi_tenant_onboarding_and_sample_data_seeding() {
-    if !has_mongo() {
-        return;
-    }
     let app = common::spawn_app_multi_tenant_with_secret(Some(SECRET)).await;
-    ensure_indexes(&app.db, TenantMode::Multi).await;
+    ensure_indexes(app.mongo(), TenantMode::Multi).await;
 
     // 1. Provision shop with owner
     let (status, _) = post(
@@ -448,7 +435,9 @@ async fn multi_tenant_onboarding_and_sample_data_seeding() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let token = body["data"]["token"].as_str().unwrap();
+    let token = body["data"]["token"]
+        .as_str()
+        .expect("the value is a string");
 
     // 4. Query setup-status with bearer token
     let (status, body) = get_with_token(&app.router, "/api/system/setup-status", Some(token)).await;
@@ -485,16 +474,13 @@ async fn multi_tenant_onboarding_and_sample_data_seeding() {
         "sample products should be loaded in tenant scope: {body}"
     );
 
-    let _ = app.db.drop().await;
+    let _ = app.mongo().drop().await;
 }
 
 #[tokio::test]
 async fn replaying_with_a_new_name_refreshes_names_but_keeps_the_password() {
-    if !has_mongo() {
-        return;
-    }
     let app = common::spawn_app_multi_tenant_with_secret(Some(SECRET)).await;
-    ensure_indexes(&app.db, TenantMode::Multi).await;
+    ensure_indexes(app.mongo(), TenantMode::Multi).await;
     let hash = argon2_hash(PASSWORD);
 
     let (first, _) = post(
@@ -524,22 +510,31 @@ async fn replaying_with_a_new_name_refreshes_names_but_keeps_the_password() {
     assert_eq!(body["data"]["adminCreated"], false);
 
     let user = app
-        .db
+        .mongo()
         .collection::<mongodb::bson::Document>("users")
         .find_one(doc! { "username": "admin" })
         .await
-        .unwrap()
+        .expect("the awaited step succeeds")
         .expect("owner user stored");
-    assert_eq!(user.get_str("name").unwrap(), "Ann Perera");
+    assert_eq!(
+        user.get_str("name")
+            .expect("the document has this string field"),
+        "Ann Perera"
+    );
 
     let tenant = app
-        .db
+        .mongo()
         .collection::<mongodb::bson::Document>("tenants")
         .find_one(doc! { "key": TENANT_A })
         .await
-        .unwrap()
+        .expect("the awaited step succeeds")
         .expect("tenant stored");
-    assert_eq!(tenant.get_str("name").unwrap(), "Ann Mobile");
+    assert_eq!(
+        tenant
+            .get_str("name")
+            .expect("the document has this string field"),
+        "Ann Mobile"
+    );
 
     // The local password is untouched by a replay.
     let (status, body) = post(
@@ -551,5 +546,5 @@ async fn replaying_with_a_new_name_refreshes_names_but_keeps_the_password() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
 
-    let _ = app.db.drop().await;
+    let _ = app.mongo().drop().await;
 }

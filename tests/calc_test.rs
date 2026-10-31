@@ -32,13 +32,17 @@ async fn post(
     let response = app
         .router
         .clone()
-        .oneshot(request.body(Body::from(body.to_string())).unwrap())
+        .oneshot(
+            request
+                .body(Body::from(body.to_string()))
+                .expect("the request is well formed"),
+        )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     (
         status,
         serde_json::from_slice(&bytes).unwrap_or(Value::Null),
@@ -54,11 +58,13 @@ fn golden(name: &str, request: &Value, reply: &Value) {
     if std::env::var("UPDATE_GOLDEN").is_ok() {
         std::fs::write(
             &path,
-            serde_json::to_string_pretty(&recorded).unwrap() + "\n",
+            serde_json::to_string_pretty(&recorded).expect("the value serializes to JSON") + "\n",
         )
-        .unwrap();
+        .expect("the value serializes to JSON");
     }
-    let stored: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let stored: Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("the text is valid JSON"))
+            .expect("the text is valid JSON");
     assert_eq!(stored, recorded, "{name} drifted from its golden file");
 }
 
@@ -308,7 +314,10 @@ async fn a_cash_payment_and_a_shift_count_are_checked_against_the_real_drawer() 
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{opened}");
-    let session_key = opened["data"]["key"].as_str().unwrap().to_string();
+    let session_key = opened["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     let tea = category_key(CashMovementType::PettyExpense, "Tea and refreshments");
 
     let request = json!({
@@ -493,7 +502,10 @@ async fn the_totals_over_a_shift_list_are_worked_out_on_the_server() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{opened}");
-    let key = opened["data"]["key"].as_str().unwrap().to_string();
+    let key = opened["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
 
     let request = json!({ "sessionKeys": [key] });
     let (status, body) = post(&app, "/api/calc/shift-totals", &request, Some(&admin)).await;

@@ -48,12 +48,16 @@ async fn call(
             Some(value) => Body::from(value.to_string()),
             None => Body::empty(),
         })
-        .unwrap();
-    let response = router.clone().oneshot(request).await.unwrap();
+        .expect("the request is well formed");
+    let response = router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     (status, bytes.to_vec())
 }
 
@@ -78,7 +82,7 @@ fn token(app: &common::TestApp, role: Role) -> String {
 fn kind<'a>(settings: &'a Value, slug: &str) -> &'a Value {
     settings["data"]["kinds"]
         .as_array()
-        .unwrap()
+        .expect("the value is an array")
         .iter()
         .find(|k| k["kind"] == slug)
         .unwrap_or_else(|| panic!("no kind {slug} in {settings}"))
@@ -87,9 +91,14 @@ fn kind<'a>(settings: &'a Value, slug: &str) -> &'a Value {
 fn option_names(kind: &Value) -> Vec<String> {
     kind["families"]
         .as_array()
-        .unwrap()
+        .expect("the value is an array")
         .iter()
-        .map(|t| t["family"].as_str().unwrap().to_string())
+        .map(|t| {
+            t["family"]
+                .as_str()
+                .expect("the value is a string")
+                .to_string()
+        })
         .collect()
 }
 
@@ -114,9 +123,9 @@ async fn lists_each_kind_with_its_designs_standard_design_first() {
 
     let slugs: Vec<&str> = body["data"]["kinds"]
         .as_array()
-        .unwrap()
+        .expect("the value is an array")
         .iter()
-        .map(|k| k["kind"].as_str().unwrap())
+        .map(|k| k["kind"].as_str().expect("the value is a string"))
         .collect();
     assert_eq!(
         slugs,
@@ -155,7 +164,7 @@ async fn lists_each_kind_with_its_designs_standard_design_first() {
     assert!(
         body["data"]["kinds"]
             .as_array()
-            .unwrap()
+            .expect("the value is an array")
             .iter()
             .all(|k| k["kind"] != "analytics-report")
     );
@@ -393,7 +402,7 @@ async fn a_stored_choice_that_is_no_longer_offered_is_reported_not_replaced() {
     .bind(json!({ "a4-invoice": GONE }).to_string())
     .execute(pool)
     .await
-    .unwrap();
+    .expect("the awaited step succeeds");
 
     let (status, body) = call_json(
         &app.router,
@@ -438,7 +447,10 @@ async fn make_sale(app: &common::TestApp, cashier: &str) -> String {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    body["data"]["invoice"]["key"].as_str().unwrap().to_string()
+    body["data"]["invoice"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string()
 }
 
 async fn print(
@@ -467,14 +479,14 @@ async fn print(
 
 async fn rows(app: &common::TestApp, invoice_key: &str) -> Vec<Document> {
     use futures_util::TryStreamExt;
-    app.db
+    app.mongo()
         .collection::<Document>("generated_documents")
         .find(doc! { "entity_key": invoice_key })
         .await
-        .unwrap()
+        .expect("the awaited step succeeds")
         .try_collect()
         .await
-        .unwrap()
+        .expect("the awaited step succeeds")
 }
 
 #[tokio::test]
@@ -509,9 +521,16 @@ async fn printing_follows_the_shops_design_and_caches_each_design_separately() {
         .iter()
         .find(|r| r.get_str("document_type").ok() == Some("a4-invoice--doc_temp_ZahcoYg8xCQjuc8c"))
         .expect("the modern print is cached under its own key");
-    assert_eq!(modern.get_str("template_name").unwrap(), "a4-invoice");
     assert_eq!(
-        modern.get_str("template_key").unwrap(),
+        modern
+            .get_str("template_name")
+            .expect("the document has this string field"),
+        "a4-invoice"
+    );
+    assert_eq!(
+        modern
+            .get_str("template_key")
+            .expect("the document has this string field"),
         "tpl_a4_invoice_modern"
     );
 
@@ -528,7 +547,7 @@ async fn printing_follows_the_shops_design_and_caches_each_design_separately() {
     assert!(pdf.contains("tpl_a4_invoice "), "{pdf}");
     assert_eq!(rows(&app, &invoice).await.len(), 2, "no extra render");
 
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }
 
 #[tokio::test]
@@ -586,7 +605,7 @@ async fn one_print_can_use_another_design_without_changing_the_shops_choice() {
         assert!(body.contains("TEMPLATE_UNAVAILABLE"), "{bad}: {body}");
     }
 
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }
 
 #[tokio::test]
@@ -599,7 +618,7 @@ async fn a_design_that_is_no_longer_offered_blocks_printing_until_the_shop_choos
     // A choice made while the design was still offered; the settings API
     // would refuse it now, so write it as it would have been stored.
     let now = mongodb::bson::DateTime::now();
-    app.db
+    app.mongo()
         .collection::<Document>("document_template_settings")
         .insert_one(doc! {
             "key": "main",
@@ -610,7 +629,7 @@ async fn a_design_that_is_no_longer_offered_blocks_printing_until_the_shop_choos
             "updated_at": now,
         })
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 
     // No silent substitution: the print is refused with a clear code...
     let (status, body) = print(&app, &cashier, &invoice, "a4-invoice", "").await;
@@ -638,7 +657,7 @@ async fn a_design_that_is_no_longer_offered_blocks_printing_until_the_shop_choos
     assert_eq!(status, StatusCode::OK);
     assert!(pdf.contains("tpl_a4_invoice "), "{pdf}");
 
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }
 
 #[tokio::test]
@@ -655,7 +674,7 @@ async fn the_document_endpoints_require_the_design_parameter() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }
 
 async fn design_status(app: &common::TestApp, cashier: &str, invoice: &str, query: &str) -> Value {
@@ -741,7 +760,7 @@ async fn reprinting_can_serve_the_original_design_or_the_current_one() {
     .await;
     assert_eq!(code, StatusCode::NOT_FOUND, "no 80 mm receipt was printed");
 
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }
 
 #[tokio::test]
@@ -800,7 +819,7 @@ async fn a_custom_design_prints_with_its_options_and_each_value_set_is_cached_ap
     print(&app, &cashier, &invoice, "a4-invoice", "").await;
     assert_eq!(rows(&app, &invoice).await.len(), 2);
 
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }
 
 #[tokio::test]
@@ -847,14 +866,17 @@ async fn resetting_a_designs_selections_clears_the_choice_and_its_option_values(
                 Some(value) => Body::from(value.to_string()),
                 None => Body::empty(),
             })
-            .unwrap();
+            .expect("the request is well formed");
         let router = app.router.clone();
         async move {
-            let response = router.oneshot(request).await.unwrap();
+            let response = router
+                .oneshot(request)
+                .await
+                .expect("the awaited step succeeds");
             let status = response.status();
             let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
                 .await
-                .unwrap();
+                .expect("the awaited step succeeds");
             (
                 status,
                 serde_json::from_slice::<Value>(&bytes).unwrap_or(Value::Null),
@@ -926,7 +948,7 @@ async fn resetting_a_designs_selections_clears_the_choice_and_its_option_values(
         (StatusCode::OK, &json!([]))
     );
 
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }
 
 #[tokio::test]
@@ -962,5 +984,5 @@ async fn each_shop_has_its_own_design_choice() {
     );
     assert_eq!(kind(&b, "a4-invoice")["effective"], CLASSIC);
 
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }

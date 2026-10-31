@@ -1,12 +1,16 @@
+//! Counting the cash in the drawer by denomination.
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::error::{CalcError, CalcResult};
 
+/// Every note and coin the drawer is counted in, in rupees, largest first.
 pub const DENOMINATION_RUPEES: [i64; 10] = [5000, 1000, 500, 100, 50, 20, 10, 5, 2, 1];
 
 const MAX_COUNT: i64 = 1_000_000;
 
+/// How many of each denomination were counted.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -18,6 +22,7 @@ pub struct CalcCashCountRequest {
     pub counts: HashMap<String, i64>,
 }
 
+/// One denomination of a cash count: how many, and what they add up to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -31,6 +36,7 @@ pub struct CashCountLine {
     pub subtotal_cents: i64,
 }
 
+/// A cash count worked out: every denomination and the drawer total.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -42,6 +48,11 @@ pub struct CalcCashCountReply {
     pub total_cents: i64,
 }
 
+/// Totals a cash count.
+///
+/// # Errors
+///
+/// Fails when a count names a denomination that does not exist, or is negative or implausibly large.
 pub fn compute_count(request: &CalcCashCountRequest) -> CalcResult<CalcCashCountReply> {
     for (id, count) in &request.counts {
         if !DENOMINATION_RUPEES

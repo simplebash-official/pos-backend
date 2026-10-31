@@ -34,11 +34,15 @@ async fn spawn_unthrottled() -> common::TestApp {
 }
 
 async fn execute(router: &axum::Router, request: Request<Body>) -> (StatusCode, Value) {
-    let response = router.clone().oneshot(request).await.unwrap();
+    let response = router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let json = if bytes.is_empty() {
         Value::Null
     } else {
@@ -64,7 +68,7 @@ async fn send_authed(
             Some(value) => Body::from(value.to_string()),
             None => Body::empty(),
         })
-        .unwrap();
+        .expect("the request is well formed");
     execute(router, request).await
 }
 
@@ -157,11 +161,11 @@ async fn test_singleflight_thundering_herd_stress() {
             15_000,
             7_500,
         );
-        app.db
+        app.mongo()
             .collection::<InvoiceDocument>("invoices")
             .insert_one(inv)
             .await
-            .unwrap();
+            .expect("the awaited step succeeds");
     }
 
     // Explicitly invalidate cache via endpoint to ensure a completely cold state
@@ -212,7 +216,7 @@ async fn test_singleflight_thundering_herd_stress() {
 
     let mut successful_count = 0;
     for res in results {
-        let (task_id, status, body, task_time) = res.unwrap();
+        let (task_id, status, body, task_time) = res.expect("the step succeeds");
         assert_eq!(
             status,
             StatusCode::OK,
@@ -296,7 +300,7 @@ async fn test_hot_cache_throughput_and_latency_stress() {
 
     let mut all_latencies: Vec<std::time::Duration> = worker_results
         .into_iter()
-        .flat_map(|r| r.unwrap())
+        .flat_map(|r| r.expect("the step succeeds"))
         .collect();
     all_latencies.sort();
 
@@ -413,10 +417,10 @@ async fn test_concurrent_mutations_and_invalidation_race() {
     let (reader_res, writer_res) = tokio::join!(join_all(reader_tasks), join_all(writer_tasks));
 
     for r in reader_res {
-        r.unwrap();
+        r.expect("the step succeeds");
     }
     for w in writer_res {
-        w.unwrap();
+        w.expect("the step succeeds");
     }
 
     println!(
@@ -464,11 +468,11 @@ async fn test_heavy_multi_dataset_fanout_stress() {
             12_000,
             6_000,
         );
-        app.db
+        app.mongo()
             .collection::<InvoiceDocument>("invoices")
             .insert_one(inv)
             .await
-            .unwrap();
+            .expect("the awaited step succeeds");
     }
 
     let concurrency = 20;
@@ -500,7 +504,7 @@ async fn test_heavy_multi_dataset_fanout_stress() {
     println!("[STRESS TEST] Heavy fan-out {concurrency} requests completed in {duration:?}");
 
     for res in results {
-        let (status, body) = res.unwrap();
+        let (status, body) = res.expect("the step succeeds");
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["data"]["section"], "all");
         assert!(body["data"]["overview"]["timeseries"].is_object());

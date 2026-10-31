@@ -30,19 +30,28 @@ async fn send(
     let request = match body {
         Some(value) => {
             builder = builder.header(CONTENT_TYPE, "application/json");
-            builder.body(Body::from(value.to_string())).unwrap()
+            builder
+                .body(Body::from(value.to_string()))
+                .expect("the request is well formed")
         }
-        None => builder.body(Body::empty()).unwrap(),
+        None => builder
+            .body(Body::empty())
+            .expect("the request is well formed"),
     };
-    let response = app.router.clone().oneshot(request).await.unwrap();
+    let response = app
+        .router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let json = if bytes.is_empty() {
         Value::Null
     } else {
-        serde_json::from_slice(&bytes).unwrap()
+        serde_json::from_slice(&bytes).expect("the text is valid JSON")
     };
     (status, json)
 }
@@ -61,10 +70,10 @@ fn today() -> String {
 fn account<'a>(body: &'a Value, kind: &str) -> &'a Value {
     body["data"]["accounts"]
         .as_array()
-        .unwrap()
+        .expect("the value is an array")
         .iter()
         .find(|a| a["kind"] == kind)
-        .unwrap()
+        .expect("a match exists")
 }
 
 async fn scenario(app: &common::TestApp) {
@@ -299,5 +308,5 @@ async fn the_accounts_on_sqlite() {
 async fn the_accounts_on_mongo() {
     let app = common::spawn_app_isolated().await;
     scenario(&app).await;
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }

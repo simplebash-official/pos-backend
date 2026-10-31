@@ -20,17 +20,17 @@ async fn health_route_returns_success_format() {
             Request::builder()
                 .uri("/api/health")
                 .body(Body::empty())
-                .unwrap(),
+                .expect("the request is well formed"),
         )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        .expect("the awaited step succeeds");
+    let json: serde_json::Value = serde_json::from_slice(&body).expect("the text is valid JSON");
 
     assert_eq!(json["success"], true);
     assert_eq!(json["data"]["status"], "ok");

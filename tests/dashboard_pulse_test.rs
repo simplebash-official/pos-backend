@@ -24,13 +24,17 @@ async fn get(app: &common::TestApp, token: Option<&str>) -> (StatusCode, Value) 
     let response = app
         .router
         .clone()
-        .oneshot(request.body(Body::empty()).unwrap())
+        .oneshot(
+            request
+                .body(Body::empty())
+                .expect("the request is well formed"),
+        )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     (
         status,
         serde_json::from_slice(&bytes).unwrap_or(Value::Null),
@@ -53,7 +57,13 @@ async fn an_empty_shop_gets_empty_groups_and_a_signed_out_caller_is_refused() {
     let data = &body["data"];
     assert_eq!(data["activeRepairsCount"], 0);
     assert_eq!(data["uncollectedReadyValueCents"], 0);
-    assert_eq!(data["repairPipeline"].as_array().unwrap().len(), 4);
+    assert_eq!(
+        data["repairPipeline"]
+            .as_array()
+            .expect("the value is an array")
+            .len(),
+        4
+    );
     assert_eq!(data["repairPipeline"][0]["stage"], "received");
     assert_eq!(data["printPipeline"][3]["stage"], "delivered");
     assert_eq!(data["technicians"], serde_json::json!([]));

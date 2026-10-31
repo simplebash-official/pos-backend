@@ -29,19 +29,28 @@ async fn send(
     let request = match body {
         Some(value) => {
             builder = builder.header(CONTENT_TYPE, "application/json");
-            builder.body(Body::from(value.to_string())).unwrap()
+            builder
+                .body(Body::from(value.to_string()))
+                .expect("the request is well formed")
         }
-        None => builder.body(Body::empty()).unwrap(),
+        None => builder
+            .body(Body::empty())
+            .expect("the request is well formed"),
     };
-    let response = app.router.clone().oneshot(request).await.unwrap();
+    let response = app
+        .router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let json = if bytes.is_empty() {
         Value::Null
     } else {
-        serde_json::from_slice(&bytes).unwrap()
+        serde_json::from_slice(&bytes).expect("the text is valid JSON")
     };
     (status, json)
 }
@@ -97,9 +106,9 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(status, StatusCode::OK, "{body}");
     let names: Vec<&str> = body["data"]
         .as_array()
-        .unwrap()
+        .expect("the value is an array")
         .iter()
-        .map(|c| c["name"].as_str().unwrap())
+        .map(|c| c["name"].as_str().expect("the value is a string"))
         .collect();
     assert!(
         names.contains(&"Scrap and waste sale") && names.contains(&"Other income"),
@@ -124,7 +133,12 @@ async fn scenario(app: &common::TestApp) {
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
     let income = &body["data"];
-    assert!(income["number"].as_str().unwrap().starts_with("INC-"));
+    assert!(
+        income["number"]
+            .as_str()
+            .expect("the value is a string")
+            .starts_with("INC-")
+    );
     assert_eq!(income["source"], "ledger");
     assert_eq!(income["receivedInto"], "bank");
     assert_eq!(income["categoryName"], "Commission received");
@@ -132,11 +146,14 @@ async fn scenario(app: &common::TestApp) {
     assert!(
         income["payeeKey"]
             .as_str()
-            .unwrap()
+            .expect("the value is a string")
             .starts_with("pye_other_"),
         "the typed name is saved for next time"
     );
-    let key = income["key"].as_str().unwrap().to_string();
+    let key = income["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     let (status, body) = send(app, "GET", &format!("/api/incomes/{key}"), None, &manager).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["data"]["amountCents"], 450_000);
@@ -167,8 +184,8 @@ async fn scenario(app: &common::TestApp) {
     ] {
         let mut body = good();
         body.as_object_mut()
-            .unwrap()
-            .extend(extra.as_object().unwrap().clone());
+            .expect("the value is an object")
+            .extend(extra.as_object().expect("the value is an object").clone());
         let (status, body) = send(app, "POST", "/api/incomes", Some(body), &manager).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{what}: {body}");
     }
@@ -198,8 +215,14 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
-    let voucher = body["data"]["movementNumber"].as_str().unwrap().to_string();
-    let movement_key = body["data"]["key"].as_str().unwrap().to_string();
+    let voucher = body["data"]["movementNumber"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
+    let movement_key = body["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     // Reversed later: both rows leave the list.
     let (status, body) = send(
         app,
@@ -213,7 +236,10 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
-    let mistaken = body["data"]["key"].as_str().unwrap().to_string();
+    let mistaken = body["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     let (status, body) = send(
         app,
         "POST",
@@ -226,7 +252,9 @@ async fn scenario(app: &common::TestApp) {
 
     let (status, body) = send(app, "GET", "/api/incomes?source=drawer", None, &manager).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    let drawer = body["data"]["incomes"].as_array().unwrap();
+    let drawer = body["data"]["incomes"]
+        .as_array()
+        .expect("the value is an array");
     assert_eq!(drawer.len(), 1, "{body}");
     assert_eq!(drawer[0]["key"], movement_key.as_str());
     assert_eq!(drawer[0]["number"], voucher.as_str());
@@ -278,5 +306,5 @@ async fn the_income_ledger_on_sqlite() {
 async fn the_income_ledger_on_mongo() {
     let app = common::spawn_app_isolated().await;
     scenario(&app).await;
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }

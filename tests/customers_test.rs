@@ -16,15 +16,19 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 async fn execute(router: &axum::Router, request: Request<Body>) -> (StatusCode, Value) {
-    let response = router.clone().oneshot(request).await.unwrap();
+    let response = router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let json = if bytes.is_empty() {
         Value::Null
     } else {
-        serde_json::from_slice(&bytes).unwrap()
+        serde_json::from_slice(&bytes).expect("the text is valid JSON")
     };
     (status, json)
 }
@@ -43,7 +47,7 @@ async fn send(
             Some(value) => Body::from(value.to_string()),
             None => Body::empty(),
         })
-        .unwrap();
+        .expect("the request is well formed");
     execute(router, request).await
 }
 
@@ -63,7 +67,7 @@ async fn send_authed(
             Some(value) => Body::from(value.to_string()),
             None => Body::empty(),
         })
-        .unwrap();
+        .expect("the request is well formed");
     execute(router, request).await
 }
 
@@ -114,7 +118,7 @@ async fn quick_create_customer_succeeds_with_minimal_fields() {
         "077{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("the clock is after the epoch")
             .as_millis()
             % 10_000_000
     );
@@ -142,7 +146,10 @@ async fn quick_create_customer_succeeds_with_minimal_fields() {
     assert_eq!(data["totalPurchasesCents"], 0);
     assert!(data["id"].as_str().is_some());
     assert!(
-        data["key"].as_str().unwrap().starts_with("cust_"),
+        data["key"]
+            .as_str()
+            .expect("the value is a string")
+            .starts_with("cust_"),
         "Key must start with cust_ prefix"
     );
     assert_eq!(data["contactPerson"], Value::Null);
@@ -182,8 +189,8 @@ async fn create_customer_with_full_profile_and_fetch_by_id_and_key() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["success"], true);
     let created = &body["data"];
-    let id = created["id"].as_str().unwrap();
-    let key = created["key"].as_str().unwrap();
+    let id = created["id"].as_str().expect("the value is a string");
+    let key = created["key"].as_str().expect("the value is a string");
 
     assert_eq!(created["name"], "ABC Enterprises");
     assert_eq!(created["contactPerson"], "Kavinda Fernando");
@@ -299,7 +306,9 @@ async fn search_and_tag_filtering_works() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let customers = search_body["data"]["customers"].as_array().unwrap();
+    let customers = search_body["data"]["customers"]
+        .as_array()
+        .expect("the value is an array");
     assert_eq!(customers.len(), 2);
 
     // Filter by tag
@@ -312,7 +321,9 @@ async fn search_and_tag_filtering_works() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let tag_customers = tag_body["data"]["customers"].as_array().unwrap();
+    let tag_customers = tag_body["data"]["customers"]
+        .as_array()
+        .expect("the value is an array");
     assert_eq!(tag_customers.len(), 1);
     assert_eq!(tag_customers[0]["name"], name1);
 }
@@ -352,7 +363,7 @@ async fn pagination_structure_matches_expected_format() {
     assert_eq!(data["page"], 1);
     assert_eq!(data["limit"], 2);
     assert_eq!(data["totalPages"], 3);
-    let items = data["customers"].as_array().unwrap();
+    let items = data["customers"].as_array().expect("the value is an array");
     assert_eq!(items.len(), 2);
 }
 
@@ -374,7 +385,9 @@ async fn replace_and_update_customer_maintains_invariants() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let id = create_body["data"]["id"].as_str().unwrap();
+    let id = create_body["data"]["id"]
+        .as_str()
+        .expect("the value is a string");
 
     // PUT replacement
     let (status, put_body) = send_authed(
@@ -427,7 +440,9 @@ async fn delete_customer_soft_deletes_and_excludes_from_lists() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let id = create_body["data"]["id"].as_str().unwrap();
+    let id = create_body["data"]["id"]
+        .as_str()
+        .expect("the value is a string");
 
     // Delete single
     let (status, del_body) = send_authed(
@@ -470,12 +485,16 @@ async fn delete_customer_with_outstanding_balance_is_blocked() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let key = create_body["data"]["key"].as_str().unwrap();
-    let id = create_body["data"]["id"].as_str().unwrap();
+    let key = create_body["data"]["key"]
+        .as_str()
+        .expect("the value is a string");
+    let id = create_body["data"]["id"]
+        .as_str()
+        .expect("the value is a string");
 
     // Simulate an invoice ledger balance on the customer
     let update_res = app
-        .db
+        .mongo()
         .collection::<mongodb::bson::Document>("customers")
         .update_one(
             mongodb::bson::doc! { "key": key },
@@ -514,7 +533,10 @@ async fn batch_delete_customers_succeeds() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let id1 = c1["data"]["id"].as_str().unwrap().to_string();
+    let id1 = c1["data"]["id"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
 
     let (status, c2) = send_authed(
         &app.router,
@@ -525,7 +547,10 @@ async fn batch_delete_customers_succeeds() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let id2 = c2["data"]["id"].as_str().unwrap().to_string();
+    let id2 = c2["data"]["id"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
 
     let (status, batch_body) = send_authed(
         &app.router,
@@ -569,7 +594,9 @@ async fn distinct_tags_autocomplete_endpoint_works() {
     let (status, body) = send_authed(&app.router, "GET", "/api/customers/tags", None, &token).await;
 
     assert_eq!(status, StatusCode::OK);
-    let tags = body["data"]["tags"].as_array().unwrap();
+    let tags = body["data"]["tags"]
+        .as_array()
+        .expect("the value is an array");
     let tag_strings: Vec<&str> = tags.iter().filter_map(|t| t.as_str()).collect();
     assert!(tag_strings.contains(&tag_a.as_str()));
     assert!(tag_strings.contains(&tag_b.as_str()));

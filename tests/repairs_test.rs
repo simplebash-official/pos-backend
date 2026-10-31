@@ -14,15 +14,19 @@ use simplebash_pos_backend::modules::repairs::model::RepairDocument;
 use tower::ServiceExt;
 
 async fn execute(router: &axum::Router, request: Request<Body>) -> (StatusCode, Value) {
-    let response = router.clone().oneshot(request).await.unwrap();
+    let response = router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let json = if bytes.is_empty() {
         Value::Null
     } else {
-        serde_json::from_slice(&bytes).unwrap()
+        serde_json::from_slice(&bytes).expect("the text is valid JSON")
     };
     (status, json)
 }
@@ -41,7 +45,7 @@ async fn send(
             Some(value) => Body::from(value.to_string()),
             None => Body::empty(),
         })
-        .unwrap();
+        .expect("the request is well formed");
     execute(router, request).await
 }
 
@@ -61,7 +65,7 @@ async fn send_authed(
             Some(value) => Body::from(value.to_string()),
             None => Body::empty(),
         })
-        .unwrap();
+        .expect("the request is well formed");
     execute(router, request).await
 }
 
@@ -154,11 +158,19 @@ async fn create_repair_reserves_ticket_number_and_defaults_status_to_received() 
     assert_eq!(data["customerName"], "Kasun Silva");
     assert_eq!(data["estimatedCostCents"], 850000);
     assert!(
-        data["ticketNumber"].as_str().unwrap().starts_with("REP-"),
+        data["ticketNumber"]
+            .as_str()
+            .expect("the value is a string")
+            .starts_with("REP-"),
         "ticket number must start with REP-, got {}",
         data["ticketNumber"]
     );
-    assert!(data["key"].as_str().unwrap().starts_with("rep_"));
+    assert!(
+        data["key"]
+            .as_str()
+            .expect("the value is a string")
+            .starts_with("rep_")
+    );
     assert!(
         data.get("promisedReadyAt").is_none() || data["promisedReadyAt"].is_null(),
         "no promised date unless one was given"
@@ -179,7 +191,10 @@ async fn repair_promised_ready_at_round_trips_and_drives_is_overdue() {
     assert_eq!(status, StatusCode::OK, "Body: {body}");
     assert_eq!(body["data"]["promisedReadyAt"], "2000-01-01");
     assert_eq!(body["data"]["isOverdue"], true);
-    let key = body["data"]["key"].as_str().unwrap().to_string();
+    let key = body["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
 
     // A future promised date clears the overdue flag.
     let (status, body) = send_authed(
@@ -298,7 +313,9 @@ async fn update_repair_rejects_status_transition_to_ready_without_price() {
         &token,
     )
     .await;
-    let key = created["data"]["key"].as_str().unwrap();
+    let key = created["data"]["key"]
+        .as_str()
+        .expect("the value is a string");
 
     let (status, body) = send_authed(
         &app.router,
@@ -337,8 +354,12 @@ async fn get_repair_by_id_and_key_and_update_status() {
         &token,
     )
     .await;
-    let id = created["data"]["id"].as_str().unwrap();
-    let key = created["data"]["key"].as_str().unwrap();
+    let id = created["data"]["id"]
+        .as_str()
+        .expect("the value is a string");
+    let key = created["data"]["key"]
+        .as_str()
+        .expect("the value is a string");
 
     let (status, by_id) = send_authed(
         &app.router,
@@ -397,7 +418,9 @@ async fn list_repairs_filters_by_search_and_status() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let repairs = body["data"]["repairs"].as_array().unwrap();
+    let repairs = body["data"]["repairs"]
+        .as_array()
+        .expect("the value is an array");
     assert_eq!(repairs.len(), 1, "Body: {body}");
     assert_eq!(repairs[0]["customerName"], format!("Findable-{unique}"));
 
@@ -410,7 +433,10 @@ async fn list_repairs_filters_by_search_and_status() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    for repair in body["data"]["repairs"].as_array().unwrap() {
+    for repair in body["data"]["repairs"]
+        .as_array()
+        .expect("the value is an array")
+    {
         assert_eq!(repair["status"], "cancelled");
     }
 }
@@ -424,8 +450,8 @@ async fn list_repairs_filters_by_date_preset() {
     let name = format!("DatePreset-{unique}");
     let now = BsonDateTime::now();
     let yesterday = BsonDateTime::from_chrono(now.to_chrono() - chrono::Duration::days(1));
-    seed_repair_with_named(&app.db, &name, "received", Some(1000), now).await;
-    seed_repair_with_named(&app.db, &name, "received", Some(2000), yesterday).await;
+    seed_repair_with_named(app.mongo(), &name, "received", Some(1000), now).await;
+    seed_repair_with_named(app.mongo(), &name, "received", Some(2000), yesterday).await;
 
     // No datePreset — search alone finds both.
     let (status, body) = send_authed(
@@ -437,7 +463,13 @@ async fn list_repairs_filters_by_date_preset() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "Body: {body}");
-    assert_eq!(body["data"]["repairs"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        body["data"]["repairs"]
+            .as_array()
+            .expect("the value is an array")
+            .len(),
+        2
+    );
 
     // datePreset=today narrows to just the one created "now".
     let (status, body) = send_authed(
@@ -449,7 +481,9 @@ async fn list_repairs_filters_by_date_preset() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "Body: {body}");
-    let repairs = body["data"]["repairs"].as_array().unwrap();
+    let repairs = body["data"]["repairs"]
+        .as_array()
+        .expect("the value is an array");
     assert_eq!(repairs.len(), 1, "Body: {body}");
     assert_eq!(repairs[0]["estimatedCostCents"], 1000);
 }
@@ -467,7 +501,9 @@ async fn delete_repair_soft_deletes_and_excludes_from_lists() {
         &token,
     )
     .await;
-    let key = created["data"]["key"].as_str().unwrap();
+    let key = created["data"]["key"]
+        .as_str()
+        .expect("the value is a string");
 
     let (status, _) = send_authed(
         &app.router,
@@ -506,8 +542,14 @@ async fn seed_customer(app: &common::TestApp, phone_suffix: &str) -> (String, St
     .await;
     assert_eq!(status, StatusCode::OK, "Body: {body}");
     (
-        body["data"]["key"].as_str().unwrap().to_string(),
-        body["data"]["primaryPhone"].as_str().unwrap().to_string(),
+        body["data"]["key"]
+            .as_str()
+            .expect("the value is a string")
+            .to_string(),
+        body["data"]["primaryPhone"]
+            .as_str()
+            .expect("the value is a string")
+            .to_string(),
     )
 }
 
@@ -555,7 +597,9 @@ async fn update_repair_with_customer_key_resolves_name_and_phone_from_customer_r
         &token,
     )
     .await;
-    let key = created["data"]["key"].as_str().unwrap();
+    let key = created["data"]["key"]
+        .as_str()
+        .expect("the value is a string");
 
     let (customer_key, customer_phone) = seed_customer(&app, "8888883").await;
 
@@ -618,7 +662,7 @@ async fn seed_repair_with_named(
             updated_by_device: None,
         })
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     key
 }
 
@@ -731,7 +775,7 @@ async fn create_repair_with_valid_assigned_employee_id_resolves_name() {
     let app = common::spawn_app().await;
     let admin = admin_token(&app.config);
     let employee = create_employee_via_api(&app.router, &admin).await;
-    let employee_key = employee["key"].as_str().unwrap();
+    let employee_key = employee["key"].as_str().expect("the value is a string");
 
     let mut payload = sample_repair_payload("9990001");
     payload["assignment"] = json!({

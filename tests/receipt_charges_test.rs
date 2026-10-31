@@ -31,12 +31,16 @@ async fn send(
         .header(AUTHORIZATION, format!("Bearer {token}"))
         .header(CONTENT_TYPE, "application/json")
         .body(body.map_or_else(Body::empty, |b| Body::from(b.to_string())))
-        .unwrap();
-    let response = router.clone().oneshot(request).await.unwrap();
+        .expect("the request is well formed");
+    let response = router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let json = if bytes.is_empty() {
         Value::Null
     } else {
@@ -84,8 +88,14 @@ impl Shop<'_> {
             .await;
         assert_eq!(status, StatusCode::CREATED, "{product}");
         (
-            product["data"]["id"].as_str().unwrap().to_string(),
-            product["data"]["key"].as_str().unwrap().to_string(),
+            product["data"]["id"]
+                .as_str()
+                .expect("the value is a string")
+                .to_string(),
+            product["data"]["key"]
+                .as_str()
+                .expect("the value is a string")
+                .to_string(),
         )
     }
 
@@ -93,8 +103,15 @@ impl Shop<'_> {
         let body = self
             .get(&format!("/api/inventory/products/{product_key}/batches"))
             .await;
-        let mut items = body["data"]["items"].as_array().unwrap().clone();
-        items.sort_by_key(|b| b["unitCostCents"].as_i64().unwrap());
+        let mut items = body["data"]["items"]
+            .as_array()
+            .expect("the value is an array")
+            .clone();
+        items.sort_by_key(|b| {
+            b["unitCostCents"]
+                .as_i64()
+                .expect("the value is an integer")
+        });
         items
     }
 
@@ -102,7 +119,7 @@ impl Shop<'_> {
         self.get(&format!("/api/sessions/{}", self.session_key))
             .await["data"]["expectedCashCents"]
             .as_i64()
-            .unwrap()
+            .expect("the value is an integer")
     }
 
     async fn receipts(&self) -> usize {
@@ -112,7 +129,7 @@ impl Shop<'_> {
         ))
         .await["data"]["items"]
             .as_array()
-            .unwrap()
+            .expect("the value is an array")
             .len()
     }
 
@@ -151,7 +168,10 @@ async fn scenario(app: &common::TestApp) {
         &admin,
     )
     .await;
-    let category_key_ = category["data"]["key"].as_str().unwrap().to_string();
+    let category_key_ = category["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     let (_, sub) = send(
         router,
         "POST",
@@ -162,7 +182,7 @@ async fn scenario(app: &common::TestApp) {
     .await;
     let subcategory_key = sub["data"]["subcategories"][0]["key"]
         .as_str()
-        .unwrap()
+        .expect("the value is a string")
         .to_string();
     let (_, supplier) = send(
         router,
@@ -175,7 +195,10 @@ async fn scenario(app: &common::TestApp) {
         &admin,
     )
     .await;
-    let supplier_key = supplier["data"]["key"].as_str().unwrap().to_string();
+    let supplier_key = supplier["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     let (status, courier) = send(
         router,
         "POST",
@@ -185,7 +208,10 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{courier}");
-    let courier_key = courier["data"]["key"].as_str().unwrap().to_string();
+    let courier_key = courier["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
 
     let terminal = format!("term_{tag}");
     let (status, session) = send(
@@ -197,7 +223,10 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{session}");
-    let session_key = session["data"]["key"].as_str().unwrap().to_string();
+    let session_key = session["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
 
     let shop = Shop {
         router,
@@ -247,8 +276,12 @@ async fn scenario(app: &common::TestApp) {
         .iter()
         .map(|b| {
             (
-                b["receivedQuantity"].as_i64().unwrap(),
-                b["unitCostCents"].as_i64().unwrap(),
+                b["receivedQuantity"]
+                    .as_i64()
+                    .expect("the value is an integer"),
+                b["unitCostCents"]
+                    .as_i64()
+                    .expect("the value is an integer"),
             )
         })
         .collect();
@@ -310,18 +343,35 @@ async fn scenario(app: &common::TestApp) {
     // Shipping 2,000 by value: 1,200 / 800. Discount 500 by quantity: 250 / 250. Shares: 950 / 550.
     let shares: Vec<i64> = billed["lines"]
         .as_array()
-        .unwrap()
+        .expect("the value is an array")
         .iter()
-        .map(|l| l["chargesShareCents"].as_i64().unwrap())
+        .map(|l| {
+            l["chargesShareCents"]
+                .as_i64()
+                .expect("the value is an integer")
+        })
         .collect();
     assert_eq!(shares, vec![950, 550]);
     assert_eq!(billed["lines"][0]["landedTotalCents"], 60_950);
-    assert_eq!(billed["charges"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        billed["charges"]
+            .as_array()
+            .expect("the value is an array")
+            .len(),
+        2
+    );
     let a_cost: i64 = shop
         .batches(&a_key)
         .await
         .iter()
-        .map(|b| b["receivedQuantity"].as_i64().unwrap() * b["unitCostCents"].as_i64().unwrap())
+        .map(|b| {
+            b["receivedQuantity"]
+                .as_i64()
+                .expect("the value is an integer")
+                * b["unitCostCents"]
+                    .as_i64()
+                    .expect("the value is an integer")
+        })
         .sum();
     assert_eq!(
         a_cost, 60_950,
@@ -354,7 +404,14 @@ async fn scenario(app: &common::TestApp) {
         .batches(&c_key)
         .await
         .iter()
-        .map(|b| b["receivedQuantity"].as_i64().unwrap() * b["unitCostCents"].as_i64().unwrap())
+        .map(|b| {
+            b["receivedQuantity"]
+                .as_i64()
+                .expect("the value is an integer")
+                * b["unitCostCents"]
+                    .as_i64()
+                    .expect("the value is an integer")
+        })
         .sum();
     assert_eq!(batch_cost, 20_700);
 
@@ -520,8 +577,12 @@ async fn scenario(app: &common::TestApp) {
         .iter()
         .map(|b| {
             (
-                b["receivedQuantity"].as_i64().unwrap(),
-                b["unitCostCents"].as_i64().unwrap(),
+                b["receivedQuantity"]
+                    .as_i64()
+                    .expect("the value is an integer"),
+                b["unitCostCents"]
+                    .as_i64()
+                    .expect("the value is an integer"),
             )
         })
         .collect();
@@ -529,7 +590,13 @@ async fn scenario(app: &common::TestApp) {
     let listed = shop
         .get(&format!("/api/inventory/products/{phone_key}/serials"))
         .await;
-    assert_eq!(listed["data"]["items"].as_array().unwrap().len(), 3);
+    assert_eq!(
+        listed["data"]["items"]
+            .as_array()
+            .expect("the value is an array")
+            .len(),
+        3
+    );
 
     // ---- The supplier balance owes the goods and the charges the supplier billed, not the courier. ----
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
@@ -545,11 +612,15 @@ async fn scenario(app: &common::TestApp) {
     let balance = |body: &Value| {
         body["data"]["suppliers"]
             .as_array()
-            .unwrap()
+            .expect("the value is an array")
             .iter()
             .find(|row| row["supplierKey"] == json!(shop.supplier_key))
-            .map(|row| row["balanceCents"].as_i64().unwrap())
-            .unwrap()
+            .map(|row| {
+                row["balanceCents"]
+                    .as_i64()
+                    .expect("the value is an integer")
+            })
+            .expect("a match exists")
     };
     let before = balance(&shop.get("/api/balances/suppliers").await);
     let mut body = shop.receipt(
@@ -581,7 +652,7 @@ async fn charges_on_sqlite() {
 async fn charges_on_mongo() {
     let app = common::spawn_app_isolated().await;
     scenario(&app).await;
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }
 
 /// A database that created `receipt_charges` before it had a description column gets one at start.
@@ -592,24 +663,24 @@ async fn an_older_charges_table_gets_its_description_column() {
         .max_connections(1)
         .connect("sqlite::memory:")
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     sqlx::query(
         "CREATE TABLE receipt_charges (key TEXT PRIMARY KEY, id TEXT NOT NULL, receipt_key TEXT NOT NULL)",
     )
     .execute(&pool)
     .await
-    .unwrap();
+    .expect("the awaited step succeeds");
     simplebash_pos_backend::clients::sqlite::migrate_schema(&pool)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let columns: Vec<String> =
         sqlx::query_scalar("SELECT name FROM pragma_table_info('receipt_charges')")
             .fetch_all(&pool)
             .await
-            .unwrap();
+            .expect("the awaited step succeeds");
     assert!(columns.iter().any(|c| c == "description"), "{columns:?}");
     // Running it again changes nothing.
     simplebash_pos_backend::clients::sqlite::migrate_schema(&pool)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 }

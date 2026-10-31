@@ -22,8 +22,9 @@ async fn test_success_response_format() {
 
     let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        .expect("the awaited step succeeds");
+    let json: serde_json::Value =
+        serde_json::from_slice(&body_bytes).expect("the text is valid JSON");
 
     assert_eq!(json["success"], true);
     assert_eq!(json["data"]["id"], "123");
@@ -44,8 +45,9 @@ async fn test_error_response_format() {
 
     let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        .expect("the awaited step succeeds");
+    let json: serde_json::Value =
+        serde_json::from_slice(&body_bytes).expect("the text is valid JSON");
 
     assert_eq!(json["success"], false);
     assert_eq!(json["message"], "Product not found");
@@ -62,8 +64,9 @@ async fn test_standard_app_error_defaults() {
 
     let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        .expect("the awaited step succeeds");
+    let json: serde_json::Value =
+        serde_json::from_slice(&body_bytes).expect("the text is valid JSON");
 
     assert_eq!(json["success"], false);
     assert_eq!(json["message"], "Item missing");
@@ -82,8 +85,9 @@ async fn test_server_error_sanitization() {
 
     let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        .expect("the awaited step succeeds");
+    let json: serde_json::Value =
+        serde_json::from_slice(&body_bytes).expect("the text is valid JSON");
 
     assert_eq!(json["success"], false);
     assert_eq!(
@@ -104,8 +108,9 @@ async fn test_sqlx_error_conversion_is_human_readable() {
 
     let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        .expect("the awaited step succeeds");
+    let json: serde_json::Value =
+        serde_json::from_slice(&body_bytes).expect("the text is valid JSON");
 
     assert_eq!(json["success"], false);
     assert_eq!(

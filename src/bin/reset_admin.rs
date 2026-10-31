@@ -1,19 +1,20 @@
+//! Rotates the existing Admin account's password (its username is always
+//! `admin`) to `RESET_ADMIN_PASSWORD`
+//! (required — there is deliberately no default, so a reset can never leave
+//! the shop on a publicly documented password).
+//!
+//! Unlike `seed_admin`, this requires an Admin to already exist and
+//! overwrites its credentials in place — there is no undo, and no HTTP
+//! route can do this (an Admin account is never manageable through the
+//! API by anyone, including another Admin). Safe to run against SQLite or
+//! MongoDB.
+//!
+//! Run with: `cargo run --bin reset_admin`
+
 use simplebash_pos_backend::clients;
 use simplebash_pos_backend::core::config::Config;
 use simplebash_pos_backend::modules::users::service::reset_admin_credentials;
 
-/// Rotates the existing Admin account's password (its username is always
-/// `admin`) to `RESET_ADMIN_PASSWORD`
-/// (required — there is deliberately no default, so a reset can never leave
-/// the shop on a publicly documented password).
-///
-/// Unlike `seed_admin`, this requires an Admin to already exist and
-/// overwrites its credentials in place — there is no undo, and no HTTP
-/// route can do this (an Admin account is never manageable through the
-/// API by anyone, including another Admin). Safe to run against SQLite or
-/// MongoDB.
-///
-/// Run with: `cargo run --bin reset_admin`
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();

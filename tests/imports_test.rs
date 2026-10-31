@@ -13,15 +13,19 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 async fn execute(router: &axum::Router, request: Request<Body>) -> (StatusCode, Value) {
-    let response = router.clone().oneshot(request).await.unwrap();
+    let response = router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let json = if bytes.is_empty() {
         Value::Null
     } else {
-        serde_json::from_slice(&bytes).unwrap()
+        serde_json::from_slice(&bytes).expect("the text is valid JSON")
     };
     (status, json)
 }
@@ -40,7 +44,7 @@ async fn send_anon(
             Some(value) => Body::from(value.to_string()),
             None => Body::empty(),
         })
-        .unwrap();
+        .expect("the request is well formed");
     execute(router, request).await
 }
 
@@ -60,7 +64,7 @@ async fn send_authed(
             Some(value) => Body::from(value.to_string()),
             None => Body::empty(),
         })
-        .unwrap();
+        .expect("the request is well formed");
     execute(router, request).await
 }
 
@@ -177,7 +181,7 @@ async fn imports_process_valid_inventory_rows_and_record_batch() {
     assert_eq!(batch["failedRows"], 0);
     assert_eq!(batch["status"], "completed");
 
-    let batch_key = batch["key"].as_str().unwrap();
+    let batch_key = batch["key"].as_str().expect("the value is a string");
     assert!(batch_key.starts_with("imp_"));
 
     // Verify detail endpoint
@@ -206,7 +210,7 @@ async fn imports_process_valid_inventory_rows_and_record_batch() {
     assert!(
         list_body["data"]["items"]
             .as_array()
-            .unwrap()
+            .expect("the value is an array")
             .iter()
             .any(|b| b["key"] == batch_key)
     );
@@ -262,7 +266,7 @@ async fn imports_records_row_errors_for_invalid_rows() {
     assert_eq!(batch["failedRows"], 2);
     assert_eq!(batch["status"], "partially_completed");
 
-    let errors = batch["errors"].as_array().unwrap();
+    let errors = batch["errors"].as_array().expect("the value is an array");
     assert_eq!(errors.len(), 2);
     assert_eq!(errors[0]["rowNumber"], 1);
     assert_eq!(errors[1]["rowNumber"], 2);

@@ -1,10 +1,11 @@
+//! Seeds the customers collection/table with 20 realistic sample customers.
+//! Upserts idempotently, safe to run against SQLite or MongoDB.
+//!
+//! Run with: `cargo run --bin seed_customers`
+
 use simplebash_pos_backend::core::config::Config;
 use simplebash_pos_backend::{clients, seeds};
 
-/// Seeds the customers collection/table with 20 realistic sample customers.
-/// Upserts idempotently, safe to run against SQLite or MongoDB.
-///
-/// Run with: `cargo run --bin seed_customers`
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();

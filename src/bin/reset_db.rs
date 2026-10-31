@@ -1,3 +1,8 @@
+//! Wipes the configured database (every MongoDB collection, or every SQLite table) and
+//! re-seeds the base data. Destructive and irreversible.
+//!
+//! Run with: `cargo run --bin reset_db`
+
 use simplebash_pos_backend::core::config::Config;
 use simplebash_pos_backend::{clients, seeds};
 use std::fs;

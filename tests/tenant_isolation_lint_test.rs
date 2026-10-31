@@ -46,8 +46,8 @@ const RAW_TYPES_ALLOWED: &[&str] = &[
 ];
 
 fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    for entry in fs::read_dir(dir).unwrap() {
-        let path = entry.unwrap().path();
+    for entry in fs::read_dir(dir).expect("the directory is readable") {
+        let path = entry.expect("the step succeeds").path();
         if path.is_dir() {
             rust_files(&path, out);
         } else if path.extension().is_some_and(|e| e == "rs") {
@@ -68,13 +68,17 @@ fn violations(needle: &dyn Fn(&str) -> bool, list: &[&str]) -> Vec<String> {
     for file in files {
         let relative = file
             .strip_prefix(root)
-            .unwrap()
+            .expect("the step succeeds")
             .to_string_lossy()
             .replace('\\', "/");
         if allowed(&relative, list) {
             continue;
         }
-        for (number, line) in fs::read_to_string(&file).unwrap().lines().enumerate() {
+        for (number, line) in fs::read_to_string(&file)
+            .expect("the file is readable")
+            .lines()
+            .enumerate()
+        {
             let code = line.trim_start();
             if code.starts_with("//") {
                 continue;

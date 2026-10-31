@@ -40,7 +40,7 @@ impl Mock {
     fn set_for(&self, tenant: &str, templates: Vec<Value>) {
         self.templates
             .lock()
-            .unwrap()
+            .expect("the mutex is not poisoned")
             .insert(tenant.to_string(), templates);
     }
 }
@@ -75,7 +75,10 @@ async fn start(mock: Arc<Mock>) -> String {
                 .unwrap_or_default()
                 .to_string()
         };
-        mock.keys.lock().unwrap().push(header("X-Internal-Api-Key"));
+        mock.keys
+            .lock()
+            .expect("the mutex is not poisoned")
+            .push(header("X-Internal-Api-Key"));
         if mock.failing.load(Ordering::SeqCst) {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -85,7 +88,7 @@ async fn start(mock: Arc<Mock>) -> String {
         let templates = mock
             .templates
             .lock()
-            .unwrap()
+            .expect("the mutex is not poisoned")
             .get(&header("X-Tenant-Key"))
             .cloned()
             .unwrap_or_default();
@@ -97,8 +100,12 @@ async fn start(mock: Arc<Mock>) -> String {
     let router = Router::new()
         .route("/api/templates", get(list))
         .with_state(mock);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("the awaited step succeeds");
+    let addr = listener
+        .local_addr()
+        .expect("the listener has a local address");
     tokio::spawn(async move {
         axum::serve(listener, router).await.ok();
     });
@@ -115,8 +122,14 @@ async fn the_list_is_cached_until_it_expires() {
     mock.set(vec![template("doc_temp_a", "A4 Invoice", "a4-invoice")]);
     let client = client(start(mock.clone()).await, Duration::from_secs(60));
 
-    client.list_templates().await.unwrap();
-    client.list_templates().await.unwrap();
+    client
+        .list_templates()
+        .await
+        .expect("the awaited step succeeds");
+    client
+        .list_templates()
+        .await
+        .expect("the awaited step succeeds");
     assert_eq!(mock.fetches.load(Ordering::SeqCst), 1);
 }
 
@@ -126,7 +139,14 @@ async fn an_expired_list_is_refetched_so_new_templates_appear_without_a_restart(
     mock.set(vec![template("doc_temp_a", "A4 Invoice", "a4-invoice")]);
     let client = client(start(mock.clone()).await, Duration::ZERO);
 
-    assert_eq!(client.list_templates().await.unwrap().len(), 1);
+    assert_eq!(
+        client
+            .list_templates()
+            .await
+            .expect("the awaited step succeeds")
+            .len(),
+        1
+    );
 
     mock.set(vec![
         template("doc_temp_a", "A4 Invoice", "a4-invoice"),
@@ -135,7 +155,7 @@ async fn an_expired_list_is_refetched_so_new_templates_appear_without_a_restart(
     let names: Vec<String> = client
         .list_templates()
         .await
-        .unwrap()
+        .expect("the awaited step succeeds")
         .iter()
         .map(|t| t.name.clone())
         .collect();
@@ -148,7 +168,10 @@ async fn a_failed_refresh_keeps_serving_the_previous_list() {
     let mock = Arc::new(Mock::default());
     mock.set(vec![template("doc_temp_a", "A4 Invoice", "a4-invoice")]);
     let client = client(start(mock.clone()).await, Duration::ZERO);
-    client.list_templates().await.unwrap();
+    client
+        .list_templates()
+        .await
+        .expect("the awaited step succeeds");
 
     mock.failing.store(true, Ordering::SeqCst);
     let stale = client
@@ -165,7 +188,13 @@ async fn a_failed_refresh_keeps_serving_the_previous_list() {
     // ...and recovers on its own once the document-server is back.
     mock.failing.store(false, Ordering::SeqCst);
     mock.set(Vec::new());
-    assert!(client.list_templates().await.unwrap().is_empty());
+    assert!(
+        client
+            .list_templates()
+            .await
+            .expect("the awaited step succeeds")
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -189,7 +218,10 @@ async fn the_list_carries_family_version_kind_and_options_and_sends_the_internal
     mock.set(vec![fancy]);
     let client = client(start(mock.clone()).await, Duration::from_secs(60));
 
-    let list = client.list_templates().await.unwrap();
+    let list = client
+        .list_templates()
+        .await
+        .expect("the awaited step succeeds");
     assert_eq!(list.len(), 1);
     let fancy = &list[0];
     assert_eq!(
@@ -202,7 +234,10 @@ async fn the_list_carries_family_version_kind_and_options_and_sends_the_internal
     assert_eq!(fancy.scope, "private");
     assert!(fancy.is_default);
     assert_eq!(fancy.options[0].key, "showSign");
-    assert_eq!(*mock.keys.lock().unwrap(), ["test-key"]);
+    assert_eq!(
+        *mock.keys.lock().expect("the mutex is not poisoned"),
+        ["test-key"]
+    );
 }
 
 #[tokio::test]
@@ -221,15 +256,18 @@ async fn each_tenant_is_served_and_cached_its_own_list() {
     let names = |tenant: &'static str| {
         let client = client.clone();
         async move {
-            with_tenant(Tenant::id(tenant).unwrap(), async move {
-                client
-                    .list_templates()
-                    .await
-                    .unwrap()
-                    .iter()
-                    .map(|t| t.name.clone())
-                    .collect::<Vec<_>>()
-            })
+            with_tenant(
+                Tenant::id(tenant).expect("the tenant id is valid"),
+                async move {
+                    client
+                        .list_templates()
+                        .await
+                        .expect("the awaited step succeeds")
+                        .iter()
+                        .map(|t| t.name.clone())
+                        .collect::<Vec<_>>()
+                },
+            )
             .await
         }
     };

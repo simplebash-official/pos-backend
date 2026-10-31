@@ -1,3 +1,9 @@
+//! Seeds 20 sample products into every subcategory of the configured database, so list,
+//! search and report screens can be tried against realistic volume. The product table
+//! below is data; the code only walks it.
+//!
+//! Run with: `cargo run --bin seed_20_per_subcategory`
+
 use simplebash_pos_backend::clients;
 use simplebash_pos_backend::core::config::Config;
 use simplebash_pos_backend::domain::inventory::{

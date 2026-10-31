@@ -7,7 +7,7 @@ per-module architecture and layering rationale is in `src/CLAUDE.md`.
 
 Swagger UI: `http://localhost:8080/docs`. Raw OpenAPI 3.1 JSON: `http://localhost:8080/api-docs/openapi.json`. Generated via `utoipa` + `utoipa-axum` + `utoipa-swagger-ui` — there is no hand-written spec file to fall out of sync.
 
-**The docs are only correct if every route follows this pattern** (see any `modules/*/routes.rs` for a working example):
+**The docs are only correct if every route follows this pattern** (see any `modules/*/routes/*_routes.rs` for a working example):
 1. Annotate the handler with `#[utoipa::path(get, path = "/foo", tag = "<module>", responses((status = 200, body = ApiResponse<SomeResponseType>)))]` (also add `request_body = ...` / path or query params as needed, and `security(("bearerAuth" = []))` if the route requires `CurrentUser`). Success responses are wrapped in `core::response::ApiResponse<T>`, not the bare domain type — see `core/response.rs`.
 2. Response/request payload types (the `T` inside `ApiResponse<T>`, and any request body type) need `#[derive(utoipa::ToSchema)]` alongside `serde::Serialize`/`Deserialize`.
 3. Register the handler in that module's `router()` via `OpenApiRouter::new().routes(routes!(handler_one, handler_two, ...))` — **never** mount a handler with plain `axum::routing::get/post/...` inside a module's `router()`, since only handlers passed through the `routes!()` macro get collected into the OpenAPI document.

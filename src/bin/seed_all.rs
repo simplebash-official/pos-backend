@@ -1,16 +1,17 @@
+//! Bootstraps the entire POS system database:
+//! 1. Admin account (`admin@pos.com` / `admin@1234`)
+//! 2. Reference Categories & Subcategories (providers)
+//! 3. Suppliers
+//! 4. Customers (20 realistic profiles)
+//! 5. Inventory Categories, Subcategories & Products
+//! 6. API Key
+//!
+//! Safe to run against SQLite or MongoDB.
+//! Run with: `cargo run --bin seed_all`
+
 use simplebash_pos_backend::core::config::Config;
 use simplebash_pos_backend::{clients, seeds};
 
-/// Bootstraps the entire POS system database:
-/// 1. Admin account (`admin@pos.com` / `admin@1234`)
-/// 2. Reference Categories & Subcategories (providers)
-/// 3. Suppliers
-/// 4. Customers (20 realistic profiles)
-/// 5. Inventory Categories, Subcategories & Products
-/// 6. API Key
-///
-/// Safe to run against SQLite or MongoDB.
-/// Run with: `cargo run --bin seed_all`
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();

@@ -30,19 +30,28 @@ async fn send(
     let request = match body {
         Some(value) => {
             builder = builder.header(CONTENT_TYPE, "application/json");
-            builder.body(Body::from(value.to_string())).unwrap()
+            builder
+                .body(Body::from(value.to_string()))
+                .expect("the request is well formed")
         }
-        None => builder.body(Body::empty()).unwrap(),
+        None => builder
+            .body(Body::empty())
+            .expect("the request is well formed"),
     };
-    let response = app.router.clone().oneshot(request).await.unwrap();
+    let response = app
+        .router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let json = if bytes.is_empty() {
         Value::Null
     } else {
-        serde_json::from_slice(&bytes).unwrap()
+        serde_json::from_slice(&bytes).expect("the text is valid JSON")
     };
     (status, json)
 }
@@ -71,8 +80,11 @@ async fn scenario(app: &common::TestApp) {
         } else {
             chrono::NaiveDate::from_ymd_opt(today.year(), today.month() + 1, 1)
         }
-        .unwrap();
-        next.pred_opt().unwrap().format("%Y-%m-%d").to_string()
+        .expect("the date is valid");
+        next.pred_opt()
+            .expect("the date is valid")
+            .format("%Y-%m-%d")
+            .to_string()
     };
 
     let (status, _) = send(app, "GET", "/api/recurring-expenses", None, &staff).await;
@@ -96,7 +108,10 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{vendor}");
-    let landlord = vendor["data"]["key"].as_str().unwrap().to_string();
+    let landlord = vendor["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
 
     // A regular bill that falls due today.
     let create = |extra: Value| {
@@ -105,8 +120,8 @@ async fn scenario(app: &common::TestApp) {
             "dueDay": today.day(), "remindDaysBefore": 3, "paidFrom": "drawer", "note": "Monthly rent"
         });
         base.as_object_mut()
-            .unwrap()
-            .extend(extra.as_object().unwrap().clone());
+            .expect("the value is an object")
+            .extend(extra.as_object().expect("the value is an object").clone());
         base
     };
     let (status, body) = send(
@@ -118,7 +133,10 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
-    let rent_key = body["data"]["key"].as_str().unwrap().to_string();
+    let rent_key = body["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     assert_eq!(body["data"]["categoryName"], "Shop rent");
     assert_eq!(body["data"]["payeeName"], "Mr. Landlord");
     assert_eq!(body["data"]["active"], true);
@@ -186,11 +204,11 @@ async fn scenario(app: &common::TestApp) {
     let bill = |bills: &Value, key: &str| {
         bills["data"]
             .as_array()
-            .unwrap()
+            .expect("the value is an array")
             .iter()
             .find(|b| b["template"]["key"] == key)
             .cloned()
-            .unwrap()
+            .expect("a match exists")
     };
     let (_, bills) = send(app, "GET", "/api/recurring-expenses", None, &manager).await;
     let rent = bill(&bills, &rent_key);
@@ -209,7 +227,13 @@ async fn scenario(app: &common::TestApp) {
         )
         .await;
         assert_eq!(status, StatusCode::CREATED, "{body}");
-        extra_keys.push((body["data"]["key"].as_str().unwrap().to_string(), "overdue"));
+        extra_keys.push((
+            body["data"]["key"]
+                .as_str()
+                .expect("the value is a string")
+                .to_string(),
+            "overdue",
+        ));
     }
     if today.day() + 10 <= 28 {
         let (status, body) = send(
@@ -219,7 +243,10 @@ async fn scenario(app: &common::TestApp) {
         .await;
         assert_eq!(status, StatusCode::CREATED, "{body}");
         extra_keys.push((
-            body["data"]["key"].as_str().unwrap().to_string(),
+            body["data"]["key"]
+                .as_str()
+                .expect("the value is a string")
+                .to_string(),
             "upcoming",
         ));
     }
@@ -229,9 +256,9 @@ async fn scenario(app: &common::TestApp) {
     }
     let days: Vec<i64> = bills["data"]
         .as_array()
-        .unwrap()
+        .expect("the value is an array")
         .iter()
-        .map(|b| b["daysUntilDue"].as_i64().unwrap())
+        .map(|b| b["daysUntilDue"].as_i64().expect("the value is an integer"))
         .collect();
     assert!(
         days.windows(2).all(|w| w[0] <= w[1]),
@@ -257,8 +284,8 @@ async fn scenario(app: &common::TestApp) {
             "categoryKey": cat("Shop rent"), "payeeKey": landlord, "periodStart": first_day, "periodEnd": last_day
         });
         base.as_object_mut()
-            .unwrap()
-            .extend(extra.as_object().unwrap().clone());
+            .expect("the value is an object")
+            .extend(extra.as_object().expect("the value is an object").clone());
         base
     };
     let (status, body) = send(
@@ -270,14 +297,23 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
-    let first_payment = body["data"]["key"].as_str().unwrap().to_string();
+    let first_payment = body["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
 
     let (_, bills) = send(app, "GET", "/api/recurring-expenses", None, &manager).await;
     let rent = bill(&bills, &rent_key);
     assert_eq!(rent["paidCents"], 3_000_000);
     assert_eq!(rent["balanceCents"], 2_000_000);
     assert_ne!(rent["status"], "paid", "30,000 of 50,000 is not paid");
-    assert_eq!(rent["payments"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        rent["payments"]
+            .as_array()
+            .expect("the value is an array")
+            .len(),
+        1
+    );
 
     // The "already paid" check says what is recorded; a part payment is not yet a duplicate.
     let status_uri = format!(
@@ -316,7 +352,10 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_eq!(body["code"], "PERIOD_ALREADY_PAID");
     assert!(
-        body["message"].as_str().unwrap().contains("Rs. 50,000.00"),
+        body["message"]
+            .as_str()
+            .expect("the value is a string")
+            .contains("Rs. 50,000.00"),
         "{body}"
     );
     let (status, body) = send(
@@ -412,7 +451,7 @@ async fn scenario(app: &common::TestApp) {
     assert!(
         bills["data"]
             .as_array()
-            .unwrap()
+            .expect("the value is an array")
             .iter()
             .all(|b| b["template"]["key"] != rent_key.as_str())
     );
@@ -427,7 +466,7 @@ async fn scenario(app: &common::TestApp) {
     assert!(
         bills["data"]
             .as_array()
-            .unwrap()
+            .expect("the value is an array")
             .iter()
             .any(|b| b["template"]["key"] == rent_key.as_str())
     );
@@ -448,5 +487,5 @@ async fn regular_bills_on_sqlite() {
 async fn regular_bills_on_mongo() {
     let app = common::spawn_app_isolated().await;
     scenario(&app).await;
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }

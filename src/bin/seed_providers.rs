@@ -1,10 +1,11 @@
+//! Seeds the categories and subcategories reference data into the database.
+//! Upserts idempotently, safe to run against SQLite or MongoDB.
+//!
+//! Run with: `cargo run --bin seed_providers`
+
 use simplebash_pos_backend::core::config::Config;
 use simplebash_pos_backend::{clients, seeds};
 
-/// Seeds the categories and subcategories reference data into the database.
-/// Upserts idempotently, safe to run against SQLite or MongoDB.
-///
-/// Run with: `cargo run --bin seed_providers`
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();

@@ -24,10 +24,10 @@ async fn get(router: &axum::Router, uri: &str, token: &str) -> (StatusCode, Stri
                 .uri(uri)
                 .header(AUTHORIZATION, format!("Bearer {token}"))
                 .body(Body::empty())
-                .unwrap(),
+                .expect("the request is well formed"),
         )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let status = response.status();
     let content_type = response
         .headers()
@@ -37,7 +37,7 @@ async fn get(router: &axum::Router, uri: &str, token: &str) -> (StatusCode, Stri
         .to_string();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     (status, content_type, bytes.to_vec())
 }
 
@@ -53,7 +53,7 @@ async fn a_shop_lists_and_downloads_its_custom_designs() {
 
     let (status, _, bytes) = get(&app.router, "/api/document-packages", &staff).await;
     assert_eq!(status, StatusCode::OK);
-    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    let body: Value = serde_json::from_slice(&bytes).expect("the text is valid JSON");
     // Only the custom (private) design: bundled ones ship with every install.
     assert_eq!(
         body["data"]["packages"],
@@ -88,7 +88,7 @@ async fn a_shop_lists_and_downloads_its_custom_designs() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }
 
 #[tokio::test]

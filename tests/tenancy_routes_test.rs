@@ -96,12 +96,16 @@ async fn call(
             Some(v) => Body::from(v.to_string()),
             None => Body::empty(),
         })
-        .unwrap();
-    let response = router.clone().oneshot(request).await.unwrap();
+        .expect("the request is well formed");
+    let response = router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     (status, String::from_utf8_lossy(&bytes).into_owned())
 }
 
@@ -339,10 +343,8 @@ fn first_list(body: &Value) -> Option<&Vec<Value>> {
 async fn tenant_b_sees_nothing_of_tenant_a_on_any_get_route() {
     let _serial = SERIAL.lock().await;
     dotenvy::dotenv().ok();
-    if std::env::var("MONGODB_URI").is_err() {
-        eprintln!("MONGODB_URI not set - skipping");
-        return;
-    }
+    std::env::var("MONGODB_URI")
+        .expect("Mongo-backed tests need MONGODB_URI (use `make check-atlas`)");
     let app = spawn_unthrottled().await;
     let token_a = admin_token(&app, Some("tenant_a"));
     let token_b = admin_token(&app, Some("tenant_b"));
@@ -415,17 +417,15 @@ async fn tenant_b_sees_nothing_of_tenant_a_on_any_get_route() {
         failures.join("\n")
     );
 
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }
 
 #[tokio::test]
 async fn cross_tenant_mutations_fail_with_404_and_leave_data_intact() {
     let _serial = SERIAL.lock().await;
     dotenvy::dotenv().ok();
-    if std::env::var("MONGODB_URI").is_err() {
-        eprintln!("MONGODB_URI not set - skipping");
-        return;
-    }
+    std::env::var("MONGODB_URI")
+        .expect("Mongo-backed tests need MONGODB_URI (use `make check-atlas`)");
     let app = spawn_unthrottled().await;
     let token_a = admin_token(&app, Some("tenant_a"));
     let token_b = admin_token(&app, Some("tenant_b"));
@@ -493,7 +493,12 @@ async fn cross_tenant_mutations_fail_with_404_and_leave_data_intact() {
     let (status, body) = call(&app.router, "GET", &product, Some(&token_a), None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let v = json_of(&body);
-    assert!(v["data"]["name"].as_str().unwrap().starts_with("ProdA-"));
+    assert!(
+        v["data"]["name"]
+            .as_str()
+            .expect("the value is a string")
+            .starts_with("ProdA-")
+    );
     assert_eq!(v["data"]["stockQuantity"], 9, "stock changed: 10 - 1 sold");
     for uri in [
         format!("/api/customers/{}", seed.customer_id),
@@ -515,17 +520,15 @@ async fn cross_tenant_mutations_fail_with_404_and_leave_data_intact() {
     .await;
     assert_ne!(json_of(&body)["data"]["status"], "cancelled");
 
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }
 
 #[tokio::test]
 async fn token_without_tenant_is_rejected_and_no_document_is_unstamped() {
     let _serial = SERIAL.lock().await;
     dotenvy::dotenv().ok();
-    if std::env::var("MONGODB_URI").is_err() {
-        eprintln!("MONGODB_URI not set - skipping");
-        return;
-    }
+    std::env::var("MONGODB_URI")
+        .expect("Mongo-backed tests need MONGODB_URI (use `make check-atlas`)");
     let app = spawn_unthrottled().await;
     let token_a = admin_token(&app, Some("tenant_a"));
     let no_tenant = admin_token(&app, None);
@@ -546,16 +549,21 @@ async fn token_without_tenant_is_rejected_and_no_document_is_unstamped() {
     // Every document written while seeding carries a real tenant: none
     // unstamped, none quarantined under the deny scope.
     let mut problems = Vec::new();
-    for name in app.db.list_collection_names().await.unwrap() {
-        let coll = app.db.collection::<Document>(&name);
+    for name in app
+        .mongo()
+        .list_collection_names()
+        .await
+        .expect("the awaited step succeeds")
+    {
+        let coll = app.mongo().collection::<Document>(&name);
         let unstamped = coll
             .count_documents(doc! { "tenant_id": { "$exists": false } })
             .await
-            .unwrap();
+            .expect("the awaited step succeeds");
         let denied = coll
             .count_documents(doc! { "tenant_id": "__deny__" })
             .await
-            .unwrap();
+            .expect("the awaited step succeeds");
         if unstamped > 0 || denied > 0 {
             problems.push(format!(
                 "{name}: {unstamped} unstamped, {denied} quarantined"
@@ -568,7 +576,7 @@ async fn token_without_tenant_is_rejected_and_no_document_is_unstamped() {
         problems.join("\n")
     );
 
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }
 
 // Aggregates (stats, dashboards, the cached reports engine) hold no needle
@@ -578,10 +586,8 @@ async fn token_without_tenant_is_rejected_and_no_document_is_unstamped() {
 async fn aggregates_and_cached_reports_are_tenant_scoped() {
     let _serial = SERIAL.lock().await;
     dotenvy::dotenv().ok();
-    if std::env::var("MONGODB_URI").is_err() {
-        eprintln!("MONGODB_URI not set - skipping");
-        return;
-    }
+    std::env::var("MONGODB_URI")
+        .expect("Mongo-backed tests need MONGODB_URI (use `make check-atlas`)");
     let app = spawn_unthrottled().await;
     let token_a = admin_token(&app, Some("tenant_a"));
     let token_b = admin_token(&app, Some("tenant_b"));
@@ -634,5 +640,5 @@ async fn aggregates_and_cached_reports_are_tenant_scoped() {
         failures.join("\n")
     );
 
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }

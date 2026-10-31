@@ -46,9 +46,11 @@ jobs:
           exit 1
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: clippy, rustfmt
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
-      # `cargo fmt --check` is left out until the tree is formatted with the
-      # current rustfmt; add it back once `cargo fmt` has been run repo-wide.
-      - run: cargo clippy --all-targets --all-features -- -D warnings
-      - run: cargo test
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      # The calculations crate must still build for the browser.
+      - run: cargo check -p pos-calc-wasm --target wasm32-unknown-unknown
+      - run: cargo test --workspace

@@ -52,18 +52,26 @@ async fn send_authed(
     let request = if let Some(json_body) = body {
         builder
             .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(serde_json::to_vec(&json_body).unwrap()))
-            .unwrap()
+            .body(Body::from(
+                serde_json::to_vec(&json_body).expect("the value serializes to JSON"),
+            ))
+            .expect("the value serializes to JSON")
     } else {
-        builder.body(Body::empty()).unwrap()
+        builder
+            .body(Body::empty())
+            .expect("the value serializes to JSON")
     };
 
-    let response = router.clone().oneshot(request).await.unwrap();
+    let response = router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     let status = response.status();
     let headers = response.headers().clone();
     let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 
     let json: serde_json::Value = if body_bytes.is_empty() {
         serde_json::Value::Null
@@ -81,22 +89,29 @@ async fn health_endpoint_returns_no_store_and_server_time() {
     let request = Request::builder()
         .uri("/api/health")
         .body(Body::empty())
-        .unwrap();
+        .expect("the request is well formed");
 
-    let response = app.router.oneshot(request).await.unwrap();
+    let response = app
+        .router
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     assert_eq!(response.status(), StatusCode::OK);
 
     let cc = response
         .headers()
         .get(header::CACHE_CONTROL)
-        .unwrap()
+        .expect("the key is present")
         .to_str()
-        .unwrap();
+        .expect("the header is text");
     assert_eq!(cc, "no-store");
 
     let server_time = response.headers().get("x-server-time");
     assert!(server_time.is_some(), "missing x-server-time header");
-    let st_str = server_time.unwrap().to_str().unwrap();
+    let st_str = server_time
+        .expect("the step succeeds")
+        .to_str()
+        .expect("the header is text");
     assert!(
         chrono::DateTime::parse_from_rfc3339(st_str).is_ok(),
         "x-server-time must be RFC3339"
@@ -119,7 +134,8 @@ async fn sequence_reservation_allocates_sequential_blocks() {
     .await;
 
     assert_eq!(status, StatusCode::OK, "first reservation: {json1}");
-    let res1: SequenceReservationResponse = serde_json::from_value(json1["data"].clone()).unwrap();
+    let res1: SequenceReservationResponse =
+        serde_json::from_value(json1["data"].clone()).expect("the value deserializes");
     assert_eq!(res1.name, "invoice");
     assert_eq!(res1.prefix, "INV-");
     assert_eq!(res1.padding, 6);
@@ -136,7 +152,8 @@ async fn sequence_reservation_allocates_sequential_blocks() {
     .await;
 
     assert_eq!(status, StatusCode::OK, "second reservation: {json2}");
-    let res2: SequenceReservationResponse = serde_json::from_value(json2["data"].clone()).unwrap();
+    let res2: SequenceReservationResponse =
+        serde_json::from_value(json2["data"].clone()).expect("the value deserializes");
     assert_eq!(res2.start, res1.end + 1);
     assert_eq!(res2.end, res1.end + 5);
     assert_eq!(res2.end - res2.start + 1, 5);
@@ -151,7 +168,7 @@ async fn negative_stock_rejection_returns_409_insufficient_stock() {
     let cat_key = generate_id("cat");
     let subcat_key = generate_id("subcat");
     let now = BsonDateTime::now();
-    app.db
+    app.mongo()
         .collection::<CategoryDocument>("categories")
         .insert_one(CategoryDocument {
             id: None,
@@ -166,9 +183,9 @@ async fn negative_stock_rejection_returns_409_insufficient_stock() {
             updated_by_device: None,
         })
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 
-    app.db
+    app.mongo()
         .collection::<SubcategoryDocument>("subcategories")
         .insert_one(SubcategoryDocument {
             id: None,
@@ -182,7 +199,7 @@ async fn negative_stock_rejection_returns_409_insufficient_stock() {
             updated_by_device: None,
         })
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 
     // Create product with stock 5
     let product_key = generate_id(prefixes::PRODUCT);
@@ -206,14 +223,18 @@ async fn negative_stock_rejection_returns_409_insufficient_stock() {
         updated_by_device: None,
     };
     let insert_res = app
-        .db
+        .mongo()
         .collection::<ProductDocument>("products")
         .insert_one(prod_doc)
         .await
-        .unwrap();
-    let prod_id = insert_res.inserted_id.as_object_id().unwrap().to_hex();
+        .expect("the awaited step succeeds");
+    let prod_id = insert_res
+        .inserted_id
+        .as_object_id()
+        .expect("the value is an object id")
+        .to_hex();
     let batch_key = generate_id(prefixes::STOCK_BATCH);
-    app.db
+    app.mongo()
         .collection::<StockBatchDocument>("stock_batches")
         .insert_one(StockBatchDocument {
             id: None,
@@ -234,7 +255,7 @@ async fn negative_stock_rejection_returns_409_insufficient_stock() {
             updated_by_device: None,
         })
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 
     // Take 10 out of a batch holding 5 (which would yield -5 stock)
     let (status, _, json) = send_authed(
@@ -263,7 +284,7 @@ async fn optimistic_concurrency_product_version_conflict() {
     let cat_key = generate_id("cat");
     let subcat_key = generate_id("subcat");
     let now = BsonDateTime::now();
-    app.db
+    app.mongo()
         .collection::<CategoryDocument>("categories")
         .insert_one(CategoryDocument {
             id: None,
@@ -278,9 +299,9 @@ async fn optimistic_concurrency_product_version_conflict() {
             updated_by_device: None,
         })
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 
-    app.db
+    app.mongo()
         .collection::<SubcategoryDocument>("subcategories")
         .insert_one(SubcategoryDocument {
             id: None,
@@ -294,7 +315,7 @@ async fn optimistic_concurrency_product_version_conflict() {
             updated_by_device: None,
         })
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 
     let prod_doc = ProductDocument {
         id: None,
@@ -316,12 +337,16 @@ async fn optimistic_concurrency_product_version_conflict() {
         updated_by_device: Some("pos-terminal-1".to_string()),
     };
     let insert_res = app
-        .db
+        .mongo()
         .collection::<ProductDocument>("products")
         .insert_one(prod_doc)
         .await
-        .unwrap();
-    let prod_id = insert_res.inserted_id.as_object_id().unwrap().to_hex();
+        .expect("the awaited step succeeds");
+    let prod_id = insert_res
+        .inserted_id
+        .as_object_id()
+        .expect("the value is an object id")
+        .to_hex();
 
     // 1. PUT with wrong If-Match: 2 (expected 1)
     let (status, _, json) = send_authed(
@@ -358,7 +383,8 @@ async fn optimistic_concurrency_product_version_conflict() {
     .await;
 
     assert_eq!(status, StatusCode::OK, "should succeed: {json_ok}");
-    let updated_product: Product = serde_json::from_value(json_ok["data"].clone()).unwrap();
+    let updated_product: Product =
+        serde_json::from_value(json_ok["data"].clone()).expect("the value deserializes");
     assert_eq!(updated_product.version, 2);
     assert_eq!(updated_product.name, "Updated Product Name");
     assert_eq!(
@@ -405,7 +431,8 @@ async fn sync_changes_cursor_and_tombstones() {
     .await;
 
     assert_eq!(status, StatusCode::OK, "full sync: {json_full}");
-    let sync_resp: SyncChangesResponse = serde_json::from_value(json_full["data"].clone()).unwrap();
+    let sync_resp: SyncChangesResponse =
+        serde_json::from_value(json_full["data"].clone()).expect("the value deserializes");
     assert!(sync_resp.changes.contains_key("products"));
     let prod_changes = &sync_resp.changes["products"];
     assert_eq!(prod_changes["full"], true);
@@ -419,8 +446,13 @@ async fn sync_status_returns_latest_resource_timestamps() {
     let req = Request::builder()
         .uri("/api/sync/status")
         .body(Body::empty())
-        .unwrap();
-    let res = app.router.clone().oneshot(req).await.unwrap();
+        .expect("the request is well formed");
+    let res = app
+        .router
+        .clone()
+        .oneshot(req)
+        .await
+        .expect("the awaited step succeeds");
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 
     // 2. Insert Category and Product into MongoDB
@@ -428,7 +460,7 @@ async fn sync_status_returns_latest_resource_timestamps() {
     let cat_key = generate_id("cat");
     let now = BsonDateTime::now();
 
-    app.db
+    app.mongo()
         .collection::<CategoryDocument>("categories")
         .insert_one(CategoryDocument {
             id: None,
@@ -443,7 +475,7 @@ async fn sync_status_returns_latest_resource_timestamps() {
             updated_by_device: None,
         })
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 
     // 3. Authenticated request -> 200 with a per-resource watermark
     let (status, _, json) =
@@ -460,7 +492,9 @@ async fn sync_status_returns_latest_resource_timestamps() {
         .expect("resources must be an object");
     assert!(resources.contains_key("categories"));
 
-    let cat_ts = resources["categories"]["lastUpdatedAt"].as_str().unwrap();
+    let cat_ts = resources["categories"]["lastUpdatedAt"]
+        .as_str()
+        .expect("the value is a string");
     assert!(
         chrono::DateTime::parse_from_rfc3339(cat_ts).is_ok(),
         "categories timestamp must be valid RFC3339: {cat_ts}"
@@ -494,7 +528,13 @@ async fn sync_status_returns_latest_resource_timestamps() {
     let changes = &json["data"]["changes"]["categories"];
     assert_eq!(changes["full"], false);
     assert_eq!(changes["unchanged"], true);
-    assert_eq!(changes["items"].as_array().unwrap().len(), 0);
+    assert_eq!(
+        changes["items"]
+            .as_array()
+            .expect("the value is an array")
+            .len(),
+        0
+    );
 }
 
 /// The delta feed and the REST snapshot feed are mirrored into the same
@@ -522,7 +562,7 @@ async fn sync_changes_items_match_the_rest_dto_shape() {
     let category_name = format!("Shape Cat {}", Uuid::new_v4());
     let subcategory_name = format!("Shape Sub {}", Uuid::new_v4());
 
-    app.db
+    app.mongo()
         .collection::<CategoryDocument>("categories")
         .insert_one(CategoryDocument {
             id: None,
@@ -537,9 +577,9 @@ async fn sync_changes_items_match_the_rest_dto_shape() {
             updated_by_device: None,
         })
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 
-    app.db
+    app.mongo()
         .collection::<SubcategoryDocument>("subcategories")
         .insert_one(SubcategoryDocument {
             id: None,
@@ -553,10 +593,10 @@ async fn sync_changes_items_match_the_rest_dto_shape() {
             updated_by_device: None,
         })
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 
     let product_key = generate_id(prefixes::PRODUCT);
-    app.db
+    app.mongo()
         .collection::<ProductDocument>("products")
         .insert_one(ProductDocument {
             id: None,
@@ -578,7 +618,7 @@ async fn sync_changes_items_match_the_rest_dto_shape() {
             updated_by_device: None,
         })
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 
     let (status, _, json) = send_authed(
         &app.router,
@@ -664,7 +704,7 @@ async fn sync_changes_invoices_and_payments_match_the_rest_dto_shape() {
     let now = BsonDateTime::now();
     let invoice_number = format!("INV-{}", Uuid::new_v4());
 
-    app.db
+    app.mongo()
         .collection::<InvoiceDocument>("invoices")
         .insert_one(InvoiceDocument {
             id: None,
@@ -711,10 +751,10 @@ async fn sync_changes_invoices_and_payments_match_the_rest_dto_shape() {
             updated_by_device: None,
         })
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 
     let payment_key = generate_id(prefixes::PAYMENT);
-    app.db
+    app.mongo()
         .collection::<PaymentDocument>("payments")
         .insert_one(PaymentDocument {
             id: None,
@@ -732,7 +772,7 @@ async fn sync_changes_invoices_and_payments_match_the_rest_dto_shape() {
             updated_at: now,
         })
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 
     let (status, _, json) = send_authed(
         &app.router,
@@ -822,7 +862,10 @@ async fn sync_changes_employees_match_the_rest_dto_shape() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{created}");
-    let employee_key = created["data"]["key"].as_str().unwrap().to_string();
+    let employee_key = created["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
 
     let (status, _, json) = send_authed(
         &app.router,
@@ -883,7 +926,10 @@ async fn sync_changes_redelivers_an_employee_after_a_login_is_linked() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{created}");
-    let employee_key = created["data"]["key"].as_str().unwrap().to_string();
+    let employee_key = created["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
 
     // Watermark taken strictly after the employee's own create — only the
     // login-linking touch should be visible in the delta from here on.

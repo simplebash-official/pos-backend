@@ -25,7 +25,10 @@ struct Captured(Arc<Mutex<Vec<u8>>>);
 
 impl Write for Captured {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(buf);
+        self.0
+            .lock()
+            .expect("the mutex is not poisoned")
+            .extend_from_slice(buf);
         Ok(buf.len())
     }
     fn flush(&mut self) -> std::io::Result<()> {
@@ -57,11 +60,17 @@ async fn build_test_app() -> axum::Router {
 }
 
 fn log_lines(captured: &Captured) -> Vec<serde_json::Value> {
-    String::from_utf8(captured.0.lock().unwrap().clone())
-        .unwrap()
-        .lines()
-        .filter_map(|l| serde_json::from_str(l).ok())
-        .collect()
+    String::from_utf8(
+        captured
+            .0
+            .lock()
+            .expect("the mutex is not poisoned")
+            .clone(),
+    )
+    .expect("the body is UTF-8")
+    .lines()
+    .filter_map(|l| serde_json::from_str(l).ok())
+    .collect()
 }
 
 fn span_request_id(line: &serde_json::Value) -> Option<&str> {
@@ -98,10 +107,10 @@ async fn requests_get_ids_and_redacted_body_logs() {
                 .uri("/api/health")
                 .header("x-request-id", "req_frontend-123")
                 .body(Body::empty())
-                .unwrap(),
+                .expect("the request is well formed"),
         )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()["x-request-id"], "req_frontend-123");
 
@@ -113,11 +122,13 @@ async fn requests_get_ids_and_redacted_body_logs() {
                 .uri("/api/health")
                 .header("x-request-id", "not a valid id")
                 .body(Body::empty())
-                .unwrap(),
+                .expect("the request is well formed"),
         )
         .await
-        .unwrap();
-    let minted = response.headers()["x-request-id"].to_str().unwrap();
+        .expect("the awaited step succeeds");
+    let minted = response.headers()["x-request-id"]
+        .to_str()
+        .expect("the header is text");
     assert!(minted.starts_with("req_"), "minted id: {minted}");
 
     // 3. A login body is logged with the password masked; the 4xx is a warn.
@@ -132,10 +143,10 @@ async fn requests_get_ids_and_redacted_body_logs() {
                 .header("content-length", body.len())
                 .header("x-request-id", "req_login-1")
                 .body(Body::from(body))
-                .unwrap(),
+                .expect("the request is well formed"),
         )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     assert!(response.status().is_client_error());
 
     let lines = log_lines(&captured);
@@ -156,7 +167,9 @@ async fn requests_get_ids_and_redacted_body_logs() {
         .iter()
         .find(|l| l["event"] == "request" && span_request_id(l) == Some("req_login-1"))
         .expect("http/request line for login");
-    let logged_body = login_request["body"].as_str().unwrap();
+    let logged_body = login_request["body"]
+        .as_str()
+        .expect("the value is a string");
     assert!(logged_body.contains("[REDACTED]"), "{logged_body}");
     assert!(!logged_body.contains("hunter2"), "{logged_body}");
 
@@ -166,6 +179,13 @@ async fn requests_get_ids_and_redacted_body_logs() {
         .expect("http/response line for login");
     assert_eq!(login_response["level"], "WARN");
 
-    let serialized = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
+    let serialized = String::from_utf8(
+        captured
+            .0
+            .lock()
+            .expect("the mutex is not poisoned")
+            .clone(),
+    )
+    .expect("the body is UTF-8");
     assert!(!serialized.contains("hunter2"), "password leaked into logs");
 }

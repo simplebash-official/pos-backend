@@ -13,15 +13,19 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 async fn execute(router: &axum::Router, request: Request<Body>) -> (StatusCode, Value) {
-    let response = router.clone().oneshot(request).await.unwrap();
+    let response = router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let json = if bytes.is_empty() {
         Value::Null
     } else {
-        serde_json::from_slice(&bytes).unwrap()
+        serde_json::from_slice(&bytes).expect("the text is valid JSON")
     };
     (status, json)
 }
@@ -42,7 +46,7 @@ async fn send_authed(
             Some(value) => Body::from(value.to_string()),
             None => Body::empty(),
         })
-        .unwrap();
+        .expect("the request is well formed");
     execute(router, request).await
 }
 
@@ -77,7 +81,10 @@ async fn seed_category_with_subcategory(app: &common::TestApp) -> (String, Strin
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "Body: {body}");
-    let category_key = body["data"]["key"].as_str().unwrap().to_string();
+    let category_key = body["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
 
     let (status, body) = send_authed(
         &app.router,
@@ -93,11 +100,11 @@ async fn seed_category_with_subcategory(app: &common::TestApp) -> (String, Strin
     // subcategory, the one just added.
     let subcategory_key = body["data"]["subcategories"]
         .as_array()
-        .unwrap()
+        .expect("the value is an array")
         .last()
-        .unwrap()["key"]
+        .expect("the list is not empty")["key"]
         .as_str()
-        .unwrap()
+        .expect("the value is a string")
         .to_string();
 
     (category_key, subcategory_key)
@@ -132,8 +139,14 @@ async fn seed_serialized_product(
     .await;
     assert_eq!(status, StatusCode::CREATED, "Body: {body}");
     (
-        body["data"]["id"].as_str().unwrap().to_string(),
-        body["data"]["key"].as_str().unwrap().to_string(),
+        body["data"]["id"]
+            .as_str()
+            .expect("the value is a string")
+            .to_string(),
+        body["data"]["key"]
+            .as_str()
+            .expect("the value is a string")
+            .to_string(),
         SERIAL_PRICE_CENTS,
     )
 }
@@ -155,7 +168,10 @@ async fn seed_supplier(app: &common::TestApp) -> String {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "Body: {body}");
-    body["data"]["key"].as_str().unwrap().to_string()
+    body["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string()
 }
 
 async fn record_purchase(
@@ -203,7 +219,10 @@ async fn list_serials(
     };
     let (status_code, body) = send_authed(&app.router, "GET", &uri, None, &token).await;
     assert_eq!(status_code, StatusCode::OK, "Body: {body}");
-    body["data"]["items"].as_array().unwrap().clone()
+    body["data"]["items"]
+        .as_array()
+        .expect("the value is an array")
+        .clone()
 }
 
 fn unique_serials(prefix: &str, count: i64) -> Vec<String> {
@@ -234,7 +253,12 @@ async fn purchase_receipt_mints_in_stock_serials_for_a_serialized_product() {
     assert_eq!(in_stock.len(), 3);
     let minted: Vec<String> = in_stock
         .iter()
-        .map(|s| s["serialNumber"].as_str().unwrap().to_string())
+        .map(|s| {
+            s["serialNumber"]
+                .as_str()
+                .expect("the value is a string")
+                .to_string()
+        })
         .collect();
     for serial in &serials {
         assert!(minted.contains(serial), "expected {serial} to be minted");
@@ -469,7 +493,7 @@ async fn sell_one_serialized_unit(
     (
         sale_body["data"]["invoice"]["key"]
             .as_str()
-            .unwrap()
+            .expect("the value is a string")
             .to_string(),
         serials[0].clone(),
     )

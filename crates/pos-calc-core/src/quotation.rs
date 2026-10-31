@@ -1,3 +1,5 @@
+//! The quotation form: line and order discounts, totals and the reasons it cannot be created yet.
+
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
@@ -11,6 +13,7 @@ const MAX_LINES: usize = 200;
 const MAX_CENTS: i64 = 10_000_000_000_000;
 const MAX_QUANTITY: i64 = 1_000_000;
 
+/// Whether a discount value is a percentage or a fixed amount in cents.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -21,6 +24,7 @@ pub enum QuotationDiscountType {
     Fixed,
 }
 
+/// What a fixed line discount applies to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -33,6 +37,7 @@ pub enum QuotationDiscountScope {
     Total,
 }
 
+/// A discount typed on one quotation line.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -47,6 +52,7 @@ pub struct CalcQuotationLineDiscount {
     pub value: f64,
 }
 
+/// One line of the quotation form.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -61,6 +67,7 @@ pub struct CalcQuotationLine {
     pub discount: Option<CalcQuotationLineDiscount>,
 }
 
+/// A discount typed on the whole quotation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -73,6 +80,7 @@ pub struct CalcQuotationOrderDiscount {
     pub value: f64,
 }
 
+/// The quotation form as typed, sent to be calculated.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -87,6 +95,7 @@ pub struct CalcQuotationRequest {
     pub valid_until: String,
 }
 
+/// The figures for one quotation line.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -100,6 +109,7 @@ pub struct CalcQuotationLineReply {
     pub total_cents: i64,
 }
 
+/// A reason the quotation cannot be created yet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -116,6 +126,7 @@ pub enum QuotationBlockerCode {
     ValidUntilInPast,
 }
 
+/// One reason the quotation cannot be created, and the line it concerns.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -127,6 +138,7 @@ pub struct QuotationBlocker {
     pub line: Option<usize>,
 }
 
+/// The calculated quotation: line figures, totals and the blockers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -166,6 +178,11 @@ fn line_discount_cents(line: &CalcQuotationLine, gross: i64) -> i64 {
     }
 }
 
+/// Works out a quotation. `today` decides whether the validity date has already passed.
+///
+/// # Errors
+///
+/// Fails when an amount, quantity or discount is out of range, or there are too many lines.
 pub fn compute(req: &CalcQuotationRequest, today: NaiveDate) -> CalcResult<CalcQuotationReply> {
     if req.lines.len() > MAX_LINES {
         return Err(CalcError::validation("There are too many lines"));

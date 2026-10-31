@@ -1,10 +1,11 @@
+//! Seeds the inventory categories, subcategories, and products into the database.
+//! Upserts idempotently, safe to run against SQLite or MongoDB.
+//!
+//! Run with: `cargo run --bin seed_inventory`
+
 use simplebash_pos_backend::core::config::Config;
 use simplebash_pos_backend::{clients, seeds};
 
-/// Seeds the inventory categories, subcategories, and products into the database.
-/// Upserts idempotently, safe to run against SQLite or MongoDB.
-///
-/// Run with: `cargo run --bin seed_inventory`
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();

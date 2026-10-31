@@ -36,13 +36,19 @@ async fn post_login(router: &axum::Router, body: Value) -> (StatusCode, Value) {
         .method("POST")
         .uri("/api/auth/login")
         .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(serde_json::to_vec(&body).unwrap()))
-        .unwrap();
-    let response = router.clone().oneshot(request).await.unwrap();
+        .body(Body::from(
+            serde_json::to_vec(&body).expect("the value serializes to JSON"),
+        ))
+        .expect("the value serializes to JSON");
+    let response = router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     (
         status,
         serde_json::from_slice(&bytes).unwrap_or(Value::Null),
@@ -52,11 +58,6 @@ async fn post_login(router: &axum::Router, body: Value) -> (StatusCode, Value) {
 #[tokio::test]
 async fn tenant_directory_and_multi_tenant_login_roundtrip() {
     dotenvy::dotenv().ok();
-    let Ok(_) = std::env::var("MONGODB_URI") else {
-        eprintln!("MONGODB_URI not set - skipping");
-        return;
-    };
-
     let uri = common::mongo_uri();
     let name = format!("jtdir_{}", &Uuid::new_v4().simple().to_string()[..24]);
     let mut overrides = common::mongo_overrides(&uri, &name).to_vec();
@@ -69,10 +70,10 @@ async fn tenant_directory_and_multi_tenant_login_roundtrip() {
     // --- directory ---------------------------------------------------------
     let a = create_tenant(&db, "  Shop-Alpha ", "Alpha Repairs")
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let b = create_tenant(&db, "shop-beta", "Beta Retail")
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     assert_eq!(
         a.shop_code, "shop-alpha",
         "codes are lowercased and trimmed"
@@ -89,8 +90,13 @@ async fn tenant_directory_and_multi_tenant_login_roundtrip() {
     );
     assert!(create_tenant(&db, "no", "Too short").await.is_err());
 
-    let resolved = resolve_shop_code(&db, "Shop-Alpha").await.unwrap();
-    assert_eq!(resolved, Tenant::id(&a.key).unwrap());
+    let resolved = resolve_shop_code(&db, "Shop-Alpha")
+        .await
+        .expect("the awaited step succeeds");
+    assert_eq!(
+        resolved,
+        Tenant::id(&a.key).expect("the tenant id is valid")
+    );
     // A tenant registered under the id the identity service issued keeps that id,
     // so a staff login by shop code reaches the data the devices sync.
     let issued = create_tenant_with_key(
@@ -100,11 +106,13 @@ async fn tenant_directory_and_multi_tenant_login_roundtrip() {
         "Test Shop",
     )
     .await
-    .unwrap();
+    .expect("the awaited step succeeds");
     assert_eq!(issued.key, "tnt_issuedbyidentity1");
     assert_eq!(
-        resolve_shop_code(&db, "test-shop").await.unwrap(),
-        Tenant::id("tnt_issuedbyidentity1").unwrap()
+        resolve_shop_code(&db, "test-shop")
+            .await
+            .expect("the awaited step succeeds"),
+        Tenant::id("tnt_issuedbyidentity1").expect("the tenant id is valid")
     );
     for bad in ["issued", "tnt_", "tnt_has space"] {
         assert!(
@@ -126,20 +134,23 @@ async fn tenant_directory_and_multi_tenant_login_roundtrip() {
         (&a, "Alpha Admin", "alpha-password-1"),
         (&b, "Beta Admin", "beta-password-2"),
     ] {
-        with_tenant(Tenant::id(&info.key).unwrap(), async {
-            create_user(
-                &db,
-                CreateUserRequest {
-                    name: name.to_string(),
-                    username: "admin".to_string(),
-                    password: password.to_string(),
-                    role: Role::Admin,
-                    employee_key: None,
-                },
-            )
-            .await
-            .expect("each tenant can own the same username")
-        })
+        with_tenant(
+            Tenant::id(&info.key).expect("the tenant id is valid"),
+            async {
+                create_user(
+                    &db,
+                    CreateUserRequest {
+                        name: name.to_string(),
+                        username: "admin".to_string(),
+                        password: password.to_string(),
+                        role: Role::Admin,
+                        employee_key: None,
+                    },
+                )
+                .await
+                .expect("each tenant can own the same username")
+            },
+        )
         .await;
     }
 
@@ -162,7 +173,7 @@ async fn tenant_directory_and_multi_tenant_login_roundtrip() {
             &DecodingKey::from_secret(config.jwt_secret.as_bytes()),
             &Validation::default(),
         )
-        .unwrap()
+        .expect("the step succeeds")
         .claims
     };
 
@@ -172,7 +183,10 @@ async fn tenant_directory_and_multi_tenant_login_roundtrip() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    let token_a = body["data"]["token"].as_str().unwrap().to_string();
+    let token_a = body["data"]["token"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     assert_eq!(body["data"]["user"]["name"], "Alpha Admin");
     assert_eq!(claims_of(&token_a).tid.as_deref(), Some(a.key.as_str()));
 
@@ -184,9 +198,13 @@ async fn tenant_directory_and_multi_tenant_login_roundtrip() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["data"]["user"]["name"], "Beta Admin");
     assert_eq!(
-        claims_of(body["data"]["token"].as_str().unwrap())
-            .tid
-            .as_deref(),
+        claims_of(
+            body["data"]["token"]
+                .as_str()
+                .expect("the value is a string")
+        )
+        .tid
+        .as_deref(),
         Some(b.key.as_str())
     );
 
@@ -220,15 +238,15 @@ async fn tenant_directory_and_multi_tenant_login_roundtrip() {
                 .uri("/api/auth/me")
                 .header(header::AUTHORIZATION, format!("Bearer {token_a}"))
                 .body(Body::empty())
-                .unwrap(),
+                .expect("the request is well formed"),
         )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     assert_eq!(me.status(), StatusCode::OK);
     let bytes = axum::body::to_bytes(me.into_body(), usize::MAX)
         .await
-        .unwrap();
-    let me: Value = serde_json::from_slice(&bytes).unwrap();
+        .expect("the awaited step succeeds");
+    let me: Value = serde_json::from_slice(&bytes).expect("the text is valid JSON");
     assert_eq!(me["data"]["name"], "Alpha Admin");
 
     // Public shop lookup endpoint resolves branding name without authentication.
@@ -238,15 +256,15 @@ async fn tenant_directory_and_multi_tenant_login_roundtrip() {
             Request::builder()
                 .uri("/api/auth/shop/shop-alpha")
                 .body(Body::empty())
-                .unwrap(),
+                .expect("the request is well formed"),
         )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     assert_eq!(lookup_ok.status(), StatusCode::OK);
     let bytes = axum::body::to_bytes(lookup_ok.into_body(), usize::MAX)
         .await
-        .unwrap();
-    let shop: Value = serde_json::from_slice(&bytes).unwrap();
+        .expect("the awaited step succeeds");
+    let shop: Value = serde_json::from_slice(&bytes).expect("the text is valid JSON");
     assert_eq!(shop["data"]["shopCode"], "shop-alpha");
     assert_eq!(shop["data"]["name"], "Alpha Repairs");
 
@@ -256,10 +274,10 @@ async fn tenant_directory_and_multi_tenant_login_roundtrip() {
             Request::builder()
                 .uri("/api/auth/shop/ghost-shop")
                 .body(Body::empty())
-                .unwrap(),
+                .expect("the request is well formed"),
         )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     assert_eq!(lookup_missing.status(), StatusCode::NOT_FOUND);
 
     raw.drop().await.ok();
@@ -268,10 +286,6 @@ async fn tenant_directory_and_multi_tenant_login_roundtrip() {
 #[tokio::test]
 async fn multi_tenant_cors_only_allows_configured_origins() {
     dotenvy::dotenv().ok();
-    let Ok(_) = std::env::var("MONGODB_URI") else {
-        eprintln!("MONGODB_URI not set - skipping");
-        return;
-    };
     let uri = common::mongo_uri();
     let name = format!("jtdir_{}", &Uuid::new_v4().simple().to_string()[..24]);
     let mut overrides = common::mongo_overrides(&uri, &name).to_vec();
@@ -300,10 +314,10 @@ async fn multi_tenant_cors_only_allows_configured_origins() {
                         .uri("/api/health")
                         .header(header::ORIGIN, origin)
                         .body(Body::empty())
-                        .unwrap(),
+                        .expect("the request is well formed"),
                 )
                 .await
-                .unwrap();
+                .expect("the awaited step succeeds");
             response
                 .headers()
                 .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)

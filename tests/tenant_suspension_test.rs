@@ -23,15 +23,6 @@ const SECRET: &str = "test-provision-secret-0123456789";
 const PASSWORD: &str = "correct-horse-1";
 const DAY_MS: i64 = 24 * 3600 * 1000;
 
-fn has_mongo() -> bool {
-    dotenvy::dotenv().ok();
-    if std::env::var("MONGODB_URI").is_err() {
-        eprintln!("MONGODB_URI not set - skipping");
-        return false;
-    }
-    true
-}
-
 /// A tenant id no other test (running in the same process, sharing the suspension cache) uses.
 fn tenant_id() -> String {
     format!("tnt_{}", &uuid::Uuid::new_v4().simple().to_string()[..16])
@@ -40,7 +31,7 @@ fn tenant_id() -> String {
 fn argon2_hash(password: &str) -> String {
     Argon2::default()
         .hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng))
-        .unwrap()
+        .expect("the password hashes")
         .to_string()
 }
 
@@ -67,14 +58,14 @@ async fn send(
         .oneshot(
             request
                 .body(Body::from(body.map(|b| b.to_string()).unwrap_or_default()))
-                .unwrap(),
+                .expect("the request is well formed"),
         )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     (
         status,
         serde_json::from_slice(&bytes).unwrap_or(Value::Null),
@@ -135,11 +126,8 @@ async fn set_status(router: &Router, tenant: &str, suspended: bool) -> (StatusCo
 
 #[tokio::test]
 async fn a_suspended_shop_is_refused_everywhere_and_can_be_reinstated() {
-    if !has_mongo() {
-        return;
-    }
     let app = common::spawn_app_multi_tenant_with_secret(Some(SECRET)).await;
-    ensure_indexes(&app.db, TenantMode::Multi).await;
+    ensure_indexes(app.mongo(), TenantMode::Multi).await;
     let (tenant, other) = (tenant_id(), tenant_id());
     provision(&app.router, &tenant, "ann-s-phones").await;
     provision(&app.router, &other, "bob-repairs").await;
@@ -147,7 +135,10 @@ async fn a_suspended_shop_is_refused_everywhere_and_can_be_reinstated() {
     // Signed in and working before the suspension.
     let (status, body) = login(&app.router, "ann-s-phones", PASSWORD).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    let token = body["data"]["token"].as_str().unwrap().to_string();
+    let token = body["data"]["token"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     let device = common::mint_device_token(&app.config, &tenant, "dev-1");
     let me = |t: String| {
         let router = app.router.clone();
@@ -176,7 +167,10 @@ async fn a_suspended_shop_is_refused_everywhere_and_can_be_reinstated() {
         "{body}"
     );
     assert!(
-        details["retained"]["staff"].as_u64().unwrap() >= 1,
+        details["retained"]["staff"]
+            .as_u64()
+            .expect("the value is an unsigned integer")
+            >= 1,
         "{body}"
     );
     assert_eq!(details["retained"]["bills"], 0, "{body}");
@@ -245,16 +239,13 @@ async fn a_suspended_shop_is_refused_everywhere_and_can_be_reinstated() {
         StatusCode::OK
     );
 
-    let _ = app.db.drop().await;
+    let _ = app.mongo().drop().await;
 }
 
 #[tokio::test]
 async fn the_status_route_needs_the_secret_and_a_known_shop() {
-    if !has_mongo() {
-        return;
-    }
     let app = common::spawn_app_multi_tenant_with_secret(Some(SECRET)).await;
-    ensure_indexes(&app.db, TenantMode::Multi).await;
+    ensure_indexes(app.mongo(), TenantMode::Multi).await;
     let tenant = tenant_id();
     provision(&app.router, &tenant, "ann-s-phones").await;
 
@@ -293,12 +284,12 @@ async fn the_status_route_needs_the_secret_and_a_known_shop() {
         );
     }
     let stored = app
-        .db
+        .mongo()
         .collection::<Document>("tenants")
         .find_one(doc! { "key": &tenant })
         .await
-        .unwrap()
-        .unwrap();
+        .expect("the awaited step succeeds")
+        .expect("the step succeeds");
     assert!(
         stored.get("suspended_at").is_none(),
         "an unauthorised call changed nothing"
@@ -329,12 +320,12 @@ async fn the_status_route_needs_the_secret_and_a_known_shop() {
         assert_eq!(status, StatusCode::BAD_REQUEST, "{body} -> {resp}");
     }
     let still_active = app
-        .db
+        .mongo()
         .collection::<Document>("tenants")
         .find_one(doc! { "key": &tenant })
         .await
-        .unwrap()
-        .unwrap();
+        .expect("the awaited step succeeds")
+        .expect("the step succeeds");
     assert!(
         still_active.get("suspended_at").is_none()
             && still_active.get("suspended_reason").is_none(),
@@ -354,17 +345,14 @@ async fn the_status_route_needs_the_secret_and_a_known_shop() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
-    let _ = app.db.drop().await;
-    let _ = off.db.drop().await;
+    let _ = app.mongo().drop().await;
+    let _ = off.mongo().drop().await;
 }
 
 #[tokio::test]
 async fn usage_counts_this_shop_only_and_leaves_out_voided_and_deleted_rows() {
-    if !has_mongo() {
-        return;
-    }
     let app = common::spawn_app_multi_tenant_with_secret(Some(SECRET)).await;
-    ensure_indexes(&app.db, TenantMode::Multi).await;
+    ensure_indexes(app.mongo(), TenantMode::Multi).await;
     let (tenant, other) = (tenant_id(), tenant_id());
     provision(&app.router, &tenant, "ann-s-phones").await;
     provision(&app.router, &other, "bob-repairs").await;
@@ -372,12 +360,12 @@ async fn usage_counts_this_shop_only_and_leaves_out_voided_and_deleted_rows() {
     let now = DateTime::now().timestamp_millis();
     let at = |days: i64| DateTime::from_millis(now - days * DAY_MS);
     let insert = |name: &'static str, docs: Vec<Document>| {
-        let db = app.db.clone();
+        let db = app.mongo().clone();
         async move {
             db.collection::<Document>(name)
                 .insert_many(docs)
                 .await
-                .unwrap()
+                .expect("the awaited step succeeds")
         }
     };
     let invoice = |t: &str, status: &str, cents: i64, when: DateTime| {
@@ -460,11 +448,11 @@ async fn usage_counts_this_shop_only_and_leaves_out_voided_and_deleted_rows() {
         u["lastSyncAt"].is_string() && u["lastBillAt"].is_string(),
         "{u}"
     );
-    let days = u["billsByDay"].as_array().unwrap();
+    let days = u["billsByDay"].as_array().expect("the value is an array");
     assert_eq!(days.len(), 3, "{u}");
     assert_eq!(
         days.iter()
-            .map(|d| d["bills"].as_i64().unwrap())
+            .map(|d| d["bills"].as_i64().expect("the value is an integer"))
             .sum::<i64>(),
         3
     );
@@ -485,7 +473,9 @@ async fn usage_counts_this_shop_only_and_leaves_out_voided_and_deleted_rows() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    let items = body["data"]["items"].as_array().unwrap();
+    let items = body["data"]["items"]
+        .as_array()
+        .expect("the value is an array");
     assert_eq!(items.len(), 2);
     assert_eq!(items[0]["billsTotal"], 4);
     assert_eq!(items[1]["billsTotal"], 1);
@@ -529,28 +519,25 @@ async fn usage_counts_this_shop_only_and_leaves_out_voided_and_deleted_rows() {
         (StatusCode::NOT_FOUND, Some("TENANT_NOT_FOUND"))
     );
 
-    let _ = app.db.drop().await;
+    let _ = app.mongo().drop().await;
 }
 
 #[tokio::test]
 async fn a_suspended_shop_reports_what_it_still_holds_and_reinstating_changes_none_of_it() {
-    if !has_mongo() {
-        return;
-    }
     let app = common::spawn_app_multi_tenant_with_secret(Some(SECRET)).await;
-    ensure_indexes(&app.db, TenantMode::Multi).await;
+    ensure_indexes(app.mongo(), TenantMode::Multi).await;
     let (tenant, other) = (tenant_id(), tenant_id());
     provision(&app.router, &tenant, "ann-s-phones").await;
     provision(&app.router, &other, "bob-repairs").await;
 
     let now = DateTime::now();
     let insert = |name: &'static str, docs: Vec<Document>| {
-        let db = app.db.clone();
+        let db = app.mongo().clone();
         async move {
             db.collection::<Document>(name)
                 .insert_many(docs)
                 .await
-                .unwrap()
+                .expect("the awaited step succeeds")
         }
     };
     insert(
@@ -583,7 +570,10 @@ async fn a_suspended_shop_reports_what_it_still_holds_and_reinstating_changes_no
     .await;
 
     let (_, login_body) = login(&app.router, "ann-s-phones", PASSWORD).await;
-    let token = login_body["data"]["token"].as_str().unwrap().to_string();
+    let token = login_body["data"]["token"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
 
     assert_eq!(
         set_status(&app.router, &tenant, true).await.0,
@@ -612,13 +602,13 @@ async fn a_suspended_shop_reports_what_it_still_holds_and_reinstating_changes_no
         StatusCode::OK
     );
     let kept = |name: &'static str| {
-        let db = app.db.clone();
+        let db = app.mongo().clone();
         let tenant = tenant.clone();
         async move {
             db.collection::<Document>(name)
                 .count_documents(doc! { "tenant_id": tenant })
                 .await
-                .unwrap()
+                .expect("the awaited step succeeds")
         }
     };
     assert_eq!(
@@ -630,5 +620,5 @@ async fn a_suspended_shop_reports_what_it_still_holds_and_reinstating_changes_no
         (3, 3, 1)
     );
 
-    let _ = app.db.drop().await;
+    let _ = app.mongo().drop().await;
 }

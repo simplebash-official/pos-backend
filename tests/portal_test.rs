@@ -37,9 +37,14 @@ async fn portal_renders_at_root_and_api() {
     // 1. Test GET /
     let res = app
         .clone()
-        .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .body(Body::empty())
+                .expect("the request is well formed"),
+        )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 
     assert_eq!(res.status(), StatusCode::OK);
     let content_type = res
@@ -51,8 +56,8 @@ async fn portal_renders_at_root_and_api() {
 
     let body_bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
         .await
-        .unwrap();
-    let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
+        .expect("the awaited step succeeds");
+    let body_str = String::from_utf8(body_bytes.to_vec()).expect("the body is UTF-8");
     assert!(body_str.contains("SimpleBash POS Core API"));
     assert!(body_str.contains("telemetry-signal"));
     assert!(body_str.contains("uptime-ticker"));
@@ -61,9 +66,14 @@ async fn portal_renders_at_root_and_api() {
     // 2. Test GET /api
     let res_api = app
         .clone()
-        .oneshot(Request::builder().uri("/api").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/api")
+                .body(Body::empty())
+                .expect("the request is well formed"),
+        )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     assert_eq!(res_api.status(), StatusCode::OK);
 
     // 3. Test GET /api/health returns live telemetry
@@ -72,15 +82,16 @@ async fn portal_renders_at_root_and_api() {
             Request::builder()
                 .uri("/api/health")
                 .body(Body::empty())
-                .unwrap(),
+                .expect("the request is well formed"),
         )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     assert_eq!(res_health.status(), StatusCode::OK);
     let health_bytes = axum::body::to_bytes(res_health.into_body(), usize::MAX)
         .await
-        .unwrap();
-    let health_json: serde_json::Value = serde_json::from_slice(&health_bytes).unwrap();
+        .expect("the awaited step succeeds");
+    let health_json: serde_json::Value =
+        serde_json::from_slice(&health_bytes).expect("the text is valid JSON");
     assert_eq!(health_json["data"]["status"], "ok");
     assert!(health_json["data"]["uptime_seconds"].is_number());
     assert_eq!(health_json["data"]["environment"], "development");

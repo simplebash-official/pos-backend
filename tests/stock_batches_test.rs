@@ -32,12 +32,16 @@ async fn send(
         .header(AUTHORIZATION, format!("Bearer {token}"))
         .header(CONTENT_TYPE, "application/json")
         .body(body.map_or_else(Body::empty, |b| Body::from(b.to_string())))
-        .unwrap();
-    let response = router.clone().oneshot(request).await.unwrap();
+        .expect("the request is well formed");
+    let response = router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     let json = if bytes.is_empty() {
         Value::Null
     } else {
@@ -79,7 +83,10 @@ impl Shop {
         )
         .await;
         assert_eq!(status, StatusCode::CREATED, "{category}");
-        let category_key = category["data"]["key"].as_str().unwrap().to_string();
+        let category_key = category["data"]["key"]
+            .as_str()
+            .expect("the value is a string")
+            .to_string();
         let (status, sub) = send(
             &router,
             "POST",
@@ -91,7 +98,7 @@ impl Shop {
         assert_eq!(status, StatusCode::CREATED, "{sub}");
         let subcategory_key = sub["data"]["subcategories"][0]["key"]
             .as_str()
-            .unwrap()
+            .expect("the value is a string")
             .to_string();
 
         let (status, supplier) = send(
@@ -132,9 +139,18 @@ impl Shop {
             router,
             admin,
             manager,
-            supplier_key: supplier["data"]["key"].as_str().unwrap().to_string(),
-            product_id: product["data"]["id"].as_str().unwrap().to_string(),
-            product_key: product["data"]["key"].as_str().unwrap().to_string(),
+            supplier_key: supplier["data"]["key"]
+                .as_str()
+                .expect("the value is a string")
+                .to_string(),
+            product_id: product["data"]["id"]
+                .as_str()
+                .expect("the value is a string")
+                .to_string(),
+            product_key: product["data"]["key"]
+                .as_str()
+                .expect("the value is a string")
+                .to_string(),
         }
     }
 
@@ -205,12 +221,14 @@ impl Shop {
     async fn tiers(&self) -> Vec<(i64, i64)> {
         self.product().await["priceTiers"]
             .as_array()
-            .unwrap()
+            .expect("the value is an array")
             .iter()
             .map(|t| {
                 (
-                    t["sellingPriceCents"].as_i64().unwrap(),
-                    t["quantity"].as_i64().unwrap(),
+                    t["sellingPriceCents"]
+                        .as_i64()
+                        .expect("the value is an integer"),
+                    t["quantity"].as_i64().expect("the value is an integer"),
                 )
             })
             .collect()
@@ -227,7 +245,10 @@ impl Shop {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{body}");
-        body["data"]["items"].as_array().unwrap().clone()
+        body["data"]["items"]
+            .as_array()
+            .expect("the value is an array")
+            .clone()
     }
 
     /// Remaining quantity per batch key.
@@ -237,8 +258,13 @@ impl Shop {
             .iter()
             .map(|b| {
                 (
-                    b["key"].as_str().unwrap().to_string(),
-                    b["remainingQuantity"].as_i64().unwrap(),
+                    b["key"]
+                        .as_str()
+                        .expect("the value is a string")
+                        .to_string(),
+                    b["remainingQuantity"]
+                        .as_i64()
+                        .expect("the value is an integer"),
                 )
             })
             .collect()
@@ -261,8 +287,14 @@ async fn item_a_scenario(app: &common::TestApp) {
         .await;
     assert_eq!(shop.tiers().await, vec![(120_000, 5), (150_000, 12)]);
     let batches = shop.batches(&shop.admin).await;
-    let first = batches[1]["key"].as_str().unwrap().to_string();
-    let second = batches[0]["key"].as_str().unwrap().to_string();
+    let first = batches[1]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
+    let second = batches[0]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     assert_eq!(batches[0]["sellingPriceCents"], 150_000);
     assert_eq!(batches[0]["source"], "purchase");
     assert!(batches[0]["purchaseKey"].is_string());
@@ -282,7 +314,10 @@ async fn item_a_scenario(app: &common::TestApp) {
         sale["data"]["invoice"]["totalCents"],
         2 * 120_000 + 3 * 150_000
     );
-    let voidable_invoice = sale["data"]["invoice"]["key"].as_str().unwrap().to_string();
+    let voidable_invoice = sale["data"]["invoice"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
     assert_eq!(shop.tiers().await, vec![(120_000, 3), (150_000, 9)]);
     assert_eq!(shop.product().await["stockQuantity"], 12);
 
@@ -318,7 +353,7 @@ async fn item_a_scenario(app: &common::TestApp) {
         .await;
     let third = shop.batches(&shop.admin).await[0]["key"]
         .as_str()
-        .unwrap()
+        .expect("the value is a string")
         .to_string();
     assert_eq!(shop.tiers().await, vec![(120_000, 3), (150_000, 13)]);
     let (status, split_sale) = shop.sell(&[(150_000, 11)]).await;
@@ -422,7 +457,11 @@ async fn item_a_scenario(app: &common::TestApp) {
     let batches = shop.batches(&shop.admin).await;
     let remaining_total: i64 = batches
         .iter()
-        .map(|b| b["remainingQuantity"].as_i64().unwrap())
+        .map(|b| {
+            b["remainingQuantity"]
+                .as_i64()
+                .expect("the value is an integer")
+        })
         .sum();
     assert_eq!(shop.product().await["stockQuantity"], remaining_total);
     let (status, report) = send(
@@ -436,7 +475,14 @@ async fn item_a_scenario(app: &common::TestApp) {
     assert_eq!(status, StatusCode::OK, "{report}");
     let cost_value: i64 = batches
         .iter()
-        .map(|b| b["remainingQuantity"].as_i64().unwrap() * b["unitCostCents"].as_i64().unwrap())
+        .map(|b| {
+            b["remainingQuantity"]
+                .as_i64()
+                .expect("the value is an integer")
+                * b["unitCostCents"]
+                    .as_i64()
+                    .expect("the value is an integer")
+        })
         .sum();
     assert_eq!(report["data"]["totalCostValuationCents"], cost_value);
 }
@@ -451,7 +497,7 @@ async fn item_a_scenario_on_sqlite() {
 async fn item_a_scenario_on_mongo() {
     let app = common::spawn_app_isolated().await;
     item_a_scenario(&app).await;
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }
 
 /// A desktop database from before stock batches (prices on the product row,
@@ -465,7 +511,9 @@ async fn a_sqlite_database_from_before_batches_is_migrated() {
 
     let path = std::env::temp_dir().join(format!("pos_batch_mig_{}.db", uuid::Uuid::new_v4()));
     let url = format!("sqlite://{}?mode=rwc", path.display());
-    let pool = sqlite::connect(&url, SqlLogging::Off).await.unwrap();
+    let pool = sqlite::connect(&url, SqlLogging::Off)
+        .await
+        .expect("the awaited step succeeds");
 
     // Recreate the old shape on top of a fresh schema.
     for statement in [
@@ -490,17 +538,21 @@ async fn a_sqlite_database_from_before_batches_is_migrated() {
          '[{\"productKey\":\"prod_old\",\"name\":\"Old Item\",\"unitPriceCents\":1200,\"quantity\":2,\"discountCents\":0,\"totalCents\":2400,\"unitCostCents\":900,\"sourceType\":\"retail\",\"returnedQuantity\":0,\"serialNumbers\":[]}]', \
          2400, 2400, 'cash', 'paid', '{}', '2026-01-02T00:00:00+00:00', '2026-01-02T00:00:00+00:00')",
     ] {
-        pool.execute(statement).await.unwrap();
+        pool.execute(statement)
+            .await
+            .expect("the awaited step succeeds");
     }
 
-    sqlite::init_db(&pool).await.unwrap();
+    sqlite::init_db(&pool)
+        .await
+        .expect("the awaited step succeeds");
 
     let batch: (String, String, i64, i64, i64) = sqlx::query_as(
         "SELECT key, id, remaining_quantity, unit_cost_cents, selling_price_cents FROM stock_batches WHERE product_key = 'prod_old'",
     )
     .fetch_one(&pool)
     .await
-    .unwrap();
+    .expect("the awaited step succeeds");
     assert_eq!(
         batch,
         (
@@ -515,7 +567,7 @@ async fn a_sqlite_database_from_before_batches_is_migrated() {
         sqlx::query_as("SELECT key, batch_key FROM stock_movements ORDER BY key")
             .fetch_all(&pool)
             .await
-            .unwrap();
+            .expect("the awaited step succeeds");
     assert_eq!(
         movements,
         vec![
@@ -527,13 +579,13 @@ async fn a_sqlite_database_from_before_batches_is_migrated() {
         sqlx::query_as("SELECT batch_key FROM product_serials WHERE key = 'psn_old'")
             .fetch_one(&pool)
             .await
-            .unwrap();
+            .expect("the awaited step succeeds");
     assert_eq!(serial.0, "stb_open_prod_old");
     let items: (String,) = sqlx::query_as("SELECT items FROM invoices WHERE key = 'inv_old'")
         .fetch_one(&pool)
         .await
-        .unwrap();
-    let items: Value = serde_json::from_str(&items.0).unwrap();
+        .expect("the awaited step succeeds");
+    let items: Value = serde_json::from_str(&items.0).expect("the text is valid JSON");
     assert_eq!(
         items[0]["batchAllocations"],
         json!([{ "batchKey": "stb_open_prod_old", "quantity": 2, "unitCostCents": 900 }])
@@ -541,7 +593,7 @@ async fn a_sqlite_database_from_before_batches_is_migrated() {
     let columns: Vec<String> = sqlx::query_scalar("SELECT name FROM pragma_table_info('products')")
         .fetch_all(&pool)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     assert!(!columns.iter().any(|c| c.contains("price")));
     // The capture triggers come back after the migration dropped them.
     let triggers: i64 = sqlx::query_scalar(
@@ -549,15 +601,17 @@ async fn a_sqlite_database_from_before_batches_is_migrated() {
     )
     .fetch_one(&pool)
     .await
-    .unwrap();
+    .expect("the awaited step succeeds");
     assert_eq!(triggers, 1);
 
     // Idempotent: a second start finds nothing to migrate.
-    sqlite::init_db(&pool).await.unwrap();
+    sqlite::init_db(&pool)
+        .await
+        .expect("the awaited step succeeds");
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM stock_batches")
         .fetch_one(&pool)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
     assert_eq!(count, 1);
 
     pool.close().await;
@@ -585,13 +639,13 @@ async fn a_mongo_database_from_before_batches_is_migrated() {
     let product_id = ObjectId::new();
     let created = BsonDateTime::from_millis(1_767_225_600_000);
     let insert = |collection: &str, document: Document| {
-        let db = app.db.clone();
+        let db = app.mongo().clone();
         let collection = collection.to_string();
         async move {
             db.collection::<Document>(&collection)
                 .insert_one(document)
                 .await
-                .unwrap();
+                .expect("the awaited step succeeds");
         }
     };
     insert(
@@ -661,7 +715,9 @@ async fn a_mongo_database_from_before_batches_is_migrated() {
     .await;
 
     // A dry run reports per shop what would change and writes nothing.
-    let dry = migrate_mongo(&app.db, Mode::DryRun).await.unwrap();
+    let dry = migrate_mongo(app.mongo(), Mode::DryRun)
+        .await
+        .expect("the awaited step succeeds");
     let shop_a = &dry.shops[SINGLE_SHOP];
     assert_eq!(
         (shop_a.products, shop_a.batches, shop_a.movements),
@@ -683,79 +739,122 @@ async fn a_mongo_database_from_before_batches_is_migrated() {
     assert_eq!((shop_b.invoices, shop_b.lines_without_cost), (0, 1));
     assert_eq!(dry.total().products, 2);
     assert_eq!(
-        app.db
+        app.mongo()
             .collection::<Document>("stock_batches")
             .count_documents(doc! {})
             .await
-            .unwrap(),
+            .expect("the awaited step succeeds"),
         0
     );
     let untouched = app
-        .db
+        .mongo()
         .collection::<Document>("products")
         .find_one(doc! { "_id": product_id })
         .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(untouched.get_i64("selling_price_cents").unwrap(), 1200);
+        .expect("the awaited step succeeds")
+        .expect("the step succeeds");
+    assert_eq!(
+        untouched
+            .get_i64("selling_price_cents")
+            .expect("the document has this field"),
+        1200
+    );
     let untouched_movement = app
-        .db
+        .mongo()
         .collection::<Document>("stock_movements")
         .find_one(doc! { "key": "sm_old" })
         .await
-        .unwrap()
-        .unwrap();
+        .expect("the awaited step succeeds")
+        .expect("the step succeeds");
     assert!(!untouched_movement.contains_key("batch_key"));
 
     // The real run does exactly what the dry run said.
-    let first = migrate_mongo(&app.db, Mode::Apply).await.unwrap();
+    let first = migrate_mongo(app.mongo(), Mode::Apply)
+        .await
+        .expect("the awaited step succeeds");
     assert_eq!(first.shops, dry.shops);
 
     let batch = app
-        .db
+        .mongo()
         .collection::<Document>("stock_batches")
         .find_one(doc! { "key": "stb_open_prod_old" })
         .await
-        .unwrap()
+        .expect("the awaited step succeeds")
         .expect("opening batch");
-    assert_eq!(batch.get_object_id("_id").unwrap(), product_id);
-    assert_eq!(batch.get_i64("remaining_quantity").unwrap(), 5);
-    assert_eq!(batch.get_i64("selling_price_cents").unwrap(), 1200);
+    assert_eq!(
+        batch
+            .get_object_id("_id")
+            .expect("the document has this id field"),
+        product_id
+    );
+    assert_eq!(
+        batch
+            .get_i64("remaining_quantity")
+            .expect("the document has this field"),
+        5
+    );
+    assert_eq!(
+        batch
+            .get_i64("selling_price_cents")
+            .expect("the document has this field"),
+        1200
+    );
     let movement = app
-        .db
+        .mongo()
         .collection::<Document>("stock_movements")
         .find_one(doc! { "key": "sm_old" })
         .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(movement.get_str("batch_key").unwrap(), "stb_open_prod_old");
+        .expect("the awaited step succeeds")
+        .expect("the step succeeds");
+    assert_eq!(
+        movement
+            .get_str("batch_key")
+            .expect("the document has this string field"),
+        "stb_open_prod_old"
+    );
     let invoice = app
-        .db
+        .mongo()
         .collection::<Document>("invoices")
         .find_one(doc! { "key": "inv_old" })
         .await
-        .unwrap()
-        .unwrap();
-    let line = invoice.get_array("items").unwrap()[0]
+        .expect("the awaited step succeeds")
+        .expect("the step succeeds");
+    let line = invoice
+        .get_array("items")
+        .expect("the document has this array field")[0]
         .as_document()
-        .unwrap()
+        .expect("the entry is a document")
         .clone();
-    let allocation = line.get_array("batchAllocations").unwrap()[0]
+    let allocation = line
+        .get_array("batchAllocations")
+        .expect("the document has this array field")[0]
         .as_document()
-        .unwrap()
+        .expect("the entry is a document")
         .clone();
-    assert_eq!(allocation.get_str("batchKey").unwrap(), "stb_open_prod_old");
-    assert_eq!(allocation.get_i64("unitCostCents").unwrap(), 1000);
+    assert_eq!(
+        allocation
+            .get_str("batchKey")
+            .expect("the document has this string field"),
+        "stb_open_prod_old"
+    );
+    assert_eq!(
+        allocation
+            .get_i64("unitCostCents")
+            .expect("the document has this field"),
+        1000
+    );
     let product = app
-        .db
+        .mongo()
         .collection::<Document>("products")
         .find_one(doc! { "_id": product_id })
         .await
-        .unwrap()
-        .unwrap();
+        .expect("the awaited step succeeds")
+        .expect("the step succeeds");
     assert!(!product.contains_key("selling_price_cents"));
 
-    let again = migrate_mongo(&app.db, Mode::Apply).await.unwrap();
+    let again = migrate_mongo(app.mongo(), Mode::Apply)
+        .await
+        .expect("the awaited step succeeds");
     let again = again.total();
     assert_eq!((again.products, again.batches, again.invoices), (0, 0, 0));
 
@@ -771,7 +870,7 @@ async fn a_mongo_database_from_before_batches_is_migrated() {
     assert_eq!(body["data"]["priceTiers"][0]["sellingPriceCents"], 1200);
     assert_eq!(body["data"]["priceTiers"][0]["quantity"], 5);
 
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }
 
 /// A product sold at two prices sits on two invoice lines. A return names the
@@ -785,13 +884,22 @@ async fn two_price_return_scenario(app: &common::TestApp) {
         .await;
     let batches = shop.batches(&shop.admin).await;
     let (dearer, cheaper) = (
-        batches[0]["key"].as_str().unwrap().to_string(),
-        batches[1]["key"].as_str().unwrap().to_string(),
+        batches[0]["key"]
+            .as_str()
+            .expect("the value is a string")
+            .to_string(),
+        batches[1]["key"]
+            .as_str()
+            .expect("the value is a string")
+            .to_string(),
     );
 
     let (status, sale) = shop.sell(&[(120_000, 2), (150_000, 3)]).await;
     assert_eq!(status, StatusCode::OK, "{sale}");
-    let invoice_key = sale["data"]["invoice"]["key"].as_str().unwrap().to_string();
+    let invoice_key = sale["data"]["invoice"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
 
     let (status, credit_note) = send(
         &shop.router,
@@ -820,9 +928,13 @@ async fn two_price_return_scenario(app: &common::TestApp) {
     let invoice_lines = |body: &Value| -> Vec<i64> {
         body["data"]["items"]
             .as_array()
-            .unwrap()
+            .expect("the value is an array")
             .iter()
-            .map(|line| line["returnedQuantity"].as_i64().unwrap())
+            .map(|line| {
+                line["returnedQuantity"]
+                    .as_i64()
+                    .expect("the value is an integer")
+            })
             .collect()
     };
     let (_, invoice) = send(
@@ -858,7 +970,9 @@ async fn two_price_return_scenario(app: &common::TestApp) {
         "POST",
         &format!(
             "/api/billing/credit-notes/{}/void",
-            credit_note["data"]["key"].as_str().unwrap()
+            credit_note["data"]["key"]
+                .as_str()
+                .expect("the value is a string")
         ),
         Some(json!({ "reason": "Returned by mistake" })),
         &shop.admin,
@@ -888,5 +1002,5 @@ async fn two_price_return_on_sqlite() {
 async fn two_price_return_on_mongo() {
     let app = common::spawn_app_isolated().await;
     two_price_return_scenario(&app).await;
-    app.db.drop().await.ok();
+    app.mongo().drop().await.ok();
 }

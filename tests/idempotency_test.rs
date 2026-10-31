@@ -29,18 +29,26 @@ async fn send_with_headers(
     let request = if let Some(json_body) = body {
         builder
             .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(serde_json::to_vec(&json_body).unwrap()))
-            .unwrap()
+            .body(Body::from(
+                serde_json::to_vec(&json_body).expect("the value serializes to JSON"),
+            ))
+            .expect("the value serializes to JSON")
     } else {
-        builder.body(Body::empty()).unwrap()
+        builder
+            .body(Body::empty())
+            .expect("the value serializes to JSON")
     };
 
-    let response = router.clone().oneshot(request).await.unwrap();
+    let response = router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     let status = response.status();
     let headers = response.headers().clone();
     let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 
     let json: serde_json::Value = if body_bytes.is_empty() {
         serde_json::Value::Null
@@ -72,7 +80,9 @@ async fn idempotency_replay_and_body_mismatch_validation() {
 
     assert_eq!(status1, StatusCode::OK, "first request: {json1}");
     assert!(headers1.get("idempotency-replayed").is_none());
-    let start1 = json1["data"]["start"].as_i64().unwrap();
+    let start1 = json1["data"]["start"]
+        .as_i64()
+        .expect("the value is an integer");
 
     // 2. Replay with identical payload and same Idempotency-Key -> cached response with idempotency-replayed: true
     let (status2, headers2, json2) = send_with_headers(
@@ -89,12 +99,14 @@ async fn idempotency_replay_and_body_mismatch_validation() {
     assert_eq!(
         headers2
             .get("idempotency-replayed")
-            .unwrap()
+            .expect("the key is present")
             .to_str()
-            .unwrap(),
+            .expect("the header is text"),
         "true"
     );
-    let start2 = json2["data"]["start"].as_i64().unwrap();
+    let start2 = json2["data"]["start"]
+        .as_i64()
+        .expect("the value is an integer");
     assert_eq!(
         start1, start2,
         "replayed response must match original exactly"
@@ -150,7 +162,7 @@ async fn login_responses_are_never_captured_into_the_idempotency_store() {
     assert!(headers.get("idempotency-replayed").is_none());
 
     let stored = app
-        .db
+        .mongo()
         .collection::<mongodb::bson::Document>("idempotency_keys")
         .find_one(mongodb::bson::doc! { "key": &idem_key })
         .await
@@ -170,7 +182,9 @@ async fn a_fresh_in_progress_record_blocks_a_concurrent_retry() {
     // Simulates a request that is genuinely still being handled: an
     // `in_progress` record less than the staleness window old must still
     // reject a same-key retry with 409, not let it race ahead.
-    let collection = app.db.collection::<IdempotencyDocument>("idempotency_keys");
+    let collection = app
+        .mongo()
+        .collection::<IdempotencyDocument>("idempotency_keys");
     collection
         .insert_one(IdempotencyDocument {
             id: None,
@@ -216,7 +230,9 @@ async fn a_stale_in_progress_record_is_treated_as_abandoned() {
         BsonDateTime::now().timestamp_millis()
             - std::time::Duration::from_secs(90).as_millis() as i64,
     );
-    let collection = app.db.collection::<IdempotencyDocument>("idempotency_keys");
+    let collection = app
+        .mongo()
+        .collection::<IdempotencyDocument>("idempotency_keys");
     collection
         .insert_one(IdempotencyDocument {
             id: None,
@@ -267,7 +283,7 @@ async fn a_forged_token_is_rejected_rather_than_bucketed_as_anonymous() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
     let stored = app
-        .db
+        .mongo()
         .collection::<mongodb::bson::Document>("idempotency_keys")
         .find_one(mongodb::bson::doc! { "key": &idem_key })
         .await
@@ -296,8 +312,13 @@ async fn an_oversized_body_is_refused_without_being_buffered() {
         .header(header::CONTENT_TYPE, "application/json")
         .header("idempotency-key", &idem_key)
         .body(Body::from(big))
-        .unwrap();
-    let response = app.router.clone().oneshot(request).await.unwrap();
+        .expect("the request is well formed");
+    let response = app
+        .router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
 }
 
@@ -313,12 +334,17 @@ async fn an_unauthenticated_request_never_touches_the_idempotency_store() {
         .header("idempotency-key", &idem_key)
         .header("x-device-id", "till-01")
         .body(Body::from(r#"{"blockSize":10}"#))
-        .unwrap();
-    let response = app.router.clone().oneshot(request).await.unwrap();
+        .expect("the request is well formed");
+    let response = app
+        .router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
     let stored = app
-        .db
+        .mongo()
         .collection::<mongodb::bson::Document>("idempotency_keys")
         .find_one(mongodb::bson::doc! { "key": &idem_key })
         .await

@@ -22,17 +22,25 @@ async fn send_request(
     let request = if let Some(json_body) = body {
         builder
             .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(serde_json::to_vec(&json_body).unwrap()))
-            .unwrap()
+            .body(Body::from(
+                serde_json::to_vec(&json_body).expect("the value serializes to JSON"),
+            ))
+            .expect("the value serializes to JSON")
     } else {
-        builder.body(Body::empty()).unwrap()
+        builder
+            .body(Body::empty())
+            .expect("the value serializes to JSON")
     };
 
-    let response = router.clone().oneshot(request).await.unwrap();
+    let response = router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
     let status = response.status();
     let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 
     let json: serde_json::Value = if body_bytes.is_empty() {
         serde_json::Value::Null
@@ -96,17 +104,35 @@ async fn test_setup_without_sample_data_creates_clean_database() {
     )
     .await;
     assert_eq!(prod_status, StatusCode::OK);
-    assert_eq!(prod_res["data"]["items"].as_array().unwrap().len(), 0);
+    assert_eq!(
+        prod_res["data"]["items"]
+            .as_array()
+            .expect("the value is an array")
+            .len(),
+        0
+    );
 
     let (cust_status, cust_res) =
         send_request(&app.router, "GET", "/api/customers", Some(token), None).await;
     assert_eq!(cust_status, StatusCode::OK);
-    assert_eq!(cust_res["data"]["customers"].as_array().unwrap().len(), 0);
+    assert_eq!(
+        cust_res["data"]["customers"]
+            .as_array()
+            .expect("the value is an array")
+            .len(),
+        0
+    );
 
     let (sup_status, sup_res) =
         send_request(&app.router, "GET", "/api/suppliers", Some(token), None).await;
     assert_eq!(sup_status, StatusCode::OK);
-    assert_eq!(sup_res["data"]["suppliers"].as_array().unwrap().len(), 0);
+    assert_eq!(
+        sup_res["data"]["suppliers"]
+            .as_array()
+            .expect("the value is an array")
+            .len(),
+        0
+    );
 
     let (cat_status, cat_res) = send_request(
         &app.router,
@@ -117,7 +143,13 @@ async fn test_setup_without_sample_data_creates_clean_database() {
     )
     .await;
     assert_eq!(cat_status, StatusCode::OK);
-    assert_eq!(cat_res["data"]["categories"].as_array().unwrap().len(), 0);
+    assert_eq!(
+        cat_res["data"]["categories"]
+            .as_array()
+            .expect("the value is an array")
+            .len(),
+        0
+    );
 
     // 3. Status endpoint now reflects setup completed with clean tables
     let (status, status_res) =
@@ -180,19 +212,42 @@ async fn test_setup_with_sample_data_populates_catalog_and_operations() {
     )
     .await;
     assert_eq!(prod_status, StatusCode::OK);
-    assert!(prod_res["data"]["pagination"]["total"].as_u64().unwrap() >= 50);
-    assert!(prod_res["data"]["items"].as_array().unwrap().len() >= 20);
+    assert!(
+        prod_res["data"]["pagination"]["total"]
+            .as_u64()
+            .expect("the value is an unsigned integer")
+            >= 50
+    );
+    assert!(
+        prod_res["data"]["items"]
+            .as_array()
+            .expect("the value is an array")
+            .len()
+            >= 20
+    );
 
     let (cust_status, cust_res) =
         send_request(&app.router, "GET", "/api/customers", Some(token), None).await;
     assert_eq!(cust_status, StatusCode::OK);
     assert_eq!(cust_res["data"]["total"], 20);
-    assert_eq!(cust_res["data"]["customers"].as_array().unwrap().len(), 10);
+    assert_eq!(
+        cust_res["data"]["customers"]
+            .as_array()
+            .expect("the value is an array")
+            .len(),
+        10
+    );
 
     let (sup_status, sup_res) =
         send_request(&app.router, "GET", "/api/suppliers", Some(token), None).await;
     assert_eq!(sup_status, StatusCode::OK);
-    assert_eq!(sup_res["data"]["suppliers"].as_array().unwrap().len(), 5);
+    assert_eq!(
+        sup_res["data"]["suppliers"]
+            .as_array()
+            .expect("the value is an array")
+            .len(),
+        5
+    );
 
     let (cat_status, cat_res) = send_request(
         &app.router,
@@ -203,7 +258,13 @@ async fn test_setup_with_sample_data_populates_catalog_and_operations() {
     )
     .await;
     assert_eq!(cat_status, StatusCode::OK);
-    assert!(cat_res["data"]["categories"].as_array().unwrap().len() >= 3);
+    assert!(
+        cat_res["data"]["categories"]
+            .as_array()
+            .expect("the value is an array")
+            .len()
+            >= 3
+    );
 
     // 3. Status endpoint reflects sample data loaded
     let (status, status_res) =

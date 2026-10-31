@@ -47,18 +47,18 @@ async fn openapi_json_lists_all_module_paths() {
             Request::builder()
                 .uri("/api-docs/openapi.json")
                 .body(Body::empty())
-                .unwrap(),
+                .expect("the request is well formed"),
         )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    let paths = json["paths"].as_object().unwrap();
+        .expect("the awaited step succeeds");
+    let json: serde_json::Value = serde_json::from_slice(&body).expect("the text is valid JSON");
+    let paths = json["paths"].as_object().expect("the value is an object");
 
     for expected in [
         "/api/health",
@@ -114,16 +114,16 @@ async fn response_body_carries_processing_time_on_success() {
             Request::builder()
                 .uri("/api/health")
                 .body(Body::empty())
-                .unwrap(),
+                .expect("the request is well formed"),
         )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        .expect("the awaited step succeeds");
+    let json: serde_json::Value = serde_json::from_slice(&body).expect("the text is valid JSON");
     assert!(
         json["processingTimeMs"].as_u64().is_some(),
         "missing processingTimeMs in body: {json}"
@@ -142,16 +142,16 @@ async fn response_body_carries_processing_time_on_error() {
             Request::builder()
                 .uri("/api/auth/me")
                 .body(Body::empty())
-                .unwrap(),
+                .expect("the request is well formed"),
         )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
-        .unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        .expect("the awaited step succeeds");
+    let json: serde_json::Value = serde_json::from_slice(&body).expect("the text is valid JSON");
     assert!(
         json["processingTimeMs"].as_u64().is_some(),
         "missing processingTimeMs in body: {json}"
@@ -167,10 +167,10 @@ async fn swagger_ui_is_mounted() {
             Request::builder()
                 .uri("/docs/")
                 .body(Body::empty())
-                .unwrap(),
+                .expect("the request is well formed"),
         )
         .await
-        .unwrap();
+        .expect("the awaited step succeeds");
 
     assert_eq!(response.status(), StatusCode::OK);
 }
