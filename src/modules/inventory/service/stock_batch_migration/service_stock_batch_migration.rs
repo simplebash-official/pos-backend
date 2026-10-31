@@ -160,10 +160,9 @@ async fn migrate_product(
         return Ok(summary);
     }
 
-    let created_at = product
-        .get_datetime("created_at")
-        .copied()
-        .unwrap_or_else(|_| bson::DateTime::now());
+    let created_at = product.get_datetime("created_at").copied().map_err(|err| {
+        mongodb::error::Error::custom(format!("product has no created_at: {err}"))
+    })?;
     let stock = i64_of(product, "stock_quantity");
     let mut batch = doc! {
         "_id": id,

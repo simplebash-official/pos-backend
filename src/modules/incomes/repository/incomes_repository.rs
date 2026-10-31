@@ -41,8 +41,8 @@ pub(super) fn income_from_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<Income
         recorded_by_user_id: row.get("recorded_by_user_id"),
         recorded_by_name_snapshot: row.get("recorded_by_name_snapshot"),
         version: row.get("version"),
-        created_at: to_bson_datetime(&row.get::<String, _>("created_at")),
-        updated_at: to_bson_datetime(&row.get::<String, _>("updated_at")),
+        created_at: to_bson_datetime(&row.get::<String, _>("created_at"))?,
+        updated_at: to_bson_datetime(&row.get::<String, _>("updated_at"))?,
         updated_by_device: row.get("updated_by_device"),
     })
 }

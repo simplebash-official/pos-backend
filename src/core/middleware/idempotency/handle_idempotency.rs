@@ -193,7 +193,11 @@ pub async fn handle_idempotency(
                     let req_hash: String = r.get("request_hash");
                     let resp_status: Option<i64> = r.get("response_status");
                     let resp_body: Option<String> = r.get("response_body");
-                    let created_at = crate::clients::sqlite::parse_iso_datetime(&created_str);
+                    let created_at = match crate::clients::sqlite::parse_iso_datetime(&created_str)
+                    {
+                        Ok(created_at) => created_at,
+                        Err(err) => return err.into_response(),
+                    };
                     Some((
                         status,
                         req_hash,
@@ -227,19 +231,32 @@ pub async fn handle_idempotency(
                 return (StatusCode::UNPROCESSABLE_ENTITY, axum::Json(err_resp)).into_response();
             }
 
-            let status_code = resp_status
-                .and_then(|s| StatusCode::from_u16(s).ok())
-                .unwrap_or(StatusCode::OK);
-
-            let body_str = resp_body.unwrap_or_default();
-            let response = Response::builder()
+            // A completed record always carries the response it stored.
+            let (Some(resp_status), Some(body_str)) = (resp_status, resp_body) else {
+                return AppError::internal("a completed idempotency record has no stored response")
+                    .into_response();
+            };
+            let status_code = match StatusCode::from_u16(resp_status) {
+                Ok(status_code) => status_code,
+                Err(err) => {
+                    return AppError::internal(format!(
+                        "a stored idempotent response has an invalid status: {err}"
+                    ))
+                    .into_response();
+                }
+            };
+            return match Response::builder()
                 .status(status_code)
                 .header(header::CONTENT_TYPE, "application/json")
                 .header("idempotency-replayed", "true")
                 .body(Body::from(body_str))
-                .unwrap_or_else(|_| (StatusCode::OK, Body::empty()).into_response());
-
-            return response;
+            {
+                Ok(response) => response,
+                Err(err) => AppError::internal(format!(
+                    "the stored idempotent response cannot be replayed: {err}"
+                ))
+                .into_response(),
+            };
         } else if status == "in_progress" {
             let age = chrono::Utc::now().signed_duration_since(created_at);
             if age < chrono::Duration::seconds(IN_PROGRESS_STALE_AFTER.as_secs() as i64) {

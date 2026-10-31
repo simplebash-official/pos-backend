@@ -95,7 +95,7 @@ pub(super) async fn recover_advance(
     Json(body): Json<CreateAdvanceRecoveryRequest>,
 ) -> AppResult<(StatusCode, Json<ApiResponse<StaffAdvanceDetail>>)> {
     current_user.require_permission(perm::BALANCES_MANAGE)?;
-    let name = current_user.resolve_name(&state.db).await;
+    let name = current_user.resolve_name(&state.db).await?;
     let detail =
         service::recover_advance(&state.db, &employee_key, current_user.user_id, name, body)
             .await?;
@@ -144,7 +144,7 @@ pub(super) async fn set_balance_opening(
     current_user.require_permission(perm::BALANCES_MANAGE)?;
     let subject =
         BalanceSubject::parse(&kind).ok_or_else(|| AppError::validation("Unknown kind."))?;
-    let name = current_user.resolve_name(&state.db).await;
+    let name = current_user.resolve_name(&state.db).await?;
     service::set_opening(&state.db, subject, &key, name, body).await?;
     Ok(Json(ApiResponse::success(
         serde_json::json!({}),

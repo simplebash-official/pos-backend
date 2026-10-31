@@ -21,7 +21,7 @@ pub(crate) async fn find_receipt_by_key(
                 .bind(key)
                 .fetch_optional(pool)
                 .await?;
-            Ok(row.as_ref().map(receipt_from_row))
+            row.as_ref().map(receipt_from_row).transpose()
         }
     }
 }
@@ -44,7 +44,7 @@ pub(crate) async fn find_receipt_by_supplier_and_reference(
             .bind(reference_no)
             .fetch_optional(pool)
             .await?;
-            Ok(row.as_ref().map(receipt_from_row))
+            row.as_ref().map(receipt_from_row).transpose()
         }
     }
 }
@@ -136,25 +136,32 @@ pub(crate) async fn list_receipts_paginated(
             }
             let total = count.fetch_one(pool).await?;
             let rows = select.bind(limit).bind(skip as i64).fetch_all(pool).await?;
-            Ok((rows.iter().map(receipt_from_row).collect(), total as u64))
+            Ok((
+                rows.iter()
+                    .map(receipt_from_row)
+                    .collect::<AppResult<Vec<_>>>()?,
+                total as u64,
+            ))
         }
     }
 }
 
-pub(super) fn receipt_from_row(row: &sqlx::sqlite::SqliteRow) -> PurchaseReceiptDocument {
-    PurchaseReceiptDocument {
+pub(super) fn receipt_from_row(
+    row: &sqlx::sqlite::SqliteRow,
+) -> AppResult<PurchaseReceiptDocument> {
+    Ok(PurchaseReceiptDocument {
         id: ObjectId::parse_str(row.get::<String, _>("id")).ok(),
         key: row.get("key"),
         receipt_number: row.get("receipt_number"),
         supplier_key: row.get("supplier_key"),
         reference_no: row.get("reference_no"),
-        date: to_bson_datetime(&row.get::<String, _>("date")),
+        date: to_bson_datetime(&row.get::<String, _>("date"))?,
         notes: row.get("notes"),
         version: row.get("version"),
-        created_at: to_bson_datetime(&row.get::<String, _>("created_at")),
-        updated_at: to_bson_datetime(&row.get::<String, _>("updated_at")),
+        created_at: to_bson_datetime(&row.get::<String, _>("created_at"))?,
+        updated_at: to_bson_datetime(&row.get::<String, _>("updated_at"))?,
         updated_by_device: row.get("updated_by_device"),
-    }
+    })
 }
 
 pub(super) fn receipts(db: &TenantDatabase) -> ScopedCollection<PurchaseReceiptDocument> {

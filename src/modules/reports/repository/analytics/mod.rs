@@ -11,21 +11,24 @@
 //! with the shop owner's local calendar — see
 //! `service::dates::{REPORT_TZ_MONGO, parse_date_range_tz}`.
 
-mod repository_analytics_part1;
-mod repository_analytics_part2;
-mod repository_analytics_part3;
+mod analytics_shared;
+mod cashier_analytics;
+mod receivables_analytics;
+mod refund_discount_analytics;
+mod revenue_analytics;
+mod sales_breakdown_analytics;
 
-pub(crate) use repository_analytics_part1::aggregate_cashier_performance;
-pub(crate) use repository_analytics_part1::aggregate_cashier_refunds;
-pub(crate) use repository_analytics_part1::aggregate_commission_series;
-pub(crate) use repository_analytics_part1::aggregate_discounts;
-pub(crate) use repository_analytics_part1::aggregate_invoice_kpis;
-pub(crate) use repository_analytics_part1::aggregate_payment_methods;
-pub(crate) use repository_analytics_part1::aggregate_receivables_aging;
-pub(crate) use repository_analytics_part2::aggregate_refund_detail;
-pub(crate) use repository_analytics_part2::aggregate_revenue_series;
-pub(crate) use repository_analytics_part2::aggregate_sales_by_category;
-pub(crate) use repository_analytics_part2::aggregate_sales_patterns;
-pub(crate) use repository_analytics_part2::aggregate_top_customers;
+pub(crate) use cashier_analytics::aggregate_cashier_performance;
+pub(crate) use cashier_analytics::aggregate_commission_series;
+pub(crate) use receivables_analytics::aggregate_receivables_aging;
+pub(crate) use refund_discount_analytics::aggregate_cashier_refunds;
+pub(crate) use refund_discount_analytics::aggregate_discounts;
+pub(crate) use refund_discount_analytics::aggregate_refund_detail;
+pub(crate) use revenue_analytics::aggregate_invoice_kpis;
+pub(crate) use revenue_analytics::aggregate_payment_methods;
+pub(crate) use revenue_analytics::aggregate_revenue_series;
+pub(crate) use sales_breakdown_analytics::aggregate_sales_by_category;
+pub(crate) use sales_breakdown_analytics::aggregate_sales_patterns;
+pub(crate) use sales_breakdown_analytics::aggregate_top_customers;
 
-pub(crate) use repository_analytics_part3::fetch_customer_balances;
+pub(crate) use receivables_analytics::fetch_customer_balances;

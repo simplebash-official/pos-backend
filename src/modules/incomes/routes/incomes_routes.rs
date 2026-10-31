@@ -32,7 +32,7 @@ pub(super) async fn create_income(
     Json(body): Json<CreateIncomeRequest>,
 ) -> AppResult<(StatusCode, Json<ApiResponse<IncomeRow>>)> {
     current_user.require_permission(perm::INCOME_MANAGE)?;
-    let name = current_user.resolve_name(&state.db).await;
+    let name = current_user.resolve_name(&state.db).await?;
     let income =
         service::create_income(&state.db, current_user.user_id, name, body, device_id.0).await?;
     Ok((

@@ -32,7 +32,7 @@ pub(super) async fn create_category(
     Json(body): Json<CreateCashCategoryRequest>,
 ) -> AppResult<(StatusCode, Json<ApiResponse<CashCategory>>)> {
     current_user.require_permission(perm::CASH_CATEGORIES_CREATE)?;
-    let name = current_user.resolve_name(&state.db).await;
+    let name = current_user.resolve_name(&state.db).await?;
     let can_manage = current_user.has_permission(perm::CASH_CATEGORIES_MANAGE);
     let category = service::create_category(&state.db, name, can_manage, body).await?;
     Ok((

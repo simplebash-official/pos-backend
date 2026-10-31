@@ -117,7 +117,7 @@ pub(super) async fn upload_attachment(
     Json(body): Json<UploadAttachmentRequest>,
 ) -> AppResult<(StatusCode, Json<ApiResponse<Attachment>>)> {
     require_owner_access(&current_user, body.owner_kind, true)?;
-    let name = current_user.resolve_name(&state.db).await;
+    let name = current_user.resolve_name(&state.db).await?;
     let saved = service::upload(&state.db, current_user.user_id, name, body).await?;
     Ok((
         StatusCode::CREATED,

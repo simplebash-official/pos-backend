@@ -2,11 +2,11 @@ use crate::clients::db::Db;
 use crate::clients::sqlite::map_sqlite_row_to_document;
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use crate::core::calculations::{commission_cents, job_profit_cents};
-use crate::core::error::AppResult;
+use crate::core::error::{AppError, AppResult};
 use crate::domain::reports::EmployeePerformanceEntry;
 use chrono::{DateTime, Utc};
 use futures_util::TryStreamExt;
-use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
+use mongodb::bson::{Bson, DateTime as BsonDateTime, Document, doc};
 use std::collections::BTreeMap;
 
 fn repairs(db: &TenantDatabase) -> ScopedCollection<Document> {
@@ -29,7 +29,7 @@ fn accumulate(
     unassigned_sentinel: &'static str,
     unassigned_label: &'static str,
     role: &'static str,
-) {
+) -> AppResult<()> {
     let bucket_key = doc
         .get_str("assigned_employee_id")
         .ok()
@@ -37,8 +37,8 @@ fn accumulate(
         .map(str::to_string)
         .unwrap_or_else(|| unassigned_sentinel.to_string());
 
-    let revenue = get_i64_flexible(doc, "estimated_cost_cents");
-    let material_cost = get_i64_flexible(doc, "material_cost_cents");
+    let revenue = recorded_cents(doc, "estimated_cost_cents")?;
+    let material_cost = recorded_cents(doc, "material_cost_cents")?;
     let profit = job_profit_cents(revenue, material_cost);
 
     let split_type = doc.get_str("split_type").ok();
@@ -82,6 +82,8 @@ fn accumulate(
     entry.profit_cents += profit;
     entry.earned_commission_cents += earned;
     entry.net_shop_contribution_cents += net_contribution;
+
+    Ok(())
 }
 
 /// Returns the accumulated per-bucket entries keyed by
@@ -119,7 +121,7 @@ pub(crate) async fn aggregate_employee_commissions(
                     UNASSIGNED_TECHNICIAN,
                     "Unassigned Technician",
                     "technician",
-                );
+                )?;
             }
 
             let mut print_match = doc! {
@@ -142,7 +144,7 @@ pub(crate) async fn aggregate_employee_commissions(
                     UNASSIGNED_PRINTER,
                     "Unassigned Printer",
                     "printer",
-                );
+                )?;
             }
         }
         Db::Sqlite(pool) => {
@@ -173,7 +175,7 @@ pub(crate) async fn aggregate_employee_commissions(
                     UNASSIGNED_TECHNICIAN,
                     "Unassigned Technician",
                     "technician",
-                );
+                )?;
             }
 
             let print_query = format!(
@@ -192,7 +194,7 @@ pub(crate) async fn aggregate_employee_commissions(
                     UNASSIGNED_PRINTER,
                     "Unassigned Printer",
                     "printer",
-                );
+                )?;
             }
         }
     }
@@ -200,12 +202,27 @@ pub(crate) async fn aggregate_employee_commissions(
     Ok(perf_map)
 }
 
-pub(crate) fn get_i64_flexible(doc: &Document, key: &str) -> i64 {
-    doc.get_i64(key)
-        .ok()
-        .or_else(|| doc.get_i32(key).ok().map(i64::from))
-        .or_else(|| doc.get_f64(key).ok().map(|v| v as i64))
-        .unwrap_or(0)
+/// An amount the document may legitimately not carry (no tender on a credit sale, no estimate on
+/// a repair): an absent field counts as nothing recorded, i.e. zero in a sum. A field that is
+/// present but not numeric is still an error.
+pub(crate) fn recorded_cents(doc: &Document, key: &str) -> AppResult<i64> {
+    match doc.get(key) {
+        None | Some(Bson::Null) => Ok(0),
+        Some(_) => get_i64_flexible(doc, key),
+    }
+}
+
+/// The numeric field `key` of an aggregation row as an integer; a missing or non-numeric
+/// field is an error, not zero.
+pub(crate) fn get_i64_flexible(doc: &Document, key: &str) -> AppResult<i64> {
+    match doc.get(key) {
+        Some(Bson::Int64(v)) => Ok(*v),
+        Some(Bson::Int32(v)) => Ok(i64::from(*v)),
+        Some(Bson::Double(v)) => Ok(*v as i64),
+        _ => Err(AppError::internal(format!(
+            "aggregation row has no numeric `{key}`"
+        ))),
+    }
 }
 
 pub(crate) const UNASSIGNED_PRINTER: &str = "__unassigned_printer__";

@@ -4,18 +4,18 @@
 //! agree by construction. The older `SYNCABLE` list in `service.rs` keeps
 //! serving the legacy `/sync/changes` route and is intentionally left alone.
 
+mod resource_spec;
 mod sync_resources;
-mod sync_resources_group;
 #[cfg(test)]
 mod tests;
 
+pub use resource_spec::MergeClass;
+pub use resource_spec::Phase;
+pub use resource_spec::ResourceSpec;
+pub use resource_spec::label_column;
+pub use resource_spec::ordered;
+pub use resource_spec::secret_fields;
+pub use resource_spec::snake_to_camel;
+pub use resource_spec::spec;
+pub use resource_spec::without_secrets;
 pub use sync_resources::SYNC_RESOURCES;
-pub use sync_resources_group::MergeClass;
-pub use sync_resources_group::Phase;
-pub use sync_resources_group::ResourceSpec;
-pub use sync_resources_group::label_column;
-pub use sync_resources_group::ordered;
-pub use sync_resources_group::secret_fields;
-pub use sync_resources_group::snake_to_camel;
-pub use sync_resources_group::spec;
-pub use sync_resources_group::without_secrets;

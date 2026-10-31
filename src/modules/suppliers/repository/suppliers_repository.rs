@@ -151,7 +151,7 @@ pub(crate) async fn find_supplier_by_id(
             .bind(&id_str)
             .fetch_optional(pool)
             .await?;
-            Ok(row.map(SupplierSqliteRow::into_document))
+            row.map(SupplierSqliteRow::into_document).transpose()
         }
     }
 }
@@ -171,7 +171,7 @@ pub(crate) async fn find_supplier_by_key(
             .bind(key)
             .fetch_optional(pool)
             .await?;
-            Ok(row.map(SupplierSqliteRow::into_document))
+            row.map(SupplierSqliteRow::into_document).transpose()
         }
     }
 }
@@ -205,10 +205,9 @@ pub(crate) async fn find_suppliers_by_keys(
                 query = query.bind(key);
             }
             let rows = query.fetch_all(pool).await?;
-            Ok(rows
-                .into_iter()
+            rows.into_iter()
                 .map(SupplierSqliteRow::into_document)
-                .collect())
+                .collect::<AppResult<Vec<_>>>()
         }
     }
 }
@@ -303,7 +302,7 @@ pub(crate) async fn list_suppliers(db: &Db, filter: Document) -> AppResult<Vec<S
             let mut items: Vec<SupplierDocument> = rows
                 .into_iter()
                 .map(SupplierSqliteRow::into_document)
-                .collect();
+                .collect::<AppResult<Vec<_>>>()?;
 
             // In-memory filter for category and search if clauses exist
             if let Ok(and_arr) = filter.get_array("$and") {
@@ -380,7 +379,7 @@ pub(super) struct SupplierSqliteRow {
 }
 
 impl SupplierSqliteRow {
-    pub(super) fn into_document(self) -> SupplierDocument {
+    pub(super) fn into_document(self) -> AppResult<SupplierDocument> {
         let supplied_categories: Vec<String> =
             serde_json::from_str(&self.supplied_categories).unwrap_or_default();
         let contact_persons: Vec<ContactPerson> = self
@@ -388,7 +387,7 @@ impl SupplierSqliteRow {
             .as_deref()
             .and_then(|s| serde_json::from_str(s).ok())
             .unwrap_or_default();
-        SupplierDocument {
+        Ok(SupplierDocument {
             id: ObjectId::parse_str(&self.id).ok(),
             key: self.key,
             name: self.name,
@@ -401,11 +400,15 @@ impl SupplierSqliteRow {
             supplied_categories,
             notes: self.notes,
             version: self.version,
-            created_at: to_bson_datetime(&self.created_at),
-            updated_at: to_bson_datetime(&self.updated_at),
-            deleted_at: self.deleted_at.as_deref().map(to_bson_datetime),
+            created_at: to_bson_datetime(&self.created_at)?,
+            updated_at: to_bson_datetime(&self.updated_at)?,
+            deleted_at: self
+                .deleted_at
+                .as_deref()
+                .map(to_bson_datetime)
+                .transpose()?,
             updated_by_device: self.updated_by_device,
-        }
+        })
     }
 }
 

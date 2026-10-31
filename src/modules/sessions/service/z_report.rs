@@ -96,10 +96,16 @@ pub async fn generate_z_report(db: &Db, session_key: &str) -> AppResult<ZReportR
     let movement_summary = summarize_movements(db, &session_movements).await?;
     let expected_cash = session_doc.calculate_expected_cash();
 
-    let counted_cash = session_doc.counted_cash_cents.unwrap_or(expected_cash);
-    let variance = session_doc
-        .cash_variance_cents
-        .unwrap_or(counted_cash - expected_cash);
+    // The report schema requires both numbers. A shift that has not been counted yet (a mid-shift
+    // report) shows its expected cash as the count and no variance.
+    let (counted_cash, variance) = match (
+        session_doc.counted_cash_cents,
+        session_doc.cash_variance_cents,
+    ) {
+        (Some(counted), Some(variance)) => (counted, variance),
+        (Some(counted), None) => (counted, counted - expected_cash),
+        (None, _) => (expected_cash, 0),
+    };
 
     let gross_sales = session_doc.total_cash_sales_cents
         + session_doc.total_card_sales_cents

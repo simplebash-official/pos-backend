@@ -85,8 +85,8 @@ pub(super) struct EmployeeSqliteRow {
 }
 
 impl EmployeeSqliteRow {
-    pub(super) fn into_document(self) -> EmployeeDocument {
-        EmployeeDocument {
+    pub(super) fn into_document(self) -> AppResult<EmployeeDocument> {
+        Ok(EmployeeDocument {
             id: ObjectId::parse_str(&self.id).ok(),
             key: self.key,
             name: self.name,
@@ -101,11 +101,15 @@ impl EmployeeSqliteRow {
             status: self.status.parse().unwrap_or(EmployeeStatus::Active),
             notes: self.notes,
             version: self.version,
-            created_at: to_bson_datetime(&self.created_at),
-            updated_at: to_bson_datetime(&self.updated_at),
-            deleted_at: self.deleted_at.as_deref().map(to_bson_datetime),
+            created_at: to_bson_datetime(&self.created_at)?,
+            updated_at: to_bson_datetime(&self.updated_at)?,
+            deleted_at: self
+                .deleted_at
+                .as_deref()
+                .map(to_bson_datetime)
+                .transpose()?,
             updated_by_device: self.updated_by_device,
-        }
+        })
     }
 }
 
@@ -129,7 +133,7 @@ pub(crate) async fn find_employee_by_id(
             .bind(&id_str)
             .fetch_optional(pool)
             .await?;
-            Ok(row.map(EmployeeSqliteRow::into_document))
+            row.map(EmployeeSqliteRow::into_document).transpose()
         }
     }
 }
@@ -149,7 +153,7 @@ pub(crate) async fn find_employee_by_key(
             .bind(key)
             .fetch_optional(pool)
             .await?;
-            Ok(row.map(EmployeeSqliteRow::into_document))
+            row.map(EmployeeSqliteRow::into_document).transpose()
         }
     }
 }
@@ -183,10 +187,9 @@ pub(crate) async fn find_employees_by_keys(
                 query = query.bind(key);
             }
             let rows = query.fetch_all(pool).await?;
-            Ok(rows
-                .into_iter()
+            rows.into_iter()
                 .map(EmployeeSqliteRow::into_document)
-                .collect())
+                .collect::<AppResult<Vec<_>>>()
         }
     }
 }
@@ -276,7 +279,7 @@ pub(crate) async fn list_employees(db: &Db, filter: Document) -> AppResult<Vec<E
             let mut items: Vec<EmployeeDocument> = rows
                 .into_iter()
                 .map(EmployeeSqliteRow::into_document)
-                .collect();
+                .collect::<AppResult<Vec<_>>>()?;
 
             // Apply in-memory filtering for search, role, status if clauses exist
             if let Ok(and_arr) = filter.get_array("$and") {

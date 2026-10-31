@@ -1,10 +1,8 @@
-use super::repository_product_part1::build_product_where_clause;
-use super::repository_product_part1::like_pattern;
+use super::product_shared::build_product_where_clause;
+use super::product_shared::like_pattern;
 use crate::clients::sqlite::SqlFilter;
-
-use mongodb::bson::doc;
-
 use crate::core::utils::build_bson_regex;
+use mongodb::bson::doc;
 
 #[test]
 fn a_search_becomes_an_escaped_like_pattern() {

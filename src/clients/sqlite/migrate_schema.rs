@@ -29,7 +29,8 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
                 "name": contact,
                 "phoneNumbers": phones,
             })];
-            let json = serde_json::to_string(&contact_persons).unwrap_or_else(|_| "[]".to_string());
+            let json =
+                serde_json::to_string(&contact_persons).expect("contact persons serialise to JSON");
             sqlx::query("UPDATE suppliers SET contact_persons = ? WHERE key = ?")
                 .bind(json)
                 .bind(key)
@@ -98,14 +99,12 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     let columns: Vec<(i32, String)> =
         sqlx::query_as("SELECT cid, name FROM pragma_table_info('login_sessions')")
             .fetch_all(pool)
-            .await
-            .unwrap_or_default();
+            .await?;
 
     if columns.iter().any(|(_, name)| name == "user_id") {
         tracing::info!("Migrating legacy column 'user_id' from 'login_sessions' table");
-        let _ = pool
-            .execute("ALTER TABLE login_sessions DROP COLUMN user_id")
-            .await;
+        pool.execute("ALTER TABLE login_sessions DROP COLUMN user_id")
+            .await?;
     }
 
     // `sync_state.outbox_epoch` (see `sync_capture::ensure_state`) arrived after
@@ -113,12 +112,10 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     let sync_state_cols: Vec<(i32, String)> =
         sqlx::query_as("SELECT cid, name FROM pragma_table_info('sync_state')")
             .fetch_all(pool)
-            .await
-            .unwrap_or_default();
+            .await?;
     if !sync_state_cols.is_empty() && !sync_state_cols.iter().any(|(_, n)| n == "outbox_epoch") {
-        let _ = pool
-            .execute("ALTER TABLE sync_state ADD COLUMN outbox_epoch TEXT")
-            .await;
+        pool.execute("ALTER TABLE sync_state ADD COLUMN outbox_epoch TEXT")
+            .await?;
     }
 
     migrate_users_to_usernames(pool).await?;
@@ -128,59 +125,52 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     let user_cols: Vec<(i32, String)> =
         sqlx::query_as("SELECT cid, name FROM pragma_table_info('users')")
             .fetch_all(pool)
-            .await
-            .unwrap_or_default();
+            .await?;
     if !user_cols.is_empty() && !user_cols.iter().any(|(_, n)| n == "preferences_json") {
         tracing::info!("Migrating 'users' table: adding 'preferences_json' column");
-        let _ = pool
-            .execute("ALTER TABLE users ADD COLUMN preferences_json TEXT")
-            .await;
+        pool.execute("ALTER TABLE users ADD COLUMN preferences_json TEXT")
+            .await?;
     }
     if !user_cols.is_empty() && !user_cols.iter().any(|(_, n)| n == "pin_hash") {
         tracing::info!("Migrating 'users' table: adding 'pin_hash' column");
-        let _ = pool
-            .execute("ALTER TABLE users ADD COLUMN pin_hash TEXT")
-            .await;
+        pool.execute("ALTER TABLE users ADD COLUMN pin_hash TEXT")
+            .await?;
     }
 
-    let invoice_cols = table_columns(pool, "invoices").await.unwrap_or_default();
+    let invoice_cols = table_columns(pool, "invoices").await?;
     if !invoice_cols.is_empty() && !invoice_cols.iter().any(|n| n == "session_key") {
         tracing::info!("Migrating 'invoices' table: adding 'session_key' column");
-        let _ = pool
-            .execute("ALTER TABLE invoices ADD COLUMN session_key TEXT")
-            .await;
-        let _ = pool
-            .execute("CREATE INDEX IF NOT EXISTS idx_invoices_session_key ON invoices(session_key)")
-            .await;
+        pool.execute("ALTER TABLE invoices ADD COLUMN session_key TEXT")
+            .await?;
+        pool.execute(
+            "CREATE INDEX IF NOT EXISTS idx_invoices_session_key ON invoices(session_key)",
+        )
+        .await?;
     }
 
-    let payment_cols = table_columns(pool, "payments").await.unwrap_or_default();
+    let payment_cols = table_columns(pool, "payments").await?;
     if !payment_cols.is_empty() && !payment_cols.iter().any(|n| n == "session_key") {
         tracing::info!("Migrating 'payments' table: adding 'session_key' column");
-        let _ = pool
-            .execute("ALTER TABLE payments ADD COLUMN session_key TEXT")
-            .await;
-        let _ = pool
-            .execute("CREATE INDEX IF NOT EXISTS idx_payments_session_key ON payments(session_key)")
-            .await;
+        pool.execute("ALTER TABLE payments ADD COLUMN session_key TEXT")
+            .await?;
+        pool.execute(
+            "CREATE INDEX IF NOT EXISTS idx_payments_session_key ON payments(session_key)",
+        )
+        .await?;
     }
 
-    let credit_note_cols = table_columns(pool, "credit_notes")
-        .await
-        .unwrap_or_default();
+    let credit_note_cols = table_columns(pool, "credit_notes").await?;
     if !credit_note_cols.is_empty() && !credit_note_cols.iter().any(|n| n == "session_key") {
         tracing::info!("Migrating 'credit_notes' table: adding 'session_key' column");
-        let _ = pool
-            .execute("ALTER TABLE credit_notes ADD COLUMN session_key TEXT")
-            .await;
-        let _ = pool
-            .execute("CREATE INDEX IF NOT EXISTS idx_credit_notes_session_key ON credit_notes(session_key)")
-            .await;
+        pool.execute("ALTER TABLE credit_notes ADD COLUMN session_key TEXT")
+            .await?;
+        pool.execute(
+            "CREATE INDEX IF NOT EXISTS idx_credit_notes_session_key ON credit_notes(session_key)",
+        )
+        .await?;
     }
 
-    let shop_profile_cols = table_columns(pool, "shop_profiles")
-        .await
-        .unwrap_or_default();
+    let shop_profile_cols = table_columns(pool, "shop_profiles").await?;
     if !shop_profile_cols.is_empty()
         && !shop_profile_cols
             .iter()
@@ -189,38 +179,35 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         tracing::info!(
             "Migrating 'shop_profiles' table: adding 'allow_shared_user_sessions' column"
         );
-        let _ = pool
+        pool
             .execute("ALTER TABLE shop_profiles ADD COLUMN allow_shared_user_sessions INTEGER NOT NULL DEFAULT 0")
-            .await;
+            .await?;
     }
 
     // Check if 'generated_documents' table is missing required columns from earlier schema versions
     let gen_doc_cols: Vec<(i32, String)> =
         sqlx::query_as("SELECT cid, name FROM pragma_table_info('generated_documents')")
             .fetch_all(pool)
-            .await
-            .unwrap_or_default();
+            .await?;
 
     if !gen_doc_cols.is_empty() {
         if !gen_doc_cols.iter().any(|(_, name)| name == "entity_key") {
             tracing::info!(
                 "Migrating 'generated_documents' table: adding missing 'entity_key' column"
             );
-            let _ = pool
-                .execute(
-                    "ALTER TABLE generated_documents ADD COLUMN entity_key TEXT NOT NULL DEFAULT ''",
-                )
-                .await;
+            pool.execute(
+                "ALTER TABLE generated_documents ADD COLUMN entity_key TEXT NOT NULL DEFAULT ''",
+            )
+            .await?;
         }
         if !gen_doc_cols.iter().any(|(_, name)| name == "document_type") {
             tracing::info!(
                 "Migrating 'generated_documents' table: adding missing 'document_type' column"
             );
-            let _ = pool
-                .execute(
-                    "ALTER TABLE generated_documents ADD COLUMN document_type TEXT NOT NULL DEFAULT ''",
-                )
-                .await;
+            pool.execute(
+                "ALTER TABLE generated_documents ADD COLUMN document_type TEXT NOT NULL DEFAULT ''",
+            )
+            .await?;
         }
         if !gen_doc_cols
             .iter()
@@ -229,11 +216,11 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             tracing::info!(
                 "Migrating 'generated_documents' table: adding missing 'file_size_bytes' column"
             );
-            let _ = pool
+            pool
                 .execute(
                     "ALTER TABLE generated_documents ADD COLUMN file_size_bytes INTEGER NOT NULL DEFAULT 0",
                 )
-                .await;
+                .await?;
         }
         // Which design rendered the PDF (nullable: rows from before designs
         // were recorded keep NULL).
@@ -251,17 +238,15 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
                 .await?;
             }
         }
-        let _ = pool
+        pool
             .execute(
                 "CREATE INDEX IF NOT EXISTS idx_generated_documents_lookup ON generated_documents(entity_key, document_type, created_at DESC)",
             )
-            .await;
+            .await?;
     }
 
     // Per-design option values a shop saved (`family -> key -> value`).
-    let settings_cols = table_columns(pool, "document_template_settings")
-        .await
-        .unwrap_or_default();
+    let settings_cols = table_columns(pool, "document_template_settings").await?;
     if !settings_cols.is_empty() && !settings_cols.iter().any(|n| n == "options") {
         tracing::info!("Migrating 'document_template_settings' table: adding 'options' column");
         pool.execute(
@@ -277,8 +262,7 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     let quotation_cols: Vec<(i32, String)> =
         sqlx::query_as("SELECT cid, name FROM pragma_table_info('quotations')")
             .fetch_all(pool)
-            .await
-            .unwrap_or_default();
+            .await?;
     if !quotation_cols.is_empty() {
         for (column, ddl) in [
             (
@@ -348,8 +332,7 @@ async fn migrate_users_to_usernames(pool: &SqlitePool) -> Result<(), sqlx::Error
     let cols: Vec<(i32, String)> =
         sqlx::query_as("SELECT cid, name FROM pragma_table_info('users')")
             .fetch_all(pool)
-            .await
-            .unwrap_or_default();
+            .await?;
     if !cols.iter().any(|(_, n)| n == "email") {
         return Ok(());
     }
@@ -439,8 +422,7 @@ async fn migrate_login_sessions_to_usernames(pool: &SqlitePool) -> Result<(), sq
     let session_cols: Vec<(i32, String)> =
         sqlx::query_as("SELECT cid, name FROM pragma_table_info('login_sessions')")
             .fetch_all(pool)
-            .await
-            .unwrap_or_default();
+            .await?;
     if !session_cols.iter().any(|(_, n)| n == "email_at_login") {
         return Ok(());
     }
@@ -450,8 +432,7 @@ async fn migrate_login_sessions_to_usernames(pool: &SqlitePool) -> Result<(), sq
     let user_cols: Vec<(i32, String)> =
         sqlx::query_as("SELECT cid, name FROM pragma_table_info('users')")
             .fetch_all(pool)
-            .await
-            .unwrap_or_default();
+            .await?;
     if user_cols.iter().any(|(_, n)| n == "username") {
         sqlx::query(
             "UPDATE login_sessions SET username_at_login = COALESCE( \

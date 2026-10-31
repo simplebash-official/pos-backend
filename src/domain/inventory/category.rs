@@ -1,6 +1,82 @@
+//! Categories and subcategories with their requests and responses.
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
+
+/// Body for `POST /categories/{categoryKey}/subcategories` (admin-only).
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct AddSubcategoryRequest {
+    /// Name of the new subcategory to add.
+    pub name: String,
+}
+
+/// Response for `GET /categories`.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct CategoriesResponse {
+    /// List of all categories with their subcategories.
+    pub categories: Vec<CategoryInfo>,
+}
+
+/// A main category and its subcategories, as returned to API clients.
+/// `subcategories` is the authoritative allow-list — a product's
+/// `subcategory_key` field is validated against it on create/update (see
+/// `service::product::ensure_valid_category`).
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CategoryInfo {
+    /// Unique business key identifying the category (e.g. cat_...).
+    pub key: String,
+    /// Category display name.
+    pub name: String,
+    /// Icon name/identifier.
+    pub icon: String,
+    /// Category color hex code or CSS color.
+    pub color: String,
+    /// Nested list of subcategories belonging to this category.
+    pub subcategories: Vec<SubcategoryInfo>,
+    /// Creation timestamp.
+    pub created_at: DateTime<Utc>,
+    /// Last update timestamp.
+    pub updated_at: DateTime<Utc>,
+    /// Version counter.
+    #[serde(default = "default_version")]
+    pub version: i64,
+    /// Deletion timestamp if soft-deleted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<DateTime<Utc>>,
+    /// Device identifier that last updated this category.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_by_device: Option<String>,
+}
+
+/// Body for `POST /categories` (admin-only — see `core::middleware::auth::AdminUser`).
+/// `subcategories` is a bulk list of subcategory *names* — each becomes its
+/// own `SubcategoryDocument` (with its own generated key) referencing the
+/// newly created category, so a category can be bootstrapped with its
+/// starter subcategories in one call.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct CreateCategoryRequest {
+    /// Display name of the new category.
+    pub name: String,
+    /// Icon name or identifier.
+    pub icon: String,
+    /// UI theme color code.
+    pub color: String,
+    /// Initial list of subcategory names to create under this category.
+    #[serde(default)]
+    pub subcategories: Vec<String>,
+}
+
+/// Response for `GET /categories/{categoryKey}/subcategories`.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SubcategoriesResponse {
+    /// Parent category key.
+    pub category_key: String,
+    /// Subcategories under the parent category.
+    pub subcategories: Vec<SubcategoryInfo>,
+}
 
 /// A subcategory as returned to API clients, persisted in its own
 /// `subcategories` collection (see `modules::inventory::model::SubcategoryDocument`).
@@ -43,46 +119,6 @@ pub struct UpdateCategoryRequest {
     pub icon: Option<String>,
     /// Updated theme color code.
     pub color: Option<String>,
-}
-
-/// Body for `PUT /products/{id}`. Every field is optional so a client can
-/// send only what changed — `service::product::update_product` fills in
-/// omitted fields from the existing document rather than clearing them.
-/// `category_key`/`subcategory_key`, like on create, must be keys, not names.
-/// `sku` stays immutable (no field here); `barcode` can be set/corrected once,
-/// so a product created without the right barcode (or with an auto-generated
-/// one) can be pointed at the real label number later.
-#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateProductRequest {
-    /// Updated product name.
-    pub name: Option<String>,
-    /// Add or correct the scannable barcode (e.g. store the manufacturer
-    /// barcode printed on the package). 8-14 digits; saved as a manual
-    /// barcode. Omit to leave the existing barcode untouched — an empty
-    /// string is a validation error, not a "clear".
-    pub barcode: Option<String>,
-    /// Updated category key.
-    pub category_key: Option<String>,
-    /// Updated subcategory key.
-    pub subcategory_key: Option<String>,
-    /// Updated low-stock warning threshold.
-    pub min_stock_threshold: Option<i64>,
-    /// Updated serialized-tracking flag.
-    pub is_serialized: Option<bool>,
-    /// Updated warranty length in months.
-    pub warranty_months: Option<i64>,
-}
-
-/// Body for `PATCH /batches/{key}`. Either field may be sent alone. Changing
-/// the cost is Admin-only (the handler checks it).
-#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateStockBatchRequest {
-    /// New selling price for the batch's remaining units, in cents.
-    pub selling_price_cents: Option<i64>,
-    /// Corrected unit cost, in cents (Admin only).
-    pub unit_cost_cents: Option<i64>,
 }
 
 /// Response for `GET /categories/valid` — the same category/subcategory

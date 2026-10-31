@@ -96,8 +96,8 @@ struct LoginSessionSqliteRow {
 }
 
 impl LoginSessionSqliteRow {
-    pub(super) fn into_document(self) -> LoginSessionDocument {
-        LoginSessionDocument {
+    pub(super) fn into_document(self) -> AppResult<LoginSessionDocument> {
+        Ok(LoginSessionDocument {
             id: ObjectId::parse_str(&self.id).ok(),
             key: self.key,
             user_key: self.user_key,
@@ -106,9 +106,9 @@ impl LoginSessionSqliteRow {
             role_at_login: self.role_at_login.parse().unwrap_or(Role::Staff),
             ip_address: self.ip_address,
             user_agent: self.user_agent,
-            created_at: to_bson_datetime(&self.created_at),
-            updated_at: to_bson_datetime(&self.updated_at),
-        }
+            created_at: to_bson_datetime(&self.created_at)?,
+            updated_at: to_bson_datetime(&self.updated_at)?,
+        })
     }
 }
 
@@ -170,7 +170,9 @@ pub(crate) async fn list_login_sessions(
                 }
             };
 
-            Ok(rows.into_iter().map(|r| r.into_document()).collect())
+            rows.into_iter()
+                .map(|r| r.into_document())
+                .collect::<AppResult<Vec<_>>>()
         }
     }
 }

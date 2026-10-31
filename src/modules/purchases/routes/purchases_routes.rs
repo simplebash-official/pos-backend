@@ -134,7 +134,7 @@ pub(super) async fn record_credit(
     Json(body): Json<CreateSupplierCreditRequest>,
 ) -> AppResult<(StatusCode, Json<ApiResponse<SupplierCredit>>)> {
     let by = RecordedBy {
-        name: current_user.resolve_name(&state.db).await,
+        name: current_user.resolve_name(&state.db).await?,
         user_id: current_user.user_id,
     };
     let recorded = credit::create_credit(&state.db, by, body).await?;
@@ -177,7 +177,7 @@ pub(super) async fn record_receipt(
         }
     }
     let recorded_by = RecordedBy {
-        name: current_user.resolve_name(&state.db).await,
+        name: current_user.resolve_name(&state.db).await?,
         user_id: current_user.user_id,
     };
     let recorded = receipt::record_receipt(&state.db, Some(recorded_by), body, device_id.0).await?;
@@ -212,7 +212,7 @@ pub(super) async fn void_credit(
     Path(key): Path<String>,
 ) -> AppResult<(StatusCode, Json<ApiResponse<SupplierCredit>>)> {
     let by = RecordedBy {
-        name: current_user.resolve_name(&state.db).await,
+        name: current_user.resolve_name(&state.db).await?,
         user_id: current_user.user_id,
     };
     let voided = credit::void_credit(&state.db, by, &key).await?;

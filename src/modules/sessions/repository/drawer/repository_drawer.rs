@@ -31,16 +31,17 @@ pub async fn get_drawer_state(
             .fetch_optional(pool)
             .await?;
 
-            Ok(row.map(|r| {
+            row.map(|r| -> AppResult<DrawerStateDocument> {
                 let updated_at_str: String = r.get("updated_at");
-                DrawerStateDocument {
+                Ok(DrawerStateDocument {
                     terminal_id: r.get("terminal_id"),
                     current_balance_cents: r.get("current_balance_cents"),
                     last_session_key: r.get("last_session_key"),
                     last_closing_float_cents: r.get("last_closing_float_cents"),
-                    updated_at: to_bson_datetime(&updated_at_str),
-                }
-            }))
+                    updated_at: to_bson_datetime(&updated_at_str)?,
+                })
+            })
+            .transpose()
         }
     }
 }
@@ -62,16 +63,17 @@ pub async fn list_drawer_states(db: &Db) -> AppResult<Vec<DrawerStateDocument>> 
             )
             .fetch_all(pool)
             .await?;
-            Ok(rows
-                .iter()
-                .map(|r| DrawerStateDocument {
-                    terminal_id: r.get("terminal_id"),
-                    current_balance_cents: r.get("current_balance_cents"),
-                    last_session_key: r.get("last_session_key"),
-                    last_closing_float_cents: r.get("last_closing_float_cents"),
-                    updated_at: to_bson_datetime(&r.get::<String, _>("updated_at")),
+            rows.iter()
+                .map(|r| -> AppResult<DrawerStateDocument> {
+                    Ok(DrawerStateDocument {
+                        terminal_id: r.get("terminal_id"),
+                        current_balance_cents: r.get("current_balance_cents"),
+                        last_session_key: r.get("last_session_key"),
+                        last_closing_float_cents: r.get("last_closing_float_cents"),
+                        updated_at: to_bson_datetime(&r.get::<String, _>("updated_at"))?,
+                    })
                 })
-                .collect())
+                .collect::<AppResult<Vec<_>>>()
         }
     }
 }

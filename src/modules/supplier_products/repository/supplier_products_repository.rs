@@ -110,7 +110,8 @@ pub(crate) async fn find_link(
             .bind(product_key)
             .fetch_optional(pool)
             .await?;
-            Ok(row.map(SupplierProductLinkSqliteRow::into_document))
+            row.map(SupplierProductLinkSqliteRow::into_document)
+                .transpose()
         }
     }
 }
@@ -192,10 +193,9 @@ pub(crate) async fn list_links_by_product(
             .bind(product_key)
             .fetch_all(pool)
             .await?;
-            Ok(rows
-                .into_iter()
+            rows.into_iter()
                 .map(SupplierProductLinkSqliteRow::into_document)
-                .collect())
+                .collect::<AppResult<Vec<_>>>()
         }
     }
 }
@@ -224,10 +224,9 @@ pub(crate) async fn list_links_by_supplier(
             .bind(supplier_key)
             .fetch_all(pool)
             .await?;
-            Ok(rows
-                .into_iter()
+            rows.into_iter()
                 .map(SupplierProductLinkSqliteRow::into_document)
-                .collect())
+                .collect::<AppResult<Vec<_>>>()
         }
     }
 }
@@ -342,7 +341,7 @@ pub(crate) async fn list_links_paginated(
             Ok((
                 rows.into_iter()
                     .map(SupplierProductLinkSqliteRow::into_document)
-                    .collect(),
+                    .collect::<AppResult<Vec<_>>>()?,
                 total,
             ))
         }
@@ -371,8 +370,8 @@ pub(super) struct SupplierProductLinkSqliteRow {
 }
 
 impl SupplierProductLinkSqliteRow {
-    pub(super) fn into_document(self) -> SupplierProductLinkDocument {
-        SupplierProductLinkDocument {
+    pub(super) fn into_document(self) -> AppResult<SupplierProductLinkDocument> {
+        Ok(SupplierProductLinkDocument {
             id: ObjectId::parse_str(&self.id).ok(),
             key: self.key,
             supplier_key: self.supplier_key,
@@ -380,11 +379,15 @@ impl SupplierProductLinkSqliteRow {
             cost_price_cents: self.cost_price_cents,
             notes: self.notes,
             version: self.version,
-            created_at: to_bson_datetime(&self.created_at),
-            updated_at: to_bson_datetime(&self.updated_at),
-            deleted_at: self.deleted_at.as_deref().map(to_bson_datetime),
+            created_at: to_bson_datetime(&self.created_at)?,
+            updated_at: to_bson_datetime(&self.updated_at)?,
+            deleted_at: self
+                .deleted_at
+                .as_deref()
+                .map(to_bson_datetime)
+                .transpose()?,
             updated_by_device: self.updated_by_device,
-        }
+        })
     }
 }
 

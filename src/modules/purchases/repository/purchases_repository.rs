@@ -279,12 +279,12 @@ pub(super) fn row_to_purchase_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<Pu
         line_total_cents: row.get("line_total_cents"),
         charges_share_cents: row.get("charges_share_cents"),
         selling_price_cents: row.get("selling_price_cents"),
-        date: to_bson_datetime(&date_str),
+        date: to_bson_datetime(&date_str)?,
         receipt_key: row.get("receipt_key"),
         version: row.get("version"),
-        created_at: to_bson_datetime(&created_at_str),
-        updated_at: to_bson_datetime(&updated_at_str),
-        deleted_at: deleted_at_str.map(|s| to_bson_datetime(&s)),
+        created_at: to_bson_datetime(&created_at_str)?,
+        updated_at: to_bson_datetime(&updated_at_str)?,
+        deleted_at: deleted_at_str.map(|s| to_bson_datetime(&s)).transpose()?,
         updated_by_device: row.get("updated_by_device"),
     })
 }

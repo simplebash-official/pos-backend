@@ -42,7 +42,7 @@ pub(crate) fn build_a4_invoice_data(
         "customerAddress": invoice.customer_address_snapshot.clone().unwrap_or_default(),
         "paymentMethod": invoice.payment_method,
         "cardLast4": invoice.card_last4.clone().unwrap_or_default(),
-        "tenderedAmountCents": invoice.amount_received_cents.unwrap_or(invoice.total_cents),
+        "tenderedAmountCents": tendered_cents(invoice),
         "items": invoice.items,
         "subtotalCents": invoice.subtotal_cents,
         "discountType": invoice.discount_type,
@@ -261,7 +261,7 @@ pub(crate) fn build_thermal_receipt_data(
         "discountCents": invoice.discount_cents,
         "totalCents": invoice.total_cents,
         "paymentMethod": invoice.payment_method,
-        "tenderedAmountCents": invoice.amount_received_cents.unwrap_or(invoice.total_cents),
+        "tenderedAmountCents": tendered_cents(invoice),
         "changeDueCents": invoice.change_due_cents.unwrap_or(0),
         "cardLast4": invoice.card_last4.clone().unwrap_or_default(),
         "splitPayments": invoice.split_payments.clone().unwrap_or_default(),
@@ -553,4 +553,13 @@ pub(super) fn shop_field<'a>(shop: &'a Value, field: &str) -> Option<&'a str> {
 
 pub(super) fn shop_field_or_empty<'a>(shop: &'a Value, field: &str) -> &'a str {
     shop_field(shop, field).unwrap_or("")
+}
+
+/// What the customer handed over. An invoice that records no tender (a credit sale or a
+/// settled-by-card sale) prints its total, which is what the receipt template expects.
+fn tendered_cents(invoice: &Invoice) -> i64 {
+    match invoice.amount_received_cents {
+        Some(received) => received,
+        None => invoice.total_cents,
+    }
 }

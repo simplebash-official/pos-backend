@@ -74,7 +74,7 @@ pub(crate) async fn find_user_by_employee_key(
                 .bind(employee_key)
                 .fetch_optional(pool)
                 .await?;
-            Ok(row.as_ref().map(user_from_sqlite_row))
+            row.as_ref().map(user_from_sqlite_row).transpose()
         }
     }
 }
@@ -92,7 +92,7 @@ pub(crate) async fn find_user_by_id(db: &Db, id: ObjectId) -> AppResult<Option<U
                 .bind(&id_hex)
                 .fetch_optional(pool)
                 .await?;
-            Ok(row.as_ref().map(user_from_sqlite_row))
+            row.as_ref().map(user_from_sqlite_row).transpose()
         }
     }
 }
@@ -113,7 +113,7 @@ pub(crate) async fn find_user_by_username(
                 .bind(username)
                 .fetch_optional(pool)
                 .await?;
-            Ok(row.as_ref().map(user_from_sqlite_row))
+            row.as_ref().map(user_from_sqlite_row).transpose()
         }
     }
 }
@@ -154,7 +154,9 @@ pub(crate) async fn find_users_by_employee_keys(
                 query = query.bind(k);
             }
             let rows = query.fetch_all(pool).await?;
-            Ok(rows.iter().map(user_from_sqlite_row).collect())
+            rows.iter()
+                .map(user_from_sqlite_row)
+                .collect::<AppResult<Vec<_>>>()
         }
     }
 }
@@ -251,7 +253,9 @@ pub(crate) async fn list_users(db: &Db, filter: Document) -> AppResult<Vec<UserD
                     .await?
             };
 
-            Ok(rows.iter().map(user_from_sqlite_row).collect())
+            rows.iter()
+                .map(user_from_sqlite_row)
+                .collect::<AppResult<Vec<_>>>()
         }
     }
 }
@@ -339,13 +343,13 @@ pub(crate) async fn update_user(
     }
 }
 
-pub(super) fn user_from_sqlite_row(r: &sqlx::sqlite::SqliteRow) -> UserDocument {
+pub(super) fn user_from_sqlite_row(r: &sqlx::sqlite::SqliteRow) -> AppResult<UserDocument> {
     let id_str: String = r.get("id");
     let role_str: String = r.get("role");
     let created_str: String = r.get("created_at");
     let updated_str: String = r.get("updated_at");
     let is_active_int: i64 = r.get("is_active");
-    UserDocument {
+    Ok(UserDocument {
         id: ObjectId::parse_str(&id_str).ok(),
         key: r.get("key"),
         name: r.get("name"),
@@ -360,9 +364,9 @@ pub(super) fn user_from_sqlite_row(r: &sqlx::sqlite::SqliteRow) -> UserDocument 
             .ok()
             .flatten()
             .and_then(|raw| serde_json::from_str(&raw).ok()),
-        created_at: to_bson_datetime(&created_str),
-        updated_at: to_bson_datetime(&updated_str),
-    }
+        created_at: to_bson_datetime(&created_str)?,
+        updated_at: to_bson_datetime(&updated_str)?,
+    })
 }
 
 pub(super) fn users(db: &TenantDatabase) -> ScopedCollection<UserDocument> {

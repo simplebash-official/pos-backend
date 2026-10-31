@@ -25,21 +25,26 @@ pub(crate) async fn find_document_template_settings(
             .await
             .map_err(|e| fetch_err(&e))?;
 
-            Ok(row.map(|r| {
+            row.map(|r| -> AppResult<_> {
                 let selections_json: String = r.get("selections");
                 let options_json: String = r.get("options");
                 let created_at: String = r.get("created_at");
                 let updated_at: String = r.get("updated_at");
-                DocumentTemplateSettingsDocument {
+                Ok(DocumentTemplateSettingsDocument {
                     id: None,
                     key: r.get("key"),
-                    selections: serde_json::from_str(&selections_json).unwrap_or_default(),
-                    options: serde_json::from_str(&options_json).unwrap_or_default(),
+                    selections: serde_json::from_str(&selections_json).map_err(|err| {
+                        AppError::internal(format!("stored selections are not JSON: {err}"))
+                    })?,
+                    options: serde_json::from_str(&options_json).map_err(|err| {
+                        AppError::internal(format!("stored options are not JSON: {err}"))
+                    })?,
                     version: r.get("version"),
-                    created_at: to_bson_datetime(&created_at),
-                    updated_at: to_bson_datetime(&updated_at),
-                }
-            }))
+                    created_at: to_bson_datetime(&created_at)?,
+                    updated_at: to_bson_datetime(&updated_at)?,
+                })
+            })
+            .transpose()
         }
         Db::Mongo(mongo) => mongo
             .collection::<DocumentTemplateSettingsDocument>(DOCUMENT_TEMPLATE_SETTINGS)
@@ -67,16 +72,18 @@ pub(crate) async fn find_shop_profile(
             .await
             .map_err(|e| AppError::internal(format!("Failed to fetch shop profile: {e}")))?;
 
-            Ok(row.map(|r| {
+            row.map(|r| -> AppResult<_> {
                 let address_lines_str: String = r.get("address_lines");
                 let address_lines: Vec<String> =
-                    serde_json::from_str(&address_lines_str).unwrap_or_default();
+                    serde_json::from_str(&address_lines_str).map_err(|err| {
+                        AppError::internal(format!("stored address lines are not JSON: {err}"))
+                    })?;
                 let created_at: String = r.get("created_at");
                 let updated_at: String = r.get("updated_at");
                 let allow_shared_user_sessions_int: i64 =
-                    r.try_get("allow_shared_user_sessions").unwrap_or(0);
+                    r.try_get("allow_shared_user_sessions")?;
 
-                ShopProfileDocument {
+                Ok(ShopProfileDocument {
                     id: None,
                     key: r.get("key"),
                     legal_name: r.get("legal_name"),
@@ -97,10 +104,11 @@ pub(crate) async fn find_shop_profile(
                     receipt_footer_text: r.get("receipt_footer_text"),
                     allow_shared_user_sessions: allow_shared_user_sessions_int != 0,
                     version: r.get("version"),
-                    created_at: to_bson_datetime(&created_at),
-                    updated_at: to_bson_datetime(&updated_at),
-                }
-            }))
+                    created_at: to_bson_datetime(&created_at)?,
+                    updated_at: to_bson_datetime(&updated_at)?,
+                })
+            })
+            .transpose()
         }
         Db::Mongo(mongo) => {
             let collection = mongo.collection::<ShopProfileDocument>("shop_profiles");

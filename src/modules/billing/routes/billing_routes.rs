@@ -14,7 +14,7 @@ use crate::domain::billing::{
 use crate::domain::settings::{DocumentDesignChoice, DocumentDesignStatus};
 use crate::modules::billing::service;
 use crate::modules::billing::service::sale;
-use crate::modules::{documents, users};
+use crate::modules::documents;
 use axum::Json;
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
@@ -90,13 +90,7 @@ pub(super) async fn create_credit_note(
     Json(body): Json<CreateCreditNoteRequest>,
 ) -> AppResult<Json<ApiResponse<CreditNote>>> {
     user.require_permission(perm::BILLING_WRITE)?;
-    let cashier_name = match mongodb::bson::oid::ObjectId::parse_str(&user.user_id) {
-        Ok(object_id) => users::service::get_user(&state.db, object_id)
-            .await
-            .map(|u| u.name)
-            .unwrap_or_else(|_| "Unknown".to_string()),
-        Err(_) => "Unknown".to_string(),
-    };
+    let cashier_name = user.resolve_name(&state.db).await?;
     let response = service::credit_notes::create_credit_note(
         &state.db,
         &state.config,
@@ -491,13 +485,7 @@ pub(super) async fn record_payment(
 ) -> AppResult<Json<ApiResponse<PaymentRecord>>> {
     user.require_permission(perm::BILLING_WRITE)?;
     let invoice = service::get_invoice(&state.db, &id).await?;
-    let recorded_by_name = match mongodb::bson::oid::ObjectId::parse_str(&user.user_id) {
-        Ok(object_id) => users::service::get_user(&state.db, object_id)
-            .await
-            .map(|u| u.name)
-            .unwrap_or_else(|_| "Unknown".to_string()),
-        Err(_) => "Unknown".to_string(),
-    };
+    let recorded_by_name = user.resolve_name(&state.db).await?;
     let payment = service::payments::record_payment(
         &state.db,
         &invoice.key,

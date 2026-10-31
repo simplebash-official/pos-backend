@@ -375,7 +375,7 @@ pub(super) fn row_to_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<QuotationDo
         status: row.get("status"),
         has_out_of_stock_items,
         fulfilled_by_invoice_key,
-        fulfilled_at: fulfilled_at.map(|s| to_bson_datetime(&s)),
+        fulfilled_at: fulfilled_at.map(|s| to_bson_datetime(&s)).transpose()?,
         customer_key: row.get("customer_key"),
         customer_name: row.get("customer_name"),
         customer_phone: row.get("customer_phone"),
@@ -394,10 +394,10 @@ pub(super) fn row_to_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<QuotationDo
         shop_profile_snapshot: serde_json::from_str(&snapshot_json).map_err(|e| {
             AppError::internal(format!("Stored quotation shop profile is corrupt: {e}"))
         })?,
-        created_at: to_bson_datetime(&created_at),
-        updated_at: to_bson_datetime(&updated_at),
+        created_at: to_bson_datetime(&created_at)?,
+        updated_at: to_bson_datetime(&updated_at)?,
         version: row.get("version"),
-        deleted_at: deleted_at.map(|s| to_bson_datetime(&s)),
+        deleted_at: deleted_at.map(|s| to_bson_datetime(&s)).transpose()?,
         updated_by_device: row.get("updated_by_device"),
     })
 }

@@ -390,8 +390,8 @@ pub(super) fn row_to_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<LabelTempla
         height_mm: row.get("height_mm"),
         elements,
         version: row.get("version"),
-        created_at: to_bson_datetime(&created_at),
-        updated_at: to_bson_datetime(&updated_at),
+        created_at: to_bson_datetime(&created_at)?,
+        updated_at: to_bson_datetime(&updated_at)?,
     })
 }
 
@@ -429,8 +429,8 @@ pub(super) fn row_to_job(row: &sqlx::sqlite::SqliteRow) -> AppResult<LabelPrintJ
         printed_by_name: row.get("printed_by_name"),
         items,
         total_labels: total_labels as u32,
-        created_at: to_bson_datetime(&created_at),
-        updated_at: to_bson_datetime(&updated_at),
+        created_at: to_bson_datetime(&created_at)?,
+        updated_at: to_bson_datetime(&updated_at)?,
     })
 }
 

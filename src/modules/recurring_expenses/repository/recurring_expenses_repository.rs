@@ -39,8 +39,8 @@ pub(super) fn from_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<RecurringExpe
         note: row.get("note"),
         active: row.get::<i64, _>("active") != 0,
         version: row.get("version"),
-        created_at: to_bson_datetime(&row.get::<String, _>("created_at")),
-        updated_at: to_bson_datetime(&row.get::<String, _>("updated_at")),
+        created_at: to_bson_datetime(&row.get::<String, _>("created_at"))?,
+        updated_at: to_bson_datetime(&row.get::<String, _>("updated_at"))?,
         updated_by_device: row.get("updated_by_device"),
     })
 }

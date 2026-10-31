@@ -20,7 +20,7 @@ pub(super) fn charge_from_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<Receip
         key: row.get("key"),
         receipt_key: row.get("receipt_key"),
         supplier_key: row.get("supplier_key"),
-        date: to_bson_datetime(&row.get::<String, _>("date")),
+        date: to_bson_datetime(&row.get::<String, _>("date"))?,
         kind: ChargeKind::parse(&kind).ok_or_else(|| {
             AppError::internal(format!("Unknown charge kind '{kind}' in database"))
         })?,
@@ -46,8 +46,8 @@ pub(super) fn charge_from_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<Receip
             .transpose()?,
         payment_key: row.get("payment_key"),
         version: row.get("version"),
-        created_at: to_bson_datetime(&row.get::<String, _>("created_at")),
-        updated_at: to_bson_datetime(&row.get::<String, _>("updated_at")),
+        created_at: to_bson_datetime(&row.get::<String, _>("created_at"))?,
+        updated_at: to_bson_datetime(&row.get::<String, _>("updated_at"))?,
         updated_by_device: row.get("updated_by_device"),
     })
 }

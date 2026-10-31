@@ -210,10 +210,8 @@ async fn compute_refund_shape(
         // Split-paid invoices default to a proportional allocation across
         // the invoice's original payment legs; anything else is a single
         // leg using the resolved payment method.
-        let split_payments = repository::list_payments_for_invoice(db, invoice_key.unwrap_or(""))
-            .await
-            .unwrap_or_default();
-        let invoice_legs: Vec<(String, i64)> = if invoice_key.is_some() {
+        let invoice_legs: Vec<(String, i64)> = if let Some(invoice_key) = invoice_key {
+            let split_payments = repository::list_payments_for_invoice(db, invoice_key).await?;
             split_payments
                 .iter()
                 .map(|p| (p.payment_method.clone(), p.amount_cents))
@@ -911,23 +909,22 @@ async fn finish_create_credit_note(
             if cash_refunded > 0
                 && let Some(ref s_key) = resolved_session_key
             {
-                let _ = crate::modules::sessions::repository::sessions::increment_session_refunds(
+                crate::modules::sessions::repository::sessions::increment_session_refunds(
                     db,
                     s_key,
                     cash_refunded,
                 )
-                .await;
-                if let Ok(Some(sess)) =
+                .await?;
+                let session =
                     crate::modules::sessions::repository::sessions::find_session_by_key(db, s_key)
-                        .await
-                {
-                    let _ = crate::modules::sessions::repository::drawer::update_drawer_balance(
-                        db,
-                        &sess.terminal_id,
-                        -cash_refunded,
-                    )
-                    .await;
-                }
+                        .await?
+                        .ok_or_else(|| AppError::internal("the refund's session disappeared"))?;
+                crate::modules::sessions::repository::drawer::update_drawer_balance(
+                    db,
+                    &session.terminal_id,
+                    -cash_refunded,
+                )
+                .await?;
             }
         }
     }

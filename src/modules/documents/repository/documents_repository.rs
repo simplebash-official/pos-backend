@@ -32,7 +32,7 @@ pub(crate) async fn find_latest_by_entity_and_type(
             .fetch_optional(pool)
             .await?;
 
-            Ok(row.map(|r| row_to_document(&r)))
+            row.map(|r| row_to_document(&r)).transpose()
         }
     }
 }
@@ -74,7 +74,7 @@ pub(crate) async fn find_latest_by_entity_and_variant(
             .bind(&prefixed)
             .fetch_optional(pool)
             .await?;
-            Ok(row.map(|r| row_to_document(&r)))
+            row.map(|r| row_to_document(&r)).transpose()
         }
     }
 }
@@ -150,11 +150,11 @@ pub(crate) async fn insert(
     }
 }
 
-pub(super) fn row_to_document(r: &sqlx::sqlite::SqliteRow) -> GeneratedDocumentDocument {
+pub(super) fn row_to_document(r: &sqlx::sqlite::SqliteRow) -> AppResult<GeneratedDocumentDocument> {
     let id_str: String = r.get("id");
     let created_str: String = r.get("created_at");
     let updated_str: String = r.get("updated_at");
-    GeneratedDocumentDocument {
+    Ok(GeneratedDocumentDocument {
         id: ObjectId::parse_str(&id_str).ok(),
         key: r.get("key"),
         entity_key: r.get("entity_key"),
@@ -166,7 +166,7 @@ pub(super) fn row_to_document(r: &sqlx::sqlite::SqliteRow) -> GeneratedDocumentD
         template_version: r.get("template_version"),
         file_path: r.get("file_path"),
         file_size_bytes: r.get("file_size_bytes"),
-        created_at: to_bson_datetime(&created_str),
-        updated_at: to_bson_datetime(&updated_str),
-    }
+        created_at: to_bson_datetime(&created_str)?,
+        updated_at: to_bson_datetime(&updated_str)?,
+    })
 }

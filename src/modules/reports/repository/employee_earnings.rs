@@ -21,7 +21,7 @@ use crate::core::error::AppResult;
 
 use crate::domain::employees::EmployeeEarningRecord;
 
-use crate::modules::reports::repository::commissions::get_i64_flexible;
+use crate::modules::reports::repository::commissions::recorded_cents;
 
 fn repairs(db: &TenantDatabase) -> ScopedCollection<Document> {
     db.collection("repairs")
@@ -35,9 +35,9 @@ fn to_record(
     doc: &Document,
     work_type: &'static str,
     description: String,
-) -> EmployeeEarningRecord {
-    let revenue = get_i64_flexible(doc, "estimated_cost_cents");
-    let material_cost = get_i64_flexible(doc, "material_cost_cents");
+) -> AppResult<EmployeeEarningRecord> {
+    let revenue = recorded_cents(doc, "estimated_cost_cents")?;
+    let material_cost = recorded_cents(doc, "material_cost_cents")?;
     let profit = job_profit_cents(revenue, material_cost);
 
     let split_type = doc.get_str("split_type").ok();
@@ -55,7 +55,7 @@ fn to_record(
         "pending"
     };
 
-    EmployeeEarningRecord {
+    Ok(EmployeeEarningRecord {
         work_id: doc.get_str("key").unwrap_or_default().to_string(),
         ticket_or_invoice_number: doc.get_str("ticket_number").unwrap_or_default().to_string(),
         work_type: work_type.to_string(),
@@ -72,7 +72,7 @@ fn to_record(
             .get_datetime("created_at")
             .map(|d| d.to_chrono())
             .unwrap_or_else(|_| Utc::now()),
-    }
+    })
 }
 
 /// Every completed/delivered repair and print job assigned to `employee_key`
@@ -105,7 +105,7 @@ pub(crate) async fn list_employee_earnings(
                     .get_str("issue_description")
                     .unwrap_or_default()
                     .to_string();
-                records.push(to_record(&doc, "repair", description));
+                records.push(to_record(&doc, "repair", description)?);
             }
 
             let print_match = doc! {
@@ -123,7 +123,7 @@ pub(crate) async fn list_employee_earnings(
                 .await?;
             while let Some(doc) = cursor.try_next().await? {
                 let description = doc.get_str("job_type").unwrap_or_default().to_string();
-                records.push(to_record(&doc, "print", description));
+                records.push(to_record(&doc, "print", description)?);
             }
         }
         Db::Sqlite(pool) => {
@@ -143,7 +143,7 @@ pub(crate) async fn list_employee_earnings(
                     .get_str("issue_description")
                     .unwrap_or_default()
                     .to_string();
-                records.push(to_record(&doc, "repair", description));
+                records.push(to_record(&doc, "repair", description)?);
             }
 
             let print_query = "SELECT * FROM print_jobs WHERE deleted_at IS NULL AND assigned_employee_id = ? AND status IN ('completed', 'delivered', 'ready_for_pickup') AND created_at >= ? AND created_at < ? ORDER BY created_at DESC";
@@ -156,7 +156,7 @@ pub(crate) async fn list_employee_earnings(
             for row in print_rows {
                 let doc = map_sqlite_row_to_document(&row);
                 let description = doc.get_str("job_type").unwrap_or_default().to_string();
-                records.push(to_record(&doc, "print", description));
+                records.push(to_record(&doc, "print", description)?);
             }
         }
     }

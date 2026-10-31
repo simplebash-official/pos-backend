@@ -177,8 +177,8 @@ pub(super) fn map_sqlite_row_to_batch(
         errors,
         created_by_user_key: row.get("created_by_user_key"),
         created_by_user_name: row.get("created_by_user_name"),
-        created_at: to_bson_datetime(&created_at_str),
-        updated_at: to_bson_datetime(&updated_at_str),
+        created_at: to_bson_datetime(&created_at_str)?,
+        updated_at: to_bson_datetime(&updated_at_str)?,
     })
 }
 

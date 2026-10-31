@@ -250,7 +250,7 @@ pub(crate) async fn update_shop_profile(
 
             // Keep the tenant directory's store name in sync so auth and directory reflect any rename
             if let Some(tid) = tenant_id {
-                let _ = tenants_repository::update_tenant_name(db, tid, trimmed).await;
+                tenants_repository::update_tenant_name(db, tid, trimmed).await?;
             }
         }
 

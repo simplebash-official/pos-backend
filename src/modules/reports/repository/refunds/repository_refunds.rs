@@ -42,10 +42,10 @@ pub(crate) async fn aggregate_refund_totals(
             let mut cursor = credit_notes(db).aggregate(pipeline).await?;
             if let Some(doc) = cursor.try_next().await? {
                 Ok(RefundTotals {
-                    net_refund_cents: get_i64_flexible(&doc, "net_refund_cents"),
-                    refund_cash_cents: get_i64_flexible(&doc, "refund_cash_cents"),
-                    balance_reduction_cents: get_i64_flexible(&doc, "balance_reduction_cents"),
-                    credit_note_count: get_i64_flexible(&doc, "count") as u64,
+                    net_refund_cents: get_i64_flexible(&doc, "net_refund_cents")?,
+                    refund_cash_cents: get_i64_flexible(&doc, "refund_cash_cents")?,
+                    balance_reduction_cents: get_i64_flexible(&doc, "balance_reduction_cents")?,
+                    credit_note_count: get_i64_flexible(&doc, "count")? as u64,
                 })
             } else {
                 Ok(RefundTotals::default())

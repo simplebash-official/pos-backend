@@ -187,9 +187,9 @@ fn row_to_subcategory_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<Subcategor
         category_key: row.get("category_key"),
         name: row.get("name"),
         version: row.get("version"),
-        created_at: to_bson_datetime(&created_at_str),
-        updated_at: to_bson_datetime(&updated_at_str),
-        deleted_at: deleted_at_str.map(|s| to_bson_datetime(&s)),
+        created_at: to_bson_datetime(&created_at_str)?,
+        updated_at: to_bson_datetime(&updated_at_str)?,
+        deleted_at: deleted_at_str.map(|s| to_bson_datetime(&s)).transpose()?,
         updated_by_device: row.get("updated_by_device"),
     })
 }
@@ -276,9 +276,9 @@ pub(super) fn row_to_category_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<Ca
         icon: row.get("icon"),
         color: row.get("color"),
         version: row.get("version"),
-        created_at: to_bson_datetime(&created_at_str),
-        updated_at: to_bson_datetime(&updated_at_str),
-        deleted_at: deleted_at_str.map(|s| to_bson_datetime(&s)),
+        created_at: to_bson_datetime(&created_at_str)?,
+        updated_at: to_bson_datetime(&updated_at_str)?,
+        deleted_at: deleted_at_str.map(|s| to_bson_datetime(&s)).transpose()?,
         updated_by_device: row.get("updated_by_device"),
     })
 }

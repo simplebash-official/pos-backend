@@ -55,7 +55,7 @@ pub(super) async fn update_cash_settings(
     Json(body): Json<UpdateCashSettingsRequest>,
 ) -> AppResult<Json<ApiResponse<CashSettings>>> {
     current_user.require_permission(perm::CASH_SETTINGS_MANAGE)?;
-    let name = current_user.resolve_name(&state.db).await;
+    let name = current_user.resolve_name(&state.db).await?;
     let settings = service::update_settings(&state.db, name, body).await?;
     Ok(Json(ApiResponse::success(
         settings,

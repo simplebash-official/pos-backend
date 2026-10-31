@@ -31,10 +31,7 @@ pub async fn tenant_context(State(state): State<AppState>, req: Request, next: N
     }
     // Same verification (and same tenant derivation) as the `CurrentUser`
     // extractor; any failure means no tenant, i.e. `Deny`.
-    let verified = match verify_bearer(req.headers(), &state.config).await {
-        Ok(verified) => Some(verified),
-        Err(_) => None,
-    };
+    let verified = verify_bearer(req.headers(), &state.config).await.ok();
     let header_device = req
         .headers()
         .get("x-device-id")

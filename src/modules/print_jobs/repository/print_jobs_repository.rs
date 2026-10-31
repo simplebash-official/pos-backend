@@ -462,9 +462,9 @@ pub(super) fn row_to_print_job_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<P
         split_type: row.get("split_type"),
         split_value: row.get("split_value"),
         version: row.get("version"),
-        created_at: to_bson_datetime(&created_at_str),
-        updated_at: to_bson_datetime(&updated_at_str),
-        deleted_at: deleted_at_str.map(|s| to_bson_datetime(&s)),
+        created_at: to_bson_datetime(&created_at_str)?,
+        updated_at: to_bson_datetime(&updated_at_str)?,
+        deleted_at: deleted_at_str.map(|s| to_bson_datetime(&s)).transpose()?,
         updated_by_device: row.get("updated_by_device"),
     })
 }

@@ -65,8 +65,8 @@ fn settlement_from_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<ReceiptSettle
         })?,
         payment_key: row.get("payment_key"),
         version: row.get("version"),
-        created_at: to_bson_datetime(&row.get::<String, _>("created_at")),
-        updated_at: to_bson_datetime(&row.get::<String, _>("updated_at")),
+        created_at: to_bson_datetime(&row.get::<String, _>("created_at"))?,
+        updated_at: to_bson_datetime(&row.get::<String, _>("updated_at"))?,
         updated_by_device: row.get("updated_by_device"),
     })
 }

@@ -97,24 +97,27 @@ pub struct CurrentUser {
 
 impl CurrentUser {
     /// Resolves the human-readable display name for this user.
-    /// Checks the token's `name` claim first; falls back to querying the user
-    /// by their ObjectId in `db`; falls back to "Cashier" if neither is available.
-    pub async fn resolve_name(&self, db: &crate::clients::db::Db) -> String {
+    ///
+    /// Checks the token's `name` claim first, then the stored user. A user with
+    /// neither is an error: the name is stamped on financial records.
+    pub async fn resolve_name(&self, db: &crate::clients::db::Db) -> AppResult<String> {
         if let Some(ref name) = self.name {
             let trimmed = name.trim();
             if !trimmed.is_empty() {
-                return trimmed.to_string();
+                return Ok(trimmed.to_string());
             }
         }
-        if let Ok(oid) = mongodb::bson::oid::ObjectId::parse_str(&self.user_id)
-            && let Ok(user) = crate::modules::users::service::get_user(db, oid).await
-        {
-            let trimmed = user.name.trim();
-            if !trimmed.is_empty() {
-                return trimmed.to_string();
-            }
+        let object_id = mongodb::bson::oid::ObjectId::parse_str(&self.user_id).map_err(|err| {
+            AppError::internal(format!(
+                "the token has no name and its user id is invalid: {err}"
+            ))
+        })?;
+        let user = crate::modules::users::service::get_user(db, object_id).await?;
+        let trimmed = user.name.trim();
+        if trimmed.is_empty() {
+            return Err(AppError::internal("the signed-in user has no name"));
         }
-        "Cashier".to_string()
+        Ok(trimmed.to_string())
     }
 
     /// The caller's device id, or 403 `DEVICE_TOKEN_REQUIRED` unless the

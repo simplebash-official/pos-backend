@@ -244,18 +244,14 @@ pub(crate) async fn insert_credit_note(
                 .id
                 .map(|oid| oid.to_hex())
                 .unwrap_or_else(generate_id_hex);
-            let returned_items_json = serde_json::to_string(&document.returned_items)
-                .unwrap_or_else(|_| "[]".to_string());
-            let exchange_items_json = serde_json::to_string(&document.exchange_items)
-                .unwrap_or_else(|_| "[]".to_string());
-            let refund_breakdown_json = serde_json::to_string(&document.refund_breakdown)
-                .unwrap_or_else(|_| "[]".to_string());
-            let refund_payment_keys_json = serde_json::to_string(&document.refund_payment_keys)
-                .unwrap_or_else(|_| "[]".to_string());
-            let status_str = serde_json::to_value(document.status)
-                .ok()
-                .and_then(|v| v.as_str().map(|s| s.to_string()))
-                .unwrap_or_else(|| "approved".to_string());
+            let returned_items_json = serde_json::to_string(&document.returned_items)?;
+            let exchange_items_json = serde_json::to_string(&document.exchange_items)?;
+            let refund_breakdown_json = serde_json::to_string(&document.refund_breakdown)?;
+            let refund_payment_keys_json = serde_json::to_string(&document.refund_payment_keys)?;
+            let status_str = serde_json::to_value(document.status)?
+                .as_str()
+                .expect("a status serializes as a string")
+                .to_string();
 
             let created_at_iso = bson_to_iso(&document.created_at);
             let updated_at_iso = bson_to_iso(&document.updated_at);

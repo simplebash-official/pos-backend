@@ -19,8 +19,8 @@ fn from_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<AccountOpeningDocument> 
         as_of_date: row.get("as_of_date"),
         set_by_name_snapshot: row.get("set_by_name_snapshot"),
         version: row.get("version"),
-        created_at: to_bson_datetime(&row.get::<String, _>("created_at")),
-        updated_at: to_bson_datetime(&row.get::<String, _>("updated_at")),
+        created_at: to_bson_datetime(&row.get::<String, _>("created_at"))?,
+        updated_at: to_bson_datetime(&row.get::<String, _>("updated_at"))?,
         updated_by_device: row.get("updated_by_device"),
     })
 }

@@ -2,7 +2,7 @@ use crate::clients::db::Db;
 use crate::clients::sqlite::{bson_to_iso, generate_id_hex, to_bson_datetime};
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use crate::clients::uow::{Backend, Unit};
-use crate::core::error::AppResult;
+use crate::core::error::{AppError, AppResult};
 use crate::domain::inventory::StockMovementType;
 use crate::modules::inventory::model::StockMovementDocument;
 use futures_util::TryStreamExt;
@@ -170,11 +170,17 @@ pub(super) fn row_to_stock_movement_doc(
     let id_str: String = row.get("id");
     let object_id = ObjectId::parse_str(&id_str).ok();
     let product_id_str: String = row.get("product_id");
-    let product_id = ObjectId::parse_str(&product_id_str).unwrap_or_default();
+    let product_id = ObjectId::parse_str(&product_id_str).map_err(|err| {
+        AppError::internal(format!(
+            "stored stock movement product id is invalid: {err}"
+        ))
+    })?;
     let movement_type_str: String = row.get("movement_type");
-    let movement_type = movement_type_str
-        .parse()
-        .unwrap_or(StockMovementType::ManualAdjustment);
+    let movement_type: StockMovementType = movement_type_str.parse().map_err(|_| {
+        AppError::internal(format!(
+            "stored movement type `{movement_type_str}` is unknown"
+        ))
+    })?;
     let created_at_str: String = row.get("created_at");
     let updated_at_str: String = row.get("updated_at");
     let deleted_at_str: Option<String> = row.get("deleted_at");
@@ -189,9 +195,9 @@ pub(super) fn row_to_stock_movement_doc(
         reference_id: row.get("reference_id"),
         note: row.get("note"),
         version: row.get("version"),
-        created_at: to_bson_datetime(&created_at_str),
-        updated_at: to_bson_datetime(&updated_at_str),
-        deleted_at: deleted_at_str.map(|s| to_bson_datetime(&s)),
+        created_at: to_bson_datetime(&created_at_str)?,
+        updated_at: to_bson_datetime(&updated_at_str)?,
+        deleted_at: deleted_at_str.map(|s| to_bson_datetime(&s)).transpose()?,
         updated_by_device: row.get("updated_by_device"),
     })
 }

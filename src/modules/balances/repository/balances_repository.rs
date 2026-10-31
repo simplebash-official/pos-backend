@@ -130,8 +130,8 @@ pub(crate) async fn list_openings(
     }
 }
 
-fn recovery_from_row(row: &sqlx::sqlite::SqliteRow) -> AdvanceRecoveryDocument {
-    AdvanceRecoveryDocument {
+fn recovery_from_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<AdvanceRecoveryDocument> {
+    Ok(AdvanceRecoveryDocument {
         id: ObjectId::parse_str(row.get::<String, _>("id")).ok(),
         key: row.get("key"),
         employee_key: row.get("employee_key"),
@@ -141,10 +141,10 @@ fn recovery_from_row(row: &sqlx::sqlite::SqliteRow) -> AdvanceRecoveryDocument {
         recorded_by_user_id: row.get("recorded_by_user_id"),
         recorded_by_name_snapshot: row.get("recorded_by_name_snapshot"),
         version: row.get("version"),
-        created_at: to_bson_datetime(&row.get::<String, _>("created_at")),
-        updated_at: to_bson_datetime(&row.get::<String, _>("updated_at")),
+        created_at: to_bson_datetime(&row.get::<String, _>("created_at"))?,
+        updated_at: to_bson_datetime(&row.get::<String, _>("updated_at"))?,
         updated_by_device: row.get("updated_by_device"),
-    }
+    })
 }
 
 /// Every recovery, oldest first; the service groups them per employee.
@@ -165,7 +165,9 @@ pub(crate) async fn list_recoveries(db: &Db) -> AppResult<Vec<AdvanceRecoveryDoc
             let rows = sqlx::query("SELECT * FROM advance_recoveries ORDER BY created_at ASC")
                 .fetch_all(pool)
                 .await?;
-            Ok(rows.iter().map(recovery_from_row).collect())
+            rows.iter()
+                .map(recovery_from_row)
+                .collect::<AppResult<Vec<_>>>()
         }
     }
 }
@@ -183,8 +185,8 @@ pub(super) fn opening_from_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<Balan
         as_of_date: row.get("as_of_date"),
         set_by_name_snapshot: row.get("set_by_name_snapshot"),
         version: row.get("version"),
-        created_at: to_bson_datetime(&row.get::<String, _>("created_at")),
-        updated_at: to_bson_datetime(&row.get::<String, _>("updated_at")),
+        created_at: to_bson_datetime(&row.get::<String, _>("created_at"))?,
+        updated_at: to_bson_datetime(&row.get::<String, _>("updated_at"))?,
         updated_by_device: row.get("updated_by_device"),
     })
 }

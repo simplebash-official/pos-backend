@@ -252,11 +252,11 @@ pub(super) fn row_to_batch_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<Stock
         remaining_quantity: row.get("remaining_quantity"),
         unit_cost_cents: row.get("unit_cost_cents"),
         selling_price_cents: row.get("selling_price_cents"),
-        received_at: to_bson_datetime(&received_at_str),
+        received_at: to_bson_datetime(&received_at_str)?,
         version: row.get("version"),
-        created_at: to_bson_datetime(&created_at_str),
-        updated_at: to_bson_datetime(&updated_at_str),
-        deleted_at: deleted_at_str.map(|s| to_bson_datetime(&s)),
+        created_at: to_bson_datetime(&created_at_str)?,
+        updated_at: to_bson_datetime(&updated_at_str)?,
+        deleted_at: deleted_at_str.map(|s| to_bson_datetime(&s)).transpose()?,
         updated_by_device: row.get("updated_by_device"),
     })
 }

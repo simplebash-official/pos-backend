@@ -174,9 +174,9 @@ pub(super) struct CustomerSqliteRow {
 }
 
 impl CustomerSqliteRow {
-    pub(super) fn into_document(self) -> CustomerDocument {
+    pub(super) fn into_document(self) -> AppResult<CustomerDocument> {
         let tags: Vec<String> = serde_json::from_str(&self.tags).unwrap_or_default();
-        CustomerDocument {
+        Ok(CustomerDocument {
             id: ObjectId::parse_str(&self.id).ok(),
             key: self.key,
             name: self.name,
@@ -190,11 +190,15 @@ impl CustomerSqliteRow {
             outstanding_balance_cents: self.outstanding_balance_cents,
             total_purchases_cents: self.total_purchases_cents,
             version: self.version,
-            created_at: to_bson_datetime(&self.created_at),
-            updated_at: to_bson_datetime(&self.updated_at),
-            deleted_at: self.deleted_at.as_deref().map(to_bson_datetime),
+            created_at: to_bson_datetime(&self.created_at)?,
+            updated_at: to_bson_datetime(&self.updated_at)?,
+            deleted_at: self
+                .deleted_at
+                .as_deref()
+                .map(to_bson_datetime)
+                .transpose()?,
             updated_by_device: self.updated_by_device,
-        }
+        })
     }
 }
 
@@ -305,7 +309,7 @@ pub(crate) async fn find_customer_by_id(
             .bind(&id_str)
             .fetch_optional(pool)
             .await?;
-            Ok(row.map(CustomerSqliteRow::into_document))
+            row.map(CustomerSqliteRow::into_document).transpose()
         }
     }
 }
@@ -337,7 +341,7 @@ pub(crate) async fn find_customer_by_key(
             .bind(key)
             .fetch_optional(pool)
             .await?;
-            Ok(row.map(CustomerSqliteRow::into_document))
+            row.map(CustomerSqliteRow::into_document).transpose()
         }
     }
 }
@@ -372,10 +376,9 @@ pub(crate) async fn find_customers_by_keys(
                 query = query.bind(key);
             }
             let rows = query.fetch_all(pool).await?;
-            Ok(rows
-                .into_iter()
+            rows.into_iter()
                 .map(CustomerSqliteRow::into_document)
-                .collect())
+                .collect::<AppResult<Vec<_>>>()
         }
     }
 }
@@ -483,7 +486,7 @@ pub(crate) async fn list_customers(
             let mut items: Vec<CustomerDocument> = rows
                 .into_iter()
                 .map(CustomerSqliteRow::into_document)
-                .collect();
+                .collect::<AppResult<Vec<_>>>()?;
 
             // Filter in-memory by clauses
             if let Ok(and_arr) = filter.get_array("$and") {

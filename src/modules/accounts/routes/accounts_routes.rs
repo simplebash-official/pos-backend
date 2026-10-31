@@ -60,7 +60,7 @@ pub(super) async fn set_account_opening(
 ) -> AppResult<Json<ApiResponse<AccountSummary>>> {
     current_user.require_permission(perm::ACCOUNTS_MANAGE)?;
     let kind = AccountKind::parse(&kind).ok_or_else(|| AppError::validation("Unknown account."))?;
-    let name = current_user.resolve_name(&state.db).await;
+    let name = current_user.resolve_name(&state.db).await?;
     let summary = service::set_opening(&state.db, kind, name, body).await?;
     Ok(Json(ApiResponse::success(
         summary,

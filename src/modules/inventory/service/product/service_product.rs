@@ -295,10 +295,13 @@ pub(crate) async fn delete_product(
 /// same as the single-delete path.
 pub(crate) async fn delete_products(db: &Db, product_ids: Vec<String>) -> AppResult<u64> {
     crate::core::logging::domain::tracked("inventory.products_bulk_deleted", async move {
-        let object_ids: Vec<ObjectId> = product_ids
+        let object_ids = product_ids
             .iter()
-            .filter_map(|id| ObjectId::parse_str(id).ok())
-            .collect();
+            .map(|id| {
+                ObjectId::parse_str(id)
+                    .map_err(|_| AppError::validation(format!("`{id}` is not a valid product id")))
+            })
+            .collect::<AppResult<Vec<ObjectId>>>()?;
 
         // Keys are needed for the `supplier_products` cascade below, so they
         // must be read before the delete removes the documents they came from.

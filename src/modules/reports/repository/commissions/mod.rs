@@ -14,4 +14,4 @@ mod repository_commissions;
 pub(crate) use repository_commissions::UNASSIGNED_PRINTER;
 pub(crate) use repository_commissions::UNASSIGNED_TECHNICIAN;
 pub(crate) use repository_commissions::aggregate_employee_commissions;
-pub(crate) use repository_commissions::get_i64_flexible;
+pub(crate) use repository_commissions::recorded_cents;

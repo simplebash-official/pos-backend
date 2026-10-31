@@ -326,11 +326,13 @@ pub async fn insert_session(
             let opening_denom_json = doc
                 .opening_denominations
                 .as_ref()
-                .map(|v| serde_json::to_string(v).unwrap_or_default());
+                .map(serde_json::to_string)
+                .transpose()?;
             let closing_denom_json = doc
                 .closing_denominations
                 .as_ref()
-                .map(|v| serde_json::to_string(v).unwrap_or_default());
+                .map(serde_json::to_string)
+                .transpose()?;
 
             sqlx::query(
                 r#"
@@ -544,15 +546,21 @@ pub(crate) fn session_from_sqlite_row(
 ) -> AppResult<RegisterSessionDocument> {
     let id_str: String = row.get("id");
     let status_str: String = row.get("status");
-    let status = SessionStatus::parse(&status_str).unwrap_or(SessionStatus::Open);
+    let status = SessionStatus::parse(&status_str).ok_or_else(|| {
+        AppError::internal(format!("stored session status `{status_str}` is unknown"))
+    })?;
 
     let opening_denominations_str: Option<String> = row.get("opening_denominations");
     let opening_denominations =
-        opening_denominations_str.and_then(|s| serde_json::from_str(&s).ok());
+        opening_denominations_str
+            .map(|text| serde_json::from_str(&text))
+            .transpose()?;
 
     let closing_denominations_str: Option<String> = row.get("closing_denominations");
     let closing_denominations =
-        closing_denominations_str.and_then(|s| serde_json::from_str(&s).ok());
+        closing_denominations_str
+            .map(|text| serde_json::from_str(&text))
+            .transpose()?;
 
     let opened_at_str: String = row.get("opened_at");
     let closed_at_str: Option<String> = row.get("closed_at");
@@ -569,7 +577,7 @@ pub(crate) fn session_from_sqlite_row(
         cashier_id: row.get("cashier_id"),
         cashier_name_snapshot: row.get("cashier_name_snapshot"),
         status,
-        opened_at: to_bson_datetime(&opened_at_str),
+        opened_at: to_bson_datetime(&opened_at_str)?,
         opening_float_cents: row.get("opening_float_cents"),
         opening_denominations,
         opening_note: row.get("opening_note"),
@@ -578,7 +586,7 @@ pub(crate) fn session_from_sqlite_row(
         opening_discrepancy_reason: row.get("opening_discrepancy_reason"),
         opening_approved_by_id: row.get("opening_approved_by_id"),
         opening_approved_by_name: row.get("opening_approved_by_name"),
-        closed_at: closed_at_str.as_deref().map(to_bson_datetime),
+        closed_at: closed_at_str.as_deref().map(to_bson_datetime).transpose()?,
         closing_cashier_id: row.get("closing_cashier_id"),
         closing_cashier_name_snapshot: row.get("closing_cashier_name_snapshot"),
         expected_cash_cents: row.get("expected_cash_cents"),
@@ -591,7 +599,10 @@ pub(crate) fn session_from_sqlite_row(
         variance_reason: row.get("variance_reason"),
         variance_approved_by_id: row.get("variance_approved_by_id"),
         variance_approved_by_name: row.get("variance_approved_by_name"),
-        reopened_at: reopened_at_str.as_deref().map(to_bson_datetime),
+        reopened_at: reopened_at_str
+            .as_deref()
+            .map(to_bson_datetime)
+            .transpose()?,
         reopened_by_id: row.get("reopened_by_id"),
         reopened_by_name: row.get("reopened_by_name"),
         reopened_reason: row.get("reopened_reason"),
@@ -606,8 +617,8 @@ pub(crate) fn session_from_sqlite_row(
         total_cash_drops_cents: row.get("total_cash_drops_cents"),
         has_late_movements: has_late_movements_int != 0,
         version: row.get("version"),
-        created_at: to_bson_datetime(&created_at_str),
-        updated_at: to_bson_datetime(&updated_at_str),
+        created_at: to_bson_datetime(&created_at_str)?,
+        updated_at: to_bson_datetime(&updated_at_str)?,
     })
 }
 
@@ -644,11 +655,13 @@ pub async fn update_session(
             let opening_denom_json = doc
                 .opening_denominations
                 .as_ref()
-                .map(|v| serde_json::to_string(v).unwrap_or_default());
+                .map(serde_json::to_string)
+                .transpose()?;
             let closing_denom_json = doc
                 .closing_denominations
                 .as_ref()
-                .map(|v| serde_json::to_string(v).unwrap_or_default());
+                .map(serde_json::to_string)
+                .transpose()?;
 
             let res = sqlx::query(
                 r#"

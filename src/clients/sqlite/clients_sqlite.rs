@@ -1,4 +1,5 @@
 use super::migrate_schema::migrate_schema;
+use crate::core::error::{AppError, AppResult};
 use crate::core::logging::SqlLogging;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{Column, Executor, Row, SqlitePool, TypeInfo, ValueRef};
@@ -15,13 +16,16 @@ pub fn bson_to_iso(dt: &mongodb::bson::DateTime) -> String {
 pub async fn connect(url: &str, sql_logging: SqlLogging) -> Result<SqlitePool, sqlx::Error> {
     // If the URL points to a file, ensure its parent directory exists
     if let Some(path_str) = url.strip_prefix("sqlite://") {
-        let clean_path = path_str.split('?').next().unwrap_or(path_str);
+        let clean_path = path_str
+            .split('?')
+            .next()
+            .expect("split yields at least one item");
         if clean_path != ":memory:" && !clean_path.is_empty() {
             let path = Path::new(clean_path);
             if let Some(parent) = path.parent()
                 && !parent.as_os_str().is_empty()
             {
-                let _ = std::fs::create_dir_all(parent);
+                std::fs::create_dir_all(parent).map_err(sqlx::Error::Io)?;
             }
         }
     }
@@ -73,7 +77,11 @@ fn with_statement_logging(
 /// unique against `taken` with a numeric suffix. Used only by the one-off
 /// email -> username migration below.
 pub(super) fn derive_username(email: &str, taken: &std::collections::HashSet<String>) -> String {
-    let local = email.split('@').next().unwrap_or_default().to_lowercase();
+    let local = email
+        .split('@')
+        .next()
+        .expect("split yields at least one item")
+        .to_lowercase();
     let cleaned: String = local
         .chars()
         .map(|c| {
@@ -516,9 +524,14 @@ pub async fn migrate_to_stock_batches(pool: &SqlitePool) -> Result<(), sqlx::Err
                     .fetch_all(&mut *tx)
                     .await?;
             for (key, json) in rows {
-                let Some(mut items) = json.and_then(|j| serde_json::from_str(&j).ok()) else {
+                let Some(json) = json else {
                     continue;
                 };
+                let mut items = serde_json::from_str(&json).map_err(|err| {
+                    sqlx::Error::Decode(
+                        format!("{table}.{column} of {key} is not JSON: {err}").into(),
+                    )
+                })?;
                 if crate::modules::inventory::service::stock_batch::backfill_line_allocations(
                     &mut items, cost_of,
                 ) {
@@ -546,12 +559,11 @@ pub fn now_utc_iso() -> String {
     chrono::Utc::now().to_rfc3339()
 }
 
-/// Parses an RFC-3339 timestamp string into chrono `DateTime<Utc>`.
-#[must_use]
-pub fn parse_iso_datetime(s: &str) -> chrono::DateTime<chrono::Utc> {
+/// Parses a stored RFC-3339 timestamp; a value that is not one means the row is corrupt.
+pub fn parse_iso_datetime(s: &str) -> AppResult<chrono::DateTime<chrono::Utc>> {
     chrono::DateTime::parse_from_rfc3339(s)
         .map(|dt| dt.with_timezone(&chrono::Utc))
-        .unwrap_or_else(|_| chrono::Utc::now())
+        .map_err(|err| AppError::internal(format!("stored timestamp `{s}` is invalid: {err}")))
 }
 
 /// A SQL `WHERE` condition (without the `WHERE` keyword) and the values to bind to its `?`
@@ -572,8 +584,7 @@ pub(super) async fn table_columns(
         .await
 }
 
-/// Converts an RFC-3339 string directly into `mongodb::bson::DateTime`.
-#[must_use]
-pub fn to_bson_datetime(s: &str) -> mongodb::bson::DateTime {
-    mongodb::bson::DateTime::from_chrono(parse_iso_datetime(s))
+/// Converts a stored RFC-3339 string into `mongodb::bson::DateTime`.
+pub fn to_bson_datetime(s: &str) -> AppResult<mongodb::bson::DateTime> {
+    Ok(mongodb::bson::DateTime::from_chrono(parse_iso_datetime(s)?))
 }

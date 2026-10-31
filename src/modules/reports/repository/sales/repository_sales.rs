@@ -1,20 +1,20 @@
 use crate::clients::db::Db;
 use crate::clients::sqlite::map_sqlite_row_to_document;
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
-use crate::core::error::AppResult;
+use crate::core::error::{AppError, AppResult};
 use crate::domain::reports::{DailySalesReportSummary, PaymentMethodBreakdown, TopProductEntry};
 use chrono::{DateTime, Utc};
 use futures_util::TryStreamExt;
-use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
+use mongodb::bson::{Bson, DateTime as BsonDateTime, Document, doc};
 
 fn accumulate_daily_sales_doc(
     doc: &Document,
     date: String,
     map: &mut std::collections::BTreeMap<String, DailySalesReportSummary>,
-) {
-    let subtotal = get_i64_flexible(doc, "subtotal_cents");
-    let discount = get_i64_flexible(doc, "discount_cents");
-    let total = get_i64_flexible(doc, "total_cents");
+) -> AppResult<()> {
+    let subtotal = get_i64_flexible(doc, "subtotal_cents")?;
+    let discount = get_i64_flexible(doc, "discount_cents")?;
+    let total = get_i64_flexible(doc, "total_cents")?;
 
     let entry = map
         .entry(date.clone())
@@ -43,9 +43,9 @@ fn accumulate_daily_sales_doc(
                     .or_else(|_| idoc.get_str("source_type"))
                     .unwrap_or("");
                 let item_total = if idoc.contains_key("totalCents") {
-                    get_i64_flexible(idoc, "totalCents")
+                    get_i64_flexible(idoc, "totalCents")?
                 } else {
-                    get_i64_flexible(idoc, "total_cents")
+                    get_i64_flexible(idoc, "total_cents")?
                 };
                 match source_type {
                     "retail" => entry.retail_revenue_cents += item_total,
@@ -57,9 +57,9 @@ fn accumulate_daily_sales_doc(
         }
     }
 
-    let payment_method = doc.get_str("payment_method").unwrap_or("cash");
-    let is_credit = doc.get_bool("is_credit").unwrap_or(false);
-    let amount_received = get_i64_flexible(doc, "amount_received_cents");
+    let payment_method = required_text(doc, "payment_method")?;
+    let is_credit = required_bool(doc, "is_credit")?;
+    let amount_received = recorded_cents(doc, "amount_received_cents")?;
 
     if is_credit {
         let balance = (total - amount_received).max(0);
@@ -75,8 +75,8 @@ fn accumulate_daily_sales_doc(
         if let Ok(splits) = doc.get_array("split_payments") {
             for split in splits {
                 if let Some(sdoc) = split.as_document() {
-                    let method = sdoc.get_str("method").unwrap_or("cash");
-                    let amt = get_i64_flexible(sdoc, "amount_cents");
+                    let method = required_text(sdoc, "method")?;
+                    let amt = get_i64_flexible(sdoc, "amountCents")?;
                     match method {
                         "card" => entry.payment_methods.card_cents += amt,
                         "online" => entry.payment_methods.online_cents += amt,
@@ -93,6 +93,8 @@ fn accumulate_daily_sales_doc(
             _ => entry.payment_methods.cash_cents += total,
         }
     }
+
+    Ok(())
 }
 
 /// Aggregates sales grouped by calendar day (UTC) in `[start, end)`.
@@ -142,7 +144,7 @@ pub(crate) async fn aggregate_daily_sales(
 
             while let Some(doc) = cursor.try_next().await? {
                 let date = doc.get_str("date").unwrap_or("").to_string();
-                accumulate_daily_sales_doc(&doc, date, &mut map);
+                accumulate_daily_sales_doc(&doc, date, &mut map)?;
             }
 
             Ok(map.into_values().collect())
@@ -170,7 +172,7 @@ pub(crate) async fn aggregate_daily_sales(
                 } else {
                     String::new()
                 };
-                accumulate_daily_sales_doc(&doc, date, &mut map);
+                accumulate_daily_sales_doc(&doc, date, &mut map)?;
             }
 
             Ok(map.into_values().collect())
@@ -232,17 +234,17 @@ pub(crate) async fn aggregate_sales_summary(
                 if let Ok(totals) = result.get_array("totals")
                     && let Some(first) = totals.first().and_then(|v| v.as_document())
                 {
-                    agg.total_invoices = get_i64_flexible(first, "count") as u64;
-                    agg.gross_sales_cents = get_i64_flexible(first, "subtotal");
-                    agg.discount_cents = get_i64_flexible(first, "discount");
-                    agg.total_sales_cents = get_i64_flexible(first, "total");
+                    agg.total_invoices = get_i64_flexible(first, "count")? as u64;
+                    agg.gross_sales_cents = get_i64_flexible(first, "subtotal")?;
+                    agg.discount_cents = get_i64_flexible(first, "discount")?;
+                    agg.total_sales_cents = get_i64_flexible(first, "total")?;
                 }
 
                 if let Ok(streams) = result.get_array("streams") {
                     for stream in streams {
                         if let Some(doc) = stream.as_document() {
                             let source_type = doc.get_str("_id").unwrap_or("");
-                            let revenue = get_i64_flexible(doc, "revenue");
+                            let revenue = get_i64_flexible(doc, "revenue")?;
                             match source_type {
                                 "retail" => agg.retail_revenue_cents += revenue,
                                 "repair" => agg.repair_revenue_cents += revenue,
@@ -273,9 +275,9 @@ pub(crate) async fn aggregate_sales_summary(
             for row in &rows {
                 let doc = map_sqlite_row_to_document(row);
                 agg.total_invoices += 1;
-                agg.gross_sales_cents += get_i64_flexible(&doc, "subtotal_cents");
-                agg.discount_cents += get_i64_flexible(&doc, "discount_cents");
-                agg.total_sales_cents += get_i64_flexible(&doc, "total_cents");
+                agg.gross_sales_cents += get_i64_flexible(&doc, "subtotal_cents")?;
+                agg.discount_cents += get_i64_flexible(&doc, "discount_cents")?;
+                agg.total_sales_cents += get_i64_flexible(&doc, "total_cents")?;
 
                 if let Ok(items) = doc.get_array("items") {
                     for item in items {
@@ -285,9 +287,9 @@ pub(crate) async fn aggregate_sales_summary(
                                 .or_else(|_| idoc.get_str("source_type"))
                                 .unwrap_or("");
                             let revenue = if idoc.contains_key("totalCents") {
-                                get_i64_flexible(idoc, "totalCents")
+                                get_i64_flexible(idoc, "totalCents")?
                             } else {
-                                get_i64_flexible(idoc, "total_cents")
+                                get_i64_flexible(idoc, "total_cents")?
                             };
                             match source_type {
                                 "retail" => agg.retail_revenue_cents += revenue,
@@ -362,9 +364,9 @@ pub(crate) async fn aggregate_top_products(
                         .get_str("source_type")
                         .unwrap_or("retail")
                         .to_string();
-                    let units_sold = get_i64_flexible(&doc, "units_sold");
-                    let total_revenue_cents = get_i64_flexible(&doc, "total_revenue_cents");
-                    let total_discount_cents = get_i64_flexible(&doc, "total_discount_cents");
+                    let units_sold = get_i64_flexible(&doc, "units_sold")?;
+                    let total_revenue_cents = get_i64_flexible(&doc, "total_revenue_cents")?;
+                    let total_discount_cents = get_i64_flexible(&doc, "total_discount_cents")?;
 
                     products.push(TopProductEntry {
                         product_key,
@@ -421,16 +423,16 @@ pub(crate) async fn aggregate_top_products(
                                 .or_else(|_| idoc.get_str("source_type"))
                                 .unwrap_or("retail")
                                 .to_string();
-                            let quantity = get_i64_flexible(idoc, "quantity");
+                            let quantity = get_i64_flexible(idoc, "quantity")?;
                             let total_cents = if idoc.contains_key("totalCents") {
-                                get_i64_flexible(idoc, "totalCents")
+                                get_i64_flexible(idoc, "totalCents")?
                             } else {
-                                get_i64_flexible(idoc, "total_cents")
+                                get_i64_flexible(idoc, "total_cents")?
                             };
                             let discount_cents = if idoc.contains_key("discountCents") {
-                                get_i64_flexible(idoc, "discountCents")
+                                get_i64_flexible(idoc, "discountCents")?
                             } else {
-                                get_i64_flexible(idoc, "discount_cents")
+                                get_i64_flexible(idoc, "discount_cents")?
                             };
 
                             let key = (product_key.clone(), name.clone());
@@ -474,11 +476,11 @@ pub(crate) async fn aggregate_top_products(
     }
 }
 
-fn accumulate_payment_doc(doc: &Document, breakdown: &mut PaymentMethodBreakdown) {
-    let payment_method = doc.get_str("payment_method").unwrap_or("cash");
-    let is_credit = doc.get_bool("is_credit").unwrap_or(false);
-    let total_cents = get_i64_flexible(doc, "total_cents");
-    let amount_received_cents = get_i64_flexible(doc, "amount_received_cents");
+fn accumulate_payment_doc(doc: &Document, breakdown: &mut PaymentMethodBreakdown) -> AppResult<()> {
+    let payment_method = required_text(doc, "payment_method")?;
+    let is_credit = required_bool(doc, "is_credit")?;
+    let total_cents = get_i64_flexible(doc, "total_cents")?;
+    let amount_received_cents = recorded_cents(doc, "amount_received_cents")?;
 
     if is_credit {
         let upfront = amount_received_cents;
@@ -495,8 +497,8 @@ fn accumulate_payment_doc(doc: &Document, breakdown: &mut PaymentMethodBreakdown
         if let Ok(splits) = doc.get_array("split_payments") {
             for split in splits {
                 if let Some(sdoc) = split.as_document() {
-                    let method = sdoc.get_str("method").unwrap_or("cash");
-                    let amt = get_i64_flexible(sdoc, "amount_cents");
+                    let method = required_text(sdoc, "method")?;
+                    let amt = get_i64_flexible(sdoc, "amountCents")?;
                     match method {
                         "card" => breakdown.card_cents += amt,
                         "online" => breakdown.online_cents += amt,
@@ -513,6 +515,8 @@ fn accumulate_payment_doc(doc: &Document, breakdown: &mut PaymentMethodBreakdown
             _ => breakdown.cash_cents += total_cents,
         }
     }
+
+    Ok(())
 }
 
 /// Helper to accurately compute payment breakdown across cash, card, online, credit, and split payments.
@@ -549,7 +553,7 @@ pub(crate) async fn compute_payment_methods(
             let mut breakdown = PaymentMethodBreakdown::default();
 
             while let Some(doc) = cursor.try_next().await? {
-                accumulate_payment_doc(&doc, &mut breakdown);
+                accumulate_payment_doc(&doc, &mut breakdown)?;
             }
 
             Ok(breakdown)
@@ -568,7 +572,7 @@ pub(crate) async fn compute_payment_methods(
             let mut breakdown = PaymentMethodBreakdown::default();
             for row in &rows {
                 let doc = map_sqlite_row_to_document(row);
-                accumulate_payment_doc(&doc, &mut breakdown);
+                accumulate_payment_doc(&doc, &mut breakdown)?;
             }
 
             Ok(breakdown)
@@ -576,12 +580,39 @@ pub(crate) async fn compute_payment_methods(
     }
 }
 
-pub(crate) fn get_i64_flexible(doc: &Document, key: &str) -> i64 {
-    doc.get_i64(key)
-        .ok()
-        .or_else(|| doc.get_i32(key).ok().map(i64::from))
-        .or_else(|| doc.get_f64(key).ok().map(|v| v as i64))
-        .unwrap_or(0)
+/// The string field `key` of a stored invoice or line; a missing one is an error.
+pub(crate) fn required_text<'a>(doc: &'a Document, key: &str) -> AppResult<&'a str> {
+    doc.get_str(key)
+        .map_err(|_| AppError::internal(format!("stored document has no text `{key}`")))
+}
+
+/// The boolean field `key` of a stored document; a missing one is an error.
+pub(crate) fn required_bool(doc: &Document, key: &str) -> AppResult<bool> {
+    doc.get_bool(key)
+        .map_err(|_| AppError::internal(format!("stored document has no flag `{key}`")))
+}
+
+/// An amount the document may legitimately not carry (no tender on a credit sale, no estimate on
+/// a repair): an absent field counts as nothing recorded, i.e. zero in a sum. A field that is
+/// present but not numeric is still an error.
+pub(crate) fn recorded_cents(doc: &Document, key: &str) -> AppResult<i64> {
+    match doc.get(key) {
+        None | Some(Bson::Null) => Ok(0),
+        Some(_) => get_i64_flexible(doc, key),
+    }
+}
+
+/// The numeric field `key` of an aggregation row as an integer; a missing or non-numeric
+/// field is an error, not zero.
+pub(crate) fn get_i64_flexible(doc: &Document, key: &str) -> AppResult<i64> {
+    match doc.get(key) {
+        Some(Bson::Int64(v)) => Ok(*v),
+        Some(Bson::Int32(v)) => Ok(i64::from(*v)),
+        Some(Bson::Double(v)) => Ok(*v as i64),
+        _ => Err(AppError::internal(format!(
+            "aggregation row has no numeric `{key}`"
+        ))),
+    }
 }
 
 pub(super) fn invoices(db: &TenantDatabase) -> ScopedCollection<Document> {

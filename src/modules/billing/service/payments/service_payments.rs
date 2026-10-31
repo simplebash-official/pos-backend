@@ -117,7 +117,7 @@ pub async fn record_payment(
             let card_delta = if body.payment_method == "card" { inserted.amount_cents } else { 0 };
             let online_delta = if body.payment_method == "online" { inserted.amount_cents } else { 0 };
 
-            let _ = crate::modules::sessions::repository::sessions::increment_session_sales(
+            crate::modules::sessions::repository::sessions::increment_session_sales(
                 db,
                 s_key,
                 cash_delta,
@@ -125,17 +125,20 @@ pub async fn record_payment(
                 online_delta,
                 0,
             )
-            .await;
+            .await?;
 
-            if cash_delta != 0
-                && let Ok(Some(sess)) = crate::modules::sessions::repository::sessions::find_session_by_key(db, s_key).await {
-                    let _ = crate::modules::sessions::repository::drawer::update_drawer_balance(
-                        db,
-                        &sess.terminal_id,
-                        cash_delta,
-                    )
-                    .await;
-                }
+            if cash_delta != 0 {
+                let session =
+                    crate::modules::sessions::repository::sessions::find_session_by_key(db, s_key)
+                        .await?
+                        .ok_or_else(|| AppError::internal("the payment's session disappeared"))?;
+                crate::modules::sessions::repository::drawer::update_drawer_balance(
+                    db,
+                    &session.terminal_id,
+                    cash_delta,
+                )
+                .await?;
+            }
         }
 
         let new_total_paid = already_paid + inserted.amount_cents;

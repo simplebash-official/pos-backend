@@ -10,8 +10,8 @@ use mongodb::bson::doc;
 use mongodb::bson::oid::ObjectId;
 use sqlx::Row;
 
-pub(super) fn expense_from_row(row: &sqlx::sqlite::SqliteRow) -> ExpenseDocument {
-    ExpenseDocument {
+pub(super) fn expense_from_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<ExpenseDocument> {
+    Ok(ExpenseDocument {
         id: ObjectId::parse_str(row.get::<String, _>("id")).ok(),
         key: row.get("key"),
         expense_number: row.get("expense_number"),
@@ -26,10 +26,10 @@ pub(super) fn expense_from_row(row: &sqlx::sqlite::SqliteRow) -> ExpenseDocument
         recorded_by_user_id: row.get("recorded_by_user_id"),
         recorded_by_name_snapshot: row.get("recorded_by_name_snapshot"),
         version: row.get("version"),
-        created_at: to_bson_datetime(&row.get::<String, _>("created_at")),
-        updated_at: to_bson_datetime(&row.get::<String, _>("updated_at")),
+        created_at: to_bson_datetime(&row.get::<String, _>("created_at"))?,
+        updated_at: to_bson_datetime(&row.get::<String, _>("updated_at"))?,
         updated_by_device: row.get("updated_by_device"),
-    }
+    })
 }
 
 pub(super) fn expenses(db: &TenantDatabase) -> ScopedCollection<ExpenseDocument> {
@@ -45,7 +45,7 @@ pub(crate) async fn find_expense_by_key(db: &Db, key: &str) -> AppResult<Option<
                 .bind(key)
                 .fetch_optional(pool)
                 .await?;
-            Ok(row.as_ref().map(expense_from_row))
+            row.as_ref().map(expense_from_row).transpose()
         }
     }
 }
@@ -207,12 +207,12 @@ pub(crate) async fn list_expenses(
             if let Some(to) = to {
                 query = query.bind(to);
             }
-            Ok(query
+            query
                 .fetch_all(pool)
                 .await?
                 .iter()
                 .map(expense_from_row)
-                .collect())
+                .collect::<AppResult<Vec<_>>>()
         }
     }
 }
@@ -262,8 +262,8 @@ pub(super) fn payment_from_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<Expen
         recorded_by_user_id: row.get("recorded_by_user_id"),
         recorded_by_name_snapshot: row.get("recorded_by_name_snapshot"),
         version: row.get("version"),
-        created_at: to_bson_datetime(&row.get::<String, _>("created_at")),
-        updated_at: to_bson_datetime(&row.get::<String, _>("updated_at")),
+        created_at: to_bson_datetime(&row.get::<String, _>("created_at"))?,
+        updated_at: to_bson_datetime(&row.get::<String, _>("updated_at"))?,
         updated_by_device: row.get("updated_by_device"),
     })
 }

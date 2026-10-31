@@ -1,19 +1,14 @@
 //! Mongo and SQLite access for invoice records, specifically invoice mutation helpers
 //! for credit notes, voiding, and closing.
 
+use crate::clients::db::Db;
+use crate::clients::sqlite::now_utc_iso;
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
+use crate::core::error::AppResult;
+use crate::domain::billing::InvoiceItem;
+use crate::modules::billing::model::InvoiceDocument;
 use mongodb::bson::oid::ObjectId;
 use mongodb::bson::{DateTime as BsonDateTime, doc};
-
-use crate::clients::db::Db;
-
-use crate::clients::sqlite::now_utc_iso;
-
-use crate::core::error::AppResult;
-
-use crate::domain::billing::InvoiceItem;
-
-use crate::modules::billing::model::InvoiceDocument;
 
 fn invoices(db: &TenantDatabase) -> ScopedCollection<InvoiceDocument> {
     db.collection("invoices")
@@ -84,7 +79,7 @@ pub(crate) async fn update_invoice_credit_note_progress(
                 return Ok(None);
             };
 
-            let items_json = serde_json::to_string(&items).unwrap_or_else(|_| "[]".to_string());
+            let items_json = serde_json::to_string(&items)?;
             let now_iso = now_utc_iso();
 
             sqlx::query(

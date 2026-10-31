@@ -508,7 +508,7 @@ pub(crate) fn movement_from_sqlite_row(
         original_variance_session_key: row.get("original_variance_session_key"),
         receipt_key: row.get("receipt_key"),
         version: row.get("version"),
-        created_at: to_bson_datetime(&created_at_str),
-        updated_at: to_bson_datetime(&updated_at_str),
+        created_at: to_bson_datetime(&created_at_str)?,
+        updated_at: to_bson_datetime(&updated_at_str)?,
     })
 }

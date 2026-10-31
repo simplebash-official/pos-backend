@@ -306,7 +306,7 @@ pub(crate) async fn list_outstanding_invoices(
                 let balance_due_cents = (total_cents - amount_paid_cents).max(0);
                 let due_date: Option<String> = r.get("due_date");
                 let created_at_str: String = r.get("created_at");
-                let created_at = parse_iso_datetime(&created_at_str);
+                let created_at = parse_iso_datetime(&created_at_str)?;
 
                 let is_overdue = if let Some(ref d) = due_date {
                     NaiveDate::parse_from_str(d, "%Y-%m-%d")

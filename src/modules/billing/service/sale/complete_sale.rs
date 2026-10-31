@@ -179,14 +179,18 @@ async fn apply_line_item_side_effects(
                     )
                     .await
                         && let Some(serial_id) = serial.id
-                    {
-                        let _ = inventory::service::product_serial::mark_serial_sold(
+                        && let Err(err) = inventory::service::product_serial::mark_serial_sold(
                             db,
                             serial_id,
                             &inserted_invoice.key,
                             product.warranty_months,
                         )
-                        .await;
+                        .await
+                    {
+                        return Some(format!(
+                            "serial {serial_number} of {} could not be marked sold: {err}",
+                            product.key
+                        ));
                     }
                 }
             }

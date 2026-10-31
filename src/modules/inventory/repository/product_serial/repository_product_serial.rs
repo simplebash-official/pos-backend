@@ -2,7 +2,7 @@ use crate::clients::db::Db;
 use crate::clients::sqlite::{bson_to_iso, generate_id_hex, to_bson_datetime};
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use crate::clients::uow::{Backend, Unit};
-use crate::core::error::AppResult;
+use crate::core::error::{AppError, AppResult};
 use crate::domain::inventory::SerialStatus;
 use crate::modules::inventory::model::ProductSerialDocument;
 use futures_util::TryStreamExt;
@@ -163,7 +163,9 @@ pub(super) fn row_to_serial_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<Prod
     let id_str: String = row.get("id");
     let object_id = ObjectId::parse_str(&id_str).ok();
     let status_str: String = row.get("status");
-    let status = status_str.parse().unwrap_or(SerialStatus::InStock);
+    let status: SerialStatus = status_str.parse().map_err(|_| {
+        AppError::internal(format!("stored serial status `{status_str}` is unknown"))
+    })?;
     let sold_at_str: Option<String> = row.get("sold_at");
     let warranty_expires_at_str: Option<String> = row.get("warranty_expires_at");
     let created_at_str: String = row.get("created_at");
@@ -177,13 +179,15 @@ pub(super) fn row_to_serial_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<Prod
         batch_key: row.get("batch_key"),
         status,
         invoice_key: row.get("invoice_key"),
-        sold_at: sold_at_str.map(|s| to_bson_datetime(&s)),
+        sold_at: sold_at_str.map(|s| to_bson_datetime(&s)).transpose()?,
         warranty_months: row.get("warranty_months"),
-        warranty_expires_at: warranty_expires_at_str.map(|s| to_bson_datetime(&s)),
+        warranty_expires_at: warranty_expires_at_str
+            .map(|s| to_bson_datetime(&s))
+            .transpose()?,
         credit_note_key: row.get("credit_note_key"),
         version: row.get("version"),
-        created_at: to_bson_datetime(&created_at_str),
-        updated_at: to_bson_datetime(&updated_at_str),
+        created_at: to_bson_datetime(&created_at_str)?,
+        updated_at: to_bson_datetime(&updated_at_str)?,
     })
 }
 

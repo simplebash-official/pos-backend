@@ -34,7 +34,7 @@ pub(super) async fn add_expense_payment(
     Json(body): Json<CreateExpensePaymentRequest>,
 ) -> AppResult<(StatusCode, Json<ApiResponse<ExpenseDetail>>)> {
     current_user.require_permission(perm::EXPENSES_MANAGE)?;
-    let name = current_user.resolve_name(&state.db).await;
+    let name = current_user.resolve_name(&state.db).await?;
     let detail = service::add_payment(&state.db, &key, current_user.user_id, name, body).await?;
     Ok((
         StatusCode::CREATED,
@@ -63,7 +63,7 @@ pub(super) async fn create_expense(
     Json(body): Json<CreateExpenseRequest>,
 ) -> AppResult<(StatusCode, Json<ApiResponse<ExpenseDetail>>)> {
     current_user.require_permission(perm::EXPENSES_MANAGE)?;
-    let name = current_user.resolve_name(&state.db).await;
+    let name = current_user.resolve_name(&state.db).await?;
     let detail =
         service::create_expense(&state.db, current_user.user_id, name, body, device_id.0).await?;
     Ok((
