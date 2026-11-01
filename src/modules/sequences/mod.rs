@@ -1,7 +1,7 @@
 //! Document-number sequences reserved by devices that create documents offline.
 
 mod counter_id;
-mod model;
+pub(crate) mod model;
 mod repository;
 pub mod routes;
 pub mod service;

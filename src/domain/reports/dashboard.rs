@@ -210,14 +210,6 @@ pub struct RemindersQuery {
     pub page: Option<u64>,
 }
 
-fn default_one() -> u64 {
-    1
-}
-
-fn default_twenty() -> u64 {
-    20
-}
-
 /// The dashboard reminders feed: a merged, sorted list plus honest headline
 /// counts over the full (pre-truncation) set.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -232,13 +224,9 @@ pub struct RemindersResponse {
     pub jobs_overdue_count: u64,
     pub jobs_due_soon_count: u64,
     pub due_within_days: u32,
-    #[serde(default)]
     pub total: u64,
-    #[serde(default = "default_one")]
     pub page: u64,
-    #[serde(default = "default_twenty")]
     pub limit: u64,
-    #[serde(default = "default_one")]
     pub total_pages: u64,
 }
 

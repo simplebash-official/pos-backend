@@ -438,8 +438,11 @@ async fn an_outdated_desktop_app_cannot_push_or_pull_until_it_updates() {
     let tid = "tnt_old";
     let token = common::mint_device_token(&app.config, tid, "dev_old1");
     let product = json!({
-        "key": "prod_from_old_app", "name": "Old app product", "version": 1,
-        "updatedAt": "2026-10-01T00:00:00Z",
+        "id": "prod_from_old_app", "key": "prod_from_old_app", "sku": "OLD-0001",
+        "name": "Old app product", "categoryKey": "cat_old", "category": "Accessories",
+        "subcategoryKey": "sub_old", "subcategory": "Cables", "stockQuantity": 0,
+        "minStockThreshold": 0, "priceTiers": [], "isSerialized": false, "version": 1,
+        "createdAt": "2026-10-01T00:00:00Z", "updatedAt": "2026-10-01T00:00:00Z",
     });
     let push_body = json!({
         "deviceId": "dev_old1", "batchId": "b-old", "baseSeq": 0,

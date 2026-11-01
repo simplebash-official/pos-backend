@@ -9,6 +9,6 @@
 //! directly.
 
 pub mod kinds;
-mod model;
+pub(crate) mod model;
 mod repository;
 pub mod service;

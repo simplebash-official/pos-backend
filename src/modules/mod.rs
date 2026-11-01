@@ -30,6 +30,7 @@ pub mod reports;
 pub mod sequences;
 pub mod sessions;
 pub mod settings;
+pub mod stored_shape;
 pub mod supplier_products;
 pub mod suppliers;
 pub mod sync;

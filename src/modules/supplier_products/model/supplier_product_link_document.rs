@@ -25,13 +25,10 @@ pub struct SupplierProductLinkDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
     /// Concurrency version counter for optimistic locking.
-    #[serde(default = "default_version")]
     pub version: i64,
     /// Timestamp when this link was created.
-    #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
     /// Timestamp when this link was last updated.
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
     /// Soft-delete timestamp, if deleted.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -39,10 +36,6 @@ pub struct SupplierProductLinkDocument {
     /// Device identifier that last updated this link.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by_device: Option<String>,
-}
-
-fn default_version() -> i64 {
-    1
 }
 
 impl SupplierProductLinkDocument {

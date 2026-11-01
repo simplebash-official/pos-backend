@@ -17,7 +17,8 @@ pub struct CreateQuotationItem {
     pub selling_price_cents: Option<i64>,
     /// Units offered; must be at least 1.
     pub quantity: i64,
-    /// Discount on this line in cents (cannot exceed the line's gross value).
+    /// Discount on this line in cents (cannot exceed the line's gross value). Optional in the
+    /// request: an omitted discount is no discount.
     #[serde(default)]
     pub discount_cents: i64,
 }
@@ -56,7 +57,6 @@ pub struct Quotation {
     /// True when still `active` but `validUntil` is in the past.
     pub is_expired: bool,
     /// True when this quotation was created with items that were out of stock.
-    #[serde(default)]
     pub has_out_of_stock_items: bool,
     /// The invoice that converted/fulfilled this quotation, if fulfilled.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -176,7 +176,6 @@ pub struct SyncQuotation {
     pub key: String,
     pub quotation_number: String,
     pub status: String,
-    #[serde(default)]
     pub has_out_of_stock_items: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fulfilled_by_invoice_key: Option<String>,

@@ -12,7 +12,6 @@ use serde::{Deserialize, Serialize};
 pub struct CashMovementDocument {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<ObjectId>,
-    #[serde(default)]
     pub key: String,
     pub movement_number: String,
     pub movement_type: CashMovementType,
@@ -46,7 +45,6 @@ pub struct CashMovementDocument {
     pub approval_reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reverses_key: Option<String>,
-    #[serde(default)]
     pub recorded_late: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub original_variance_session_key: Option<String>,
@@ -54,11 +52,8 @@ pub struct CashMovementDocument {
     /// pair), when it was; later payments against a receipt do not carry it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub receipt_key: Option<String>,
-    #[serde(default = "default_version")]
     pub version: i64,
-    #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
 }
 
@@ -121,10 +116,6 @@ impl CashMovementDocument {
     }
 }
 
-pub(super) fn default_version() -> i64 {
-    1
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 /// How a drawer state is stored in the database.
 pub struct DrawerStateDocument {
@@ -133,7 +124,6 @@ pub struct DrawerStateDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_session_key: Option<String>,
     pub last_closing_float_cents: i64,
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
 }
 
@@ -156,7 +146,6 @@ impl DrawerStateDocument {
 pub struct RegisterSessionDocument {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<ObjectId>,
-    #[serde(default)]
     pub key: String,
     pub session_number: String,
     pub terminal_id: String,
@@ -171,7 +160,6 @@ pub struct RegisterSessionDocument {
     pub opening_note: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expected_opening_float_cents: Option<i64>,
-    #[serde(default)]
     pub opening_discrepancy_cents: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub opening_discrepancy_reason: Option<String>,
@@ -213,31 +201,18 @@ pub struct RegisterSessionDocument {
     pub reopened_by_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reopened_reason: Option<String>,
-    #[serde(default)]
     pub total_cash_sales_cents: i64,
-    #[serde(default)]
     pub total_card_sales_cents: i64,
-    #[serde(default)]
     pub total_online_sales_cents: i64,
-    #[serde(default)]
     pub total_credit_sales_cents: i64,
-    #[serde(default)]
     pub total_cash_refunds_cents: i64,
-    #[serde(default)]
     pub total_pay_in_cents: i64,
-    #[serde(default)]
     pub total_pay_out_cents: i64,
-    #[serde(default)]
     pub total_owner_withdrawals_cents: i64,
-    #[serde(default)]
     pub total_cash_drops_cents: i64,
-    #[serde(default)]
     pub has_late_movements: bool,
-    #[serde(default = "default_version")]
     pub version: i64,
-    #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
 }
 

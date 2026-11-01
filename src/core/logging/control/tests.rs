@@ -14,11 +14,9 @@ fn parses_log_mode_lines_and_ignores_others() {
     assert!(parse_control("not json").is_none());
     assert!(parse_control("").is_none());
 
-    // Missing fields fall back to "recording, no bodies, slow SQL".
-    let minimal = parse_control(r#"{"cmd":"log_mode"}"#).expect("minimal line");
-    assert!(minimal.enabled);
-    assert!(!minimal.http_bodies);
-    assert_eq!(minimal.sql, None);
+    // A line that omits a switch is ignored, never completed with a guess.
+    assert!(parse_control(r#"{"cmd":"log_mode"}"#).is_none());
+    assert!(parse_control(r#"{"cmd":"log_mode","enabled":true}"#).is_none());
 }
 
 #[test]

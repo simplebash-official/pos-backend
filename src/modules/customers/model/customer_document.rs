@@ -12,7 +12,6 @@ pub struct CustomerDocument {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<ObjectId>,
     /// Unique business key identifying this customer (e.g. cus_...).
-    #[serde(default)]
     pub key: String,
     /// Customer's full name or business name.
     pub name: String,
@@ -31,25 +30,19 @@ pub struct CustomerDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub address: Option<String>,
     /// Descriptive labels or categorization tags (e.g. "VIP", "Wholesale").
-    #[serde(default)]
     pub tags: Vec<String>,
     /// Internal notes or remarks regarding this customer.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
     /// Total outstanding unpaid balance in cents.
-    #[serde(default)]
     pub outstanding_balance_cents: i64,
     /// Cumulative lifetime total purchases in cents.
-    #[serde(default)]
     pub total_purchases_cents: i64,
     /// Concurrency version counter for optimistic locking.
-    #[serde(default = "default_version")]
     pub version: i64,
     /// Timestamp when this customer profile was created.
-    #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
     /// Timestamp when this customer profile was last updated.
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
     /// Timestamp when this customer was soft-deleted, if applicable.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -57,10 +50,6 @@ pub struct CustomerDocument {
     /// Identifier of the device or sync client that last updated this document.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by_device: Option<String>,
-}
-
-fn default_version() -> i64 {
-    1
 }
 
 impl CustomerDocument {

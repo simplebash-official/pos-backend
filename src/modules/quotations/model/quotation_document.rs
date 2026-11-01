@@ -12,14 +12,12 @@ pub struct QuotationDocument {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<ObjectId>,
     /// Unique business key (`quo_...`).
-    #[serde(default)]
     pub key: String,
     /// Sequential number (e.g. `QUO-0001`).
     pub quotation_number: String,
     /// `active`, `fulfilled` or `cancelled`; expiry is derived from `valid_until`.
     pub status: String,
     /// True when this quotation was created with items that were out of stock.
-    #[serde(default)]
     pub has_out_of_stock_items: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fulfilled_by_invoice_key: Option<String>,
@@ -51,13 +49,10 @@ pub struct QuotationDocument {
     /// The shop profile as it was when the quotation was made, so a reprint
     /// after the shop changes its address or logo still matches the original.
     pub shop_profile_snapshot: serde_json::Value,
-    #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
     /// Sync version: 1 on create, +1 on every change (only `cancel` changes a
-    /// quotation). `#[serde(default)]` keeps documents stored before sync loadable.
-    #[serde(default = "default_version")]
+    /// quotation). Documents stored before sync get 1 from `migrate_stored_defaults`.
     pub version: i64,
     /// Always `None`: quotations are cancelled, never deleted. The column exists
     /// because the sync apply path writes it for every resource.
@@ -66,10 +61,6 @@ pub struct QuotationDocument {
     /// Device (or `web:<id>` / `cloud`) that last wrote this quotation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by_device: Option<String>,
-}
-
-fn default_version() -> i64 {
-    1
 }
 
 impl QuotationDocument {

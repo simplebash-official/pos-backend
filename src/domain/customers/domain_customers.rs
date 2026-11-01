@@ -55,7 +55,6 @@ pub struct Customer {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub address: Option<String>,
     /// List of assigned customer category tags.
-    #[serde(default)]
     pub tags: Vec<String>,
     /// Freeform internal customer notes.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -69,7 +68,6 @@ pub struct Customer {
     /// Timestamp when last modified.
     pub updated_at: DateTime<Utc>,
     /// Optimistic locking version.
-    #[serde(default = "default_version")]
     pub version: i64,
     /// Timestamp of deletion if customer is soft-deleted.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -77,10 +75,6 @@ pub struct Customer {
     /// Device identifier of client that last modified this customer.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by_device: Option<String>,
-}
-
-fn default_version() -> i64 {
-    1
 }
 
 /// Query params for `GET /customers`. `search` matches against name,

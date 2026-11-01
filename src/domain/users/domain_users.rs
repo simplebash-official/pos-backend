@@ -143,11 +143,9 @@ pub struct User {
     /// Whether user account is active.
     pub is_active: bool,
     /// Whether this user account has a security PIN configured for register overrides.
-    #[serde(default)]
     pub has_pin: bool,
     /// This login's own UI preferences (e.g. the billing catalog sort).
     /// Always present in responses; unset values are omitted inside.
-    #[serde(default)]
     pub preferences: UserPreferences,
     /// Key of the `Employee` HR/commission profile this login belongs to,
     /// if any. Optional — a login can exist with no linked employee profile

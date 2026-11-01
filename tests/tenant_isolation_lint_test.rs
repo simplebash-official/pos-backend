@@ -40,6 +40,7 @@ const RAW_TYPES_ALLOWED: &[&str] = &[
     // One-time MongoDB data migrations run against the raw database handle. (The old scan
     // missed them only because rustfmt had split their multi-line `use mongodb::{...}`.)
     "src/bin/",
+    "src/modules/stored_shape/",
     "src/modules/cash_categories/migration/cash_categories_migration.rs",
     "src/modules/inventory/service/stock_batch_migration/service_stock_batch_migration.rs",
     "src/modules/purchases/service/receipt_migration/service_receipt_migration.rs",

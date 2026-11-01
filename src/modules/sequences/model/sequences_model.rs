@@ -31,7 +31,6 @@ pub struct SequenceCounterDocument {
     #[serde(rename = "_id")]
     pub name: String,
     /// Next integer value to allocate for this sequence.
-    #[serde(default)]
     pub next_val: i64,
     /// Prefix string attached to formatted sequence numbers (e.g. "INV-").
     pub prefix: String,

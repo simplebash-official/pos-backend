@@ -85,7 +85,6 @@ pub struct Supplier {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub secondary_phone: Option<String>,
     /// All contact persons belonging to this supplier, each with up to 2 phone numbers.
-    #[serde(default)]
     pub contact_persons: Vec<ContactPerson>,
     /// Physical or postal address.
     pub address: String,
@@ -102,7 +101,6 @@ pub struct Supplier {
     /// Timestamp when supplier was last updated.
     pub updated_at: DateTime<Utc>,
     /// Optimistic locking version number.
-    #[serde(default = "default_version")]
     pub version: i64,
     /// Deletion timestamp if soft-deleted.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -110,10 +108,6 @@ pub struct Supplier {
     /// Device identifier that last updated this record.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by_device: Option<String>,
-}
-
-fn default_version() -> i64 {
-    1
 }
 
 /// Response for `GET /suppliers/categories` — every distinct tag currently

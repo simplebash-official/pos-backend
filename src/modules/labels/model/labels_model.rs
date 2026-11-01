@@ -39,9 +39,7 @@ pub struct LabelPrintJobDocument {
     pub printed_by_name: String,
     pub items: Vec<LabelJobItemDocument>,
     pub total_labels: u32,
-    #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
 }
 
@@ -93,16 +91,9 @@ pub struct LabelTemplateDocument {
     pub width_mm: f64,
     pub height_mm: f64,
     pub elements: Vec<LabelElement>,
-    #[serde(default = "default_version")]
     pub version: i64,
-    #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
-}
-
-fn default_version() -> i64 {
-    1
 }
 
 impl LabelTemplateDocument {

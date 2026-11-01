@@ -4,10 +4,6 @@ use mongodb::bson::oid::ObjectId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub(super) fn default_version() -> i64 {
-    1
-}
-
 /// The shop's chosen design family per document kind (`kind slug -> family`)
 /// and the option values it saved per design (`family -> key -> value`).
 /// One row per shop (key `main`); tenant-scoped like `shop_profiles`.
@@ -16,15 +12,10 @@ pub struct DocumentTemplateSettingsDocument {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<ObjectId>,
     pub key: String,
-    #[serde(default)]
     pub selections: HashMap<String, String>,
-    #[serde(default)]
     pub options: HashMap<String, HashMap<String, serde_json::Value>>,
-    #[serde(default = "default_version")]
     pub version: i64,
-    #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
 }
 
@@ -34,45 +25,25 @@ pub struct ShopProfileDocument {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<ObjectId>,
     pub key: String,
-    #[serde(default)]
     pub legal_name: String,
-    #[serde(default)]
     pub trading_name: String,
-    #[serde(default)]
     pub address_lines: Vec<String>,
-    #[serde(default)]
     pub primary_phone: String,
-    #[serde(default)]
     pub secondary_phone: String,
-    #[serde(default)]
     pub email: String,
-    #[serde(default)]
     pub website: String,
-    #[serde(default)]
     pub business_reg_no: String,
-    #[serde(default)]
     pub logo_base64: String,
-    #[serde(default)]
     pub bank_name: String,
-    #[serde(default)]
     pub bank_branch: String,
-    #[serde(default)]
     pub account_name: String,
-    #[serde(default)]
     pub account_number: String,
-    #[serde(default)]
     pub default_warranty_text: String,
-    #[serde(default)]
     pub default_footer_text: String,
-    #[serde(default)]
     pub receipt_footer_text: String,
-    #[serde(default)]
     pub allow_shared_user_sessions: bool,
-    #[serde(default = "default_version")]
     pub version: i64,
-    #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
 }
 

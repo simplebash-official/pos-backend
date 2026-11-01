@@ -95,7 +95,6 @@ pub struct Repair {
     /// Derived flag: the promised-ready date has passed and the job is still
     /// open (not delivered/cancelled). Computed fresh on every read, never
     /// stored — mirrors `billing::Invoice.is_overdue`.
-    #[serde(default)]
     pub is_overdue: bool,
     /// Lifecycle status ("received", "in_progress", "completed", "delivered", "cancelled").
     pub status: String,
@@ -124,7 +123,6 @@ pub struct Repair {
     /// Timestamp when ticket was last updated.
     pub updated_at: DateTime<Utc>,
     /// Optimistic locking version number.
-    #[serde(default = "default_version")]
     pub version: i64,
     /// Soft deletion timestamp if deleted.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -132,10 +130,6 @@ pub struct Repair {
     /// Device identifier that last updated this record.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by_device: Option<String>,
-}
-
-fn default_version() -> i64 {
-    1
 }
 
 /// The `assignment{}` sub-object of `CreateRepairRequest`/

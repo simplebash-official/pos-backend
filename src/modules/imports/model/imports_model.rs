@@ -17,15 +17,12 @@ pub struct ImportBatchDocument {
     pub successful_rows: u64,
     pub failed_rows: u64,
     pub status: String,
-    #[serde(default)]
     pub errors: Vec<ImportRowErrorDocument>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by_user_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by_user_name: Option<String>,
-    #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
 }
 

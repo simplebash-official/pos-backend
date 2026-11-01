@@ -22,7 +22,7 @@ fn repair(id: &str, status: &str, tech: Option<&str>, created: &str, cost: i64) 
         "customerPhone": "0771234567", "deviceModel": "Phone", "issueDescription": "x",
         "isOverdue": false, "status": status, "estimatedCostCents": cost,
         "materialCostCents": 500, "assignedEmployeeId": tech, "createdAt": created,
-        "updatedAt": created
+        "updatedAt": created, "version": 1
     }))
 }
 
@@ -127,7 +127,7 @@ fn pending_stock_quotations_are_tracked_and_flagged_ready_when_replenished() {
         "categoryKey": "cat_1", "category": "Accessories",
         "subcategoryKey": "sub_1", "subcategory": "Protectors",
         "stockQuantity": 0, "minStockThreshold": 5,
-        "priceTiers": [],
+        "priceTiers": [], "isSerialized": false,
         "createdAt": NOW, "updatedAt": NOW, "version": 1
     }));
 
@@ -146,7 +146,7 @@ fn pending_stock_quotations_are_tracked_and_flagged_ready_when_replenished() {
         "categoryKey": "cat_1", "category": "Accessories",
         "subcategoryKey": "sub_1", "subcategory": "Protectors",
         "stockQuantity": 5, "minStockThreshold": 5,
-        "priceTiers": [],
+        "priceTiers": [], "isSerialized": false,
         "createdAt": NOW, "updatedAt": NOW, "version": 1
     }));
     inp.products = std::slice::from_ref(&replenished_product);

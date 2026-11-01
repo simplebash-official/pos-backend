@@ -16,7 +16,6 @@ pub struct CreditNoteDocument {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<ObjectId>,
     /// Unique business key for this credit note (e.g. cn_...).
-    #[serde(default)]
     pub key: String,
     /// Human-friendly sequential credit note number (e.g. CN-000001).
     pub credit_note_number: String,
@@ -27,7 +26,6 @@ pub struct CreditNoteDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub invoice_number: Option<String>,
     /// True if this credit note has no linked invoice.
-    #[serde(default)]
     pub no_receipt: bool,
     /// Key of the customer linked to the original invoice, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -42,7 +40,6 @@ pub struct CreditNoteDocument {
     /// List of returned items.
     pub returned_items: Vec<CreditNoteItemDocument>,
     /// List of replacement or exchange items provided, if any.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exchange_items: Vec<InvoiceItem>,
     /// Set whenever `exchange_items` is non-empty.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -55,21 +52,16 @@ pub struct CreditNoteDocument {
     /// extra payment) before the partial-payment cap.
     pub net_refund_cents: i64,
     /// The portion of `net_refund_cents` actually paid out/collected.
-    #[serde(default)]
     pub refund_cash_cents: i64,
     /// The remainder applied as an invoice balance reduction instead of cash.
-    #[serde(default)]
     pub balance_reduction_cents: i64,
     /// How `refund_cash_cents` was allocated across payment methods.
-    #[serde(default)]
     pub refund_breakdown: Vec<RefundBreakdownLeg>,
     /// Keys of payment record(s) created for the refund or extra payment, if any.
-    #[serde(default)]
     pub refund_payment_keys: Vec<String>,
     /// This credit note's resolution state.
     pub status: crate::domain::billing::CreditNoteStatus,
     /// True when approved past the normal return window, or no-receipt.
-    #[serde(default)]
     pub is_manager_override: bool,
     /// User ID of the Admin who approved the override, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -93,13 +85,10 @@ pub struct CreditNoteDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub voided_reason: Option<String>,
     /// Concurrency version number for optimistic locking.
-    #[serde(default = "default_version")]
     pub version: i64,
     /// Timestamp when credit note document was created.
-    #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
     /// Timestamp when credit note document was last updated.
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
 }
 
@@ -155,10 +144,6 @@ impl CreditNoteDocument {
 /// Type alias for credit note items embedded in credit note documents.
 pub type CreditNoteItemDocument = CreditNoteItem;
 
-pub(super) fn default_version() -> i64 {
-    1
-}
-
 /// Invoices are append-only (see `domain::billing::Invoice`'s module
 /// comment, D3): every field here except `status`/`voided_*`/`closed_*`/
 /// `refunded_cents`/`credit_note_count` is written once at insert and never
@@ -169,7 +154,6 @@ pub struct InvoiceDocument {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<ObjectId>,
     /// Unique business key for this invoice (e.g. inv_...).
-    #[serde(default)]
     pub key: String,
     /// Human-friendly sequential invoice number (e.g. INV-000001).
     pub invoice_number: String,
@@ -194,10 +178,8 @@ pub struct InvoiceDocument {
     /// Subtotal price before discounts in cents.
     pub subtotal_cents: i64,
     /// Type of discount applied ("percentage" or "fixed").
-    #[serde(default = "default_discount_type")]
     pub discount_type: String,
     /// Discount value (percentage rate or fixed amount).
-    #[serde(default)]
     pub discount_value: f64,
     /// Total computed discount amount in cents.
     pub discount_cents: i64,
@@ -260,30 +242,21 @@ pub struct InvoiceDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub closed_by: Option<String>,
     /// Total amount in cents refunded against this invoice.
-    #[serde(default)]
     pub refunded_cents: i64,
     /// Count of credit notes (any status) recorded against this invoice.
-    #[serde(default)]
     pub credit_note_count: i64,
     /// Register session key this invoice was billed in, if during an open cashier shift.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_key: Option<String>,
     /// Concurrency version number for optimistic locking.
-    #[serde(default = "default_version")]
     pub version: i64,
     /// Timestamp when invoice was created.
-    #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
     /// Timestamp when invoice was last updated.
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
     /// Device identifier that created or last updated this invoice.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by_device: Option<String>,
-}
-
-fn default_discount_type() -> String {
-    "fixed".to_string()
 }
 
 impl InvoiceDocument {
@@ -354,7 +327,6 @@ pub struct PaymentDocument {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<ObjectId>,
     /// Unique business key for this payment record (e.g. pay_...).
-    #[serde(default)]
     pub key: String,
     /// Key of the invoice this payment is applied to.
     pub invoice_key: String,
@@ -375,13 +347,10 @@ pub struct PaymentDocument {
     /// Timestamp when this payment occurred.
     pub recorded_at: BsonDateTime,
     /// Concurrency version number for optimistic locking.
-    #[serde(default = "default_version")]
     pub version: i64,
     /// Timestamp when payment document was created.
-    #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
     /// Timestamp when payment document was last updated.
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
 }
 

@@ -12,7 +12,6 @@ pub struct SupplierDocument {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<ObjectId>,
     /// Unique business key identifying this supplier (e.g. sup_...).
-    #[serde(default)]
     pub key: String,
     /// Supplier company or trading name.
     pub name: String,
@@ -24,7 +23,6 @@ pub struct SupplierDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub secondary_phone: Option<String>,
     /// All contact persons belonging to this supplier, each with up to 2 phone numbers.
-    #[serde(default)]
     pub contact_persons: Vec<ContactPerson>,
     /// Physical or mailing address of the supplier.
     pub address: String,
@@ -37,13 +35,10 @@ pub struct SupplierDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
     /// Concurrency version counter for optimistic locking.
-    #[serde(default = "default_version")]
     pub version: i64,
     /// Timestamp when supplier record was created.
-    #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
     /// Timestamp when supplier record was last updated.
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
     /// Soft-delete timestamp, if deleted.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -51,10 +46,6 @@ pub struct SupplierDocument {
     /// Device identifier that last updated this supplier record.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by_device: Option<String>,
-}
-
-fn default_version() -> i64 {
-    1
 }
 
 impl SupplierDocument {

@@ -12,7 +12,6 @@ pub struct RepairDocument {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<ObjectId>,
     /// Unique business key identifying this repair ticket (e.g. rep_...).
-    #[serde(default)]
     pub key: String,
     /// Sequential ticket number (e.g. REP-000001).
     pub ticket_number: String,
@@ -31,8 +30,7 @@ pub struct RepairDocument {
     /// Problem description or repair diagnosis notes.
     pub issue_description: String,
     /// Date the job was promised ready for the customer (YYYY-MM-DD), if a
-    /// hand-back date was agreed. `#[serde(default)]` keeps older stored
-    /// documents (written before this field existed) deserializing cleanly.
+    /// hand-back date was agreed. Absent means no date was agreed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub promised_ready_at: Option<String>,
     /// Lifecycle status ("received", "in_progress", "completed", "delivered", "cancelled").
@@ -56,13 +54,10 @@ pub struct RepairDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub split_value: Option<f64>,
     /// Concurrency version counter for optimistic locking.
-    #[serde(default = "default_version")]
     pub version: i64,
     /// Timestamp when repair ticket was created.
-    #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
     /// Timestamp when repair ticket was last updated.
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
     /// Soft-delete timestamp, if deleted.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -70,10 +65,6 @@ pub struct RepairDocument {
     /// Device identifier that last updated this repair record.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by_device: Option<String>,
-}
-
-fn default_version() -> i64 {
-    1
 }
 
 impl RepairDocument {

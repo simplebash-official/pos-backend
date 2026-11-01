@@ -198,7 +198,6 @@ fn row_to_subcategory_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<Subcategor
 pub(super) struct CategoryWithSubcategories {
     #[serde(flatten)]
     pub(super) category: CategoryDocument,
-    #[serde(default)]
     pub(super) subcategories: Vec<SubcategoryDocument>,
 }
 

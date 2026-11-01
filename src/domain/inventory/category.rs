@@ -40,7 +40,6 @@ pub struct CategoryInfo {
     /// Last update timestamp.
     pub updated_at: DateTime<Utc>,
     /// Version counter.
-    #[serde(default = "default_version")]
     pub version: i64,
     /// Deletion timestamp if soft-deleted.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -96,7 +95,6 @@ pub struct SubcategoryInfo {
     /// Last update timestamp.
     pub updated_at: DateTime<Utc>,
     /// Version counter.
-    #[serde(default = "default_version")]
     pub version: i64,
     /// Deletion timestamp if soft-deleted.
     #[serde(skip_serializing_if = "Option::is_none")]

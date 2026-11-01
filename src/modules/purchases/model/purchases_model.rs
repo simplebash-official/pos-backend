@@ -9,10 +9,6 @@ use mongodb::bson::DateTime as BsonDateTime;
 use mongodb::bson::oid::ObjectId;
 use serde::{Deserialize, Serialize};
 
-pub(super) fn default_version() -> i64 {
-    1
-}
-
 /// A single stock-intake record. References `suppliers`/inventory
 /// `products` via their immutable `key`s (`supplier_key`/`product_key`),
 /// never a raw `ObjectId` — same cross-reference convention as
@@ -36,7 +32,6 @@ pub struct PurchaseDocument {
     pub line_total_cents: i64,
     /// This line's share of the receipt's extra charges in cents (discounts negative), fixed when
     /// the receipt was recorded. The stock batches were costed from `line_total + share`.
-    #[serde(default)]
     pub charges_share_cents: i64,
     /// Selling price per unit set at receipt, in cents.
     pub selling_price_cents: i64,
@@ -45,13 +40,10 @@ pub struct PurchaseDocument {
     /// Foreign key referencing the receipt (supplier invoice) this line belongs to.
     pub receipt_key: String,
     /// Concurrency version counter for optimistic locking.
-    #[serde(default = "default_version")]
     pub version: i64,
     /// Timestamp when purchase document was created.
-    #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
     /// Timestamp when purchase document was last updated.
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
     /// Soft-delete timestamp, if deleted.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -121,11 +113,8 @@ pub struct PurchaseReceiptDocument {
     /// Optional remarks.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
-    #[serde(default = "default_version")]
     pub version: i64,
-    #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
     /// Device identifier that last updated this record.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -227,11 +216,8 @@ pub struct ReceiptChargeDocument {
     pub payment_kind: Option<PaymentKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payment_key: Option<String>,
-    #[serde(default = "default_version")]
     pub version: i64,
-    #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
     /// Device identifier that last updated this record.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -291,11 +277,8 @@ pub struct ReceiptSettlementDocument {
     pub payment_kind: PaymentKind,
     /// Key of the cash movement or expense payment that paid.
     pub payment_key: String,
-    #[serde(default = "default_version")]
     pub version: i64,
-    #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
     /// Device identifier that last updated this record.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -346,11 +329,8 @@ pub struct SupplierCreditDocument {
     pub reverses_key: Option<String>,
     pub recorded_by_user_id: String,
     pub recorded_by_name_snapshot: String,
-    #[serde(default = "default_version")]
     pub version: i64,
-    #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
     /// Device identifier that last updated this record.
     #[serde(skip_serializing_if = "Option::is_none")]

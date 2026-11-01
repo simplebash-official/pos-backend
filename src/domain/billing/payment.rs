@@ -1,7 +1,5 @@
 //! Payments on an invoice and the requests that record them.
 
-use super::invoice::default_version;
-
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -79,7 +77,6 @@ pub struct PaymentRecord {
     /// Timestamp when payment record was last modified.
     pub updated_at: DateTime<Utc>,
     /// Version number for concurrency control.
-    #[serde(default = "default_version")]
     pub version: i64,
 }
 

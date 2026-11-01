@@ -350,7 +350,7 @@ async fn verify_bearer_derives_the_tenant_for_both_token_kinds() {
     // Local HS256 token carrying a tenant.
     let local = hs256(
         &config.jwt_secret,
-        json!({ "sub": "u1", "exp": exp, "tid": "tnt_local" }),
+        json!({ "sub": "u1", "exp": exp, "tid": "tnt_local", "permissions": [] }),
     );
     let v = verify_bearer(&bearer(&local), &config).await.unwrap();
     assert_eq!(v.tenant, Some(Tenant::id("tnt_local").unwrap()));
@@ -358,14 +358,17 @@ async fn verify_bearer_derives_the_tenant_for_both_token_kinds() {
 
     // Local token without a tenant: no tenant, which is what makes CurrentUser reject it in
     // multi mode.
-    let t = hs256(&config.jwt_secret, json!({ "sub": "u1", "exp": exp }));
+    let t = hs256(
+        &config.jwt_secret,
+        json!({ "sub": "u1", "exp": exp, "permissions": [] }),
+    );
     let v = verify_bearer(&bearer(&t), &config).await.unwrap();
     assert!(v.tenant.is_none() && v.tenant_id().is_none());
 
     // A blank tenant claim is malformed, not "no tenant".
     let t = hs256(
         &config.jwt_secret,
-        json!({ "sub": "u1", "exp": exp, "tid": "  " }),
+        json!({ "sub": "u1", "exp": exp, "tid": "  ", "permissions": [] }),
     );
     assert!(verify_bearer(&bearer(&t), &config).await.is_err());
 
@@ -380,7 +383,7 @@ async fn verify_bearer_derives_the_tenant_for_both_token_kinds() {
     // Wrong HS256 secret still fails.
     let bad = hs256(
         "some-other-secret-some-other-secret-0000",
-        json!({ "sub": "u1", "exp": exp, "tid": "t" }),
+        json!({ "sub": "u1", "exp": exp, "tid": "t", "permissions": [] }),
     );
     assert!(verify_bearer(&bearer(&bad), &config).await.is_err());
 }

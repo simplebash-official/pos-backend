@@ -1,7 +1,6 @@
 //! Credit notes (returns), their lines, conditions, reasons and requests.
 
 use super::invoice::InvoiceItem;
-use super::invoice::default_version;
 use super::sale::CreateSaleItemRequest;
 use crate::domain::inventory::BatchAllocation;
 use chrono::{DateTime, Utc};
@@ -135,7 +134,6 @@ pub struct CreditNote {
     /// List of returned items.
     pub returned_items: Vec<CreditNoteItem>,
     /// List of replacement or exchange items provided, if any.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exchange_items: Vec<InvoiceItem>,
     /// Set whenever `exchangeItems` is non-empty — lets reporting
     /// distinguish a genuine return (money leaving, nothing replacing it)
@@ -160,10 +158,8 @@ pub struct CreditNote {
     /// cash the shop never received.
     pub balance_reduction_cents: i64,
     /// How `refundCashCents` was allocated across payment methods.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub refund_breakdown: Vec<RefundBreakdownLeg>,
     /// Keys of payment record(s) created for the refund or extra payment, if any.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub refund_payment_keys: Vec<String>,
     /// This credit note's resolution state.
     pub status: CreditNoteStatus,
@@ -196,7 +192,6 @@ pub struct CreditNote {
     /// Timestamp when the credit note was last updated.
     pub updated_at: DateTime<Utc>,
     /// Optimistic locking version number.
-    #[serde(default = "default_version")]
     pub version: i64,
 }
 
@@ -251,7 +246,6 @@ pub struct CreditNoteItem {
     /// batch at the picked price for a no-receipt return. Units are only put
     /// back for a restockable condition; voiding the credit note takes them
     /// out of these same batches again.
-    #[serde(default)]
     pub batch_allocations: Vec<BatchAllocation>,
 }
 

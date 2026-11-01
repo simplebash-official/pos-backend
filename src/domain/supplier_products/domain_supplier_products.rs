@@ -40,7 +40,6 @@ pub struct SupplierProductLink {
     /// Timestamp when link was last modified.
     pub updated_at: DateTime<Utc>,
     /// Optimistic concurrency control version number.
-    #[serde(default = "default_version")]
     pub version: i64,
     /// Deletion timestamp if soft-deleted.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -48,10 +47,6 @@ pub struct SupplierProductLink {
     /// Device identifier that last updated this link.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by_device: Option<String>,
-}
-
-fn default_version() -> i64 {
-    1
 }
 
 /// Query params for `GET /supplier-products`. Both `supplierKey` and `productKey`

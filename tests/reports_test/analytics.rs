@@ -396,12 +396,16 @@ async fn analytics_summary_and_timeseries_use_cost_snapshot_and_shop_local_bucke
     // `created_at` filter.
     let cat_key = "cat_ax_widgets";
     let prd_key = "prd_ax_widget";
+    let now = mongodb::bson::DateTime::now();
     let _ = app
         .mongo()
         .collection::<Document>("categories")
         .update_one(
             doc! { "key": cat_key },
-            doc! { "$set": { "key": cat_key, "name": "AX Widgets", "icon": "", "color": "" } },
+            doc! { "$set": {
+                "key": cat_key, "name": "AX Widgets", "icon": "", "color": "",
+                "version": 1_i64, "created_at": now, "updated_at": now,
+            } },
         )
         .upsert(true)
         .await;
@@ -414,6 +418,14 @@ async fn analytics_summary_and_timeseries_use_cost_snapshot_and_shop_local_bucke
                 "key": prd_key,
                 "category_key": cat_key,
                 "subcategory_key": "sub_ax",
+                "sku": "AX-WIDGET-001",
+                "name": "AX Widget",
+                "stock_quantity": 0_i64,
+                "min_stock_threshold": 0_i64,
+                "is_serialized": false,
+                "version": 1_i64,
+                "created_at": now,
+                "updated_at": now,
             } },
         )
         .upsert(true)

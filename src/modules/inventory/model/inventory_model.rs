@@ -21,7 +21,6 @@ pub struct CategoryDocument {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<ObjectId>,
     /// Unique business key identifying this category (e.g. cat_...).
-    #[serde(default)]
     pub key: String,
     /// Category display name.
     pub name: String,
@@ -30,13 +29,10 @@ pub struct CategoryDocument {
     /// Color hex code or theme token for UI badges.
     pub color: String,
     /// Concurrency version counter for optimistic locking.
-    #[serde(default = "default_version")]
     pub version: i64,
     /// Timestamp when category was created.
-    #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
     /// Timestamp when category was last updated.
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
     /// Soft-delete timestamp, if deleted.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -72,10 +68,6 @@ impl CategoryDocument {
     }
 }
 
-pub(super) fn default_version() -> i64 {
-    1
-}
-
 /// Mongo document shape representing an inventory product.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProductDocument {
@@ -83,10 +75,8 @@ pub struct ProductDocument {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<ObjectId>,
     /// Unique business key identifying this product (e.g. prd_...).
-    #[serde(default)]
     pub key: String,
     /// Human-readable SKU code (e.g. PHO-SCR-0001).
-    #[serde(default)]
     pub sku: String,
     /// Barcode string for scanning (e.g. EAN-13), if any.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -95,35 +85,26 @@ pub struct ProductDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub barcode_source: Option<BarcodeSource>,
     /// Product name or title.
-    #[serde(default)]
     pub name: String,
     /// Foreign key referencing the parent category.
-    #[serde(default)]
     pub category_key: String,
     /// Foreign key referencing the subcategory.
-    #[serde(default)]
     pub subcategory_key: String,
     /// Current number of units in inventory stock — the sum of the product's
     /// stock movements (a derived column; see `sync::derived_*`).
-    #[serde(default)]
     pub stock_quantity: i64,
     /// Minimum threshold count for low-stock warning alerts.
-    #[serde(default)]
     pub min_stock_threshold: i64,
     /// True when units of this product are tracked individually by serial number.
-    #[serde(default)]
     pub is_serialized: bool,
     /// Warranty length in months, if this product carries one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub warranty_months: Option<i64>,
     /// Version counter for optimistic locking.
-    #[serde(default = "default_version")]
     pub version: i64,
     /// Timestamp when product was created.
-    #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
     /// Timestamp when product was last updated.
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
     /// Timestamp when product was soft-deleted, if applicable.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -189,7 +170,6 @@ pub struct ProductSerialDocument {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<ObjectId>,
     /// Unique business key identifying this serial record (e.g. psn_...).
-    #[serde(default)]
     pub key: String,
     /// Foreign key referencing the parent product.
     pub product_key: String,
@@ -216,13 +196,10 @@ pub struct ProductSerialDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub credit_note_key: Option<String>,
     /// Concurrency version counter for optimistic locking.
-    #[serde(default = "default_version")]
     pub version: i64,
     /// Timestamp when this serial record was created.
-    #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
     /// Timestamp when this serial record was last updated.
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
 }
 
@@ -291,13 +268,10 @@ pub struct StockBatchDocument {
     /// When the batch was received.
     pub received_at: BsonDateTime,
     /// Concurrency version counter for optimistic locking.
-    #[serde(default = "default_version")]
     pub version: i64,
     /// Timestamp when the batch was created.
-    #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
     /// Timestamp when the batch was last updated.
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
     /// Soft-delete timestamp, if deleted.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -342,7 +316,6 @@ pub struct StockMovementDocument {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<ObjectId>,
     /// Unique business key identifying this stock movement record (e.g. stm_...).
-    #[serde(default)]
     pub key: String,
     /// MongoDB ObjectId of the affected product.
     pub product_id: ObjectId,
@@ -361,12 +334,10 @@ pub struct StockMovementDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
     /// Concurrency version counter for optimistic locking.
-    #[serde(default = "default_version")]
     pub version: i64,
     /// Timestamp when this stock movement occurred.
     pub created_at: BsonDateTime,
     /// Timestamp when this movement record was last modified.
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
     /// Soft-delete timestamp, if deleted.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -418,20 +389,16 @@ pub struct SubcategoryDocument {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<ObjectId>,
     /// Unique business key identifying this subcategory (e.g. sub_...).
-    #[serde(default)]
     pub key: String,
     /// Foreign key referencing the parent category key.
     pub category_key: String,
     /// Subcategory display name.
     pub name: String,
     /// Concurrency version counter for optimistic locking.
-    #[serde(default = "default_version")]
     pub version: i64,
     /// Timestamp when subcategory was created.
-    #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
     /// Timestamp when subcategory was last updated.
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
     /// Soft-delete timestamp, if deleted.
     #[serde(skip_serializing_if = "Option::is_none")]

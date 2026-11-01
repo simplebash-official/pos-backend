@@ -7,20 +7,11 @@ use mongodb::bson::DateTime as BsonDateTime;
 use mongodb::bson::oid::ObjectId;
 use serde::{Deserialize, Serialize};
 
-fn default_version() -> i64 {
-    1
-}
-
-fn default_status() -> EmployeeStatus {
-    EmployeeStatus::Active
-}
-
 /// Mongo document shape representing an employee HR/commission profile.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmployeeDocument {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<ObjectId>,
-    #[serde(default)]
     pub key: String,
     pub name: String,
     pub phone: String,
@@ -29,15 +20,11 @@ pub struct EmployeeDocument {
     pub role: EmployeeRole,
     pub default_split_type: SplitType,
     pub default_split_value: f64,
-    #[serde(default = "default_status")]
     pub status: EmployeeStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
-    #[serde(default = "default_version")]
     pub version: i64,
-    #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deleted_at: Option<BsonDateTime>,

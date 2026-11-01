@@ -38,10 +38,8 @@ pub struct LoginSessionDocument {
     // an append-only log, kept only for consistency with the Collection
     // Document Timestamps rule the rest of this codebase follows.
     /// Timestamp when this login session record was created.
-    #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
     /// Timestamp when this record was last modified.
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
 }
 

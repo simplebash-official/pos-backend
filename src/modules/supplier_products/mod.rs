@@ -4,7 +4,7 @@
 //! tree can reach past `routes`/`service` into persistence (see
 //! `modules::inventory` for the reference pattern this mirrors).
 
-mod model;
+pub(crate) mod model;
 mod repository;
 pub mod routes;
 pub mod service;

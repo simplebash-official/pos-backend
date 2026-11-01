@@ -7,7 +7,7 @@
 //! mirrors).
 
 pub mod charges;
-mod model;
+pub(crate) mod model;
 pub mod pricing;
 mod repository;
 pub mod routes;

@@ -210,7 +210,7 @@ async fn migrate_returns_to_credit_notes(db: &Database) -> HashMap<String, Strin
         document.remove("restock_action");
         document.insert("key", new_key);
         // `credit_note_number` is the new name for the old `return_number`
-        // field — required (no `#[serde(default)]`), so a document still
+        // field — required (no serde default), so a document still
         // carrying the old name fails deserialization entirely.
         if let Ok(return_number) = document.get_str("return_number") {
             let return_number = return_number.to_string();

@@ -17,9 +17,7 @@ use sqlx::Row;
 pub(super) struct ProductWithLookups {
     #[serde(flatten)]
     pub(super) product: ProductDocument,
-    #[serde(default)]
     pub(super) category_docs: Vec<CategoryDocument>,
-    #[serde(default)]
     pub(super) subcategory_docs: Vec<SubcategoryDocument>,
 }
 

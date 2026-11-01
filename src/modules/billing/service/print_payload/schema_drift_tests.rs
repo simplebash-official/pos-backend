@@ -98,7 +98,10 @@ fn cash_sale_invoice() -> Invoice {
                 "quantity": 2,
                 "discountCents": 0,
                 "totalCents": 30000,
-                "sourceType": "retail"
+                "sourceType": "retail",
+                "returnedQuantity": 0,
+                "serialNumbers": [],
+                "batchAllocations": []
             },
             {
                 "name": "Screen Replacement",
@@ -109,7 +112,10 @@ fn cash_sale_invoice() -> Invoice {
                 "sourceType": "repair",
                 "sourceTicketKey": "rep_test",
                 "sourceTicketNumber": "REP-000001",
-                "assignedEmployeeName": "Ruwan Fernando"
+                "assignedEmployeeName": "Ruwan Fernando",
+                "returnedQuantity": 0,
+                "serialNumbers": [],
+                "batchAllocations": []
             }
         ],
         "subtotalCents": 110000,
@@ -132,8 +138,11 @@ fn cash_sale_invoice() -> Invoice {
             "vatRate": 0.0,
             "receiptFooterText": "Thank you!"
         },
+        "refundedCents": 0,
+        "creditNoteCount": 0,
         "createdAt": "2026-08-23T09:00:00Z",
-        "updatedAt": "2026-08-23T09:00:00Z"
+        "updatedAt": "2026-08-23T09:00:00Z",
+        "version": 1
     }))
     .expect("cash-sale invoice fixture deserializes")
 }
@@ -300,7 +309,8 @@ fn base_credit_note() -> CreditNote {
                 "totalCents": 15000,
                 "reason": "defective",
                 "condition": "damaged",
-                "disposition": "write_off_scrap"
+                "disposition": "write_off_scrap",
+                "batchAllocations": []
             }
         ],
         "returnSubtotalCents": 15000,
@@ -311,11 +321,14 @@ fn base_credit_note() -> CreditNote {
         "refundBreakdown": [
             {"method": "cash", "amountCents": 10000}
         ],
+        "exchangeItems": [],
+        "refundPaymentKeys": [],
         "status": "resolved",
         "isManagerOverride": false,
         "shopProfileSnapshot": {},
         "createdAt": "2026-08-23T10:00:00Z",
-        "updatedAt": "2026-08-23T10:00:00Z"
+        "updatedAt": "2026-08-23T10:00:00Z",
+        "version": 1
     }))
     .expect("credit note fixture deserializes")
 }

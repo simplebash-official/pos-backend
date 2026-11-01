@@ -14,15 +14,11 @@ pub struct TenantDocument {
     pub shop_code: String,
     /// Display name of the business.
     pub name: String,
-    #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
     /// Whether initial onboarding setup has been completed for this tenant.
-    #[serde(default)]
     pub setup_completed: bool,
     /// Whether demo sample data was loaded during onboarding setup.
-    #[serde(default)]
     pub sample_data_loaded: bool,
     /// Timestamp when onboarding setup was completed.
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -64,10 +64,6 @@ pub struct CustomerRef {
     pub customer_address: Option<String>,
 }
 
-pub(super) fn default_version() -> i64 {
-    1
-}
-
 /// A completed or pending sale as returned to API clients. `id` is the
 /// Mongo `ObjectId` hex string; `key` (`inv_...`) is the prefixed id other
 /// modules/the frontend reference this invoice by. `shop_profile_snapshot`
@@ -177,12 +173,10 @@ pub struct Invoice {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub closed_by: Option<String>,
     /// Total amount in cents refunded against this invoice from credit notes.
-    #[serde(default)]
     pub refunded_cents: i64,
     /// Count of credit notes (any status) recorded against this invoice —
     /// display-only; `Closed`'s "no open credit note" guard re-queries the
     /// `credit_notes` collection rather than trusting this count alone.
-    #[serde(default)]
     pub credit_note_count: i64,
     /// Timestamp when invoice was created.
     pub created_at: DateTime<Utc>,
@@ -192,7 +186,6 @@ pub struct Invoice {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by_device: Option<String>,
     /// Optimistic locking version number.
-    #[serde(default = "default_version")]
     pub version: i64,
 }
 
@@ -242,19 +235,16 @@ pub struct InvoiceItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assigned_employee_name: Option<String>,
     /// Quantity of items already returned from this line item.
-    #[serde(default)]
     pub returned_quantity: i64,
     /// The specific serialized units sold on this line, if the product is
     /// serialized (see `Product.is_serialized`) — one entry per unit,
     /// `quantity` long. Empty for a non-serialized retail line and for
     /// repair/print lines.
-    #[serde(default)]
     pub serial_numbers: Vec<String>,
     /// Which stock batches a retail product line's units came out of (one
     /// line at one price can span several batches, oldest first). A void or
     /// a return puts units back into exactly these batches. Empty for
     /// repair/print and ad-hoc lines, which move no stock.
-    #[serde(default)]
     pub batch_allocations: Vec<BatchAllocation>,
 }
 

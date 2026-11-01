@@ -70,7 +70,6 @@ pub struct Purchase {
     /// Timestamp when purchase was last modified.
     pub updated_at: DateTime<Utc>,
     /// Optimistic locking version number.
-    #[serde(default = "default_version")]
     pub version: i64,
     /// Soft deletion timestamp if deleted.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -78,10 +77,6 @@ pub struct Purchase {
     /// Device identifier that last updated this record.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by_device: Option<String>,
-}
-
-fn default_version() -> i64 {
-    1
 }
 
 /// Query params for `GET /purchases`. `supplierKey` and `productKey` are optional

@@ -187,7 +187,6 @@ pub(super) struct PlatformClaims {
     /// Tenant (business) the token is valid for.
     pub(super) tid: Option<String>,
     /// Space-separated scope values, e.g. `owner` or `device`.
-    #[serde(default)]
     pub(super) scope: String,
     /// Registered device the token was issued to (device tokens only).
     pub(super) did: Option<String>,

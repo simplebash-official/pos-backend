@@ -48,16 +48,13 @@ impl FromRequestParts<AppState> for AdminUser {
 }
 
 /// Claims embedded in the JWT issued at login (`modules::auth::service::login`)
-/// and verified on every authenticated request. `role` is optional so
-/// tokens without it still decode; `permissions` defaults to empty for the
-/// same reason — both matter only to extractors/checks that require them
-/// (`AdminUser`, `CurrentUser::require_permission`).
+/// and verified on every authenticated request. `role` is optional, `permissions`
+/// is required: a token without it is rejected, never read as "no permissions".
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: String,
     pub exp: usize,
     pub role: Option<Role>,
-    #[serde(default)]
     pub permissions: Vec<String>,
     /// Tenant the token was issued for. Absent on single-shop deployments;
     /// required by `CurrentUser` when `TENANT_MODE=multi`.

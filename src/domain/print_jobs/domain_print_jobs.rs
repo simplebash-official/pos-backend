@@ -59,7 +59,6 @@ pub struct PrintJob {
     pub promised_ready_at: Option<String>,
     /// Derived flag: promised-ready date has passed and the job is still open
     /// (not delivered/cancelled). Computed on every read, never stored.
-    #[serde(default)]
     pub is_overdue: bool,
     /// Status ("received", "in_progress", "completed", "delivered", "cancelled").
     pub status: String,
@@ -85,7 +84,6 @@ pub struct PrintJob {
     /// Timestamp when job was last updated.
     pub updated_at: DateTime<Utc>,
     /// Optimistic concurrency version.
-    #[serde(default = "default_version")]
     pub version: i64,
     /// Soft deletion timestamp if deleted.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -93,10 +91,6 @@ pub struct PrintJob {
     /// Device identifier that last updated this record.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by_device: Option<String>,
-}
-
-fn default_version() -> i64 {
-    1
 }
 
 /// The `assignment{}` sub-object of `CreatePrintJobRequest`/

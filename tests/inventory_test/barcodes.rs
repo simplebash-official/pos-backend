@@ -25,6 +25,8 @@ async fn seed_supplier(db: &mongodb::Database) -> String {
             "primary_phone": "1234567890",
             "address": "123 Main St",
             "supplied_categories": vec!["Widgets"],
+            "contact_persons": Vec::<mongodb::bson::Bson>::new(),
+            "version": 1_i64,
             "created_at": now,
             "updated_at": now,
         })

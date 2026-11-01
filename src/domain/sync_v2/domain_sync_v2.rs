@@ -73,7 +73,6 @@ pub struct ChangeAck {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     /// True when the server clamped a future `updatedAt` (status stays applied).
-    #[serde(default)]
     pub clamped: bool,
 }
 

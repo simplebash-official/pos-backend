@@ -13,7 +13,6 @@ pub struct PrintJobDocument {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<ObjectId>,
     /// Unique business key identifying this print job (e.g. prj_...).
-    #[serde(default)]
     pub key: String,
     /// Sequential ticket number (e.g. PRN-000001).
     pub ticket_number: String,
@@ -29,8 +28,7 @@ pub struct PrintJobDocument {
     pub job_type: String,
     /// Number of items to print.
     pub quantity: i32,
-    /// Date the job was promised ready (YYYY-MM-DD), if agreed.
-    /// `#[serde(default)]` keeps older stored documents deserializing cleanly.
+    /// Date the job was promised ready (YYYY-MM-DD), if agreed. Absent means none was agreed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub promised_ready_at: Option<String>,
     /// Job lifecycle status ("received", "in_progress", "completed", "delivered", "cancelled").
@@ -53,13 +51,10 @@ pub struct PrintJobDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub split_value: Option<f64>,
     /// Concurrency version counter for optimistic locking.
-    #[serde(default = "default_version")]
     pub version: i64,
     /// Timestamp when print job was created.
-    #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
     /// Timestamp when print job was last updated.
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
     /// Soft-delete timestamp, if deleted.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -67,10 +62,6 @@ pub struct PrintJobDocument {
     /// Device identifier that last updated this print job.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by_device: Option<String>,
-}
-
-fn default_version() -> i64 {
-    1
 }
 
 impl PrintJobDocument {

@@ -4,16 +4,11 @@ use mongodb::bson::DateTime as BsonDateTime;
 use mongodb::bson::oid::ObjectId;
 use serde::{Deserialize, Serialize};
 
-fn default_version() -> i64 {
-    1
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 /// How a cash category is stored in the database.
 pub struct CashCategoryDocument {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<ObjectId>,
-    #[serde(default)]
     pub key: String,
     pub movement_type: CashMovementType,
     pub name: String,
@@ -36,11 +31,8 @@ pub struct CashCategoryDocument {
     pub merged_into_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by_name_snapshot: Option<String>,
-    #[serde(default = "default_version")]
     pub version: i64,
-    #[serde(default = "BsonDateTime::now")]
     pub created_at: BsonDateTime,
-    #[serde(default = "BsonDateTime::now")]
     pub updated_at: BsonDateTime,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by_device: Option<String>,

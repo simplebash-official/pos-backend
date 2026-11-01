@@ -866,6 +866,8 @@ async fn old_cash_movements_are_migrated_on_mongo_once() {
             "recipient_or_source": "ABC Traders", "supplier_key": "sup_abc",
             "recorded_by_user_id": "u1", "recorded_by_name_snapshot": "Cashier", "recorded_late": false,
             "version": 1_i64,
+            "created_at": mongodb::bson::DateTime::now(),
+            "updated_at": mongodb::bson::DateTime::now(),
         })
         .await
         .expect("the awaited step succeeds");

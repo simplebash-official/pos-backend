@@ -75,9 +75,7 @@ pub struct SyncStatusResponse {
     pub resources: HashMap<String, ResourceSyncStatus>,
     /// Cloud (multi-tenant) only: the shop has finished its own first-time setup
     /// (the demo-data vs clean-data choice). Always false on a single-shop install.
-    #[serde(default)]
     pub setup_completed: bool,
     /// Cloud only: that setup loaded the demo data.
-    #[serde(default)]
     pub sample_data_loaded: bool,
 }

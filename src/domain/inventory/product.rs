@@ -79,10 +79,6 @@ pub struct CreateProductRequest {
     pub warranty_months: Option<i64>,
 }
 
-pub(super) fn default_version() -> i64 {
-    1
-}
-
 /// Body for `DELETE /products` (batch delete). Any id that fails to parse
 /// as an `ObjectId` is silently dropped rather than rejecting the whole
 /// request — see `service::product::delete_products`.
@@ -204,7 +200,6 @@ pub struct Product {
     /// True when individual units of this product are tracked by serial
     /// number (see `ProductSerial`) rather than only as an aggregate
     /// `stock_quantity` count.
-    #[serde(default)]
     pub is_serialized: bool,
     /// Warranty length in months, snapshotted onto each `ProductSerial.
     /// warranty_months` at the moment a unit is sold (see
@@ -217,7 +212,6 @@ pub struct Product {
     /// Timestamp when product was last modified.
     pub updated_at: DateTime<Utc>,
     /// Optimistic locking version.
-    #[serde(default = "default_version")]
     pub version: i64,
     /// Deletion timestamp if soft-deleted.
     #[serde(skip_serializing_if = "Option::is_none")]

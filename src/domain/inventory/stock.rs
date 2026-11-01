@@ -1,7 +1,6 @@
 //! Stock batches, movements and adjustments, and the low-stock list.
 
 use super::product::PaginationMeta;
-use super::product::default_version;
 use crate::core::error::AppError;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -176,7 +175,6 @@ pub struct StockBatch {
     /// Timestamp when the batch was last modified.
     pub updated_at: DateTime<Utc>,
     /// Optimistic locking version.
-    #[serde(default = "default_version")]
     pub version: i64,
     /// Deletion timestamp if soft-deleted.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -236,7 +234,6 @@ pub struct StockMovement {
     /// Timestamp when movement was recorded/updated.
     pub updated_at: DateTime<Utc>,
     /// Version for optimistic locking.
-    #[serde(default = "default_version")]
     pub version: i64,
     /// Deletion timestamp if soft-deleted.
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -25,15 +25,9 @@ pub fn apply_control(line: &ControlLine) -> LogMode {
 /// One line written to stdin by the desktop shell to change the logging mode.
 pub struct ControlLine {
     pub cmd: String,
-    #[serde(default = "default_true")]
     pub enabled: bool,
-    #[serde(default)]
     pub http_bodies: bool,
     pub sql: Option<String>,
-}
-
-fn default_true() -> bool {
-    true
 }
 
 /// The logging switches in force after a control line was applied.

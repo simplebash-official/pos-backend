@@ -1,7 +1,6 @@
 //! Serial numbers of serialised products.
 
 use super::product::Product;
-use super::product::default_version;
 use crate::core::error::AppError;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -45,7 +44,6 @@ pub struct ProductSerial {
     /// Timestamp when this serial record was last updated.
     pub updated_at: DateTime<Utc>,
     /// Optimistic locking version.
-    #[serde(default = "default_version")]
     pub version: i64,
 }
 
