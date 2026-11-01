@@ -11,6 +11,7 @@ use crate::domain::sessions::{
     SessionListResponse, SubmitBlindCountRequest, ZReportResponse,
 };
 use crate::domain::settings::{DocumentDesignChoice, DocumentDesignStatus};
+use crate::domain::users::Role;
 use crate::modules::sessions::repository::drawer;
 use crate::modules::sessions::service;
 use crate::modules::{documents, settings};
@@ -215,10 +216,13 @@ pub(super) async fn get_current_session(
     current_user.require_permission(perm::REGISTER_SESSIONS_VIEW)?;
 
     let terminal_id = query.terminal_id.as_deref().or(device_id.0.as_deref());
-    let mut session =
-        service::resolve_active_session(&state.db, terminal_id, &current_user.user_id)
-            .await?
-            .map(|s| s.into_register_session());
+    let mut session = service::resolve_active_session(&state.db, &current_user.user_id)
+        .await?
+        // Staff work from one machine: their shift is not shown on any other.
+        .filter(|s| {
+            current_user.role != Some(Role::Staff) || Some(s.terminal_id.as_str()) == terminal_id
+        })
+        .map(|s| s.into_register_session());
 
     if let Some(ref mut s) = session {
         service::session::populate_missing_cashier_name(&state.db, s).await;
@@ -232,12 +236,9 @@ pub(super) async fn get_current_session(
 
 #[utoipa::path(
     get,
-    path = "/drawer-state/{terminal_id}",
-    params(
-        ("terminal_id" = String, Path, description = "Terminal identifier")
-    ),
+    path = "/drawer-state",
     responses(
-        (status = 200, description = "Current drawer ledger state", body = ApiResponse<Option<DrawerState>>)
+        (status = 200, description = "The signed-in user's drawer balance", body = ApiResponse<Option<DrawerState>>)
     ),
     security(("bearerAuth" = [])),
     tag = "Register Sessions"
@@ -245,10 +246,9 @@ pub(super) async fn get_current_session(
 pub(super) async fn get_drawer_state(
     State(state): State<AppState>,
     current_user: CurrentUser,
-    Path(terminal_id): Path<String>,
 ) -> AppResult<Json<ApiResponse<Option<DrawerState>>>> {
     current_user.require_permission(perm::REGISTER_SESSIONS_VIEW)?;
-    let drawer_state = drawer::get_drawer_state(&state.db, &terminal_id).await?;
+    let drawer_state = drawer::get_drawer_state(&state.db, &current_user.user_id).await?;
     Ok(Json(ApiResponse::success(
         drawer_state.map(|s| s.into_drawer_state()),
         "Drawer state retrieved successfully",

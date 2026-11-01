@@ -77,6 +77,7 @@ The invariants below apply everywhere and are easy to violate, so they stay resi
 - `cargo run --bin seed_inventory` — seeds products, stock movements, and serial numbers into the database
 - `cargo run --bin seed_api_key` — generates and inserts a random API key into the `api_keys` table/collection
 - `cargo run --bin migrate_cash_movements [-- --dry-run]` — one-time MongoDB migration of old cash movements to typed movements with categories (also seeds every shop's built-in cash categories). Idempotent; run it before deploying the typed-movement backend to an environment with existing data. SQLite migrates itself at startup.
+- `cargo run --bin migrate_drawer_by_user [-- --dry-run]` — one-time MongoDB migration of `drawer_state` from one balance per machine to one per user (the shift owner; when one user had several machines the newest row wins, a machine that never had a shift is dropped). The dry run prints every planned balance; review it, then apply right after deploying the per-user drawer backend. Idempotent. SQLite migrates itself at startup (`migrate_schema`).
 - `make check` (root `Makefile`) — runs `cargo fmt --check`, then `cargo clippy --all-targets --all-features -- -D warnings`, then `cargo test`, stopping at the first failure; `make ci` is an alias for it (the intended CI entrypoint)
 
 **After every change**, run the following and fix anything it reports before considering the work done:

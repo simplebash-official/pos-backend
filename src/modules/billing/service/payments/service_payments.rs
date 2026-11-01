@@ -43,7 +43,6 @@ pub async fn record_payment(
     body: RecordPaymentRequest,
     recorded_by_user_id: String,
     recorded_by_name: String,
-    device_id: Option<String>,
 ) -> AppResult<PaymentRecord> {
     crate::core::logging::domain::tracked("billing.payment_recorded", async move {
         if body.amount_cents <= 0 {
@@ -85,11 +84,7 @@ pub async fn record_payment(
 
         let resolved_session_key = match body.session_key {
             Some(k) => Some(k),
-            None => crate::modules::sessions::service::resolve_active_session(
-                db,
-                device_id.as_deref(),
-                &recorded_by_user_id,
-            )
+            None => crate::modules::sessions::service::resolve_active_session(db, &recorded_by_user_id)
             .await?
             .map(|s| s.key),
         };
@@ -134,7 +129,7 @@ pub async fn record_payment(
                         .ok_or_else(|| AppError::internal("the payment's session disappeared"))?;
                 crate::modules::sessions::repository::drawer::update_drawer_balance(
                     db,
-                    &session.terminal_id,
+                    &session.cashier_id,
                     cash_delta,
                 )
                 .await?;

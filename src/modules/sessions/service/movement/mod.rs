@@ -17,6 +17,7 @@ pub(crate) use service_movement::movement_counts_by_payee;
 pub(crate) use service_movement::movements_between;
 
 pub(crate) use prepare_movement::prepare_movement;
+pub(crate) use service_movement::drawer_owner;
 pub(crate) use service_movement::payouts_of_type;
 pub use service_movement::record_movement;
 pub use service_movement::requires_managed_permission;

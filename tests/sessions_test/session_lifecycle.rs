@@ -144,16 +144,16 @@ async fn session_full_lifecycle_and_z_report() {
     assert_eq!(body["data"]["status"], "open");
     assert_eq!(body["data"]["openingFloatCents"], 10000);
 
-    // Guard: Opening another session on same terminal should conflict
+    // Guard: one open shift per user, so a second one on another machine conflicts
     let (status, _) = send_authed(
         &app.router,
         "POST",
         "/api/sessions/open",
         Some(json!({
-            "terminalId": terminal_id,
+            "terminalId": format!("{terminal_id}_other"),
             "openingFloatCents": 10000
         })),
-        &admin_token,
+        &staff_token,
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
@@ -162,7 +162,7 @@ async fn session_full_lifecycle_and_z_report() {
     let (status, body) = send_authed(
         &app.router,
         "GET",
-        &format!("/api/sessions/drawer-state/{terminal_id}"),
+        "/api/sessions/drawer-state",
         None,
         &staff_token,
     )
@@ -323,7 +323,7 @@ async fn session_full_lifecycle_and_z_report() {
     let (status, body) = send_authed(
         &app.router,
         "GET",
-        &format!("/api/sessions/drawer-state/{terminal_id}"),
+        "/api/sessions/drawer-state",
         None,
         &staff_token,
     )
@@ -454,7 +454,7 @@ async fn session_full_lifecycle_and_z_report() {
     let (status, body) = send_authed(
         &app.router,
         "GET",
-        &format!("/api/sessions/drawer-state/{terminal_id}"),
+        "/api/sessions/drawer-state",
         None,
         &staff_token,
     )

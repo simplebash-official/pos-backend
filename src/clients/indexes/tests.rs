@@ -21,8 +21,8 @@ fn single_tenant_specs_are_the_historical_set() {
     // + cash_categories key/type-name + payees key/type-name + cash_movements category/payee
     // + expenses key/date + expense_payments expense_key + incomes key/date + account_openings key + balance_openings key + advance_recoveries key/employee_key + attachments key/owner + cash_settings key + purchase_receipts key/supplier-reference + purchases receipt_key
     // + receipt_settlements key/receipt_key/payment_key + supplier_credits key/supplier_key/receipt_key
-    // + receipt_charges key/receipt_key/supplier_key.
-    assert_eq!(specs.len(), 69);
+    // + receipt_charges key/receipt_key/supplier_key + drawer_state user_key.
+    assert_eq!(specs.len(), 70);
     assert!(specs.iter().all(|s| s.keys.get(TENANT_FIELD).is_none()));
     assert!(names(&specs).contains(&"products.sync_updated_at_key".to_string()));
     assert!(names(&specs).contains(&"idempotency_keys.idempotency_ttl".to_string()));

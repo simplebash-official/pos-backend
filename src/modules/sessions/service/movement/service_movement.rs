@@ -54,11 +54,11 @@ pub(crate) async fn bank_cash_moves(
 }
 
 /// The cash the drawer holds right now: the open shift's expected cash, or, between shifts, the
-/// drawer's own running balance.
+/// user's own running balance.
 pub(crate) async fn cash_in_drawer(
     db: &Db,
     session_key: Option<&str>,
-    terminal_id: &str,
+    user_key: &str,
 ) -> AppResult<i64> {
     if let Some(session_key) = session_key {
         let session = sessions::find_session_by_key(db, session_key)
@@ -80,7 +80,7 @@ pub(crate) async fn cash_in_drawer(
         }
         Ok(session.calculate_expected_cash())
     } else {
-        Ok(drawer::get_drawer_state(db, terminal_id)
+        Ok(drawer::get_drawer_state(db, user_key)
             .await?
             .map_or(0, |state| state.current_balance_cents))
     }
@@ -320,8 +320,14 @@ pub async fn record_movement(
                 .await?,
             )
         };
+        let owner = drawer_owner(
+            db,
+            document.session_key.as_deref(),
+            &document.recorded_by_user_id,
+        )
+        .await?;
         let mut tx = db.begin().await?;
-        let inserted = write_movement(&mut tx, document).await?;
+        let inserted = write_movement(&mut tx, document, &owner).await?;
         if let Some(prepared) = settlements {
             settlement::write_settlements(
                 &mut tx,
@@ -412,14 +418,21 @@ pub async fn reverse_movement(
             if is_original {
                 original_reversal_key = Some(reversal.key.clone());
             }
-            reversals.push(reversal);
+            // Undo the original's drawer, not the drawer of whoever is undoing it.
+            let owner = drawer_owner(
+                db,
+                member.session_key.as_deref(),
+                &member.recorded_by_user_id,
+            )
+            .await?;
+            reversals.push((reversal, owner));
         }
 
         let mut tx = db.begin().await?;
         let mut requested = None;
-        for reversal in reversals {
+        for (reversal, owner) in reversals {
             let is_requested = original_reversal_key.as_deref() == Some(reversal.key.as_str());
-            let inserted = write_reversal(&mut tx, reversal).await?;
+            let inserted = write_reversal(&mut tx, reversal, &owner).await?;
             if is_requested {
                 requested = Some(inserted);
             }
@@ -547,9 +560,9 @@ async fn prepare_reversal(
 async fn write_reversal(
     tx: &mut Tx,
     reversal: CashMovementDocument,
+    drawer_owner: &str,
 ) -> AppResult<CashMovementDocument> {
     let session_key = reversal.session_key.clone();
-    let terminal_id = reversal.terminal_id.clone();
     let movement_type = reversal.movement_type;
     let amount_cents = reversal.amount_cents;
     let inserted = movements::insert_cash_movement(&mut *tx, reversal).await?;
@@ -559,7 +572,7 @@ async fn write_reversal(
     }
     let delta = -drawer_delta(movement_type, amount_cents);
     if delta != 0 {
-        drawer::update_drawer_balance(&mut *tx, &terminal_id, delta).await?;
+        drawer::update_drawer_balance(&mut *tx, drawer_owner, delta).await?;
     }
     Ok(inserted)
 }
@@ -605,14 +618,32 @@ pub(crate) async fn to_movements(
         .collect())
 }
 
+/// Whose drawer a movement moves: the shift owner's when it belongs to a shift (whichever machine
+/// typed it), otherwise the person who recorded it.
+pub(crate) async fn drawer_owner(
+    db: &Db,
+    session_key: Option<&str>,
+    recorded_by_user_id: &str,
+) -> AppResult<String> {
+    let Some(session_key) = session_key else {
+        return Ok(recorded_by_user_id.to_string());
+    };
+    let session = sessions::find_session_by_key(db, session_key)
+        .await?
+        .ok_or_else(|| {
+            AppError::not_found_with_code("Register session not found", codes::SESSION_NOT_FOUND)
+        })?;
+    Ok(session.cashier_id)
+}
+
 /// Books a validated movement on the shift and the drawer, in the caller's transaction, so the
 /// row, the shift's totals and the drawer's cash move together or not at all.
 pub(crate) async fn write_movement(
     tx: &mut Tx,
     document: CashMovementDocument,
+    drawer_owner: &str,
 ) -> AppResult<CashMovementDocument> {
     let session_key = document.session_key.clone();
-    let terminal_id = document.terminal_id.clone();
     let movement_type = document.movement_type;
     let amount_cents = document.amount_cents;
 
@@ -624,7 +655,7 @@ pub(crate) async fn write_movement(
     // The drawer balance survives across shifts, so it moves with every movement.
     let delta = drawer_delta(movement_type, amount_cents);
     if delta != 0 {
-        drawer::update_drawer_balance(&mut *tx, &terminal_id, delta).await?;
+        drawer::update_drawer_balance(&mut *tx, drawer_owner, delta).await?;
     }
     Ok(inserted)
 }

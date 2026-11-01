@@ -161,7 +161,7 @@ pub async fn close_session(
     drawer::upsert_drawer_state(
         db,
         DrawerStateDocument {
-            terminal_id: session.terminal_id.clone(),
+            user_key: session.cashier_id.clone(),
             current_balance_cents: body.closing_float_cents,
             last_session_key: Some(session.key.clone()),
             last_closing_float_cents: body.closing_float_cents,
@@ -367,19 +367,6 @@ pub async fn open_session(
         return Err(AppError::validation("openingFloatCents cannot be negative"));
     }
 
-    // Guard: only 1 open session per terminal
-    if let Some(existing) =
-        sessions::find_active_session_for_terminal(db, &body.terminal_id).await?
-    {
-        return Err(AppError::conflict(
-            codes::SESSION_ALREADY_OPEN,
-            format!(
-                "An active register session ({}) is already open on terminal '{}'",
-                existing.session_number, body.terminal_id
-            ),
-        ));
-    }
-
     // Guard: only 1 open session per cashier
     if let Some(existing) = sessions::find_active_session_for_cashier(db, &cashier_id).await? {
         return Err(AppError::conflict(
@@ -391,8 +378,8 @@ pub async fn open_session(
         ));
     }
 
-    // Ledger check: inspect drawer balance from previous close / outside movements
-    let drawer_state = drawer::get_drawer_state(db, &body.terminal_id).await?;
+    // Ledger check: the cashier's own balance from their last close and outside movements.
+    let drawer_state = drawer::get_drawer_state(db, &cashier_id).await?;
     let expected_opening_float =
         expected_opening_float(drawer_state.as_ref(), body.opening_float_cents);
 
@@ -457,7 +444,7 @@ pub async fn open_session(
         key: generate_id(prefixes::REGISTER_SESSION),
         session_number,
         terminal_id: body.terminal_id.clone(),
-        cashier_id,
+        cashier_id: cashier_id.clone(),
         cashier_name_snapshot: cashier_name,
         status: SessionStatus::Open,
         opened_at: now,
@@ -507,7 +494,7 @@ pub async fn open_session(
     drawer::upsert_drawer_state(
         db,
         DrawerStateDocument {
-            terminal_id: body.terminal_id,
+            user_key: cashier_id.clone(),
             current_balance_cents: body.opening_float_cents,
             last_session_key: Some(inserted.key.clone()),
             last_closing_float_cents: drawer_state
@@ -582,20 +569,6 @@ pub async fn reopen_session(
         ));
     }
 
-    // Ensure no other active session has been opened on this terminal
-    if let Some(existing) =
-        sessions::find_active_session_for_terminal(db, &session.terminal_id).await?
-        && existing.key != session.key
-    {
-        return Err(AppError::conflict(
-            codes::SESSION_ALREADY_OPEN,
-            format!(
-                "Cannot reopen session: an active register session ({}) is already open on terminal '{}'",
-                existing.session_number, session.terminal_id
-            ),
-        ));
-    }
-
     // Ensure this cashier does not already have another active session
     if let Some(existing) =
         sessions::find_active_session_for_cashier(db, &session.cashier_id).await?
@@ -635,7 +608,7 @@ pub async fn reopen_session(
     drawer::upsert_drawer_state(
         db,
         DrawerStateDocument {
-            terminal_id: session.terminal_id.clone(),
+            user_key: session.cashier_id.clone(),
             current_balance_cents: expected_cash,
             last_session_key: Some(session.key.clone()),
             last_closing_float_cents: session.opening_float_cents,
@@ -651,29 +624,12 @@ pub async fn reopen_session(
     Ok(updated.into_register_session())
 }
 
-/// Resolves the active session.
+/// The user's own open shift, whichever machine it was opened on: the shift follows the user.
 pub async fn resolve_active_session(
     db: &Db,
-    terminal_id: Option<&str>,
     cashier_id: &str,
 ) -> AppResult<Option<RegisterSessionDocument>> {
-    let profile = crate::modules::settings::service::get_shop_profile(db, None).await?;
-    let term = terminal_id.map(str::trim).filter(|t| !t.is_empty());
-
-    if profile.allow_shared_user_sessions {
-        if let Some(t) = term
-            && let Some(s) = sessions::find_active_session_for_terminal(db, t).await?
-        {
-            return Ok(Some(s));
-        }
-        sessions::find_active_session_for_cashier(db, cashier_id).await
-    } else {
-        if let Some(t) = term {
-            sessions::find_active_session_for_terminal(db, t).await
-        } else {
-            Ok(None)
-        }
-    }
+    sessions::find_active_session_for_cashier(db, cashier_id).await
 }
 
 /// Submits the blind count.

@@ -147,7 +147,7 @@ async fn session_discrepancy_outside_movement_and_variance_conversion() {
     let (status, body) = send_authed(
         &app.router,
         "GET",
-        &format!("/api/sessions/drawer-state/{terminal_id}"),
+        "/api/sessions/drawer-state",
         None,
         &staff_token,
     )
@@ -242,7 +242,7 @@ async fn session_discrepancy_outside_movement_and_variance_conversion() {
 }
 
 #[tokio::test]
-async fn test_shared_vs_isolated_register_shift_mode_and_mid_shift_guard() {
+async fn shift_follows_its_owner_and_the_setting_guard_holds() {
     let app = common::spawn_app_isolated().await;
 
     // Seed Admin
@@ -330,7 +330,7 @@ async fn test_shared_vs_isolated_register_shift_mode_and_mid_shift_guard() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(res["data"]["key"], session_1_key);
 
-    // b) Cashier 2 on term_1 resolves to term_1's session
+    // b) Cashier 2 on term_1 does not get Cashier 1's shift (each user sees their own)
     let (status, res) = send_authed_with_device(
         &app.router,
         "GET",
@@ -341,9 +341,9 @@ async fn test_shared_vs_isolated_register_shift_mode_and_mid_shift_guard() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(res["data"]["key"], session_1_key);
+    assert!(res["data"].is_null(), "another user's shift leaked: {res}");
 
-    // c) Cashier 1 with NO terminal_id / device-id returns null in isolated mode
+    // c) Staff away from the machine their shift was opened on see no shift
     let (status, res) = send_authed(
         &app.router,
         "GET",
@@ -355,7 +355,7 @@ async fn test_shared_vs_isolated_register_shift_mode_and_mid_shift_guard() {
     assert_eq!(status, StatusCode::OK);
     assert!(
         res["data"].is_null(),
-        "Expected null in isolated mode without terminal_id: {res}"
+        "staff shift shown away from its machine: {res}"
     );
 
     // d) Cashier 2 on unused terminal term_2 returns null
@@ -433,8 +433,8 @@ async fn test_shared_vs_isolated_register_shift_mode_and_mid_shift_guard() {
     assert_eq!(status, StatusCode::CONFLICT, "Body: {conflict_res}");
     assert_eq!(conflict_res["code"], "ACTIVE_SESSIONS_EXIST");
 
-    // 9. Test resolution in Shared Mode (allowSharedUserSessions == true):
-    // a) Cashier 1 operating on term_2 resolves to term_2's active session
+    // 9. Same rules with the setting on (it no longer changes shift lookup):
+    // a) Cashier 1 on term_2 does not join Cashier 2's shift
     let (status, res) = send_authed_with_device(
         &app.router,
         "GET",
@@ -445,9 +445,20 @@ async fn test_shared_vs_isolated_register_shift_mode_and_mid_shift_guard() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(res["data"]["key"], session_2_key);
+    assert!(res["data"].is_null(), "another user's shift leaked: {res}");
 
-    // b) Cashier 2 with NO device_id or unknown terminal falls back to Cashier 2's active session
+    // b) Cashier 2 gets his shift on term_2, and not without a device
+    let (status, res) = send_authed_with_device(
+        &app.router,
+        "GET",
+        "/api/sessions/current",
+        None,
+        &cashier2_token,
+        Some("term_2"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(res["data"]["key"], session_2_key);
     let (status, res) = send_authed(
         &app.router,
         "GET",
@@ -457,9 +468,9 @@ async fn test_shared_vs_isolated_register_shift_mode_and_mid_shift_guard() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(
-        res["data"]["key"], session_2_key,
-        "Expected fallback to cashier active session in shared mode"
+    assert!(
+        res["data"].is_null(),
+        "staff shift shown without its machine: {res}"
     );
 
     // c) Cashier 1 with NO device_id has no session and returns null

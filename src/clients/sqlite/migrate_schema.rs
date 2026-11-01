@@ -317,8 +317,58 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             }
         }
     }
+    migrate_drawer_state_to_users(pool).await?;
 
     Ok(())
+}
+
+/// One-off rebuild of `drawer_state` from one row per machine to one row per user (the shift
+/// owner). A row's owner is the cashier of its last shift, else of the latest shift on that
+/// machine; when one user had several machines the most recently updated row wins, and a row
+/// whose machine never had a shift is dropped. A no-op once the table has `user_key`.
+async fn migrate_drawer_state_to_users(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    let columns = table_columns(pool, "drawer_state").await?;
+    if !columns.iter().any(|c| c == "terminal_id") {
+        return Ok(());
+    }
+    tracing::info!("Migrating 'drawer_state' table: one balance per user instead of per machine");
+    let mut tx = pool.begin().await?;
+    tx.execute(
+        r#"
+        CREATE TABLE drawer_state_by_user (
+            user_key TEXT PRIMARY KEY,
+            current_balance_cents INTEGER NOT NULL DEFAULT 0,
+            last_session_key TEXT,
+            last_closing_float_cents INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL
+        );
+        INSERT INTO drawer_state_by_user
+            (user_key, current_balance_cents, last_session_key, last_closing_float_cents, updated_at)
+        SELECT owner, current_balance_cents, last_session_key, last_closing_float_cents, updated_at
+        FROM (
+            SELECT owned.*,
+                ROW_NUMBER() OVER (PARTITION BY owner ORDER BY updated_at DESC) AS newest
+            FROM (
+                SELECT d.current_balance_cents, d.last_session_key, d.last_closing_float_cents,
+                    d.updated_at,
+                    COALESCE(
+                        (SELECT s.cashier_id FROM register_sessions s
+                            WHERE s.key = d.last_session_key),
+                        (SELECT s.cashier_id FROM register_sessions s
+                            WHERE s.terminal_id = d.terminal_id
+                            ORDER BY s.opened_at DESC LIMIT 1)
+                    ) AS owner
+                FROM drawer_state d
+            ) owned
+            WHERE owner IS NOT NULL
+        )
+        WHERE newest = 1;
+        DROP TABLE drawer_state;
+        ALTER TABLE drawer_state_by_user RENAME TO drawer_state;
+        "#,
+    )
+    .await?;
+    tx.commit().await
 }
 
 /// One-off rebuild of a desktop database whose `users` table still logs in by

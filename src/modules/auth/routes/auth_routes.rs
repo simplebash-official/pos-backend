@@ -2,6 +2,7 @@ use crate::app::AppState;
 use crate::core::constants::{codes, modules, permissions};
 use crate::core::error::{AppError, AppResult};
 use crate::core::middleware::auth::CurrentUser;
+use crate::core::middleware::sync_headers::DeviceId;
 use crate::core::response::{ApiResponse, ErrorResponse};
 use crate::domain::auth::{
     LoginRequest, LoginResponse, LoginSessionListQuery, LoginSessionsResponse, ShopLookupResponse,
@@ -70,17 +71,27 @@ fn extract_user_agent(headers: &HeaderMap) -> Option<String> {
         (status = 200, description = "Login successful", body = ApiResponse<LoginResponse>),
         (status = 400, description = "Validation error (including a missing shopCode when TENANT_MODE=multi)", body = ErrorResponse),
         (status = 401, description = "Invalid username or password, or account deactivated (in multi-tenant mode also an unknown shopCode)", body = ErrorResponse),
+        (status = 409, description = "SESSION_OPEN_ON_OTHER_DEVICE: a staff account whose shift is open on another machine (X-Device-Id)", body = ErrorResponse),
     )
 )]
 pub(super) async fn login(
     State(state): State<AppState>,
     headers: HeaderMap,
+    device_id: DeviceId,
     Json(body): Json<LoginRequest>,
 ) -> AppResult<Json<ApiResponse<LoginResponse>>> {
     let ip_address = extract_ip_address(&headers);
     let user_agent = extract_user_agent(&headers);
 
-    let response = service::login(&state.db, &state.config, body, ip_address, user_agent).await?;
+    let response = service::login(
+        &state.db,
+        &state.config,
+        body,
+        ip_address,
+        user_agent,
+        device_id.0,
+    )
+    .await?;
 
     Ok(Json(ApiResponse::success(response, "Login successful")))
 }

@@ -479,7 +479,6 @@ pub(super) async fn list_payments(
 pub(super) async fn record_payment(
     user: CurrentUser,
     State(state): State<AppState>,
-    device_id: crate::core::middleware::sync_headers::DeviceId,
     Path(id): Path<String>,
     Json(body): Json<RecordPaymentRequest>,
 ) -> AppResult<Json<ApiResponse<PaymentRecord>>> {
@@ -492,7 +491,6 @@ pub(super) async fn record_payment(
         body,
         user.user_id,
         recorded_by_name,
-        device_id.0,
     )
     .await?;
     state.reports_engine.invalidate_active();

@@ -52,6 +52,8 @@ pub(super) enum PreparedPayment {
 pub(super) struct CashPayment {
     capital: Option<CashMovementDocument>,
     payment: CashMovementDocument,
+    /// Whose drawer both movements move (`movement_service::drawer_owner`).
+    drawer_owner: String,
 }
 
 /// One payment to prepare: where the money comes from and who gets it.
@@ -165,9 +167,13 @@ async fn prepare_outlay(
                 cash_offset_cents + if own_pocket { outlay.amount_cents } else { 0 },
             )
             .await?;
+            let drawer_owner =
+                movement_service::drawer_owner(db, paid.session_key.as_deref(), &by.user_id)
+                    .await?;
             Ok(PreparedPayment::Cash(Box::new(CashPayment {
                 capital,
                 payment: paid,
+                drawer_owner,
             })))
         }
         PaymentSource::Bank | PaymentSource::Card | PaymentSource::Online => {
@@ -225,12 +231,16 @@ async fn write_payment(
 ) -> AppResult<(PaymentKind, String)> {
     match payment {
         PreparedPayment::Cash(cash) => {
-            let CashPayment { capital, payment } = *cash;
+            let CashPayment {
+                capital,
+                payment,
+                drawer_owner,
+            } = *cash;
             if let Some(capital) = capital {
-                movement_service::write_movement(tx, capital).await?;
+                movement_service::write_movement(tx, capital, &drawer_owner).await?;
             }
             let key = payment.key.clone();
-            movement_service::write_movement(tx, payment).await?;
+            movement_service::write_movement(tx, payment, &drawer_owner).await?;
             Ok((PaymentKind::CashMovement, key))
         }
         PreparedPayment::Ledger(prepared) => {

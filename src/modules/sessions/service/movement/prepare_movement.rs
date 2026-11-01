@@ -74,7 +74,7 @@ pub(crate) async fn prepare_movement(
             return Err(AppError::validation("terminalId is required"));
         }
 
-        let cash_in_drawer = cash_in_drawer(db, body.session_key.as_deref(), &body.terminal_id)
+        let cash_in_drawer = cash_in_drawer(db, body.session_key.as_deref(), &recorded_by_user_id)
             .await?
             + cash_added_cents;
 

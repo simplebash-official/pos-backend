@@ -119,7 +119,7 @@ impl CashMovementDocument {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 /// How a drawer state is stored in the database.
 pub struct DrawerStateDocument {
-    pub terminal_id: String,
+    pub user_key: String,
     pub current_balance_cents: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_session_key: Option<String>,
@@ -132,7 +132,7 @@ impl DrawerStateDocument {
     /// Converts the stored document into the type the API returns.
     pub fn into_drawer_state(self) -> DrawerState {
         DrawerState {
-            terminal_id: self.terminal_id,
+            user_key: self.user_key,
             current_balance_cents: self.current_balance_cents,
             last_session_key: self.last_session_key,
             last_closing_float_cents: self.last_closing_float_cents,

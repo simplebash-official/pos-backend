@@ -12,29 +12,26 @@ pub(super) fn drawer_state_col(db: &TenantDatabase) -> ScopedCollection<DrawerSt
 }
 
 /// Returns the drawer state.
-pub async fn get_drawer_state(
-    db: &Db,
-    terminal_id: &str,
-) -> AppResult<Option<DrawerStateDocument>> {
+pub async fn get_drawer_state(db: &Db, user_key: &str) -> AppResult<Option<DrawerStateDocument>> {
     match db {
         Db::Mongo(mongo_db) => {
             let doc = drawer_state_col(mongo_db)
-                .find_one(doc! { "terminal_id": terminal_id })
+                .find_one(doc! { "user_key": user_key })
                 .await?;
             Ok(doc)
         }
         Db::Sqlite(pool) => {
             let row = sqlx::query(
-                "SELECT terminal_id, current_balance_cents, last_session_key, last_closing_float_cents, updated_at FROM drawer_state WHERE terminal_id = ?"
+                "SELECT user_key, current_balance_cents, last_session_key, last_closing_float_cents, updated_at FROM drawer_state WHERE user_key = ?"
             )
-            .bind(terminal_id)
+            .bind(user_key)
             .fetch_optional(pool)
             .await?;
 
             row.map(|r| -> AppResult<DrawerStateDocument> {
                 let updated_at_str: String = r.get("updated_at");
                 Ok(DrawerStateDocument {
-                    terminal_id: r.get("terminal_id"),
+                    user_key: r.get("user_key"),
                     current_balance_cents: r.get("current_balance_cents"),
                     last_session_key: r.get("last_session_key"),
                     last_closing_float_cents: r.get("last_closing_float_cents"),
@@ -46,7 +43,7 @@ pub async fn get_drawer_state(
     }
 }
 
-/// The drawer balance of every terminal, for the shop-wide cash total.
+/// The drawer balance of every user, for the shop-wide cash total.
 pub async fn list_drawer_states(db: &Db) -> AppResult<Vec<DrawerStateDocument>> {
     match db {
         Db::Mongo(mongo_db) => {
@@ -59,14 +56,14 @@ pub async fn list_drawer_states(db: &Db) -> AppResult<Vec<DrawerStateDocument>> 
         }
         Db::Sqlite(pool) => {
             let rows = sqlx::query(
-                "SELECT terminal_id, current_balance_cents, last_session_key, last_closing_float_cents, updated_at FROM drawer_state",
+                "SELECT user_key, current_balance_cents, last_session_key, last_closing_float_cents, updated_at FROM drawer_state",
             )
             .fetch_all(pool)
             .await?;
             rows.iter()
                 .map(|r| -> AppResult<DrawerStateDocument> {
                     Ok(DrawerStateDocument {
-                        terminal_id: r.get("terminal_id"),
+                        user_key: r.get("user_key"),
                         current_balance_cents: r.get("current_balance_cents"),
                         last_session_key: r.get("last_session_key"),
                         last_closing_float_cents: r.get("last_closing_float_cents"),
@@ -81,7 +78,7 @@ pub async fn list_drawer_states(db: &Db) -> AppResult<Vec<DrawerStateDocument>> 
 /// Updates the drawer balance.
 pub async fn update_drawer_balance(
     unit: impl Into<Unit<'_>>,
-    terminal_id: &str,
+    user_key: &str,
     delta_cents: i64,
 ) -> AppResult<()> {
     let now = BsonDateTime::now();
@@ -91,11 +88,11 @@ pub async fn update_drawer_balance(
             crate::in_session!(
                 drawer_state_col(mongo_db)
                     .find_one_and_update(
-                        doc! { "terminal_id": terminal_id },
+                        doc! { "user_key": user_key },
                         doc! {
                             "$inc": { "current_balance_cents": delta_cents },
                             "$set": { "updated_at": now },
-                            // A first-ever movement on a terminal creates the row; it must be a complete drawer state.
+                            // A first-ever movement for a user creates the row; it must be a complete drawer state.
                             "$setOnInsert": { "last_closing_float_cents": 0_i64 },
                         },
                     )
@@ -108,14 +105,14 @@ pub async fn update_drawer_balance(
             let now_iso = now_utc_iso();
             sqlx::query(
                 r#"
-                INSERT INTO drawer_state (terminal_id, current_balance_cents, last_session_key, last_closing_float_cents, updated_at)
+                INSERT INTO drawer_state (user_key, current_balance_cents, last_session_key, last_closing_float_cents, updated_at)
                 VALUES (?, ?, NULL, 0, ?)
-                ON CONFLICT(terminal_id) DO UPDATE SET
+                ON CONFLICT(user_key) DO UPDATE SET
                     current_balance_cents = current_balance_cents + excluded.current_balance_cents,
                     updated_at = excluded.updated_at
                 "#
             )
-            .bind(terminal_id)
+            .bind(user_key)
             .bind(delta_cents)
             .bind(&now_iso)
             .execute(&mut *conn)
@@ -133,7 +130,7 @@ pub async fn upsert_drawer_state(
     match db {
         Db::Mongo(mongo_db) => {
             let col = drawer_state_col(mongo_db);
-            let filter = doc! { "terminal_id": &state.terminal_id };
+            let filter = doc! { "user_key": &state.user_key };
             if col.find_one(filter.clone()).await?.is_some() {
                 col.replace_one(filter, &state).await?;
             } else {
@@ -145,16 +142,16 @@ pub async fn upsert_drawer_state(
             let updated_at_iso = bson_to_iso(&state.updated_at);
             sqlx::query(
                 r#"
-                INSERT INTO drawer_state (terminal_id, current_balance_cents, last_session_key, last_closing_float_cents, updated_at)
+                INSERT INTO drawer_state (user_key, current_balance_cents, last_session_key, last_closing_float_cents, updated_at)
                 VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(terminal_id) DO UPDATE SET
+                ON CONFLICT(user_key) DO UPDATE SET
                     current_balance_cents = excluded.current_balance_cents,
                     last_session_key = excluded.last_session_key,
                     last_closing_float_cents = excluded.last_closing_float_cents,
                     updated_at = excluded.updated_at
                 "#
             )
-            .bind(&state.terminal_id)
+            .bind(&state.user_key)
             .bind(state.current_balance_cents)
             .bind(&state.last_session_key)
             .bind(state.last_closing_float_cents)

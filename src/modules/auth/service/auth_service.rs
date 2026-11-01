@@ -8,9 +8,10 @@ use crate::core::utils::calculate_pagination;
 use crate::domain::auth::{
     LoginRequest, LoginResponse, LoginSessionListQuery, LoginSessionsResponse, ShopLookupResponse,
 };
-use crate::domain::users::{UpdateMyPreferencesRequest, User};
+use crate::domain::users::{Role, UpdateMyPreferencesRequest, User};
 use crate::modules::auth::model::LoginSessionDocument;
 use crate::modules::auth::repository;
+use crate::modules::sessions;
 use crate::modules::tenants::service as tenants_service;
 use crate::modules::users::service as users_service;
 use chrono::{Duration, Utc};
@@ -65,6 +66,7 @@ pub(crate) async fn login(
     body: LoginRequest,
     ip_address: Option<String>,
     user_agent: Option<String>,
+    device_id: Option<String>,
 ) -> AppResult<LoginResponse> {
     // Brute-force guard, per shop + account (see `core::rate_limit`). Checked
     // before the password hash is touched, so a blocked account also stops
@@ -88,7 +90,7 @@ pub(crate) async fn login(
         ));
     }
 
-    let result = login_unthrottled(db, config, body, ip_address, user_agent).await;
+    let result = login_unthrottled(db, config, body, ip_address, user_agent, device_id).await;
     match &result {
         Ok(_) => limiter.reset(&limit_key),
         Err(err) if err.wire_parts().status == axum::http::StatusCode::UNAUTHORIZED => {
@@ -105,9 +107,10 @@ async fn login_unthrottled(
     body: LoginRequest,
     ip_address: Option<String>,
     user_agent: Option<String>,
+    device_id: Option<String>,
 ) -> AppResult<LoginResponse> {
     if config.tenant_mode != crate::core::config::TenantMode::Multi {
-        return login_in_scope(db, config, body, ip_address, user_agent, None).await;
+        return login_in_scope(db, config, body, ip_address, user_agent, device_id, None).await;
     }
 
     // Multi-tenant: the shop code picks the tenant, and everything below - the
@@ -123,7 +126,15 @@ async fn login_unthrottled(
         .ok_or_else(|| AppError::unauthorized("Invalid shop code, username or password"))?;
     crate::core::tenancy::with_tenant(
         tenant,
-        login_in_scope(db, config, body, ip_address, user_agent, Some(shop_name)),
+        login_in_scope(
+            db,
+            config,
+            body,
+            ip_address,
+            user_agent,
+            device_id,
+            Some(shop_name),
+        ),
     )
     .await
 }
@@ -134,6 +145,7 @@ async fn login_in_scope(
     body: LoginRequest,
     ip_address: Option<String>,
     user_agent: Option<String>,
+    device_id: Option<String>,
     shop_name: Option<String>,
 ) -> AppResult<LoginResponse> {
     crate::core::logging::domain::tracked("auth.login", async move {
@@ -150,6 +162,17 @@ async fn login_in_scope(
             && let Some(info) = tenants_service::suspension_of(db, &tenant_id).await?
         {
             return Err(tenants_service::suspended_error(&info));
+        }
+
+        // Staff work from one machine: while their shift is open, no other machine may sign in.
+        if user.role == Role::Staff
+            && let Some(shift) = sessions::service::resolve_active_session(db, &user.id).await?
+            && device_id.as_deref() != Some(shift.terminal_id.as_str())
+        {
+            return Err(AppError::conflict(
+                codes::SESSION_OPEN_ON_OTHER_DEVICE,
+                "Your shift is open on another machine. Close it there first.",
+            ));
         }
 
         let permissions: Vec<String> = roles::default_permissions(user.role)

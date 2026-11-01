@@ -311,11 +311,11 @@ pub struct CreateCashMovementRequest {
 /// also the key of a stored denomination count.
 pub const DENOMINATION_RUPEES: [i64; 10] = [5000, 1000, 500, 100, 50, 20, 10, 5, 2, 1];
 
-/// Persistent ledger of cash surviving across sessions for a terminal.
+/// Persistent ledger of cash surviving across shifts, one per user (the shift owner).
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DrawerState {
-    pub terminal_id: String,
+    pub user_key: String,
     pub current_balance_cents: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_session_key: Option<String>,

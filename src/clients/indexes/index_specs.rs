@@ -353,6 +353,14 @@ pub fn index_specs(tenant_mode: TenantMode) -> Vec<IndexSpec> {
         doc! { "owner_kind": 1, "owner_key": 1 },
         false,
     );
+    // Each user's running drawer balance (`sessions::repository::drawer`). Not unique: rows
+    // written before `migrate_drawer_by_user` ran have no `user_key` yet.
+    specs.add(
+        "drawer_state",
+        "drawer_state_user_key",
+        doc! { "user_key": 1 },
+        false,
+    );
     // The shop's drawer rules (`modules::cash_settings`): one row.
     specs.add(
         "cash_settings",

@@ -858,13 +858,9 @@ async fn finish_create_credit_note(
 
     let resolved_session_key = match &session_key {
         Some(k) => Some(k.clone()),
-        None => crate::modules::sessions::service::resolve_active_session(
-            db,
-            device_id.as_deref(),
-            &cashier_id,
-        )
-        .await?
-        .map(|s| s.key),
+        None => crate::modules::sessions::service::resolve_active_session(db, &cashier_id)
+            .await?
+            .map(|s| s.key),
     };
 
     let now = BsonDateTime::now();
@@ -921,7 +917,7 @@ async fn finish_create_credit_note(
                         .ok_or_else(|| AppError::internal("the refund's session disappeared"))?;
                 crate::modules::sessions::repository::drawer::update_drawer_balance(
                     db,
-                    &session.terminal_id,
+                    &session.cashier_id,
                     -cash_refunded,
                 )
                 .await?;

@@ -308,16 +308,12 @@ pub async fn complete_sale(
                 Some(sess)
             }
             None => {
-                crate::modules::sessions::service::resolve_active_session(
-                    db,
-                    device_id.as_deref(),
-                    &cashier_id,
-                )
-                .await?
+                crate::modules::sessions::service::resolve_active_session(db, &cashier_id).await?
             }
         };
         let active_session_key = session_doc.as_ref().map(|s| s.key.clone());
-        let active_session_terminal_id = session_doc.as_ref().map(|s| s.terminal_id.clone());
+        // The cash belongs to the shift owner's drawer, whichever machine rang the sale up.
+        let active_session_owner = session_doc.as_ref().map(|s| s.cashier_id.clone());
 
         let reservation = sequences::service::reserve_sequence(
             db,
@@ -521,8 +517,7 @@ pub async fn complete_sale(
             (cash, card, 0i64, unpaid)
         };
 
-        if let (Some(sess_key), Some(term_id)) = (&active_session_key, &active_session_terminal_id)
-        {
+        if let (Some(sess_key), Some(owner)) = (&active_session_key, &active_session_owner) {
             if let Err(err) =
                 crate::modules::sessions::repository::sessions::increment_session_sales(
                     db,
@@ -542,7 +537,7 @@ pub async fn complete_sale(
             if cash_delta != 0
                 && let Err(err) =
                     crate::modules::sessions::repository::drawer::update_drawer_balance(
-                        db, term_id, cash_delta,
+                        db, owner, cash_delta,
                     )
                     .await
             {

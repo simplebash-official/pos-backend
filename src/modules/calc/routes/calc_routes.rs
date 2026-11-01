@@ -75,8 +75,7 @@ pub(super) async fn calc_cash_movement(
     }
     let db = &state.db;
     let cash_in_drawer_cents =
-        sessions::service::cash_in_drawer(db, body.session_key.as_deref(), &body.terminal_id)
-            .await?;
+        sessions::service::cash_in_drawer(db, body.session_key.as_deref(), &user.user_id).await?;
     let category_limit_cents = match &body.category_key {
         Some(key) => {
             cash_categories::service::category_for_movement(db, key, body.movement_type)
@@ -348,9 +347,10 @@ pub(super) async fn calc_shift_count(
                 Some(session.opening_float_cents),
             )
         }
-        (None, Some(terminal_id)) => {
+        // Opening: the user's own balance is expected, whichever machine they open on.
+        (None, Some(_terminal_id)) => {
             let drawer =
-                sessions::repository::drawer::get_drawer_state(&state.db, terminal_id).await?;
+                sessions::repository::drawer::get_drawer_state(&state.db, &user.user_id).await?;
             (
                 sessions::service::expected_opening_float(drawer.as_ref(), body.counted_cents),
                 None,

@@ -1129,7 +1129,7 @@ CREATE INDEX IF NOT EXISTS idx_payees_name ON payees(payee_type, normalized_name
 CREATE INDEX IF NOT EXISTS idx_payees_sync ON payees(updated_at, key);
 
 CREATE TABLE IF NOT EXISTS drawer_state (
-    terminal_id TEXT PRIMARY KEY,
+    user_key TEXT PRIMARY KEY,
     current_balance_cents INTEGER NOT NULL DEFAULT 0,
     last_session_key TEXT,
     last_closing_float_cents INTEGER NOT NULL DEFAULT 0,
