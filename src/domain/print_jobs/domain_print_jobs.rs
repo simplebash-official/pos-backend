@@ -11,7 +11,6 @@ use utoipa::{IntoParams, ToSchema};
 #[serde(rename_all = "camelCase")]
 pub struct CreatePrintJobRequest {
     /// Customer contact information.
-    #[serde(default)]
     pub customer: PrintJobCustomer,
     /// Category of print job.
     pub job_type: String,
@@ -45,8 +44,7 @@ pub struct PrintJob {
     /// Customer name.
     pub customer_name: String,
     /// Customer contact phone.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub customer_phone: Option<String>,
+    pub customer_phone: String,
     /// `"mug" | "t-shirt" | "handbill" | "banner" | "custom"` — validated
     /// against that fixed set in `service`, not modeled as a Rust enum so
     /// the frontend's `PrintJobType` union stays the single source of truth

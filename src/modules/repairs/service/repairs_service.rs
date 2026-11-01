@@ -24,11 +24,11 @@ pub async fn create_repair(
         validate_status(&status)?;
         validate_promised_ready_at(body.promised_ready_at.as_deref())?;
 
-        let (customer_name, customer_phone) = resolve_customer_name_phone(
+        let (customer_name, customer_phone) = resolve_customer_info(
             db,
             body.customer.customer_key.as_deref(),
-            body.customer.customer_name.unwrap_or_default(),
-            body.customer.customer_phone.unwrap_or_default(),
+            body.customer.customer_name,
+            body.customer.customer_phone,
         )
         .await?;
 
@@ -265,21 +265,28 @@ pub(super) async fn resolve_assignment_employee_name(
 /// When `customer_key` resolves to a real customer, that record is
 /// authoritative for name/phone — a client-typed name/phone alongside a
 /// valid key could otherwise silently diverge from the linked customer.
-/// Falls back to the client-supplied name/phone only when there's no key
-/// (a walk-in with no linked account). Mirrors
-/// `billing::service::sale::complete_sale`'s customer-key resolution.
-pub(super) async fn resolve_customer_name_phone(
+/// Resolves from the client-supplied name/phone when there's no key
+/// (a walk-in with no linked account).
+pub(super) async fn resolve_customer_info(
     db: &Db,
     customer_key: Option<&str>,
-    fallback_name: String,
-    fallback_phone: String,
+    input_name: Option<String>,
+    input_phone: Option<String>,
 ) -> AppResult<(String, String)> {
     match customer_key {
         Some(key) => {
             let customer = customers::service::get_customer_by_key(db, key).await?;
             Ok((customer.name, customer.primary_phone))
         }
-        None => Ok((fallback_name, fallback_phone)),
+        None => {
+            let name = input_name
+                .filter(|n| !n.trim().is_empty())
+                .ok_or_else(|| AppError::validation("Customer name is required"))?;
+            let phone = input_phone
+                .filter(|p| !p.trim().is_empty())
+                .ok_or_else(|| AppError::validation("Customer phone cannot be empty"))?;
+            Ok((name, phone))
+        }
     }
 }
 
@@ -300,18 +307,31 @@ pub async fn update_repair(
             .id
             .expect("persisted repair document must have an _id");
 
-        let customer = body.customer.unwrap_or_default();
-        let effective_customer_key = customer
-            .customer_key
-            .clone()
-            .or(existing.customer_key.clone());
-        let (customer_name, customer_phone) = resolve_customer_name_phone(
-            db,
-            effective_customer_key.as_deref(),
-            customer.customer_name.unwrap_or(existing.customer_name),
-            customer.customer_phone.unwrap_or(existing.customer_phone),
-        )
-        .await?;
+        let effective_customer_key = body
+            .customer
+            .as_ref()
+            .and_then(|c| c.customer_key.clone())
+            .or_else(|| existing.customer_key.clone());
+
+        let (customer_name, customer_phone) = match effective_customer_key.as_deref() {
+            Some(key) => {
+                let customer = customers::service::get_customer_by_key(db, key).await?;
+                (customer.name, customer.primary_phone)
+            }
+            None => {
+                let name = body
+                    .customer
+                    .as_ref()
+                    .and_then(|c| c.customer_name.clone())
+                    .unwrap_or(existing.customer_name);
+                let phone = body
+                    .customer
+                    .as_ref()
+                    .and_then(|c| c.customer_phone.clone())
+                    .unwrap_or(existing.customer_phone);
+                (name, phone)
+            }
+        };
         let device_model = body.device_model.unwrap_or(existing.device_model);
         let issue_description = body.issue_description.unwrap_or(existing.issue_description);
         let estimated_cost_cents = body.estimated_cost_cents.or(existing.estimated_cost_cents);

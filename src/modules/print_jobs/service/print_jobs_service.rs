@@ -25,16 +25,17 @@ pub async fn create_print_job(
         validate_job_type(&body.job_type)?;
         validate_promised_ready_at(body.promised_ready_at.as_deref())?;
 
-        let (customer_name, customer_phone) = resolve_customer_name_phone(
+        let (customer_name, customer_phone) = resolve_customer_info(
             db,
             body.customer.customer_key.as_deref(),
-            body.customer.customer_name.unwrap_or_default(),
+            body.customer.customer_name,
             body.customer.customer_phone,
         )
         .await?;
 
         validate_required_fields(
             &customer_name,
+            &customer_phone,
             &body.job_type,
             body.quantity,
             body.estimated_cost_cents,
@@ -73,7 +74,7 @@ pub async fn create_print_job(
             ticket_number,
             customer_key: body.customer.customer_key,
             customer_name: customer_name.trim().to_string(),
-            customer_phone,
+            customer_phone: customer_phone.trim().to_string(),
             job_type: body.job_type,
             quantity: body.quantity,
             promised_ready_at: body.promised_ready_at,
@@ -254,21 +255,28 @@ pub(super) async fn resolve_assignment_employee_name(
 /// When `customer_key` resolves to a real customer, that record is
 /// authoritative for name/phone — a client-typed name/phone alongside a
 /// valid key could otherwise silently diverge from the linked customer.
-/// Falls back to the client-supplied name/phone only when there's no key
-/// (a walk-in with no linked account). Mirrors
-/// `billing::service::sale::complete_sale`'s customer-key resolution.
-pub(super) async fn resolve_customer_name_phone(
+/// Resolves from the client-supplied name/phone when there's no key
+/// (a walk-in with no linked account).
+pub(super) async fn resolve_customer_info(
     db: &Db,
     customer_key: Option<&str>,
-    fallback_name: String,
-    fallback_phone: Option<String>,
-) -> AppResult<(String, Option<String>)> {
+    input_name: Option<String>,
+    input_phone: Option<String>,
+) -> AppResult<(String, String)> {
     match customer_key {
         Some(key) => {
             let customer = customers::service::get_customer_by_key(db, key).await?;
-            Ok((customer.name, Some(customer.primary_phone)))
+            Ok((customer.name, customer.primary_phone))
         }
-        None => Ok((fallback_name, fallback_phone)),
+        None => {
+            let name = input_name
+                .filter(|n| !n.trim().is_empty())
+                .ok_or_else(|| AppError::validation("Customer name is required"))?;
+            let phone = input_phone
+                .filter(|p| !p.trim().is_empty())
+                .ok_or_else(|| AppError::validation("Customer phone cannot be empty"))?;
+            Ok((name, phone))
+        }
     }
 }
 
@@ -289,18 +297,31 @@ pub async fn update_print_job(
             .id
             .expect("persisted print job document must have an _id");
 
-        let customer = body.customer.unwrap_or_default();
-        let effective_customer_key = customer
-            .customer_key
-            .clone()
-            .or(existing.customer_key.clone());
-        let (customer_name, customer_phone) = resolve_customer_name_phone(
-            db,
-            effective_customer_key.as_deref(),
-            customer.customer_name.unwrap_or(existing.customer_name),
-            customer.customer_phone.or(existing.customer_phone),
-        )
-        .await?;
+        let effective_customer_key = body
+            .customer
+            .as_ref()
+            .and_then(|c| c.customer_key.clone())
+            .or_else(|| existing.customer_key.clone());
+
+        let (customer_name, customer_phone) = match effective_customer_key.as_deref() {
+            Some(key) => {
+                let customer = customers::service::get_customer_by_key(db, key).await?;
+                (customer.name, customer.primary_phone)
+            }
+            None => {
+                let name = body
+                    .customer
+                    .as_ref()
+                    .and_then(|c| c.customer_name.clone())
+                    .unwrap_or(existing.customer_name);
+                let phone = body
+                    .customer
+                    .as_ref()
+                    .and_then(|c| c.customer_phone.clone())
+                    .unwrap_or(existing.customer_phone);
+                (name, phone)
+            }
+        };
         let job_type = body.job_type.unwrap_or(existing.job_type);
         let quantity = body.quantity.unwrap_or(existing.quantity);
         let estimated_cost_cents = body
@@ -311,10 +332,17 @@ pub async fn update_print_job(
         validate_status(&status)?;
         validate_job_type(&job_type)?;
         validate_promised_ready_at(body.promised_ready_at.as_deref())?;
-        validate_required_fields(&customer_name, &job_type, quantity, estimated_cost_cents)?;
+        validate_required_fields(
+            &customer_name,
+            &customer_phone,
+            &job_type,
+            quantity,
+            estimated_cost_cents,
+        )?;
 
         let mut set_doc = doc! {
             "customer_name": &customer_name,
+            "customer_phone": &customer_phone,
             "job_type": &job_type,
             "quantity": quantity,
             "estimated_cost_cents": estimated_cost_cents,
@@ -324,10 +352,6 @@ pub async fn update_print_job(
         if let Some(key) = effective_customer_key {
             set_doc.insert("customer_key", key);
         }
-        match customer_phone {
-            Some(phone) => set_doc.insert("customer_phone", phone),
-            None => set_doc.insert("customer_phone", mongodb::bson::Bson::Null),
-        };
         if let Some(promised) = body.promised_ready_at {
             set_doc.insert("promised_ready_at", promised);
         }
@@ -388,8 +412,27 @@ pub(super) fn validate_promised_ready_at(promised_ready_at: Option<&str>) -> App
     }
 }
 
+fn validate_phone_number(phone: &str, field_name: &str) -> AppResult<()> {
+    let trimmed = phone.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::validation(format!(
+            "{field_name} cannot be empty"
+        )));
+    }
+    if !trimmed
+        .chars()
+        .all(|c| c.is_ascii_digit() || matches!(c, ' ' | '-' | '+'))
+    {
+        return Err(AppError::validation(format!(
+            "{field_name} may only contain digits, spaces, dashes, and a plus sign"
+        )));
+    }
+    Ok(())
+}
+
 pub(super) fn validate_required_fields(
     customer_name: &str,
+    customer_phone: &str,
     job_type: &str,
     quantity: i32,
     estimated_cost_cents: i64,
@@ -397,6 +440,7 @@ pub(super) fn validate_required_fields(
     if customer_name.trim().is_empty() {
         return Err(AppError::validation("Customer name is required"));
     }
+    validate_phone_number(customer_phone, "Customer phone")?;
     if job_type.trim().is_empty() {
         return Err(AppError::validation("Job type is required"));
     }

@@ -31,7 +31,6 @@ pub fn compute_job_is_overdue(status: &str, promised_ready_at: Option<&str>) -> 
 #[serde(rename_all = "camelCase")]
 pub struct CreateRepairRequest {
     /// Customer contact information.
-    #[serde(default)]
     pub customer: RepairCustomer,
     /// Device model/brand.
     pub device_model: String,

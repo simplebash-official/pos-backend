@@ -83,7 +83,10 @@ fn unprivileged_token(config: &simplebash_pos_backend::core::config::Config) -> 
 
 fn sample_print_job_payload() -> Value {
     json!({
-        "customer": { "customerName": "Nadeesha Perera" },
+        "customer": {
+            "customerName": "Nadeesha Perera",
+            "customerPhone": "0711234567"
+        },
         "jobType": "t-shirt",
         "quantity": 12,
         "estimatedCostCents": 240000,
@@ -550,7 +553,7 @@ async fn seed_print_job_with_named(
             ticket_number: format!("PRN-{}", &key[4..]),
             customer_key: None,
             customer_name: customer_name.to_string(),
-            customer_phone: Some("0770000000".to_string()),
+            customer_phone: "0770000000".to_string(),
             job_type: "mug".to_string(),
             quantity: 1,
             promised_ready_at: None,
@@ -720,4 +723,81 @@ async fn create_print_job_with_unknown_assigned_employee_id_is_not_found() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
     assert_eq!(body["code"], "EMPLOYEE_NOT_FOUND");
+}
+
+#[tokio::test]
+async fn create_print_job_without_customer_phone_is_rejected() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let mut payload = sample_print_job_payload();
+    payload["customer"] = json!({ "customerName": "Nadeesha Perera" });
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/print-jobs",
+        Some(payload),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "Body: {body}");
+}
+
+#[tokio::test]
+async fn create_print_job_with_invalid_phone_is_rejected() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let mut payload = sample_print_job_payload();
+    payload["customer"] = json!({
+        "customerName": "Nadeesha Perera",
+        "customerPhone": "invalid-phone-xyz"
+    });
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/print-jobs",
+        Some(payload),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "Body: {body}");
+}
+
+#[tokio::test]
+async fn search_print_jobs_by_customer_phone() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let unique_phone = "0729876543";
+    let mut payload = sample_print_job_payload();
+    payload["customer"] = json!({
+        "customerName": "Print Search Target",
+        "customerPhone": unique_phone
+    });
+    let (status, created) = send_authed(
+        &app.router,
+        "POST",
+        "/api/print-jobs",
+        Some(payload),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {created}");
+    let key = created["data"]["key"].as_str().expect("key is string");
+
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/print-jobs?search={unique_phone}"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    let print_jobs = body["data"]["printJobs"].as_array().expect("array");
+    assert!(
+        print_jobs.iter().any(|p| p["key"] == key),
+        "created print job must be found when searching by phone number"
+    );
 }

@@ -22,8 +22,7 @@ pub struct PrintJobDocument {
     /// Customer name snapshot or walk-in name.
     pub customer_name: String,
     /// Customer phone number snapshot.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub customer_phone: Option<String>,
+    pub customer_phone: String,
     /// Type of print job ("mug", "t-shirt", "handbill", "banner", "custom").
     pub job_type: String,
     /// Number of items to print.

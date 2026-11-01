@@ -806,3 +806,62 @@ async fn create_repair_with_unknown_assigned_employee_id_is_not_found() {
     assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
     assert_eq!(body["code"], "EMPLOYEE_NOT_FOUND");
 }
+
+#[tokio::test]
+async fn create_repair_without_customer_phone_is_rejected() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let mut payload = sample_repair_payload("9990003");
+    payload["customer"] = json!({ "customerName": "Kasun Silva" });
+    let (status, body) =
+        send_authed(&app.router, "POST", "/api/repairs", Some(payload), &token).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "Body: {body}");
+}
+
+#[tokio::test]
+async fn create_repair_with_invalid_phone_is_rejected() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let mut payload = sample_repair_payload("9990004");
+    payload["customer"] = json!({
+        "customerName": "Kasun Silva",
+        "customerPhone": "invalid-phone-abc"
+    });
+    let (status, body) =
+        send_authed(&app.router, "POST", "/api/repairs", Some(payload), &token).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "Body: {body}");
+}
+
+#[tokio::test]
+async fn search_repairs_by_customer_phone() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let unique_phone = "0719876543";
+    let mut payload = sample_repair_payload("9990005");
+    payload["customer"] = json!({
+        "customerName": "Phone Search Target",
+        "customerPhone": unique_phone
+    });
+    let (status, created) =
+        send_authed(&app.router, "POST", "/api/repairs", Some(payload), &token).await;
+    assert_eq!(status, StatusCode::OK, "Body: {created}");
+    let key = created["data"]["key"].as_str().expect("key is string");
+
+    let (status, body) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/repairs?search={unique_phone}"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    let repairs = body["data"]["repairs"].as_array().expect("array");
+    assert!(
+        repairs.iter().any(|r| r["key"] == key),
+        "created repair must be found when searching by phone number"
+    );
+}

@@ -328,7 +328,7 @@ CREATE TABLE IF NOT EXISTS print_jobs (
     ticket_number TEXT NOT NULL UNIQUE,
     customer_key TEXT,
     customer_name TEXT NOT NULL,
-    customer_phone TEXT,
+    customer_phone TEXT NOT NULL,
     job_type TEXT NOT NULL,
     quantity INTEGER NOT NULL DEFAULT 1,
     promised_ready_at TEXT,

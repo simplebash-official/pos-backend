@@ -534,7 +534,7 @@ async fn employee_commissions_and_performance_report() {
         ticket_number: format!("PRN-{}", generate_id("t")),
         customer_key: None,
         customer_name: "Customer B".to_string(),
-        customer_phone: None,
+        customer_phone: "0770000000".to_string(),
         job_type: "mug".to_string(),
         quantity: 10,
         promised_ready_at: None,

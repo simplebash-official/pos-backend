@@ -184,7 +184,7 @@ async fn reminders_include_overdue_and_due_soon_repair_and_print_jobs() {
         "POST",
         "/api/print-jobs",
         Some(json!({
-            "customer": { "customerName": "Print Reminder" },
+            "customer": { "customerName": "Print Reminder", "customerPhone": "0755200003" },
             "jobType": "banner",
             "quantity": 2,
             "estimatedCostCents": 90_000,
