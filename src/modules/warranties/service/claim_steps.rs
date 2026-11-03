@@ -259,6 +259,8 @@ pub(crate) async fn open_claim(
                 credit_note_key: None,
                 paid_repair_key: None,
                 paid_repair_number: None,
+                rework_repair_key: None,
+                rework_repair_number: None,
                 supplier: None,
                 received_on: today.to_string(),
                 resolved_on: None,

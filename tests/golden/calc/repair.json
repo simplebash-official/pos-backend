@@ -1,0 +1,25 @@
+{
+  "request": {
+    "items": [
+      {
+        "laborCents": 250000,
+        "partCents": 1200000,
+        "partCostCents": 850000
+      },
+      {
+        "laborCents": 150000
+      },
+      {
+        "laborCents": null,
+        "partCents": 30000,
+        "partCostCents": 12000
+      }
+    ]
+  },
+  "reply": {
+    "laborCents": 400000,
+    "partsCents": 1230000,
+    "priceCents": 1630000,
+    "costCents": 862000
+  }
+}

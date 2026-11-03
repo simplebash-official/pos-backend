@@ -263,14 +263,53 @@ async fn apply_line_item_side_effects(
         }
         "repair" => match &item.source_ticket_key {
             Some(ticket_key) => {
-                if let Err(err) = repairs::service::mark_delivered(db, ticket_key).await {
-                    Some(format!(
-                        "Repair ticket {} could not be marked delivered: {err}",
-                        item.source_ticket_number.as_deref().unwrap_or(ticket_key)
-                    ))
-                } else {
-                    None
+                let ticket_label = item.source_ticket_number.as_deref().unwrap_or(ticket_key);
+                let repair = match repairs::service::mark_delivered(db, ticket_key).await {
+                    Ok(repair) => repair,
+                    Err(err) => {
+                        return Some(format!(
+                            "Repair ticket {ticket_label} could not be marked delivered: {err}"
+                        ));
+                    }
+                };
+                if let Err(err) = repairs::service::use_parts(
+                    db,
+                    &repair,
+                    StockMovementType::RepairPartConsumption,
+                    &inserted_invoice.key,
+                )
+                .await
+                {
+                    return Some(format!(
+                        "The parts of repair ticket {ticket_label} could not be taken out of stock: {err}"
+                    ));
                 }
+                if let Err(err) = warranties::service::issue_for_repair(
+                    db,
+                    warranties::service::RepairLine {
+                        invoice_key: &inserted_invoice.key,
+                        invoice_number: &inserted_invoice.invoice_number,
+                        delivered_at: inserted_invoice.created_at.to_chrono(),
+                        customer_key: inserted_invoice.customer_key.as_deref(),
+                        customer_name: inserted_invoice.customer_name_snapshot.as_deref(),
+                        customer_phone: inserted_invoice.customer_phone_snapshot.as_deref(),
+                        line_index,
+                        repair_key: &repair.key,
+                        ticket_number: &repair.ticket_number,
+                        device_model: &repair.device_model,
+                        device_serial: repair.serial_number.as_deref(),
+                        items: &repair.items,
+                        actor: sale.actor,
+                        device_id: sale.device_id.clone(),
+                    },
+                )
+                .await
+                {
+                    return Some(format!(
+                        "The warranties of repair ticket {ticket_label} could not be recorded: {err}"
+                    ));
+                }
+                None
             }
             None => Some(format!(
                 "Item '{}' is a repair line with no ticket key; its ticket was not updated",

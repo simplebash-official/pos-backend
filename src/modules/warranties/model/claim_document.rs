@@ -62,6 +62,11 @@ pub struct WarrantyClaimDocument {
     pub paid_repair_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub paid_repair_number: Option<String>,
+    /// The free rework job opened from a repair claim decided as a repair.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rework_repair_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rework_repair_number: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub supplier: Option<SupplierClaim>,
     /// `YYYY-MM-DD`, shop-local.
@@ -125,6 +130,8 @@ impl WarrantyClaimDocument {
             credit_note_key: self.credit_note_key,
             paid_repair_key: self.paid_repair_key,
             paid_repair_number: self.paid_repair_number,
+            rework_repair_key: self.rework_repair_key,
+            rework_repair_number: self.rework_repair_number,
             supplier: self.supplier,
             received_on: self.received_on,
             resolved_on: self.resolved_on,

@@ -81,6 +81,10 @@ pub const REGISTER_SESSION: &str = "sess";
 
 pub const REPAIR: &str = "rep";
 
+pub const REPAIR_ITEM: &str = "rit";
+
+pub const REPAIR_SERVICE: &str = "rst";
+
 pub const SEQUENCE_BLOCK: &str = "seq";
 
 pub const STOCK_BATCH: &str = "stb";

@@ -268,6 +268,31 @@ pub(super) async fn convert_to_paid_repair(
     Ok(Json(ApiResponse::success(claim, "Paid repair opened")))
 }
 
+#[utoipa::path(post, path = "/{key}/rework", tag = modules::WARRANTY_CLAIMS,
+    params(("key" = String, Path, description = "Claim key (`wcl_…`)")),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Rework job opened", body = ApiResponse<WarrantyClaim>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+        (status = 404, description = "Claim, warranty or original job not found", body = ErrorResponse),
+        (status = 409, description = "Not decided as a repair, already resolved or reworked, or the warranty is not on repair work", body = ErrorResponse),
+    )
+)]
+/// Opens the free rework job for a claim on repair work decided as a repair.
+pub(super) async fn open_rework(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    DeviceId(device_id): DeviceId,
+    Path(key): Path<String>,
+) -> AppResult<Json<ApiResponse<WarrantyClaim>>> {
+    user.require_permission(perm::WARRANTY_CLAIMS_RECORD)?;
+    user.require_permission(perm::REPAIRS_WRITE)?;
+    let actor = actor(&state, &user).await?;
+    let claim = service::open_rework(&state.db, &key, &actor, device_id).await?;
+    Ok(Json(ApiResponse::success(claim, "Rework job opened")))
+}
+
 /// Routes of `/api/warranty-claims`.
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
@@ -282,4 +307,5 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(resolve_claim))
         .routes(routes!(return_to_customer))
         .routes(routes!(convert_to_paid_repair))
+        .routes(routes!(open_rework))
 }

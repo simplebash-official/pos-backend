@@ -266,7 +266,7 @@ pub(super) async fn shop_activities(
                     reference: rep.ticket_number,
                     cashier_name: rep.assigned_employee_name,
                     user_role: None,
-                    amount_cents: rep.estimated_cost_cents,
+                    amount_cents: Some(rep.price_cents),
                     description: format!(
                         "Repair ticket for {} (status: {})",
                         rep.device_model, rep.status

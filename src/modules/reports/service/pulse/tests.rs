@@ -20,8 +20,15 @@ fn repair(id: &str, status: &str, tech: Option<&str>, created: &str, cost: i64) 
     from(json!({
         "id": id, "key": id, "ticketNumber": format!("REP-{id}"), "customerName": "Asha",
         "customerPhone": "0771234567", "deviceModel": "Phone", "issueDescription": "x",
-        "isOverdue": false, "status": status, "estimatedCostCents": cost,
-        "materialCostCents": 500, "assignedEmployeeId": tech, "createdAt": created,
+        "isOverdue": false, "status": status, "kind": { "kind": "standard" },
+        "items": [{
+            "key": format!("rit_{id}"), "description": "Fix", "laborCents": cost,
+            "part": { "source": "outside", "name": "Glass" }, "partCents": 500,
+            "partCostCents": 500, "warranty": { "coverage": { "kind": "none" } }
+        }],
+        // What the customer pays is the labour and the part's 500.
+        "priceCents": cost + 500, "costCents": 500,
+        "assignedEmployeeId": tech, "createdAt": created,
         "updatedAt": created, "version": 1
     }))
 }

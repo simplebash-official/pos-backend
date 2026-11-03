@@ -129,6 +129,7 @@ pub const SYNCED_COLLECTIONS: &[&str] = &[
     "warranties",
     "warranty_events",
     "warranty_claims",
+    "repair_service_templates",
 ];
 
 /// Prefix for a browser session's `X-Device-Id`. Keeps a browser from ever

@@ -87,6 +87,8 @@ pub const CUSTOMERS_WRITE: &str = "customers:write";
 // gated by `SUPPLIERS_CREATE`.)
 pub const BILLING_WRITE: &str = "billing:write";
 pub const REPAIRS_WRITE: &str = "repairs:write";
+/// Add, rename, re-price and hide the shop's ready-made repair services.
+pub const REPAIR_SERVICES_MANAGE: &str = "repair_services:manage";
 pub const PRINT_JOBS_WRITE: &str = "print_jobs:write";
 pub const REPORTS_VIEW: &str = "reports:view";
 

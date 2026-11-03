@@ -279,6 +279,24 @@ pub(super) fn mock_templates_json() -> serde_json::Value {
                     true,
                     json!({ "sessionNumber": "SES-000042", "terminalId": "TERM-01", "cashierName": "Kasun Perera" }),
                 ),
+                mock_template(
+                    "tpl_warranty_card",
+                    "doc_temp_Wrnty0Card0V1Std",
+                    "Warranty Card",
+                    "warranty-card",
+                    json!({
+                        "required": ["paper", "warrantyNumber", "itemName", "coverageLabel", "validUntil"],
+                        "properties": {
+                            "paper": { "type": "string", "enum": ["a5", "thermal-58", "thermal-80"] },
+                            "warrantyNumber": { "type": "string" },
+                            "itemName": { "type": "string" },
+                            "coverageLabel": { "type": "string" },
+                            "validUntil": { "type": ["string", "null"] }
+                        }
+                    }),
+                    true,
+                    json!({ "paper": "a5", "warrantyNumber": "WTY-000001", "itemName": "Phone", "coverageLabel": "12 months", "validUntil": "02 Nov 2027" }),
+                ),
             ]
         }
     })

@@ -4,6 +4,7 @@ use crate::core::constants::{codes, prefixes};
 use crate::core::error::{AppError, AppResult};
 use crate::core::id::generate_id;
 use crate::core::utils::shop_day;
+use crate::domain::repairs::RepairItem;
 use crate::domain::sequences::ReserveSequenceRequest;
 use crate::domain::warranties::{
     ProductWarranty, WarrantyEventKind, WarrantySourceType, WarrantyStatus,
@@ -145,6 +146,107 @@ pub(crate) async fn issue_for_sale_line(
                 from_status: None,
                 to_status: Some(WarrantyStatus::Active.as_str()),
                 note: Some(format!("Sold on {}", line.invoice_number)),
+                actor: line.actor,
+                approved_by: None,
+            },
+        )
+        .await?;
+        issued.push(inserted);
+    }
+    Ok(issued)
+}
+
+/// A handed-back repair job, as its items' warranties need it.
+#[derive(Debug)]
+pub(crate) struct RepairLine<'a> {
+    pub invoice_key: &'a str,
+    pub invoice_number: &'a str,
+    pub delivered_at: DateTime<Utc>,
+    pub customer_key: Option<&'a str>,
+    pub customer_name: Option<&'a str>,
+    pub customer_phone: Option<&'a str>,
+    /// Zero-based position of the job's line on the invoice.
+    pub line_index: usize,
+    pub repair_key: &'a str,
+    pub ticket_number: &'a str,
+    pub device_model: &'a str,
+    /// The customer's device, which is what staff scan when it comes back.
+    pub device_serial: Option<&'a str>,
+    pub items: &'a [RepairItem],
+    pub actor: &'a WarrantyActor,
+    pub device_id: Option<String>,
+}
+
+/// Gives each covered item of a handed-back repair job its own warranty, starting on the
+/// shop-local day it was handed back, against the customer's device serial. An uncovered item
+/// gets none. The item's description and device name it, so one job can carry a screen under
+/// six months and a cleaning under none.
+pub(crate) async fn issue_for_repair(
+    db: &Db,
+    line: RepairLine<'_>,
+) -> AppResult<Vec<WarrantyDocument>> {
+    let starts_on = shop_day(line.delivered_at);
+    let line_index = i64::try_from(line.line_index).expect("an invoice has few lines");
+    let mut issued = Vec::new();
+    for item in line.items {
+        if !item.warranty.is_covered() {
+            continue;
+        }
+        let warranty_type = item.warranty.warranty_type.ok_or_else(|| {
+            AppError::internal("a covered repair item warranty always has a warranty type")
+        })?;
+        let ends_on = match warranty::ends_on(starts_on, item.warranty.coverage)? {
+            WarrantyEnd::On(day) => Some(day.to_string()),
+            WarrantyEnd::Never => None,
+        };
+        let now = BsonDateTime::now();
+        let document = WarrantyDocument {
+            id: None,
+            key: generate_id(prefixes::WARRANTY),
+            warranty_number: next_number(db, "warranty", line.device_id.clone()).await?,
+            source_type: WarrantySourceType::Repair,
+            invoice_key: line.invoice_key.to_string(),
+            invoice_number: line.invoice_number.to_string(),
+            line_index,
+            product_key: None,
+            repair_key: Some(line.repair_key.to_string()),
+            repair_item_key: Some(item.key.clone()),
+            item_name: format!("{} ({})", item.description, line.device_model),
+            serial_number: line.device_serial.map(str::to_string),
+            quantity: 1,
+            customer_key: line.customer_key.map(str::to_string),
+            customer_name: line.customer_name.map(str::to_string),
+            customer_phone: line.customer_phone.map(str::to_string),
+            customer_phone_tail: line.customer_phone.and_then(phone_tail),
+            coverage: item.warranty.coverage,
+            warranty_type,
+            terms: item.warranty.terms.clone(),
+            unit_price_cents: item.labor_cents + item.part_cents,
+            starts_on: starts_on.to_string(),
+            ends_on,
+            status: WarrantyStatus::Active,
+            void_reason: None,
+            replaces_warranty_key: None,
+            replaced_by_warranty_key: None,
+            claim_count: 0,
+            version: 1,
+            created_at: now,
+            updated_at: now,
+            updated_by_device: None,
+        };
+        let inserted = repository::insert_warranty(db, document).await?;
+        warranty_events::record(
+            db,
+            NewEvent {
+                warranty_key: &inserted.key,
+                claim_key: None,
+                kind: WarrantyEventKind::Created,
+                from_status: None,
+                to_status: Some(WarrantyStatus::Active.as_str()),
+                note: Some(format!(
+                    "Repair {} handed back on {}",
+                    line.ticket_number, line.invoice_number
+                )),
                 actor: line.actor,
                 approved_by: None,
             },

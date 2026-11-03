@@ -1320,6 +1320,40 @@
             }
           },
           "response": []
+        },
+        {
+          "name": "Calculate Repair Totals",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/calc/repair",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "calc",
+                "repair"
+              ]
+            },
+            "description": "What a repair job charges and costs from its items: `laborCents`, `partsCents`, `priceCents` (labour + parts) and `costCents` (part costs). Fields still being typed may be absent or null and count as nothing. Needs `repairs:write`. Nothing is stored. 400 for a negative or too large amount or more than 50 items.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"laborCents\": 250000,\n      \"partCents\": 1200000,\n      \"partCostCents\": 850000\n    },\n    {\n      \"laborCents\": 50000\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
         }
       ]
     },
@@ -5123,7 +5157,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"customer\": {\n    \"customerName\": \"Kasun Silva\",\n    \"customerPhone\": \"0771234567\"\n  },\n  \"deviceModel\": \"iPhone 14\",\n  \"serialNumber\": \"C02XG2AVJHD3\",\n  \"issueDescription\": \"Cracked screen, touch unresponsive in top corner\",\n  \"estimatedCostCents\": 850000,\n  \"promisedReadyAt\": \"2026-09-15\"\n}",
+              "raw": "{\n  \"customer\": {\n    \"customerName\": \"Kasun Silva\",\n    \"customerPhone\": \"0771234567\"\n  },\n  \"deviceModel\": \"iPhone 14\",\n  \"serialNumber\": \"C02XG2AVJHD3\",\n  \"issueDescription\": \"Cracked screen, touch unresponsive in top corner\",\n  \"promisedReadyAt\": \"2026-09-15\",\n  \"items\": [\n    {\n      \"description\": \"Replace screen\",\n      \"laborCents\": 250000,\n      \"warranty\": {\n        \"coverage\": {\n          \"kind\": \"limited\",\n          \"value\": 3,\n          \"unit\": \"months\"\n        },\n        \"warrantyType\": \"shop\",\n        \"terms\": \"Covers the screen fitted; not new cracks.\"\n      },\n      \"part\": {\n        \"source\": \"stock\",\n        \"productKey\": \"{{productKey}}\",\n        \"sellingPriceCents\": 1200000\n      }\n    },\n    {\n      \"description\": \"Clean charging port\",\n      \"laborCents\": 50000,\n      \"warranty\": {\n        \"coverage\": {\n          \"kind\": \"none\"\n        }\n      },\n      \"part\": {\n        \"source\": \"outside\",\n        \"name\": \"Contact cleaner\",\n        \"priceCents\": 10000,\n        \"costCents\": 4000\n      }\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5140,7 +5174,7 @@
                 "repairs"
               ]
             },
-            "description": "Create a repair ticket. `ticketNumber` is never client-supplied — reserved server-side on create. `status` defaults to `received` if omitted. The request nests customer identity into `customer{customerKey, customerName, customerPhone}` and technician assignment into `assignment{assignedEmployeeId, assignedEmployeeName, splitType, splitValue}` (both optional groups). If `customer.customerKey` is set, `customer.customerName`/`customerPhone` in this request are ignored and resolved server-side from the linked `Customer` record instead — only used as typed when there's no `customerKey` (a walk-in with no linked account).\n\n`estimatedCostCents` is **optional** — diagnosis-first repairs often can't be priced at intake, so it may be omitted while `status` is `received`, `diagnosing`, or `cancelled`. Moving a ticket to `ready` or `delivered` (on create or via `PATCH`) requires a price to already be set or included in the same request, otherwise the request is rejected with `400 REPAIR_PRICE_REQUIRED`.\n\n**Requires the `repairs:write` permission** in the token's `permissions` claim — granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role."
+            "description": "Opens a repair job (`REP-000001`). `items` is the work: each has a description, `laborCents`, a `warranty` (`{coverage}` and, when covered, `warrantyType`/`terms`) and at most one `part`: `{source: stock, productKey, serialNumber}` for a serialized product or `{source: stock, productKey, sellingPriceCents}` (one of its current price tiers), priced and costed by the server, or `{source: outside, name, priceCents, costCents}`. `items` may be empty while the device is being looked at; `ready`/`delivered` need at least one (400 `REPAIR_PRICE_REQUIRED`). A job with a stock part is handed back by billing it (400 `REPAIR_PART_INVALID` for `delivered` by hand). The reply carries `priceCents` (labour and part prices) and `costCents` (part costs). Needs `repairs:write`."
           },
           "response": []
         },
@@ -5176,7 +5210,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"status\": \"ready\",\n  \"promisedReadyAt\": \"2026-09-15\"\n}",
+              "raw": "{\n  \"status\": \"ready\",\n  \"promisedReadyAt\": \"2026-09-15\",\n  \"items\": [\n    {\n      \"description\": \"Replace screen\",\n      \"laborCents\": 250000,\n      \"warranty\": {\n        \"coverage\": {\n          \"kind\": \"limited\",\n          \"value\": 3,\n          \"unit\": \"months\"\n        },\n        \"warrantyType\": \"shop\",\n        \"terms\": \"Covers the screen fitted; not new cracks.\"\n      },\n      \"part\": {\n        \"source\": \"stock\",\n        \"productKey\": \"{{productKey}}\",\n        \"sellingPriceCents\": 1200000\n      },\n      \"key\": \"{{repairItemKey}}\"\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5194,7 +5228,7 @@
                 "{{repairKey}}"
               ]
             },
-            "description": "Partially update a repair ticket — omit any field to leave it unchanged. The request nests customer identity into `customer{customerKey, customerName, customerPhone}` and technician assignment into `assignment{assignedEmployeeId, assignedEmployeeName, splitType, splitValue}` (both optional groups). If `customer.customerKey` is set, `customer.customerName`/`customerPhone` in this request are ignored and resolved server-side from the linked `Customer` record instead — only used as typed when there's no `customerKey` (a walk-in with no linked account).\n\n**Requires the `repairs:write` permission** in the token's `permissions` claim — granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role."
+            "description": "Changes what is sent. `items` replaces the whole list: an item sent with the `key` of one already on the job keeps it (400 for a key not on the job); omit `items` to leave them. A handed-back job's items cannot change (409 `REPAIR_ITEMS_LOCKED`). Setting a warranty rework to `delivered` takes its stock parts out of stock (`warranty_rework_part_consumption`). Needs `repairs:write`."
           },
           "response": []
         },
@@ -5220,6 +5254,106 @@
         }
       ],
       "description": "Repair ticket CRUD. `GET /` is now the real list endpoint, not a status stub — see List Repairs' description."
+    },
+    {
+      "name": "Repair Services",
+      "description": "The shop's ready-made repair services (`/api/repair-services`): a name, the usual labour and warranty. The repair form adds one as an item. The key is derived from the name (`rst_` + hash), so the same service added on two tills is one row. Never deleted; hide with `active: false`.",
+      "item": [
+        {
+          "name": "List Repair Services",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/repair-services?includeHidden=true",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "repair-services"
+              ],
+              "query": [
+                {
+                  "key": "includeHidden",
+                  "value": "true",
+                  "description": "Also list hidden services (settings screen).",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "The services by name. Needs `repairs:write`; `includeHidden=true` also lists hidden ones and needs `repair_services:manage`."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Repair Service",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/repair-services",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "repair-services"
+              ]
+            },
+            "description": "Adds a service. 409 `REPAIR_SERVICE_NAME_TAKEN` when another service has the name (case and spaces ignored, hidden ones included). Needs `repair_services:manage` (Admin, Manager).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Screen replacement\",\n  \"laborCents\": 250000,\n  \"warranty\": {\n    \"coverage\": {\n      \"kind\": \"limited\",\n      \"value\": 3,\n      \"unit\": \"months\"\n    },\n    \"warrantyType\": \"shop\"\n  },\n  \"active\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Repair Service",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/repair-services/{{repairServiceKey}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "repair-services",
+                "{{repairServiceKey}}"
+              ]
+            },
+            "description": "Replaces the whole service; `active: false` hides it. 404 `REPAIR_SERVICE_NOT_FOUND`, 409 on a taken name or `VERSION_CONFLICT`. Needs `repair_services:manage`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Screen replacement\",\n  \"laborCents\": 300000,\n  \"warranty\": {\n    \"coverage\": {\n      \"kind\": \"limited\",\n      \"value\": 6,\n      \"unit\": \"months\"\n    },\n    \"warrantyType\": \"shop\"\n  },\n  \"active\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
     },
     {
       "name": "Reports",
@@ -7951,6 +8085,12 @@
                   "disabled": true
                 },
                 {
+                  "key": "repairKey",
+                  "value": "{{repairKey}}",
+                  "description": "Only the warranties of this repair job's items. Send one of customerKey, invoiceKey or repairKey.",
+                  "disabled": true
+                },
+                {
                   "key": "page",
                   "value": "1",
                   "description": "1-indexed page.",
@@ -8059,6 +8199,41 @@
                   "language": "json"
                 }
               }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Print Warranty Card",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "The warranty's card as a PDF, with the design in force now (`application/pdf`). A card always shows the warranty as it stands today: each change to the warranty prints afresh, so there is no `design=original`. Needs `warranties:view`.",
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/warranties/{{warrantyKey}}/documents/warranty-card?paper=a5&template=doc_temp_Wrnty0Card0V1Std",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "warranties",
+                "{{warrantyKey}}",
+                "documents",
+                "warranty-card"
+              ],
+              "query": [
+                {
+                  "key": "paper",
+                  "value": "a5",
+                  "description": "Required: `a5` (office printer), `thermal-58` or `thermal-80` (receipt roll)."
+                },
+                {
+                  "key": "template",
+                  "value": "doc_temp_Wrnty0Card0V1Std",
+                  "description": "A design family for this print only; defaults to the shop's choice for warranty cards.",
+                  "disabled": true
+                }
+              ]
             }
           },
           "response": []
@@ -8396,6 +8571,27 @@
             "description": "Turns a rejected claim into a paid repair job for the same item, once per claim. Needs `warranty_claims:record` and `repairs:write`."
           },
           "response": []
+        },
+        {
+          "name": "Open Rework Job",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/warranty-claims/{{warrantyClaimKey}}/rework",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "warranty-claims",
+                "{{warrantyClaimKey}}",
+                "rework"
+              ]
+            },
+            "description": "Opens the free rework job (`kind: warranty_rework`) for a claim on repair work that was decided as a repair, before it is resolved: same customer and device, no items yet, linked back as `reworkRepairKey`/`reworkRepairNumber`. Once per claim. 409 `CLAIM_STEP_NOT_ALLOWED` when not decided as a repair, already resolved or already reworked; 409 `CLAIM_REWORK_INVALID` for a warranty that came with a product. Needs `warranty_claims:record` and `repairs:write`."
+          },
+          "response": []
         }
       ]
     }
@@ -8586,6 +8782,14 @@
     {
       "key": "warrantyClaimKey",
       "value": "wcl_example"
+    },
+    {
+      "key": "repairItemKey",
+      "value": ""
+    },
+    {
+      "key": "repairServiceKey",
+      "value": ""
     }
   ]
 }

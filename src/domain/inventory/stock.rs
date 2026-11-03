@@ -271,9 +271,9 @@ pub struct StockMovementListResponse {
 /// Why a stock movement happened. Every adjustment (manual or automated)
 /// gets recorded as a `StockMovement` tagged with one of these, so the
 /// movement history stays auditable even once the originating request is
-/// long gone. `Sale`/`PurchaseReceipt`/`ManualAdjustment` are in active use;
-/// `RepairPartConsumption` is reserved for when repairs start consuming
-/// parts directly. `InvoiceVoidReversal` and the three `Return*` variants
+/// long gone. `RepairPartConsumption` and `WarrantyReworkPartConsumption` are
+/// the stock parts of a repair job, taken out when it is handed back.
+/// `InvoiceVoidReversal` and the three `Return*` variants
 /// used to be a single overloaded `Return` variant — split apart so an
 /// invoice-void stock restoration is distinguishable in the audit trail
 /// from a credit-note-driven restock/write-off/supplier-RMA.
@@ -282,7 +282,10 @@ pub struct StockMovementListResponse {
 pub enum StockMovementType {
     Sale,
     PurchaseReceipt,
+    /// A part used on a billed repair job, taken out when the job is handed back.
     RepairPartConsumption,
+    /// A part used on a free warranty rework; its cost is what the warranty cost the shop.
+    WarrantyReworkPartConsumption,
     ManualAdjustment,
     /// Stock restored because an invoice was voided (`billing::service::sale::void_invoice`).
     InvoiceVoidReversal,
@@ -307,6 +310,7 @@ impl StockMovementType {
             Self::Sale => "sale",
             Self::PurchaseReceipt => "purchase_receipt",
             Self::RepairPartConsumption => "repair_part_consumption",
+            Self::WarrantyReworkPartConsumption => "warranty_rework_part_consumption",
             Self::ManualAdjustment => "manual_adjustment",
             Self::InvoiceVoidReversal => "invoice_void_reversal",
             Self::ReturnRestock => "return_restock",
@@ -325,6 +329,7 @@ impl std::str::FromStr for StockMovementType {
             "sale" => Ok(Self::Sale),
             "purchase_receipt" => Ok(Self::PurchaseReceipt),
             "repair_part_consumption" => Ok(Self::RepairPartConsumption),
+            "warranty_rework_part_consumption" => Ok(Self::WarrantyReworkPartConsumption),
             "manual_adjustment" => Ok(Self::ManualAdjustment),
             "invoice_void_reversal" => Ok(Self::InvoiceVoidReversal),
             "return_restock" => Ok(Self::ReturnRestock),

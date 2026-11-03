@@ -442,6 +442,7 @@ pub fn index_specs(tenant_mode: TenantMode) -> Vec<IndexSpec> {
             doc! { "customer_key": 1, "created_at": -1 },
         ),
         ("warranties_phone_tail", doc! { "customer_phone_tail": 1 }),
+        ("warranties_repair_key", doc! { "repair_key": 1 }),
     ] {
         specs.add("warranties", name, keys, false);
     }
@@ -482,6 +483,19 @@ pub fn index_specs(tenant_mode: TenantMode) -> Vec<IndexSpec> {
     ] {
         specs.add("warranty_claims", name, keys, false);
     }
+    // Repair services: a handful per shop, listed whole and synced.
+    specs.add(
+        "repair_service_templates",
+        "repair_service_templates_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    specs.add(
+        "repair_service_templates",
+        "repair_service_templates_sync",
+        doc! { "updated_at": 1, "key": 1 },
+        false,
+    );
 
     // Platform directory (`modules::tenants`): shop codes are globally unique
     // and the collection is not tenant-owned, so it is never tenant-prefixed.

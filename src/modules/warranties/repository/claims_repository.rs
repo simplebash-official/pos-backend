@@ -18,7 +18,7 @@ const CLAIM_COLUMNS: &str = "key, id, claim_number, warranty_key, warranty_numbe
      assigned_employee_name, status, inspection_notes, decision, decision_reason, \
      decided_by_user_id, decided_by_name, expired_override_by_name, resolution_note, \
      replacement_serial_number, replacement_warranty_key, credit_note_key, paid_repair_key, \
-     paid_repair_number, supplier, received_on, resolved_on, returned_on, version, created_at, \
+     paid_repair_number, rework_repair_key, rework_repair_number, supplier, received_on, resolved_on, returned_on, version, created_at, \
      updated_at, updated_by_device";
 
 fn claims(db: &TenantDatabase) -> ScopedCollection<WarrantyClaimDocument> {
@@ -89,6 +89,8 @@ fn row_to_claim(row: &SqliteRow) -> AppResult<WarrantyClaimDocument> {
         credit_note_key: row.get("credit_note_key"),
         paid_repair_key: row.get("paid_repair_key"),
         paid_repair_number: row.get("paid_repair_number"),
+        rework_repair_key: row.get("rework_repair_key"),
+        rework_repair_number: row.get("rework_repair_number"),
         supplier: supplier
             .as_deref()
             .map(|text| parse_json("supplier", text))
@@ -137,6 +139,8 @@ fn bind_fields<'q>(
         .bind(&claim.credit_note_key)
         .bind(&claim.paid_repair_key)
         .bind(&claim.paid_repair_number)
+        .bind(&claim.rework_repair_key)
+        .bind(&claim.rework_repair_number)
         .bind(claim.supplier.as_ref().map(stored_text).transpose()?)
         .bind(&claim.received_on)
         .bind(&claim.resolved_on)

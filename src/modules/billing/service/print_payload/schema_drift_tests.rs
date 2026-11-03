@@ -56,7 +56,7 @@ fn load_schemas_of_kind(kind: &str) -> Vec<(String, serde_json::Value)> {
 /// published contract of **any** template of this kind — the same check
 /// `DocumentServerClient::render_template` enforces at request time, run
 /// here against the *real* sidecar files.
-fn assert_matches_schema(kind: &str, payload: &serde_json::Value) {
+pub(super) fn assert_matches_schema(kind: &str, payload: &serde_json::Value) {
     for (title, schema) in load_schemas_of_kind(kind) {
         let validator = jsonschema::validator_for(&schema).expect("published schema compiles");
         let violations: Vec<String> = validator
@@ -78,7 +78,7 @@ fn assert_matches_schema(kind: &str, payload: &serde_json::Value) {
     }
 }
 
-fn cash_sale_invoice() -> Invoice {
+pub(super) fn cash_sale_invoice() -> Invoice {
     serde_json::from_value(json!({
         "id": "64b0000000000000000000a1",
         "key": "inv_testcash",

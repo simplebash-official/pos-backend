@@ -324,10 +324,49 @@ pub struct WarrantyListQuery {
     pub customer_key: Option<String>,
     /// Only the warranties of this invoice.
     pub invoice_key: Option<String>,
+    /// Only the warranties of this repair job's items.
+    pub repair_key: Option<String>,
     /// Page number (1-indexed).
     pub page: Option<u64>,
     /// Items per page (at most 200).
     pub limit: Option<u64>,
+}
+
+/// The paper a warranty card is printed on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, ToSchema)]
+pub enum WarrantyCardPaper {
+    /// A5 sheet, for an office printer.
+    #[serde(rename = "a5")]
+    A5,
+    /// 58 mm receipt roll.
+    #[serde(rename = "thermal-58")]
+    Thermal58,
+    /// 80 mm receipt roll.
+    #[serde(rename = "thermal-80")]
+    Thermal80,
+}
+
+impl WarrantyCardPaper {
+    /// The name this value has on the wire and in the card's payload.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WarrantyCardPaper::A5 => "a5",
+            WarrantyCardPaper::Thermal58 => "thermal-58",
+            WarrantyCardPaper::Thermal80 => "thermal-80",
+        }
+    }
+}
+
+/// `GET /warranties/{key}/documents/warranty-card`.
+#[derive(Debug, Clone, Deserialize, IntoParams)]
+#[serde(rename_all = "camelCase")]
+#[into_params(parameter_in = Query)]
+pub struct WarrantyCardQuery {
+    /// `a5`, `thermal-58` or `thermal-80`.
+    pub paper: WarrantyCardPaper,
+    /// A design family for this print only; defaults to the shop's choice for warranty cards.
+    pub template: Option<String>,
 }
 
 /// `GET /warranties`.

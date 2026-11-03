@@ -127,6 +127,13 @@ fn catalog() -> Vec<TemplateInfo> {
             "z-report",
             true,
         ),
+        template(
+            "doc_temp_card",
+            "doc_temp_card",
+            "Warranty Card",
+            "warranty-card",
+            true,
+        ),
     ]
 }
 

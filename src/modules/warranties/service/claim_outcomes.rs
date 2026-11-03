@@ -443,8 +443,7 @@ pub(crate) async fn convert_to_paid_repair(
                 ),
                 promised_ready_at: None,
                 status: None,
-                estimated_cost_cents: None,
-                material_cost_cents: None,
+                items: Vec::new(),
                 assignment: None,
             },
             device_id,
@@ -460,6 +459,67 @@ pub(crate) async fn convert_to_paid_repair(
             WarrantyEventKind::ClaimAdvanced,
             None,
             Some(format!("Paid repair {} opened", repair.ticket_number)),
+            actor,
+            None,
+        )
+        .await?;
+        claim.into_claim(today())
+    })
+    .await
+}
+
+/// Opens the free rework job for a claim on an earlier repair that was decided as a repair:
+/// same customer and device, linked back to the claim and the original job, charging nothing.
+/// Once per claim, and only before the claim is resolved.
+pub(crate) async fn open_rework(
+    db: &Db,
+    key: &str,
+    actor: &WarrantyActor,
+    device_id: Option<String>,
+) -> AppResult<WarrantyClaim> {
+    crate::core::logging::domain::tracked("warranties.claim_rework", async move {
+        let mut claim = require_claim(db, key).await?;
+        if claim.decision != Some(ClaimDecision::Repair) || claim.status != ClaimStatus::Decided {
+            return Err(AppError::conflict(
+                codes::CLAIM_STEP_NOT_ALLOWED,
+                "A rework job is opened once a claim is decided as a repair, before it is resolved.",
+            ));
+        }
+        if let Some(number) = &claim.rework_repair_number {
+            return Err(AppError::conflict(
+                codes::CLAIM_STEP_NOT_ALLOWED,
+                format!("This claim already has rework job {number}."),
+            ));
+        }
+        let warranty = require(db, &claim.warranty_key).await?;
+        let Some(original_repair_key) = warranty.repair_key.as_deref() else {
+            return Err(AppError::conflict(
+                codes::CLAIM_REWORK_INVALID,
+                "Only a warranty on repair work can be reworked; this one came with a product.",
+            ));
+        };
+        let rework = repairs::service::create_rework(
+            db,
+            repairs::service::NewRework {
+                claim_key: &claim.key,
+                claim_number: &claim.claim_number,
+                original_repair_key,
+                issue_description: &claim.issue_description,
+                assigned_employee_key: claim.assigned_employee_key.as_deref(),
+                device_id,
+            },
+        )
+        .await?;
+        let expected = claim.version;
+        claim.rework_repair_key = Some(rework.key);
+        claim.rework_repair_number = Some(rework.ticket_number.clone());
+        save_claim(db, &mut claim, expected).await?;
+        log_step(
+            db,
+            &claim,
+            WarrantyEventKind::ClaimAdvanced,
+            None,
+            Some(format!("Rework job {} opened", rework.ticket_number)),
             actor,
             None,
         )

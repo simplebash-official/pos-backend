@@ -11,7 +11,9 @@
 
 mod repository_commissions;
 
+pub(crate) use repository_commissions::JobKind;
+pub(crate) use repository_commissions::JobMoney;
 pub(crate) use repository_commissions::UNASSIGNED_PRINTER;
 pub(crate) use repository_commissions::UNASSIGNED_TECHNICIAN;
 pub(crate) use repository_commissions::aggregate_employee_commissions;
-pub(crate) use repository_commissions::recorded_cents;
+pub(crate) use repository_commissions::job_money;

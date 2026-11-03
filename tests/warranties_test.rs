@@ -52,6 +52,26 @@ async fn send(
     (status, json)
 }
 
+async fn send_raw(app: &common::TestApp, uri: &str, token: &str) -> (StatusCode, String) {
+    let request = Request::builder()
+        .method("GET")
+        .uri(uri)
+        .header(AUTHORIZATION, format!("Bearer {token}"))
+        .body(Body::empty())
+        .expect("the request is well formed");
+    let response = app
+        .router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the router answers");
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("the body reads");
+    (status, String::from_utf8_lossy(&bytes).into_owned())
+}
+
 fn token_for(app: &common::TestApp, user: &str, role: Role, name: &str) -> String {
     let claims = Claims {
         sub: user.to_string(),
@@ -475,6 +495,58 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(last["kind"], "extended");
     assert_eq!(last["approvedByName"], "mgr");
 
+    // Printing: the invoice carries each line's warranties (the mock document-server echoes the
+    // payload it was sent), and a warranty prints its own card on A5 or a receipt roll.
+    let (status, pdf) = send_raw(
+        app,
+        &format!("/api/billing/invoices/{invoice_key}/documents/a4-invoice?design=current"),
+        &staff,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{pdf}");
+    assert!(pdf.contains("\"warranties\":["), "{pdf}");
+    assert!(
+        pdf.contains(&format!("\"subject\":\"{serial_a}\"")),
+        "{pdf}"
+    );
+    assert!(pdf.contains(&text(&charger_w["warrantyNumber"])), "{pdf}");
+    let card_uri = |key: &str, paper: &str| {
+        format!("/api/warranties/{key}/documents/warranty-card?paper={paper}")
+    };
+    let (status, pdf) = send_raw(app, &card_uri(&charger_key, "a5"), &staff).await;
+    assert_eq!(status, StatusCode::OK, "{pdf}");
+    assert!(pdf.contains("\"paper\":\"a5\""), "{pdf}");
+    assert!(pdf.contains(&text(&charger_w["warrantyNumber"])), "{pdf}");
+    assert!(
+        pdf.contains("\"warrantyTypeLabel\":\"Manufacturer warranty\""),
+        "{pdf}"
+    );
+    assert!(
+        pdf.contains("\"coverageLabel\":\"1 year\""),
+        "the extension shows: {pdf}"
+    );
+    let (status, pdf) = send_raw(app, &card_uri(&phone_a_key, "thermal-58"), &staff).await;
+    assert_eq!(status, StatusCode::OK, "{pdf}");
+    assert!(pdf.contains("\"isVoid\":false"), "{pdf}");
+    assert!(
+        pdf.contains(&format!("\"serialNumber\":\"{serial_a}\"")),
+        "{pdf}"
+    );
+    let (status, _) = send_raw(app, &card_uri(&phone_a_key, "a4"), &staff).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = send_raw(
+        app,
+        &format!("/api/warranties/{phone_a_key}/documents/warranty-card"),
+        &staff,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = send_raw(app, &card_uri("wty_missing", "a5"), &staff).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let no_view = common::mint_token(&app.config, Some(Role::Staff), &[]);
+    let (status, _) = send_raw(app, &card_uri(&phone_a_key, "a5"), &no_view).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
     // Voiding needs a reason and a manager or owner PIN, once.
     let void_body =
         |pin: &str, reason: &str| json!({ "approval": { "managerPin": pin, "reason": reason } });
@@ -557,6 +629,11 @@ async fn scenario(app: &common::TestApp) {
             "{warranty}"
         );
     }
+
+    // A card printed after the warranty changed shows it as it is now, never a stale copy.
+    let (status, pdf) = send_raw(app, &card_uri(&phone_a_key, "thermal-58"), &staff).await;
+    assert_eq!(status, StatusCode::OK, "{pdf}");
+    assert!(pdf.contains("\"isVoid\":true"), "{pdf}");
 
     // Voiding the till-override sale cancels its warranty.
     let (status, body) = send(

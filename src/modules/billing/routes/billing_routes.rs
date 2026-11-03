@@ -15,6 +15,7 @@ use crate::domain::settings::{DocumentDesignChoice, DocumentDesignStatus};
 use crate::modules::billing::service;
 use crate::modules::billing::service::sale;
 use crate::modules::documents;
+use crate::modules::warranties;
 use axum::Json;
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
@@ -300,7 +301,7 @@ pub(super) async fn get_invoice_document(
         .map(|p| p.amount_cents)
         .sum();
 
-    let data = match kind {
+    let mut data = match kind {
         "a4-invoice" => service::print_payload::build_a4_invoice_data(
             &invoice,
             "ORIGINAL — CUSTOMER COPY",
@@ -313,6 +314,9 @@ pub(super) async fn get_invoice_document(
             paid_so_far_cents,
         ),
     };
+    // Each covered line carries its warranties' numbers and end dates.
+    let warranties = warranties::service::for_invoice_print(&state.db, &invoice.key).await?;
+    service::print_payload::add_line_warranties(&mut data, &warranties)?;
 
     let pdf_bytes = documents::service::print(
         &state.db,

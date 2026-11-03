@@ -334,6 +334,9 @@ pub(crate) async fn hydrate(
         "warrantyClaims" | "warranty_claims" => to_values(
             crate::modules::warranties::service::hydrate_sync_claims(documents)?,
         )?,
+        "repairServices" | "repair_service_templates" => to_values(
+            crate::modules::repairs::service::hydrate_sync_services(documents)?,
+        )?,
         _ => Vec::new(),
     };
     Ok(values)

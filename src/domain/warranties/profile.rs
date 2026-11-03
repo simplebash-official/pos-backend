@@ -27,6 +27,36 @@ impl WarrantyType {
             WarrantyType::Both => "both",
         }
     }
+
+    /// How a printed warranty names who stands behind it.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            WarrantyType::Shop => "Shop warranty",
+            WarrantyType::Manufacturer => "Manufacturer warranty",
+            WarrantyType::Both => "Shop and manufacturer warranty",
+        }
+    }
+}
+
+/// How a warranty period reads on paper: `1 month`, `12 months`, `2 years`, `Lifetime`.
+/// `None` for no warranty, which has nothing to print.
+#[must_use]
+pub fn coverage_label(coverage: WarrantyCoverage) -> Option<String> {
+    match coverage {
+        WarrantyCoverage::None => None,
+        WarrantyCoverage::Lifetime => Some("Lifetime".to_string()),
+        WarrantyCoverage::Limited { value, unit } => {
+            let plural = unit.as_str();
+            // Every unit name is its singular plus a trailing `s`.
+            let name = if value == 1 {
+                &plural[..plural.len() - 1]
+            } else {
+                plural
+            };
+            Some(format!("{value} {name}"))
+        }
+    }
 }
 
 /// The warranty an item comes with. Stored inside its product (and, as a template, its
@@ -106,3 +136,39 @@ impl ProductWarranty {
 
 /// The longest warranty terms text.
 const TERMS_MAX: usize = 1000;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pos_calc_core::warranty::WarrantyUnit;
+
+    #[test]
+    fn coverage_reads_as_printed() {
+        let limited = |value, unit| WarrantyCoverage::Limited { value, unit };
+        assert_eq!(coverage_label(WarrantyCoverage::None), None);
+        assert_eq!(
+            coverage_label(WarrantyCoverage::Lifetime).as_deref(),
+            Some("Lifetime")
+        );
+        assert_eq!(
+            coverage_label(limited(1, WarrantyUnit::Months)).as_deref(),
+            Some("1 month")
+        );
+        assert_eq!(
+            coverage_label(limited(12, WarrantyUnit::Months)).as_deref(),
+            Some("12 months")
+        );
+        assert_eq!(
+            coverage_label(limited(1, WarrantyUnit::Years)).as_deref(),
+            Some("1 year")
+        );
+        assert_eq!(
+            coverage_label(limited(14, WarrantyUnit::Days)).as_deref(),
+            Some("14 days")
+        );
+        assert_eq!(
+            coverage_label(limited(1, WarrantyUnit::Weeks)).as_deref(),
+            Some("1 week")
+        );
+    }
+}

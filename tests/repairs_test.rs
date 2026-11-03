@@ -9,7 +9,9 @@ use mongodb::bson::DateTime as BsonDateTime;
 use serde_json::{Value, json};
 use simplebash_pos_backend::core::constants::roles;
 use simplebash_pos_backend::core::id::generate_id;
+use simplebash_pos_backend::domain::repairs::{RepairItem, RepairKind};
 use simplebash_pos_backend::domain::users::Role;
+use simplebash_pos_backend::domain::warranties::ProductWarranty;
 use simplebash_pos_backend::modules::repairs::model::RepairDocument;
 use tower::ServiceExt;
 
@@ -89,7 +91,7 @@ fn sample_repair_payload(phone_suffix: &str) -> Value {
         },
         "deviceModel": "iPhone 14",
         "issueDescription": "Cracked screen",
-        "estimatedCostCents": 850000,
+        "items": [{ "description": "Replace screen", "laborCents": 850000, "warranty": { "coverage": { "kind": "none" } } }],
     })
 }
 
@@ -101,6 +103,7 @@ fn sample_repair_payload_without_price(phone_suffix: &str) -> Value {
         },
         "deviceModel": "iPhone 14",
         "issueDescription": "Cracked screen",
+        "items": [],
     })
 }
 
@@ -156,7 +159,16 @@ async fn create_repair_reserves_ticket_number_and_defaults_status_to_received() 
     let data = &body["data"];
     assert_eq!(data["status"], "received");
     assert_eq!(data["customerName"], "Kasun Silva");
-    assert_eq!(data["estimatedCostCents"], 850000);
+    assert_eq!(data["priceCents"], 850000);
+    assert_eq!(data["costCents"], 0);
+    assert_eq!(data["kind"]["kind"], "standard");
+    assert!(
+        data["items"][0]["key"]
+            .as_str()
+            .expect("the value is a string")
+            .starts_with("rit_"),
+        "an item gets an rit_ key, got {body}"
+    );
     assert!(
         data["ticketNumber"]
             .as_str()
@@ -245,7 +257,7 @@ async fn create_repair_rejects_invalid_status_and_negative_cost() {
     assert_eq!(body["code"], "INVALID_JOB_STATUS");
 
     let mut payload = sample_repair_payload("4444444");
-    payload["estimatedCostCents"] = json!(-100);
+    payload["items"][0]["laborCents"] = json!(-100);
     let (status, body) =
         send_authed(&app.router, "POST", "/api/repairs", Some(payload), &token).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "Body: {body}");
@@ -267,10 +279,8 @@ async fn create_repair_without_price_succeeds_while_received_or_diagnosing() {
     assert_eq!(status, StatusCode::OK, "Body: {body}");
     let data = &body["data"];
     assert_eq!(data["status"], "received");
-    assert!(
-        data.get("estimatedCostCents").is_none(),
-        "estimatedCostCents must be absent, not null/0, got: {body}"
-    );
+    assert_eq!(data["items"], json!([]), "Body: {body}");
+    assert_eq!(data["priceCents"], 0);
 
     let mut payload = sample_repair_payload_without_price("9111112");
     payload["status"] = json!("diagnosing");
@@ -332,13 +342,13 @@ async fn update_repair_rejects_status_transition_to_ready_without_price() {
         &app.router,
         "PATCH",
         &format!("/api/repairs/{key}"),
-        Some(json!({ "status": "ready", "estimatedCostCents": 50000 })),
+        Some(json!({ "status": "ready", "items": [{ "description": "Replace screen", "laborCents": 50000, "warranty": { "coverage": { "kind": "none" } } }] })),
         &token,
     )
     .await;
     assert_eq!(status, StatusCode::OK, "Body: {body}");
     assert_eq!(body["data"]["status"], "ready");
-    assert_eq!(body["data"]["estimatedCostCents"], 50000);
+    assert_eq!(body["data"]["priceCents"], 50000);
 }
 
 #[tokio::test]
@@ -485,7 +495,7 @@ async fn list_repairs_filters_by_date_preset() {
         .as_array()
         .expect("the value is an array");
     assert_eq!(repairs.len(), 1, "Body: {body}");
-    assert_eq!(repairs[0]["estimatedCostCents"], 1000);
+    assert_eq!(repairs[0]["priceCents"], 1000);
 }
 
 #[tokio::test]
@@ -573,7 +583,7 @@ async fn create_repair_with_customer_key_resolves_name_and_phone_from_customer_r
             },
             "deviceModel": "iPhone 14",
             "issueDescription": "Cracked screen",
-            "estimatedCostCents": 850000,
+            "items": [{ "description": "Replace screen", "laborCents": 850000, "warranty": { "coverage": { "kind": "none" } } }],
         })),
         &token,
     )
@@ -624,7 +634,7 @@ async fn update_repair_with_customer_key_resolves_name_and_phone_from_customer_r
 }
 
 /// Inserts a minimal `RepairDocument` directly, bypassing `POST /repairs`,
-/// so tests can control `created_at`/`status`/`estimated_cost_cents`
+/// so tests can control `created_at`/`status`/the price
 /// precisely. `customer_name` defaults to a fixed placeholder via
 /// `seed_repair_with` below when a test doesn't need to scope a search
 /// against the shared test DB.
@@ -632,7 +642,7 @@ async fn seed_repair_with_named(
     db: &mongodb::Database,
     customer_name: &str,
     status: &str,
-    estimated_cost_cents: Option<i64>,
+    price_cents: Option<i64>,
     created_at: BsonDateTime,
 ) -> String {
     let key = generate_id("rep");
@@ -649,8 +659,21 @@ async fn seed_repair_with_named(
             issue_description: "Stats test seed".to_string(),
             promised_ready_at: None,
             status: status.to_string(),
-            estimated_cost_cents,
-            material_cost_cents: None,
+            kind: RepairKind::Standard,
+            items: price_cents
+                .map(|price| RepairItem {
+                    key: generate_id("rit"),
+                    description: "Stats test work".to_string(),
+                    labor_cents: price,
+                    part: None,
+                    part_cents: 0,
+                    part_cost_cents: 0,
+                    warranty: ProductWarranty::none(),
+                })
+                .into_iter()
+                .collect(),
+            price_cents: price_cents.unwrap_or(0),
+            cost_cents: 0,
             assigned_employee_id: None,
             assigned_employee_name: None,
             split_type: None,
@@ -669,17 +692,10 @@ async fn seed_repair_with_named(
 async fn seed_repair_with(
     db: &mongodb::Database,
     status: &str,
-    estimated_cost_cents: Option<i64>,
+    price_cents: Option<i64>,
     created_at: BsonDateTime,
 ) -> String {
-    seed_repair_with_named(
-        db,
-        "Stats Test Customer",
-        status,
-        estimated_cost_cents,
-        created_at,
-    )
-    .await
+    seed_repair_with_named(db, "Stats Test Customer", status, price_cents, created_at).await
 }
 
 #[tokio::test]

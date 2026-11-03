@@ -27,7 +27,7 @@ async fn seed_repair(app: &common::TestApp) -> String {
             },
             "deviceModel": "iPhone 14",
             "issueDescription": "Cracked screen",
-            "estimatedCostCents": 850000,
+            "items": [{ "description": "Repair work", "laborCents": 850000, "warranty": { "coverage": { "kind": "none" } } }],
         })),
         &token,
     )
@@ -52,6 +52,7 @@ async fn seed_repair_without_price(app: &common::TestApp) -> String {
             },
             "deviceModel": "iPhone 14",
             "issueDescription": "Cracked screen",
+            "items": [],
         })),
         &token,
     )
@@ -127,7 +128,7 @@ async fn complete_sale_with_repair_line_marks_ticket_delivered() {
     let ticket_key = seed_repair(&app).await;
 
     // unitPriceCents/assignedEmployeeName are deliberately omitted — both
-    // must be resolved from the repair ticket (estimatedCostCents 850000,
+    // must be resolved from the repair ticket (one item, labour 850000,
     // no assigned employee) rather than trusted from the payload.
     // sourceTicketNumber is also omitted — always server-resolved now.
     let mut payload = base_sale_payload();

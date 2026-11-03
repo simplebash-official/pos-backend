@@ -37,6 +37,8 @@ pub use constants_prefixes::RECEIPT_SETTLEMENT;
 pub use constants_prefixes::RECURRING_EXPENSE;
 pub use constants_prefixes::REGISTER_SESSION;
 pub use constants_prefixes::REPAIR;
+pub use constants_prefixes::REPAIR_ITEM;
+pub use constants_prefixes::REPAIR_SERVICE;
 pub use constants_prefixes::SEQUENCE_BLOCK;
 pub use constants_prefixes::STOCK_BATCH;
 pub use constants_prefixes::STOCK_MOVEMENT;

@@ -48,6 +48,7 @@ async fn main() {
         // In SQLite, clear user transaction/catalog tables if in SQLite mode
         let tables = vec![
             "warranty_claims",
+            "repair_service_templates",
             "warranty_events",
             "warranties",
             "credit_notes",

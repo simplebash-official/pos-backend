@@ -13,6 +13,8 @@ use simplebash_pos_backend::domain::billing::InvoiceStatus;
 use simplebash_pos_backend::domain::users::Role;
 use simplebash_pos_backend::modules::billing::model::{InvoiceDocument, PaymentDocument};
 
+use simplebash_pos_backend::domain::repairs::{RepairItem, RepairKind, RepairPart};
+use simplebash_pos_backend::domain::warranties::ProductWarranty;
 use simplebash_pos_backend::modules::print_jobs::model::PrintJobDocument;
 use simplebash_pos_backend::modules::repairs::model::RepairDocument;
 
@@ -508,8 +510,20 @@ async fn employee_commissions_and_performance_report() {
         issue_description: "Screen cracked".to_string(),
         promised_ready_at: None,
         status: "delivered".to_string(),
-        estimated_cost_cents: Some(500000), // Revenue = 5,000 LKR
-        material_cost_cents: Some(200000),  // Cost = 2,000 LKR -> Profit = 3,000 LKR
+        kind: RepairKind::Standard,
+        items: vec![RepairItem {
+            key: "rit_screen".to_string(),
+            description: "Screen".to_string(),
+            labor_cents: 500000,
+            part: Some(RepairPart::Outside {
+                name: "Screen".to_string(),
+            }),
+            part_cents: 0,
+            part_cost_cents: 200000,
+            warranty: ProductWarranty::none(),
+        }],
+        price_cents: 500000, // Revenue = 5,000 LKR
+        cost_cents: 200000,  // Cost = 2,000 LKR -> Profit = 3,000 LKR
         assigned_employee_id: Some("emp_1".to_string()),
         assigned_employee_name: Some("Unique Tech Nimal".to_string()),
         split_type: Some("percentage".to_string()),

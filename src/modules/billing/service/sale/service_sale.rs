@@ -166,24 +166,44 @@ pub(crate) async fn resolve_sale_item(
         "repair" => match &item.source_ticket_key {
             Some(ticket_key) => {
                 let ticket = repairs::service::get_repair(db, ticket_key).await?;
-                let estimated_cost_cents = ticket.estimated_cost_cents.ok_or_else(|| {
-                    AppError::validation_with_code(
+                if ticket.kind.is_rework() {
+                    return Err(AppError::validation_with_code(
                         format!(
-                            "Repair ticket {} has no price yet, set a repair price before billing it",
+                            "Repair ticket {} is a free warranty rework; hand it back from the repair screen instead of billing it",
+                            ticket.ticket_number
+                        ),
+                        codes::REPAIR_IS_REWORK,
+                    ));
+                }
+                if ticket.status == "delivered" {
+                    return Err(AppError::conflict(
+                        codes::INVALID_JOB_STATUS,
+                        format!(
+                            "Repair ticket {} has already been handed back and billed",
+                            ticket.ticket_number
+                        ),
+                    ));
+                }
+                if ticket.items.is_empty() {
+                    return Err(AppError::validation_with_code(
+                        format!(
+                            "Repair ticket {} has no work on it yet, add the work done before billing it",
                             ticket.ticket_number
                         ),
                         codes::REPAIR_PRICE_REQUIRED,
-                    )
-                })?;
+                    ));
+                }
+                // A part sold in the meantime stops the sale before anything is written.
+                repairs::service::check_parts_in_stock(db, &ticket).await?;
                 (
                     item.name
                         .clone()
                         .unwrap_or_else(|| ticket.device_model.clone()),
                     None,
-                    estimated_cost_cents + ticket.material_cost_cents.unwrap_or(0),
+                    ticket.price_cents,
                     Some(ticket.ticket_number),
                     ticket.assigned_employee_name,
-                    Some(ticket.material_cost_cents.unwrap_or(0) / item.quantity.max(1)),
+                    Some(ticket.cost_cents / item.quantity.max(1)),
                     Vec::new(),
                 )
             }

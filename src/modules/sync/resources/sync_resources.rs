@@ -384,4 +384,16 @@ pub const SYNC_RESOURCES: &[ResourceSpec] = &[
         order: 165,
         phase: Phase::P3a,
     },
+    // A shop's ready-made repair services: edited in place, hidden instead of deleted, keyed by
+    // name so two tills adding the same one converge.
+    ResourceSpec {
+        name: "repairServices",
+        table: "repair_service_templates",
+        class: MergeClass::Lww,
+        soft_delete: false,
+        derived: &[],
+        local_only: &[],
+        order: 166,
+        phase: Phase::P3a,
+    },
 ];

@@ -17,6 +17,7 @@ use simplebash_pos_backend::modules::inventory::model::{ProductDocument, StockBa
 
 use crate::common;
 use crate::helpers::send_authed;
+use simplebash_pos_backend::domain::repairs::{RepairItem, RepairKind, RepairPart};
 use simplebash_pos_backend::modules::repairs::model::RepairDocument;
 use tower::ServiceExt;
 
@@ -286,8 +287,20 @@ async fn employee_commissions_survive_a_rename() {
         issue_description: "Screen cracked".to_string(),
         promised_ready_at: None,
         status: "delivered".to_string(),
-        estimated_cost_cents: Some(500000),
-        material_cost_cents: Some(200000),
+        kind: RepairKind::Standard,
+        items: vec![RepairItem {
+            key: "rit_screen".to_string(),
+            description: "Screen".to_string(),
+            labor_cents: 500000,
+            part: Some(RepairPart::Outside {
+                name: "Screen".to_string(),
+            }),
+            part_cents: 0,
+            part_cost_cents: 200000,
+            warranty: ProductWarranty::none(),
+        }],
+        price_cents: 500000, // Revenue = 5,000 LKR
+        cost_cents: 200000,  // Cost = 2,000 LKR -> Profit = 3,000 LKR
         assigned_employee_id: Some(employee_key.clone()),
         assigned_employee_name: Some("stale snapshot, must be ignored".to_string()),
         split_type: Some("percentage".to_string()),
@@ -424,6 +437,7 @@ async fn analytics_summary_and_timeseries_use_cost_snapshot_and_shop_local_bucke
                 "stock_quantity": 0_i64,
                 "min_stock_threshold": 0_i64,
                 "is_serialized": false,
+                "warranty": { "coverage": { "kind": "none" } },
                 "version": 1_i64,
                 "created_at": now,
                 "updated_at": now,

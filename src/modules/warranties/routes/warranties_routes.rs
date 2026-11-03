@@ -147,4 +147,6 @@ pub fn router() -> OpenApiRouter<AppState> {
         // Manager-approved changes.
         .routes(routes!(void_warranty))
         .routes(routes!(extend_warranty))
+        // The printed card.
+        .routes(routes!(super::warranty_card_routes::get_warranty_card))
 }

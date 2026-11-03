@@ -267,6 +267,8 @@ pub(crate) enum WarrantyFilter<'a> {
     PhoneTail(&'a str),
     /// One customer.
     Customer(&'a str),
+    /// The items of one repair job.
+    Repair(&'a str),
     /// Everything.
     All,
 }
@@ -285,6 +287,7 @@ impl WarrantyFilter<'_> {
             WarrantyFilter::InvoiceKey(k) => doc! { "invoice_key": *k },
             WarrantyFilter::PhoneTail(t) => doc! { "customer_phone_tail": *t },
             WarrantyFilter::Customer(k) => doc! { "customer_key": *k },
+            WarrantyFilter::Repair(k) => doc! { "repair_key": *k },
             WarrantyFilter::All => doc! {},
         }
     }
@@ -301,6 +304,7 @@ impl WarrantyFilter<'_> {
             WarrantyFilter::InvoiceKey(k) => ("invoice_key = ?", Some((*k).to_string())),
             WarrantyFilter::PhoneTail(t) => ("customer_phone_tail = ?", Some((*t).to_string())),
             WarrantyFilter::Customer(k) => ("customer_key = ?", Some((*k).to_string())),
+            WarrantyFilter::Repair(k) => ("repair_key = ?", Some((*k).to_string())),
             WarrantyFilter::All => ("1 = 1", None),
         }
     }

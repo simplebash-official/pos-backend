@@ -5,7 +5,7 @@ use crate::core::error::{AppError, AppResult};
 use crate::core::utils::shop_day;
 use crate::domain::warranties::{
     Warranty, WarrantyDetail, WarrantyEvent, WarrantyGroup, WarrantyInvoiceLink, WarrantyListQuery,
-    WarrantyListResponse, WarrantyLookupMatch, WarrantyLookupResponse,
+    WarrantyListResponse, WarrantyLookupMatch, WarrantyLookupResponse, WarrantyStatus,
 };
 use crate::modules::billing;
 use crate::modules::warranties::model::{WarrantyDocument, WarrantyEventDocument};
@@ -113,15 +113,16 @@ pub(crate) async fn lookup(db: &Db, q: &str) -> AppResult<WarrantyLookupResponse
 
 /// A page of warranties, newest first, for one customer or one invoice (or all of them).
 pub(crate) async fn list(db: &Db, query: WarrantyListQuery) -> AppResult<WarrantyListResponse> {
-    let filter = match (&query.customer_key, &query.invoice_key) {
-        (Some(_), Some(_)) => {
+    let filter = match (&query.customer_key, &query.invoice_key, &query.repair_key) {
+        (Some(customer), None, None) => WarrantyFilter::Customer(customer),
+        (None, Some(invoice), None) => WarrantyFilter::InvoiceKey(invoice),
+        (None, None, Some(repair)) => WarrantyFilter::Repair(repair),
+        (None, None, None) => WarrantyFilter::All,
+        _ => {
             return Err(AppError::validation(
-                "Filter by a customer or by an invoice, not both.",
+                "Filter by one of a customer, an invoice or a repair job.",
             ));
         }
-        (Some(customer), None) => WarrantyFilter::Customer(customer),
-        (None, Some(invoice)) => WarrantyFilter::InvoiceKey(invoice),
-        (None, None) => WarrantyFilter::All,
     };
     let page = query.page.unwrap_or(1).max(1);
     let limit = query
@@ -135,6 +136,30 @@ pub(crate) async fn list(db: &Db, query: WarrantyListQuery) -> AppResult<Warrant
         page,
         limit,
     })
+}
+
+/// Every warranty of an invoice that is not void, in line order (then by number), for the
+/// notes printed under its lines.
+pub(crate) async fn for_invoice_print(db: &Db, invoice_key: &str) -> AppResult<Vec<Warranty>> {
+    let filter = WarrantyFilter::InvoiceKey(invoice_key);
+    let mut documents = Vec::new();
+    loop {
+        let skip = u64::try_from(documents.len()).expect("a page count fits in u64");
+        let (page, total) = repository::list(db, &filter, skip, LIST_LIMIT_MAX).await?;
+        let last = page.is_empty();
+        documents.extend(page);
+        if last || u64::try_from(documents.len()).expect("a page count fits in u64") >= total {
+            break;
+        }
+    }
+    let mut warranties = to_api(documents, today())?;
+    warranties.retain(|warranty| warranty.status != WarrantyStatus::Void);
+    warranties.sort_by(|a, b| {
+        a.line_index
+            .cmp(&b.line_index)
+            .then_with(|| a.warranty_number.cmp(&b.warranty_number))
+    });
+    Ok(warranties)
 }
 
 /// The stored warranty with this key, or 404 `WARRANTY_NOT_FOUND`.

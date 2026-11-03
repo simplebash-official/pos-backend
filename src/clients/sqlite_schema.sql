@@ -308,8 +308,10 @@ CREATE TABLE IF NOT EXISTS repairs (
     issue_description TEXT NOT NULL,
     promised_ready_at TEXT,
     status TEXT NOT NULL,
-    estimated_cost_cents INTEGER,
-    material_cost_cents INTEGER,
+    kind JSON NOT NULL,
+    items JSON NOT NULL,
+    price_cents INTEGER NOT NULL,
+    cost_cents INTEGER NOT NULL,
     assigned_employee_id TEXT,
     assigned_employee_name TEXT,
     split_type TEXT,
@@ -788,6 +790,7 @@ CREATE INDEX IF NOT EXISTS idx_warranties_invoice_key ON warranties(invoice_key)
 CREATE INDEX IF NOT EXISTS idx_warranties_invoice_number ON warranties(invoice_number);
 CREATE INDEX IF NOT EXISTS idx_warranties_customer_key ON warranties(customer_key);
 CREATE INDEX IF NOT EXISTS idx_warranties_phone_tail ON warranties(customer_phone_tail);
+CREATE INDEX IF NOT EXISTS idx_warranties_repair_key ON warranties(repair_key);
 CREATE INDEX IF NOT EXISTS idx_warranties_sync ON warranties(updated_at, key);
 
 -- A warranty's activity log: append-only, who did what and when.
@@ -846,6 +849,8 @@ CREATE TABLE IF NOT EXISTS warranty_claims (
     credit_note_key TEXT,
     paid_repair_key TEXT,
     paid_repair_number TEXT,
+    rework_repair_key TEXT,
+    rework_repair_number TEXT,
     supplier TEXT,
     received_on TEXT NOT NULL,
     resolved_on TEXT,
@@ -860,6 +865,23 @@ CREATE INDEX IF NOT EXISTS idx_warranty_claims_status ON warranty_claims(status,
 CREATE INDEX IF NOT EXISTS idx_warranty_claims_warranty ON warranty_claims(warranty_key);
 CREATE INDEX IF NOT EXISTS idx_warranty_claims_invoice ON warranty_claims(invoice_key);
 CREATE INDEX IF NOT EXISTS idx_warranty_claims_sync ON warranty_claims(updated_at, key);
+
+-- Ready-made repair services (`modules::repairs`): the key is derived from the name, so the
+-- same service added on two tills is one row. Never deleted; hidden with `active = 0`.
+CREATE TABLE IF NOT EXISTS repair_service_templates (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    labor_cents INTEGER NOT NULL,
+    warranty JSON NOT NULL,
+    active INTEGER NOT NULL,
+    version INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by_device TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_repair_service_templates_sync ON repair_service_templates(updated_at, key);
 
 -- Label print history (`modules::labels`): one row per print or download,
 -- `items` is a JSON array of the sticker groups as printed. Not synced.

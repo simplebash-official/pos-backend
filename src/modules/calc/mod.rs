@@ -12,6 +12,7 @@ pub mod earnings;
 pub mod invoice_balance;
 pub mod quotation;
 pub mod receipt;
+pub mod repair;
 pub mod routes;
 pub mod settlement;
 pub mod shares;

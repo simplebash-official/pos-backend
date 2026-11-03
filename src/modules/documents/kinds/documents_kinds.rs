@@ -38,4 +38,8 @@ pub(crate) const SELECTABLE_KINDS: &[DocumentKind] = &[
         slug: "z-report",
         label: "Z-Report",
     },
+    DocumentKind {
+        slug: "warranty-card",
+        label: "Warranty Card",
+    },
 ];
