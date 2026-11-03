@@ -9,6 +9,7 @@ use simplebash_pos_backend::core::config::Config;
 use simplebash_pos_backend::domain::inventory::{
     CreateProductRequest, OpeningStockRequest, ProductListQuery,
 };
+use simplebash_pos_backend::domain::warranties::ProductWarranty;
 use simplebash_pos_backend::modules::inventory::service::{category, product};
 
 #[derive(Debug)]
@@ -5232,7 +5233,7 @@ async fn main() {
                     auto_generate_barcode: true,
                     suppliers: Vec::new(),
                     is_serialized: false,
-                    warranty_months: None,
+                    warranty: ProductWarranty::none(),
                 };
 
                 match product::create_product(&db, req).await {

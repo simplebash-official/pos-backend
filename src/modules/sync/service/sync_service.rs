@@ -325,6 +325,15 @@ pub(crate) async fn hydrate(
             crate::modules::sessions::service::hydrate_movement_sync_documents(db, documents)
                 .await?,
         )?,
+        "warranties" => to_values(crate::modules::warranties::service::hydrate_sync_documents(
+            documents,
+        )?)?,
+        "warrantyEvents" | "warranty_events" => to_values(
+            crate::modules::warranties::service::hydrate_sync_events(documents)?,
+        )?,
+        "warrantyClaims" | "warranty_claims" => to_values(
+            crate::modules::warranties::service::hydrate_sync_claims(documents)?,
+        )?,
         _ => Vec::new(),
     };
     Ok(values)

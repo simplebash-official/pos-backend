@@ -266,7 +266,7 @@ async fn catalog_lines_use_the_catalog_and_do_not_touch_stock_or_invoices() {
         "/api/inventory/products",
         Some(json!({
             "name": "Galaxy A15", "categoryKey": category_key,
-            "subcategoryKey": subcategory_key, "minStockThreshold": 2,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } }, "minStockThreshold": 2,
             "openingStock": { "quantity": 10, "unitCostCents": 50000, "sellingPriceCents": 65000 }
         })),
         &tok,

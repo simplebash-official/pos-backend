@@ -29,13 +29,6 @@ pub struct ProductSerial {
     /// When this unit was sold, once `Sold`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sold_at: Option<DateTime<Utc>>,
-    /// Warranty length snapshotted from the product at the moment of sale.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub warranty_months: Option<i64>,
-    /// Computed `sold_at + warranty_months`, used to decide `within_warranty`
-    /// on a later credit-note return.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub warranty_expires_at: Option<DateTime<Utc>>,
     /// Key of the credit note that most recently returned this unit, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub credit_note_key: Option<String>,

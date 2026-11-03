@@ -292,6 +292,8 @@ pub enum StockMovementType {
     ReturnWriteOff,
     /// A credit-note line in `Damaged` condition with disposition `ReturnToSupplier` — audit-only, no quantity change.
     ReturnSupplierRma,
+    /// A new unit given to a customer in place of a faulty one under a warranty claim.
+    WarrantyReplacement,
     /// Stock a product started with (or that predates the ledger). Sync treats
     /// stock as the sum of movements, so every unit needs a movement behind it.
     OpeningBalance,
@@ -310,6 +312,7 @@ impl StockMovementType {
             Self::ReturnRestock => "return_restock",
             Self::ReturnWriteOff => "return_write_off",
             Self::ReturnSupplierRma => "return_supplier_rma",
+            Self::WarrantyReplacement => "warranty_replacement",
             Self::OpeningBalance => "opening_balance",
         }
     }
@@ -327,6 +330,7 @@ impl std::str::FromStr for StockMovementType {
             "return_restock" => Ok(Self::ReturnRestock),
             "return_write_off" => Ok(Self::ReturnWriteOff),
             "return_supplier_rma" => Ok(Self::ReturnSupplierRma),
+            "warranty_replacement" => Ok(Self::WarrantyReplacement),
             "opening_balance" => Ok(Self::OpeningBalance),
             _ => Err(AppError::validation(format!(
                 "Invalid stock movement type: {s}"

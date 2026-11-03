@@ -138,6 +138,14 @@ pub fn build_router(state: AppState) -> Router {
             &format!("/{}", mod_names::LABELS),
             modules::labels::routes::router(),
         )
+        .nest(
+            &format!("/{}", mod_names::WARRANTIES),
+            modules::warranties::routes::router(),
+        )
+        .nest(
+            &format!("/{}", mod_names::WARRANTY_CLAIMS.replace('_', "-")),
+            modules::warranties::routes::claims_router(),
+        )
         // `PRINT_JOBS` is `"print_jobs"` (matches the Rust module name and
         // OpenAPI tag) but the URL should read `/print-jobs`, so the
         // underscore is swapped for a hyphen only at mount time — the

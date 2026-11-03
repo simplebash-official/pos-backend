@@ -100,6 +100,21 @@ async fn openapi_json_lists_all_module_paths() {
         "/api/labels/preview",
         "/api/inventory/products/{id}/barcode",
         "/api/inventory/serials/by-number/{serialNumber}",
+        "/api/calc/warranty",
+        "/api/warranties",
+        "/api/warranties/lookup",
+        "/api/warranties/{key}",
+        "/api/warranties/{key}/void",
+        "/api/warranties/{key}/extend",
+        "/api/warranty-claims",
+        "/api/warranty-claims/{key}",
+        "/api/warranty-claims/{key}/inspect",
+        "/api/warranty-claims/{key}/decide",
+        "/api/warranty-claims/{key}/supplier/send",
+        "/api/warranty-claims/{key}/supplier/return",
+        "/api/warranty-claims/{key}/resolve",
+        "/api/warranty-claims/{key}/return",
+        "/api/warranty-claims/{key}/paid-repair",
     ] {
         assert!(paths.contains_key(expected), "missing path: {expected}");
     }

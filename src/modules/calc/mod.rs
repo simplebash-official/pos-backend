@@ -16,3 +16,4 @@ pub mod routes;
 pub mod settlement;
 pub mod shares;
 pub mod shift_totals;
+pub mod warranty;

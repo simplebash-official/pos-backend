@@ -3,6 +3,7 @@
 mod backup_service;
 #[cfg(test)]
 mod tests;
+mod warranty_upgrade;
 
 pub(crate) use backup_service::export_backup;
 pub(crate) use backup_service::restore_backup;

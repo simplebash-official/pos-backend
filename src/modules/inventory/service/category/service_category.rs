@@ -6,6 +6,7 @@ use crate::domain::inventory::{
     CategoriesResponse, CategoryInfo, CreateCategoryRequest, SubcategoriesResponse,
     UpdateCategoryRequest, ValidCategoriesResponse, ValidCategoryOption, ValidSubcategoryOption,
 };
+use crate::domain::warranties::ProductWarranty;
 use crate::modules::inventory::model::{CategoryDocument, SubcategoryDocument};
 use crate::modules::inventory::repository;
 use axum::http::StatusCode;
@@ -100,6 +101,7 @@ pub async fn create_category(db: &Db, body: CreateCategoryRequest) -> AppResult<
             name: body.name,
             icon: body.icon,
             color: body.color,
+            warranty_template: template_of(body.warranty_template)?,
             version: 1,
             created_at: now,
             updated_at: now,
@@ -375,15 +377,24 @@ pub async fn update_category(
         let icon = body.icon.unwrap_or(existing.icon);
         let color = body.color.unwrap_or(existing.color);
 
-        let updated = repository::category::update_category_fields(
-            db,
-            &category_key,
-            doc! { "name": &new_name, "icon": icon, "color": color, "updated_at": BsonDateTime::now() },
-        )
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Category not found", codes::CATEGORY_NOT_FOUND)
-        })?;
+        let mut set_doc = doc! {
+            "name": &new_name, "icon": icon, "color": color, "updated_at": BsonDateTime::now(),
+        };
+        if let Some(template) = body.warranty_template {
+            let stored = match template_of(Some(template))? {
+                Some(template) => mongodb::bson::Bson::Document(
+                    mongodb::bson::serialize_to_document(&template)
+                        .expect("a product warranty serializes to BSON"),
+                ),
+                None => mongodb::bson::Bson::Null,
+            };
+            set_doc.insert("warranty_template", stored);
+        }
+        let updated = repository::category::update_category_fields(db, &category_key, set_doc)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Category not found", codes::CATEGORY_NOT_FOUND)
+            })?;
 
         let subcategory_documents =
             repository::subcategory::list_subcategories_by_category(db, &category_key).await?;
@@ -395,4 +406,15 @@ pub async fn update_category(
         Ok(updated.into_category_info(subcategories))
     })
     .await
+}
+
+/// A checked warranty template; a template with no coverage is no template.
+fn template_of(template: Option<ProductWarranty>) -> AppResult<Option<ProductWarranty>> {
+    match template {
+        None => Ok(None),
+        Some(template) => {
+            let template = template.validated()?;
+            Ok(template.is_covered().then_some(template))
+        }
+    }
 }

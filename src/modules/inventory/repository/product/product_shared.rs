@@ -157,6 +157,10 @@ pub(super) fn row_to_product_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<Pro
     let created_at_str: String = row.get("created_at");
     let updated_at_str: String = row.get("updated_at");
     let deleted_at_str: Option<String> = row.get("deleted_at");
+    let warranty_json: String = row.get("warranty");
+    let warranty = serde_json::from_str(&warranty_json).map_err(|err| {
+        AppError::internal(format!("stored product warranty is not readable: {err}"))
+    })?;
 
     Ok(ProductDocument {
         id: object_id,
@@ -170,7 +174,7 @@ pub(super) fn row_to_product_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<Pro
         stock_quantity: row.get("stock_quantity"),
         min_stock_threshold: row.get("min_stock_threshold"),
         is_serialized: is_serialized_int != 0,
-        warranty_months: row.get("warranty_months"),
+        warranty,
         version: row.get("version"),
         created_at: to_bson_datetime(&created_at_str)?,
         updated_at: to_bson_datetime(&updated_at_str)?,

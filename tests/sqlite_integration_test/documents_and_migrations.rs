@@ -228,7 +228,7 @@ async fn test_sqlite_product_sort_is_stable_and_preferences_are_per_login() {
             Some(json!({
                 "name": name,
                 "categoryKey": category_key,
-                "subcategoryKey": subcategory_key,
+                "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
                 "openingStock": { "quantity": 5, "unitCostCents": 100, "sellingPriceCents": price },
                 "minStockThreshold": 1
             })),

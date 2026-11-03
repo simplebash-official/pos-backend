@@ -56,7 +56,7 @@ async fn create_shop(d: &Device) -> Catalog {
                 "POST",
                 "/api/inventory/products",
                 Some(json!({
-                    "name": name, "categoryKey": category_key, "subcategoryKey": subcategory_key,
+                    "name": name, "categoryKey": category_key, "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
                     "minStockThreshold": 2,
                     "openingStock": { "quantity": 500, "unitCostCents": 30000, "sellingPriceCents": 50000 }
                 })),
@@ -613,7 +613,7 @@ async fn concurrent_serial_sale_is_flagged_and_both_invoices_survive() {
             "POST",
             "/api/inventory/products",
             Some(json!({
-                "name": "Serial Phone", "categoryKey": category_key, "subcategoryKey": subcategory_key,
+                "name": "Serial Phone", "categoryKey": category_key, "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
                 "minStockThreshold": 1, "isSerialized": true
             })),
         )

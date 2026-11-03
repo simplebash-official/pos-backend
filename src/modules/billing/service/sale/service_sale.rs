@@ -7,7 +7,7 @@ use crate::domain::billing::{
 };
 use crate::domain::inventory::{Product, StockMovementType};
 use crate::modules::billing::repository;
-use crate::modules::{customers, inventory, print_jobs, repairs};
+use crate::modules::{customers, inventory, print_jobs, repairs, warranties};
 use mongodb::bson::{DateTime as BsonDateTime, doc};
 use std::collections::HashMap;
 
@@ -335,6 +335,7 @@ pub async fn void_invoice(
     id_or_key: &str,
     body: VoidInvoiceRequest,
     voided_by: String,
+    voided_by_name: String,
 ) -> AppResult<(Invoice, Vec<String>)> {
     crate::core::logging::domain::tracked("billing.invoice_voided", async move {
         if body.reason.trim().is_empty() {
@@ -414,6 +415,36 @@ pub async fn void_invoice(
                     item.name
                 ));
             }
+            for serial_number in &item.serial_numbers {
+                if let Err(err) = inventory::service::product_serial::release_sold_serial(
+                    db,
+                    product_key,
+                    serial_number,
+                    &existing.key,
+                )
+                .await
+                {
+                    warnings.push(format!(
+                        "Serial {serial_number} of '{}' could not be put back in stock: {err}",
+                        item.name
+                    ));
+                }
+            }
+        }
+
+        let actor = warranties::service::WarrantyActor {
+            user_id: voided_by.clone(),
+            name: voided_by_name,
+        };
+        if let Err(err) = warranties::service::void_for_invoice(
+            db,
+            &existing.key,
+            &existing.invoice_number,
+            &actor,
+        )
+        .await
+        {
+            warnings.push(format!("The invoice's warranties could not be cancelled: {err}"));
         }
 
         if let Some(customer_key) = &existing.customer_key {

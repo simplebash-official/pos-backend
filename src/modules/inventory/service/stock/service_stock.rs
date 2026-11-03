@@ -258,17 +258,7 @@ pub(crate) async fn list_stock_movements(
     }
 
     if let Some(mtype) = query.movement_type {
-        let mtype_str = match mtype {
-            StockMovementType::Sale => "sale",
-            StockMovementType::PurchaseReceipt => "purchase_receipt",
-            StockMovementType::RepairPartConsumption => "repair_part_consumption",
-            StockMovementType::ManualAdjustment => "manual_adjustment",
-            StockMovementType::InvoiceVoidReversal => "invoice_void_reversal",
-            StockMovementType::ReturnRestock => "return_restock",
-            StockMovementType::ReturnWriteOff => "return_write_off",
-            StockMovementType::ReturnSupplierRma => "return_supplier_rma",
-            StockMovementType::OpeningBalance => "opening_balance",
-        };
+        let mtype_str = mtype.as_str();
         filter.insert("movement_type", mtype_str);
     }
 

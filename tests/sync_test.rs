@@ -1,6 +1,7 @@
 mod common;
 
 use axum::body::Body;
+use simplebash_pos_backend::domain::warranties::ProductWarranty;
 
 use axum::http::{Request, StatusCode, header};
 use bson::DateTime as BsonDateTime;
@@ -176,6 +177,7 @@ async fn negative_stock_rejection_returns_409_insufficient_stock() {
             name: format!("Stock Test Cat {}", Uuid::new_v4()),
             icon: "Box".to_string(),
             color: "blue".to_string(),
+            warranty_template: None,
             version: 1,
             created_at: now,
             updated_at: now,
@@ -215,7 +217,7 @@ async fn negative_stock_rejection_returns_409_insufficient_stock() {
         stock_quantity: 5,
         min_stock_threshold: 2,
         is_serialized: false,
-        warranty_months: None,
+        warranty: ProductWarranty::none(),
         version: 1,
         created_at: now,
         updated_at: now,
@@ -292,6 +294,7 @@ async fn optimistic_concurrency_product_version_conflict() {
             name: format!("Opt Test Cat {}", Uuid::new_v4()),
             icon: "Box".to_string(),
             color: "blue".to_string(),
+            warranty_template: None,
             version: 1,
             created_at: now,
             updated_at: now,
@@ -329,7 +332,7 @@ async fn optimistic_concurrency_product_version_conflict() {
         stock_quantity: 10,
         min_stock_threshold: 2,
         is_serialized: false,
-        warranty_months: None,
+        warranty: ProductWarranty::none(),
         version: 1,
         created_at: now,
         updated_at: now,
@@ -468,6 +471,7 @@ async fn sync_status_returns_latest_resource_timestamps() {
             name: format!("Status Cat {}", Uuid::new_v4()),
             icon: "Box".to_string(),
             color: "blue".to_string(),
+            warranty_template: None,
             version: 1,
             created_at: now,
             updated_at: now,
@@ -570,6 +574,7 @@ async fn sync_changes_items_match_the_rest_dto_shape() {
             name: category_name.clone(),
             icon: "Box".to_string(),
             color: "blue".to_string(),
+            warranty_template: None,
             version: 1,
             created_at: now,
             updated_at: now,
@@ -610,7 +615,7 @@ async fn sync_changes_items_match_the_rest_dto_shape() {
             stock_quantity: 7,
             min_stock_threshold: 2,
             is_serialized: false,
-            warranty_months: None,
+            warranty: ProductWarranty::none(),
             version: 1,
             created_at: now,
             updated_at: now,

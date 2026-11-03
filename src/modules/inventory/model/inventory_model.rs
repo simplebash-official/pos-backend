@@ -4,6 +4,7 @@ use crate::domain::inventory::{
     BarcodeSource, BatchSource, CategoryInfo, Product, ProductSerial, SerialStatus, StockBatch,
     StockMovement, StockMovementType, SubcategoryInfo,
 };
+use crate::domain::warranties::ProductWarranty;
 use mongodb::bson::DateTime as BsonDateTime;
 use mongodb::bson::oid::ObjectId;
 use serde::{Deserialize, Serialize};
@@ -28,6 +29,9 @@ pub struct CategoryDocument {
     pub icon: String,
     /// Color hex code or theme token for UI badges.
     pub color: String,
+    /// The warranty the product form fills in for a new product of this category.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warranty_template: Option<ProductWarranty>,
     /// Concurrency version counter for optimistic locking.
     pub version: i64,
     /// Timestamp when category was created.
@@ -58,6 +62,7 @@ impl CategoryDocument {
             name: self.name,
             icon: self.icon,
             color: self.color,
+            warranty_template: self.warranty_template,
             subcategories,
             created_at: self.created_at.to_chrono(),
             updated_at: self.updated_at.to_chrono(),
@@ -97,9 +102,8 @@ pub struct ProductDocument {
     pub min_stock_threshold: i64,
     /// True when units of this product are tracked individually by serial number.
     pub is_serialized: bool,
-    /// Warranty length in months, if this product carries one.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub warranty_months: Option<i64>,
+    /// The warranty each unit comes with (coverage `none` when it has none).
+    pub warranty: ProductWarranty,
     /// Version counter for optimistic locking.
     pub version: i64,
     /// Timestamp when product was created.
@@ -148,7 +152,7 @@ impl ProductDocument {
             stock_quantity: self.stock_quantity,
             min_stock_threshold: self.min_stock_threshold,
             is_serialized: self.is_serialized,
-            warranty_months: self.warranty_months,
+            warranty: self.warranty,
             created_at: self.created_at.to_chrono(),
             updated_at: self.updated_at.to_chrono(),
             version: self.version,
@@ -186,12 +190,6 @@ pub struct ProductSerialDocument {
     /// When this unit was sold, once `Sold`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sold_at: Option<BsonDateTime>,
-    /// Warranty length snapshotted from the product at the moment of sale.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub warranty_months: Option<i64>,
-    /// Computed `sold_at + warranty_months`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub warranty_expires_at: Option<BsonDateTime>,
     /// Key of the credit note that most recently returned this unit, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub credit_note_key: Option<String>,
@@ -224,8 +222,6 @@ impl ProductSerialDocument {
             status: self.status,
             invoice_key: self.invoice_key,
             sold_at: self.sold_at.map(|d| d.to_chrono()),
-            warranty_months: self.warranty_months,
-            warranty_expires_at: self.warranty_expires_at.map(|d| d.to_chrono()),
             credit_note_key: self.credit_note_key,
             created_at: self.created_at.to_chrono(),
             updated_at: self.updated_at.to_chrono(),

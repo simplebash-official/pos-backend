@@ -6,7 +6,7 @@ use crate::core::id::generate_id;
 use crate::domain::inventory::{ProductSerial, SerialLookup, SerialStatus};
 use crate::modules::inventory::model::ProductSerialDocument;
 use crate::modules::inventory::repository;
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use mongodb::bson::oid::ObjectId;
 use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
 
@@ -34,8 +34,6 @@ pub(crate) async fn create_serials_for_purchase(
             status: SerialStatus::InStock,
             invoice_key: None,
             sold_at: None,
-            warranty_months: None,
-            warranty_expires_at: None,
             credit_note_key: None,
             version: 1,
             created_at: now,
@@ -106,15 +104,6 @@ pub(crate) fn hydrate_sync_documents(documents: Vec<Document>) -> AppResult<Vec<
         .collect()
 }
 
-/// Whether a resolved serial's warranty is still active right now —
-/// response-only computation feeding a credit-note line's
-/// `within_warranty` field and disposition guidance.
-pub(crate) fn is_within_warranty(serial: &ProductSerialDocument) -> Option<bool> {
-    serial
-        .warranty_expires_at
-        .map(|expires| expires.to_chrono() > Utc::now())
-}
-
 /// Lists a product's serial units, optionally filtered by lifecycle status.
 /// Backs `GET /products/{key}/serials`, used both by a sale-time "pick a
 /// unit to sell" picker (`status=in_stock`) and a return-time lookup.
@@ -179,33 +168,66 @@ pub(crate) async fn lookup_in_stock_serial(
     })
 }
 
-/// Flips a resolved serial to `Sold`, stamping the invoice it was sold on
-/// and computing `warranty_expires_at` from the product's snapshotted
-/// `warranty_months` (if any). Called post-commit, mirroring how
-/// `apply_stock_delta` runs after the invoice itself is already inserted.
+/// Flips a resolved serial to `Sold`, stamping the invoice it was sold on.
+/// Called post-commit, mirroring how `apply_stock_delta` runs after the
+/// invoice itself is already inserted. Its warranty is a separate record
+/// (`warranties::service::issue_for_sale_line`).
 pub(crate) async fn mark_serial_sold(
     db: &Db,
     serial_id: ObjectId,
     invoice_key: &str,
-    warranty_months: Option<i64>,
 ) -> AppResult<()> {
-    let now = Utc::now();
-    let warranty_expires_at =
-        warranty_months.map(|months| BsonDateTime::from_chrono(now + Duration::days(months * 30)));
-
-    let mut set_doc = doc! {
+    let set_doc = doc! {
         "status": "sold",
         "invoice_key": invoice_key,
-        "sold_at": BsonDateTime::from_chrono(now),
+        "sold_at": BsonDateTime::from_chrono(Utc::now()),
     };
-    if let Some(months) = warranty_months {
-        set_doc.insert("warranty_months", months);
-    }
-    if let Some(expires) = warranty_expires_at {
-        set_doc.insert("warranty_expires_at", expires);
-    }
-
     repository::product_serial::update_serial(db, serial_id, set_doc).await?;
+    Ok(())
+}
+
+/// Puts a unit sold on `invoice_key` back in stock when that invoice is
+/// voided, so the serial can be sold again. A unit that came back on a
+/// credit note keeps its return status; one sold on another invoice is an
+/// error (the invoice line and the serial disagree).
+pub(crate) async fn release_sold_serial(
+    db: &Db,
+    product_key: &str,
+    serial_number: &str,
+    invoice_key: &str,
+) -> AppResult<()> {
+    let serial = repository::product_serial::find_serial_by_number_and_product(
+        db,
+        serial_number,
+        product_key,
+    )
+    .await?
+    .ok_or_else(|| {
+        AppError::not_found_with_code(
+            format!("Serial number '{serial_number}' not found for this product"),
+            codes::SERIAL_NOT_FOUND,
+        )
+    })?;
+    if serial.invoice_key.as_deref() != Some(invoice_key) {
+        return Err(AppError::not_found_with_code(
+            format!("Serial number '{serial_number}' was not sold on this invoice"),
+            codes::SERIAL_NOT_FOUND,
+        ));
+    }
+    if serial.status != SerialStatus::Sold {
+        return Ok(());
+    }
+    let serial_id = serial
+        .id
+        .ok_or_else(|| AppError::internal("persisted product serial document must have an id"))?;
+    repository::product_serial::release_serial(db, serial_id)
+        .await?
+        .ok_or_else(|| {
+            AppError::not_found_with_code(
+                format!("Serial number '{serial_number}' not found for this product"),
+                codes::SERIAL_NOT_FOUND,
+            )
+        })?;
     Ok(())
 }
 
@@ -293,5 +315,17 @@ pub(crate) async fn transition_serial_on_return(
         "credit_note_key": credit_note_key,
     };
     repository::product_serial::update_serial(db, serial_id, set_doc).await?;
+    Ok(())
+}
+
+/// Marks a unit the shop took back under a warranty claim (a faulty unit swapped for a new
+/// one) as `ReturnedFaulty`.
+pub(crate) async fn mark_serial_returned_faulty(db: &Db, serial_id: ObjectId) -> AppResult<()> {
+    repository::product_serial::update_serial(
+        db,
+        serial_id,
+        doc! { "status": SerialStatus::ReturnedFaulty.as_str() },
+    )
+    .await?;
     Ok(())
 }

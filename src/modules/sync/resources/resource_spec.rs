@@ -23,6 +23,9 @@ pub fn label_column(table: &str) -> Option<&'static str> {
         "receipt_settlements" => Some("payment_key"),
         "supplier_credits" => Some("key"),
         "receipt_charges" => Some("key"),
+        "warranties" => Some("warranty_number"),
+        "warranty_events" => Some("key"),
+        "warranty_claims" => Some("claim_number"),
         _ => None,
     }
 }

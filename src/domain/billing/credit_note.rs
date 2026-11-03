@@ -100,6 +100,10 @@ pub struct CreateCreditNoteRequest {
     pub notes: Option<String>,
     /// Register session key if processed during an active cashier shift.
     pub session_key: Option<String>,
+    /// The warranty claim this refund settles (`wcl_…`). It must have been decided as a
+    /// refund on the same invoice, and a serialized item must be among what comes back. A
+    /// manager already approved it, so the return window does not apply.
+    pub warranty_claim_key: Option<String>,
 }
 
 /// A return/refund/exchange transaction record.

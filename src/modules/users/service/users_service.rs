@@ -4,8 +4,8 @@ use crate::core::error::{AppError, AppResult};
 use crate::core::id::generate_id;
 use crate::domain::employees::EmployeeLoginSummary;
 use crate::domain::users::{
-    CATALOG_SORT_IDS, CreateUserRequest, Role, UpdateMyPreferencesRequest, UpdateUserRequest, User,
-    UserListQuery, UsersResponse,
+    ApprovedBy, CATALOG_SORT_IDS, CreateUserRequest, ManagerApproval, Role,
+    UpdateMyPreferencesRequest, UpdateUserRequest, User, UserListQuery, UsersResponse,
 };
 use crate::modules::employees;
 use crate::modules::users::model::UserDocument;
@@ -723,6 +723,42 @@ pub(super) fn verify_password(password: &str, hash: &str) -> AppResult<bool> {
     Ok(Argon2::default()
         .verify_password(password.as_bytes(), &parsed_hash)
         .is_ok())
+}
+
+/// The longest reason an approval may carry.
+const APPROVAL_REASON_MAX: usize = 500;
+
+/// Checks a manager or owner sign-off: a reason must be given (at most 500 characters) and the
+/// PIN must belong to an active Admin or Manager. 401 `INVALID_PIN` otherwise; nothing is
+/// written.
+pub async fn require_manager_approval(
+    db: &Db,
+    approval: &ManagerApproval,
+) -> AppResult<ApprovedBy> {
+    let reason = approval.reason.trim();
+    if reason.is_empty() {
+        return Err(AppError::validation(
+            "Please say why this is being allowed.",
+        ));
+    }
+    if reason.chars().count() > APPROVAL_REASON_MAX {
+        return Err(AppError::validation(format!(
+            "The reason can be at most {APPROVAL_REASON_MAX} characters."
+        )));
+    }
+    let approver = verify_user_pin(db, approval.manager_pin.trim(), Some("manager"))
+        .await?
+        .ok_or_else(|| {
+            AppError::unauthorized_with_code(
+                "That PIN does not belong to a manager or owner.",
+                codes::INVALID_PIN,
+            )
+        })?;
+    Ok(ApprovedBy {
+        user_id: approver.id,
+        name: approver.name,
+        reason: reason.to_string(),
+    })
 }
 
 /// Verifies a numeric PIN against active users with the required role.

@@ -11,6 +11,7 @@ use simplebash_pos_backend::core::id::generate_id;
 use simplebash_pos_backend::domain::billing::InvoiceStatus;
 use simplebash_pos_backend::domain::inventory::BatchSource;
 use simplebash_pos_backend::domain::users::Role;
+use simplebash_pos_backend::domain::warranties::ProductWarranty;
 use simplebash_pos_backend::modules::billing::model::InvoiceDocument;
 use simplebash_pos_backend::modules::inventory::model::{ProductDocument, StockBatchDocument};
 
@@ -120,7 +121,7 @@ async fn inventory_valuation_and_top_products_report() {
         stock_quantity: 20,
         min_stock_threshold: 5,
         is_serialized: false,
-        warranty_months: None,
+        warranty: ProductWarranty::none(),
         version: 1,
         created_at: BsonDateTime::from_chrono(now),
         updated_at: BsonDateTime::from_chrono(now),
@@ -140,7 +141,7 @@ async fn inventory_valuation_and_top_products_report() {
         stock_quantity: 3, // Low stock (<= 5)
         min_stock_threshold: 5,
         is_serialized: true,
-        warranty_months: Some(6),
+        warranty: simplebash_pos_backend::modules::warranties::migration::legacy_profile(Some(6)),
         version: 1,
         created_at: BsonDateTime::from_chrono(now),
         updated_at: BsonDateTime::from_chrono(now),

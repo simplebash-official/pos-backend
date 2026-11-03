@@ -167,8 +167,8 @@ async fn export_and_restore_backup_roundtrip() {
     .expect("the awaited step succeeds");
 
     sqlx::query(
-        "INSERT INTO products (key, id, sku, name, category_key, subcategory_key, stock_quantity, version, created_at, updated_at) \
-         VALUES ('prod_1', '65f1a1a1a1a1a1a1a1a1a1a3', 'LAP-GAM-0001', 'Asus ROG', 'cat_1', 'subcat_1', 5, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        "INSERT INTO products (key, id, sku, name, category_key, subcategory_key, stock_quantity, warranty, version, created_at, updated_at) \
+         VALUES ('prod_1', '65f1a1a1a1a1a1a1a1a1a1a3', 'LAP-GAM-0001', 'Asus ROG', 'cat_1', 'subcat_1', 5, '{\"coverage\":{\"kind\":\"none\"}}', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
     )
     .execute(&ctx.pool)
     .await

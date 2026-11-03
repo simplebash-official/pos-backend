@@ -80,6 +80,7 @@ pub(super) fn require_owner_access(
         AttachmentOwner::CashMovement => (perm::CASH_MOVEMENTS_VIEW, perm::CASH_MOVEMENTS_CREATE),
         AttachmentOwner::Expense => (perm::EXPENSES_VIEW, perm::EXPENSES_MANAGE),
         AttachmentOwner::Income => (perm::INCOME_VIEW, perm::INCOME_MANAGE),
+        AttachmentOwner::WarrantyClaim => (perm::WARRANTIES_VIEW, perm::WARRANTY_CLAIMS_RECORD),
     };
     user.require_permission(if write {
         perm::ATTACHMENTS_CREATE

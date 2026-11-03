@@ -1,5 +1,6 @@
 //! Categories and subcategories with their requests and responses.
 
+use crate::domain::warranties::ProductWarranty;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -33,6 +34,10 @@ pub struct CategoryInfo {
     pub icon: String,
     /// Category color hex code or CSS color.
     pub color: String,
+    /// The warranty the product form fills in for a new product of this category. Copied into
+    /// the product when chosen, never read through it later.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warranty_template: Option<ProductWarranty>,
     /// Nested list of subcategories belonging to this category.
     pub subcategories: Vec<SubcategoryInfo>,
     /// Creation timestamp.
@@ -55,6 +60,7 @@ pub struct CategoryInfo {
 /// newly created category, so a category can be bootstrapped with its
 /// starter subcategories in one call.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateCategoryRequest {
     /// Display name of the new category.
     pub name: String,
@@ -65,6 +71,8 @@ pub struct CreateCategoryRequest {
     /// Initial list of subcategory names to create under this category.
     #[serde(default)]
     pub subcategories: Vec<String>,
+    /// The warranty new products of this category start with in the product form.
+    pub warranty_template: Option<ProductWarranty>,
 }
 
 /// Response for `GET /categories/{categoryKey}/subcategories`.
@@ -110,6 +118,7 @@ pub struct SubcategoryInfo {
 /// products reference a category by its immutable `key`, so no cascade is
 /// needed (see `service::category::update_category`).
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateCategoryRequest {
     /// Updated display name.
     pub name: Option<String>,
@@ -117,6 +126,8 @@ pub struct UpdateCategoryRequest {
     pub icon: Option<String>,
     /// Updated theme color code.
     pub color: Option<String>,
+    /// A new warranty template; coverage `none` removes it.
+    pub warranty_template: Option<ProductWarranty>,
 }
 
 /// Response for `GET /categories/valid` — the same category/subcategory

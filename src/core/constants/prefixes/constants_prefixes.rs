@@ -98,3 +98,9 @@ pub const SUPPLIER_PRODUCT: &str = "splink";
 pub const TENANT: &str = "tnt";
 
 pub const USER: &str = "usr";
+
+pub const WARRANTY: &str = "wty";
+
+pub const WARRANTY_EVENT: &str = "wev";
+
+pub const WARRANTY_CLAIM: &str = "wcl";

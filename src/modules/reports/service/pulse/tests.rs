@@ -127,7 +127,7 @@ fn pending_stock_quotations_are_tracked_and_flagged_ready_when_replenished() {
         "categoryKey": "cat_1", "category": "Accessories",
         "subcategoryKey": "sub_1", "subcategory": "Protectors",
         "stockQuantity": 0, "minStockThreshold": 5,
-        "priceTiers": [], "isSerialized": false,
+        "priceTiers": [], "isSerialized": false, "warranty": { "coverage": { "kind": "none" } },
         "createdAt": NOW, "updatedAt": NOW, "version": 1
     }));
 
@@ -146,7 +146,7 @@ fn pending_stock_quotations_are_tracked_and_flagged_ready_when_replenished() {
         "categoryKey": "cat_1", "category": "Accessories",
         "subcategoryKey": "sub_1", "subcategory": "Protectors",
         "stockQuantity": 5, "minStockThreshold": 5,
-        "priceTiers": [], "isSerialized": false,
+        "priceTiers": [], "isSerialized": false, "warranty": { "coverage": { "kind": "none" } },
         "createdAt": NOW, "updatedAt": NOW, "version": 1
     }));
     inp.products = std::slice::from_ref(&replenished_product);

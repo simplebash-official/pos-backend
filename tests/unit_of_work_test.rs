@@ -111,9 +111,12 @@ async fn scenario(app: &common::TestApp) {
             "name": format!("Uow Phone {tag}"),
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
+            "warranty": {
+                "coverage": { "kind": "limited", "value": 12, "unit": "months" },
+                "warrantyType": "shop",
+            },
             "minStockThreshold": 1,
             "isSerialized": true,
-            "warrantyMonths": 12,
         })),
         &admin,
     )

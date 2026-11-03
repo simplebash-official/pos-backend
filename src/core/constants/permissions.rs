@@ -107,3 +107,12 @@ pub const EMPLOYEES_WRITE: &str = "employees:write";
 /// not sales). Granted to Admin and Manager only — Staff tokens get a 403 from
 /// every `/api/quotations` route, so hiding the UI is never the only guard.
 pub const QUOTATIONS_MANAGE: &str = "quotations:manage";
+
+/// Look up warranties and see their history. Granted to every role: checking a warranty is a
+/// counter task.
+pub const WARRANTIES_VIEW: &str = "warranties:view";
+/// Record warranty work: open and move claims, and ask for a manager-approved void, extension
+/// or expired-warranty override (each still needs a manager or owner PIN). Every role.
+pub const WARRANTY_CLAIMS_RECORD: &str = "warranty_claims:record";
+/// Change a line's warranty at the till, away from what the product carries. Admin and Manager.
+pub const WARRANTIES_ADJUST_AT_SALE: &str = "warranties:adjust_at_sale";

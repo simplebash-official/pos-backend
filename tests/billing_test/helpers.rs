@@ -103,6 +103,7 @@ pub(crate) async fn seed_category_with_subcategory(
             name: format!("Test Category {}", Uuid::new_v4()),
             icon: "Box".to_string(),
             color: "blue".to_string(),
+            warranty_template: None,
             version: 1,
             created_at: now,
             updated_at: now,
@@ -145,7 +146,7 @@ pub(crate) async fn seed_product(app: &common::TestApp) -> (String, String, i64)
         Some(json!({
             "name": "Test Widget",
             "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "openingStock": { "quantity": 10, "unitCostCents": 1000, "sellingPriceCents": 2000 },
             "minStockThreshold": 2,
         })),

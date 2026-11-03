@@ -83,6 +83,7 @@ pub async fn seed_providers(db: &Db) -> Result<ProviderSeedResult, AppError> {
                             name: None,
                             icon: Some(cat.icon.to_string()),
                             color: Some(cat.color.to_string()),
+                            warranty_template: None,
                         },
                     )
                     .await?
@@ -95,6 +96,7 @@ pub async fn seed_providers(db: &Db) -> Result<ProviderSeedResult, AppError> {
                     name: cat.name.to_string(),
                     icon: cat.icon.to_string(),
                     color: cat.color.to_string(),
+                    warranty_template: None,
                     subcategories: cat
                         .subcategory_names
                         .iter()

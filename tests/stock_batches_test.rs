@@ -125,7 +125,7 @@ impl Shop {
             Some(json!({
                 "name": format!("Item A {tag}"),
                 "categoryKey": category_key,
-                "subcategoryKey": subcategory_key,
+                "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
                 "minStockThreshold": 2,
             })),
             &admin,
@@ -520,8 +520,9 @@ async fn a_sqlite_database_from_before_batches_is_migrated() {
         "ALTER TABLE products ADD COLUMN cost_price_cents INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE products ADD COLUMN selling_price_cents INTEGER NOT NULL DEFAULT 0",
         "INSERT INTO products (key, id, sku, name, category_key, subcategory_key, cost_price_cents, \
-         selling_price_cents, stock_quantity, version, created_at, updated_at) VALUES \
-         ('prod_old', '65f1a1a1a1a1a1a1a1a1a1c1', 'OLD-1', 'Old Item', 'cat_1', 'subcat_1', 1000, 1200, 5, 1, \
+         selling_price_cents, stock_quantity, warranty, version, created_at, updated_at) VALUES \
+         ('prod_old', '65f1a1a1a1a1a1a1a1a1a1c1', 'OLD-1', 'Old Item', 'cat_1', 'subcat_1', 1000, 1200, 5, \
+         '{\"coverage\":{\"kind\":\"none\"}}', 1, \
          '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')",
         "INSERT INTO stock_movements (key, id, product_id, quantity_delta, movement_type, version, created_at, updated_at) \
          VALUES ('sm_old', '65f1a1a1a1a1a1a1a1a1a1c2', '65f1a1a1a1a1a1a1a1a1a1c1', 5, 'opening_balance', 1, \
@@ -655,6 +656,7 @@ async fn a_mongo_database_from_before_batches_is_migrated() {
             "category_key": "cat_1", "subcategory_key": "subcat_1",
             "cost_price_cents": 1000_i64, "selling_price_cents": 1200_i64,
             "stock_quantity": 5_i64, "min_stock_threshold": 0_i64, "is_serialized": false,
+            "warranty": { "coverage": { "kind": "none" } },
             "version": 1_i64, "created_at": created, "updated_at": created,
         },
     )
@@ -698,6 +700,7 @@ async fn a_mongo_database_from_before_batches_is_migrated() {
             "category_key": "cat_1", "subcategory_key": "subcat_1", "tenant_id": "tnt_b",
             "cost_price_cents": 0_i64, "selling_price_cents": 0_i64,
             "stock_quantity": 0_i64, "min_stock_threshold": 0_i64, "is_serialized": false,
+            "warranty": { "coverage": { "kind": "none" } },
             "version": 1_i64, "created_at": created, "updated_at": created,
         },
     )

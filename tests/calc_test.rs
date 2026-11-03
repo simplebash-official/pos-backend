@@ -487,6 +487,37 @@ async fn bar_lengths_are_worked_out_on_the_server() {
 }
 
 #[tokio::test]
+async fn warranty_periods_are_worked_out_on_the_server() {
+    let app = common::spawn_app_sqlite().await;
+    let staff = common::mint_token(&app.config, Some(Role::Staff), &[]);
+    let request = json!({
+        "startsOn": "2026-11-03",
+        "coverage": { "kind": "limited", "value": 12, "unit": "months" }
+    });
+    let (status, body) = post(&app, "/api/calc/warranty", &request, Some(&staff)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let data = &body["data"];
+    assert_eq!(data["kind"], "until");
+    assert_eq!(data["endsOn"], "2027-11-02");
+    golden("warranty", &request, data);
+
+    let lifetime = json!({ "startsOn": "2026-11-03", "coverage": { "kind": "lifetime" } });
+    let (status, body) = post(&app, "/api/calc/warranty", &lifetime, Some(&staff)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["kind"], "lifetime");
+
+    let zero = json!({
+        "startsOn": "2026-11-03",
+        "coverage": { "kind": "limited", "value": 0, "unit": "days" }
+    });
+    let (status, _) = post(&app, "/api/calc/warranty", &zero, Some(&staff)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (status, _) = post(&app, "/api/calc/warranty", &request, None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn the_totals_over_a_shift_list_are_worked_out_on_the_server() {
     let app = common::spawn_app_sqlite().await;
     let admin = common::mint_token(

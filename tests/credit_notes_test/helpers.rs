@@ -82,6 +82,7 @@ pub(crate) async fn seed_category_with_subcategory(
             name: format!("Test Category {}", Uuid::new_v4()),
             icon: "Box".to_string(),
             color: "blue".to_string(),
+            warranty_template: None,
             version: 1,
             created_at: now,
             updated_at: now,
@@ -126,7 +127,7 @@ pub(crate) async fn seed_product(
         Some(json!({
             "name": name,
             "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "openingStock": { "quantity": stock, "unitCostCents": price_cents / 2, "sellingPriceCents": price_cents },
             "minStockThreshold": 2,
         })),

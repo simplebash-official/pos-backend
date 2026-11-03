@@ -235,6 +235,7 @@ pub(crate) async fn process_inventory_import(
                 name: cat_input.clone(),
                 icon: "package".to_string(),
                 color: "blue".to_string(),
+                warranty_template: None,
                 subcategories: vec![subcat_input.clone()],
             };
             match service::category::create_category(db, create_cat_req).await {
@@ -570,11 +571,24 @@ pub(crate) async fn process_inventory_import(
             ],
             false,
         );
-        let warranty_months =
-            match get_i64(row, &["warrantyMonths", "warranty_months", "warranty"], -1) {
-                Ok(w) if w >= 0 => Some(w),
-                _ => None,
-            };
+        let warranty_cell = get_first_string(row, &["warranty"]);
+        let warranty = match super::import_warranty::parse_row_warranty(
+            warranty_cell.as_deref(),
+            get_first_string(row, &["warrantyType", "warranty_type"]).as_deref(),
+            get_first_string(row, &["warrantyTerms", "warranty_terms"]).as_deref(),
+        ) {
+            Ok(warranty) => warranty,
+            Err(message) => {
+                errors.push(ImportRowError {
+                    row_number,
+                    field: Some("warranty".to_string()),
+                    message,
+                    raw_value: warranty_cell,
+                });
+                failed_count += 1;
+                continue;
+            }
+        };
 
         // The product is created empty; the row's units then come in as an
         // `import` batch at the row's cost and selling price.
@@ -588,7 +602,7 @@ pub(crate) async fn process_inventory_import(
             min_stock_threshold,
             suppliers: Vec::new(),
             is_serialized,
-            warranty_months,
+            warranty,
         };
 
         match service::product::create_product(db, create_req).await {

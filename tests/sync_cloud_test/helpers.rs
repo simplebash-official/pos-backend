@@ -270,7 +270,7 @@ pub(crate) async fn seed_tenant(app: &common::TestApp, tid: &str) -> Seed {
         Some(&token),
         Some(json!({
             "name": format!("Prod-{uniq}"), "categoryKey": category_key,
-            "subcategoryKey": subcategory_key, "minStockThreshold": 3,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } }, "minStockThreshold": 3,
             "openingStock": { "quantity": 10, "unitCostCents": 1000, "sellingPriceCents": 2000 },
             "autoGenerateBarcode": true,
         })),

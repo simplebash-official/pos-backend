@@ -2,6 +2,7 @@ use crate::clients::db::Db;
 use crate::clients::sqlite::{bson_to_iso, generate_id_hex, to_bson_datetime};
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use crate::core::error::{AppError, AppResult};
+use crate::domain::warranties::ProductWarranty;
 use crate::modules::inventory::model::{CategoryDocument, SubcategoryDocument};
 use futures_util::TryStreamExt;
 use mongodb::bson::oid::ObjectId;
@@ -147,13 +148,14 @@ pub(crate) async fn insert_category(db: &Db, document: &CategoryDocument) -> App
             let created_at_iso = bson_to_iso(&document.created_at);
             let updated_at_iso = bson_to_iso(&document.updated_at);
             let deleted_at_iso = document.deleted_at.as_ref().map(bson_to_iso);
+            let template = template_json(document.warranty_template.as_ref());
 
             sqlx::query(
                 r#"
                 INSERT INTO categories (
-                    key, id, name, icon, color, version, created_at, updated_at,
-                    deleted_at, updated_by_device
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    key, id, name, icon, color, warranty_template, version, created_at,
+                    updated_at, deleted_at, updated_by_device
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(&document.key)
@@ -161,6 +163,7 @@ pub(crate) async fn insert_category(db: &Db, document: &CategoryDocument) -> App
             .bind(&document.name)
             .bind(&document.icon)
             .bind(&document.color)
+            .bind(&template)
             .bind(document.version)
             .bind(&created_at_iso)
             .bind(&updated_at_iso)
@@ -267,6 +270,14 @@ pub(super) fn row_to_category_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<Ca
     let created_at_str: String = row.get("created_at");
     let updated_at_str: String = row.get("updated_at");
     let deleted_at_str: Option<String> = row.get("deleted_at");
+    let template_str: Option<String> = row.get("warranty_template");
+    let warranty_template = template_str
+        .map(|text| {
+            serde_json::from_str(&text).map_err(|err| {
+                AppError::internal(format!("stored category warranty template: {err}"))
+            })
+        })
+        .transpose()?;
 
     Ok(CategoryDocument {
         id: object_id,
@@ -274,6 +285,7 @@ pub(super) fn row_to_category_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<Ca
         name: row.get("name"),
         icon: row.get("icon"),
         color: row.get("color"),
+        warranty_template,
         version: row.get("version"),
         created_at: to_bson_datetime(&created_at_str)?,
         updated_at: to_bson_datetime(&updated_at_str)?,
@@ -310,6 +322,17 @@ pub(crate) async fn update_category_fields(
             if let Ok(color) = set_doc.get_str("color") {
                 cat.color = color.to_string();
             }
+            match set_doc.get("warranty_template") {
+                Some(mongodb::bson::Bson::Null) => cat.warranty_template = None,
+                Some(mongodb::bson::Bson::Document(template)) => {
+                    cat.warranty_template = Some(
+                        mongodb::bson::deserialize_from_document(template.clone()).map_err(
+                            |err| AppError::internal(format!("category warranty template: {err}")),
+                        )?,
+                    );
+                }
+                _ => {}
+            }
             if let Ok(dt) = set_doc.get_datetime("updated_at") {
                 cat.updated_at = *dt;
             }
@@ -318,11 +341,13 @@ pub(crate) async fn update_category_fields(
             let updated_at_iso = bson_to_iso(&cat.updated_at);
 
             sqlx::query(
-                "UPDATE categories SET name = ?, icon = ?, color = ?, version = ?, updated_at = ? WHERE key = ?",
+                "UPDATE categories SET name = ?, icon = ?, color = ?, warranty_template = ?, \
+                 version = ?, updated_at = ? WHERE key = ?",
             )
             .bind(&cat.name)
             .bind(&cat.icon)
             .bind(&cat.color)
+            .bind(template_json(cat.warranty_template.as_ref()))
             .bind(cat.version)
             .bind(&updated_at_iso)
             .bind(key)
@@ -332,4 +357,9 @@ pub(crate) async fn update_category_fields(
             Ok(Some(cat))
         }
     }
+}
+
+/// A warranty template as its SQLite JSON text.
+fn template_json(template: Option<&ProductWarranty>) -> Option<String> {
+    template.map(|t| serde_json::to_string(t).expect("a product warranty serializes to JSON"))
 }

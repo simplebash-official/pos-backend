@@ -423,6 +423,66 @@ pub fn index_specs(tenant_mode: TenantMode) -> Vec<IndexSpec> {
         false,
     );
 
+    // Warranties (`modules::warranties`): found by key, by number, serial, invoice, customer
+    // or phone, scanned by sync; their log is read per warranty, oldest first.
+    specs.add(
+        "warranties",
+        "warranties_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    for (name, keys) in [
+        ("warranties_sync", doc! { "updated_at": 1, "key": 1 }),
+        ("warranties_number", doc! { "warranty_number": 1 }),
+        ("warranties_serial", doc! { "serial_number": 1 }),
+        ("warranties_invoice_key", doc! { "invoice_key": 1 }),
+        ("warranties_invoice_number", doc! { "invoice_number": 1 }),
+        (
+            "warranties_customer_key",
+            doc! { "customer_key": 1, "created_at": -1 },
+        ),
+        ("warranties_phone_tail", doc! { "customer_phone_tail": 1 }),
+    ] {
+        specs.add("warranties", name, keys, false);
+    }
+    specs.add(
+        "warranty_events",
+        "warranty_events_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    specs.add(
+        "warranty_events",
+        "warranty_events_warranty_key",
+        doc! { "warranty_key": 1, "created_at": 1 },
+        false,
+    );
+    specs.add(
+        "warranty_events",
+        "warranty_events_sync",
+        doc! { "updated_at": 1, "key": 1 },
+        false,
+    );
+    // Claims: the queue lists them by status, oldest first; a warranty and an invoice show
+    // their own.
+    specs.add(
+        "warranty_claims",
+        "warranty_claims_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    for (name, keys) in [
+        ("warranty_claims_sync", doc! { "updated_at": 1, "key": 1 }),
+        (
+            "warranty_claims_status",
+            doc! { "status": 1, "created_at": 1 },
+        ),
+        ("warranty_claims_warranty_key", doc! { "warranty_key": 1 }),
+        ("warranty_claims_invoice_key", doc! { "invoice_key": 1 }),
+    ] {
+        specs.add("warranty_claims", name, keys, false);
+    }
+
     // Platform directory (`modules::tenants`): shop codes are globally unique
     // and the collection is not tenant-owned, so it is never tenant-prefixed.
     if tenant_mode == TenantMode::Multi {

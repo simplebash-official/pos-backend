@@ -157,7 +157,7 @@ async fn seed_tenant_a(app: &common::TestApp, token: &str) -> Seed {
         Some(json!({
             "name": product_name,
             "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "openingStock": { "quantity": 10, "unitCostCents": 1000, "sellingPriceCents": 2000 },
             "minStockThreshold": 3,
             "autoGenerateBarcode": true,

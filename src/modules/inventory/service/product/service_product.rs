@@ -59,6 +59,7 @@ pub async fn create_product(db: &Db, body: CreateProductRequest) -> AppResult<Pr
             return Err(AppError::validation("Product name is required"));
         }
         validate_min_stock_threshold(body.min_stock_threshold)?;
+        let warranty = body.warranty.validated()?;
         if let Some(opening) = &body.opening_stock {
             if opening.quantity < 1 {
                 return Err(AppError::validation(
@@ -128,7 +129,7 @@ pub async fn create_product(db: &Db, body: CreateProductRequest) -> AppResult<Pr
             stock_quantity: 0,
             min_stock_threshold: body.min_stock_threshold,
             is_serialized: body.is_serialized,
-            warranty_months: body.warranty_months,
+            warranty,
             version: 1,
             created_at: now,
             updated_at: now,
@@ -813,8 +814,13 @@ pub(crate) async fn update_product(
         if let Some(is_serialized) = body.is_serialized {
             set_doc.insert("is_serialized", is_serialized);
         }
-        if let Some(warranty_months) = body.warranty_months {
-            set_doc.insert("warranty_months", warranty_months);
+        if let Some(warranty) = body.warranty {
+            let warranty = warranty.validated()?;
+            set_doc.insert(
+                "warranty",
+                mongodb::bson::serialize_to_document(&warranty)
+                    .expect("a product warranty serializes to BSON"),
+            );
         }
         if let Some(barcode) = barcode_change {
             set_doc.insert("barcode", barcode);

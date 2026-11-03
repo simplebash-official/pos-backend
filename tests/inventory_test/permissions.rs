@@ -1,6 +1,7 @@
 //! Permissions tests.
 
 use axum::http::StatusCode;
+use simplebash_pos_backend::domain::warranties::ProductWarranty;
 
 use serde_json::{Value, json};
 use simplebash_pos_backend::core::config::Config;
@@ -48,7 +49,7 @@ async fn seed_product_with(
             stock_quantity,
             min_stock_threshold,
             is_serialized: false,
-            warranty_months: None,
+            warranty: ProductWarranty::none(),
             version: 1,
             created_at: now,
             updated_at: now,
@@ -82,7 +83,7 @@ async fn staff_may_read_inventory_but_not_write_it() {
         Some(json!({
             "name": format!("Staff Guard Product {}", Uuid::new_v4()),
             "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "openingStock": { "quantity": 5, "unitCostCents": 1000, "sellingPriceCents": 2000 },
             "minStockThreshold": 1,
         })),
@@ -117,7 +118,7 @@ async fn staff_may_read_inventory_but_not_write_it() {
             Some(json!({
                 "name": "Nope",
                 "categoryKey": category_key,
-                "subcategoryKey": subcategory_key,
+                "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
                 "openingStock": { "quantity": 1, "unitCostCents": 100, "sellingPriceCents": 200 },
                 "minStockThreshold": 1,
             })),

@@ -36,5 +36,7 @@ pub const BALANCES: &str = "balances";
 pub const CASH_SETTINGS: &str = "cash_settings";
 pub const ATTACHMENTS: &str = "attachments";
 pub const RECURRING_EXPENSES: &str = "recurring_expenses";
+pub const WARRANTIES: &str = "warranties";
+pub const WARRANTY_CLAIMS: &str = "warranty_claims";
 
 pub const DOCUMENT_PACKAGES: &str = "document-packages";

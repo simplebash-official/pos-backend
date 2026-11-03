@@ -64,6 +64,13 @@ pub(super) async fn complete_sale(
     Json(body): Json<CreateSaleRequest>,
 ) -> AppResult<Json<ApiResponse<CompleteSaleResponse>>> {
     user.require_permission(perm::BILLING_WRITE)?;
+    if body
+        .items
+        .iter()
+        .any(|item| item.warranty_override.is_some())
+    {
+        user.require_permission(perm::WARRANTIES_ADJUST_AT_SALE)?;
+    }
     let response = sale::complete_sale(&state.db, body, user.user_id, device_id.0).await?;
     state.reports_engine.invalidate_active();
     Ok(Json(ApiResponse::success(
@@ -583,7 +590,9 @@ pub(super) async fn void_invoice(
     Path(id): Path<String>,
     Json(body): Json<VoidInvoiceRequest>,
 ) -> AppResult<Json<ApiResponse<Invoice>>> {
-    let (invoice, warnings) = sale::void_invoice(&state.db, &id, body, admin.0.user_id).await?;
+    let voided_by_name = admin.0.resolve_name(&state.db).await?;
+    let (invoice, warnings) =
+        sale::void_invoice(&state.db, &id, body, admin.0.user_id, voided_by_name).await?;
     state.reports_engine.invalidate_active();
     let message = if warnings.is_empty() {
         "Invoice voided successfully".to_string()
