@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS products (
     stock_quantity INTEGER NOT NULL DEFAULT 0,
     min_stock_threshold INTEGER NOT NULL DEFAULT 0,
     is_serialized INTEGER NOT NULL DEFAULT 0,
-    warranty_months INTEGER,
+    -- The warranty each unit comes with (`domain::warranties::ProductWarranty` as JSON).
+    warranty TEXT NOT NULL,
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -32,6 +33,8 @@ CREATE TABLE IF NOT EXISTS categories (
     name TEXT NOT NULL UNIQUE,
     icon TEXT NOT NULL DEFAULT '',
     color TEXT NOT NULL DEFAULT '',
+    -- The warranty a new product of this category starts with (`ProductWarranty` JSON).
+    warranty_template TEXT,
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -305,8 +308,10 @@ CREATE TABLE IF NOT EXISTS repairs (
     issue_description TEXT NOT NULL,
     promised_ready_at TEXT,
     status TEXT NOT NULL,
-    estimated_cost_cents INTEGER,
-    material_cost_cents INTEGER,
+    kind JSON NOT NULL,
+    items JSON NOT NULL,
+    price_cents INTEGER NOT NULL,
+    cost_cents INTEGER NOT NULL,
     assigned_employee_id TEXT,
     assigned_employee_name TEXT,
     split_type TEXT,
@@ -475,8 +480,6 @@ CREATE TABLE IF NOT EXISTS product_serials (
     status TEXT NOT NULL,
     invoice_key TEXT,
     sold_at TEXT,
-    warranty_months INTEGER,
-    warranty_expires_at TEXT,
     credit_note_key TEXT,
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
@@ -742,6 +745,143 @@ CREATE TABLE IF NOT EXISTS label_templates (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+-- Warranties (`modules::warranties`): one row per covered unit (a sold serial, or a whole
+-- non-serialized invoice line). `coverage` is the JSON period copied at sale time; `ends_on` is
+-- the last covered day (NULL: lifetime). Whether it has run out is worked out on read.
+CREATE TABLE IF NOT EXISTS warranties (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    warranty_number TEXT NOT NULL,
+    source_type TEXT NOT NULL,
+    invoice_key TEXT NOT NULL,
+    invoice_number TEXT NOT NULL,
+    line_index INTEGER NOT NULL,
+    product_key TEXT,
+    repair_key TEXT,
+    repair_item_key TEXT,
+    item_name TEXT NOT NULL,
+    serial_number TEXT,
+    quantity INTEGER NOT NULL,
+    customer_key TEXT,
+    customer_name TEXT,
+    customer_phone TEXT,
+    customer_phone_tail TEXT,
+    coverage TEXT NOT NULL,
+    warranty_type TEXT NOT NULL,
+    terms TEXT,
+    unit_price_cents INTEGER NOT NULL,
+    starts_on TEXT NOT NULL,
+    ends_on TEXT,
+    status TEXT NOT NULL,
+    void_reason TEXT,
+    replaces_warranty_key TEXT,
+    replaced_by_warranty_key TEXT,
+    claim_count INTEGER NOT NULL,
+    version INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by_device TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_warranties_number ON warranties(warranty_number);
+CREATE INDEX IF NOT EXISTS idx_warranties_serial ON warranties(serial_number);
+CREATE INDEX IF NOT EXISTS idx_warranties_invoice_key ON warranties(invoice_key);
+CREATE INDEX IF NOT EXISTS idx_warranties_invoice_number ON warranties(invoice_number);
+CREATE INDEX IF NOT EXISTS idx_warranties_customer_key ON warranties(customer_key);
+CREATE INDEX IF NOT EXISTS idx_warranties_phone_tail ON warranties(customer_phone_tail);
+CREATE INDEX IF NOT EXISTS idx_warranties_repair_key ON warranties(repair_key);
+CREATE INDEX IF NOT EXISTS idx_warranties_sync ON warranties(updated_at, key);
+
+-- A warranty's activity log: append-only, who did what and when.
+CREATE TABLE IF NOT EXISTS warranty_events (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    warranty_key TEXT NOT NULL,
+    claim_key TEXT,
+    kind TEXT NOT NULL,
+    from_status TEXT,
+    to_status TEXT,
+    note TEXT,
+    actor_user_id TEXT NOT NULL,
+    actor_name TEXT NOT NULL,
+    approved_by_user_id TEXT,
+    approved_by_name TEXT,
+    version INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by_device TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_warranty_events_warranty ON warranty_events(warranty_key, created_at);
+CREATE INDEX IF NOT EXISTS idx_warranty_events_sync ON warranty_events(updated_at, key);
+
+-- A warranty claim (RMA): a covered item brought back with a fault. `void_checks` and
+-- `supplier` are JSON objects.
+CREATE TABLE IF NOT EXISTS warranty_claims (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    claim_number TEXT NOT NULL,
+    warranty_key TEXT NOT NULL,
+    warranty_number TEXT NOT NULL,
+    item_name TEXT NOT NULL,
+    serial_number TEXT,
+    product_key TEXT,
+    invoice_key TEXT NOT NULL,
+    invoice_number TEXT NOT NULL,
+    customer_key TEXT,
+    customer_name TEXT,
+    customer_phone TEXT,
+    issue_description TEXT NOT NULL,
+    void_checks TEXT NOT NULL,
+    assigned_employee_key TEXT,
+    assigned_employee_name TEXT,
+    status TEXT NOT NULL,
+    inspection_notes TEXT,
+    decision TEXT,
+    decision_reason TEXT,
+    decided_by_user_id TEXT,
+    decided_by_name TEXT,
+    expired_override_by_name TEXT,
+    resolution_note TEXT,
+    replacement_serial_number TEXT,
+    replacement_warranty_key TEXT,
+    credit_note_key TEXT,
+    paid_repair_key TEXT,
+    paid_repair_number TEXT,
+    rework_repair_key TEXT,
+    rework_repair_number TEXT,
+    supplier TEXT,
+    received_on TEXT NOT NULL,
+    resolved_on TEXT,
+    returned_on TEXT,
+    version INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by_device TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_warranty_claims_status ON warranty_claims(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_warranty_claims_warranty ON warranty_claims(warranty_key);
+CREATE INDEX IF NOT EXISTS idx_warranty_claims_invoice ON warranty_claims(invoice_key);
+CREATE INDEX IF NOT EXISTS idx_warranty_claims_sync ON warranty_claims(updated_at, key);
+
+-- Ready-made repair services (`modules::repairs`): the key is derived from the name, so the
+-- same service added on two tills is one row. Never deleted; hidden with `active = 0`.
+CREATE TABLE IF NOT EXISTS repair_service_templates (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    labor_cents INTEGER NOT NULL,
+    warranty JSON NOT NULL,
+    active INTEGER NOT NULL,
+    version INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by_device TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_repair_service_templates_sync ON repair_service_templates(updated_at, key);
 
 -- Label print history (`modules::labels`): one row per print or download,
 -- `items` is a JSON array of the sticker groups as printed. Not synced.

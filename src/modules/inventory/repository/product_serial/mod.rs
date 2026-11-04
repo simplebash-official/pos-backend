@@ -10,4 +10,5 @@ pub(crate) use repository_product_serial::find_serial_by_number;
 pub(crate) use repository_product_serial::find_serial_by_number_and_product;
 pub(crate) use repository_product_serial::find_serials_for_product;
 pub(crate) use repository_product_serial::insert_product_serial;
+pub(crate) use repository_product_serial::release_serial;
 pub(crate) use repository_product_serial::update_serial;

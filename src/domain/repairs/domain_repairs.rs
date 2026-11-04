@@ -1,3 +1,4 @@
+use super::repair_item::{RepairItem, RepairItemInput, RepairKind};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
@@ -42,12 +43,10 @@ pub struct CreateRepairRequest {
     pub promised_ready_at: Option<String>,
     /// Initial status (defaults to "received").
     pub status: Option<String>,
-    /// Estimated charge to customer in cents. Optional: a ticket can be
-    /// created before a technician has diagnosed the device and quoted a
-    /// price; see `service::validate_price_required_for_status`.
-    pub estimated_cost_cents: Option<i64>,
-    /// Optional cost of parts/materials in cents.
-    pub material_cost_cents: Option<i64>,
+    /// The work on the job. May be empty while the device is still being looked at; a job
+    /// needs at least one item before it is `ready` or `delivered` (see
+    /// `service::validate_price_required_for_status`).
+    pub items: Vec<RepairItemInput>,
     /// Optional technician assignment.
     pub assignment: Option<RepairAssignment>,
 }
@@ -97,14 +96,15 @@ pub struct Repair {
     pub is_overdue: bool,
     /// Lifecycle status ("received", "in_progress", "completed", "delivered", "cancelled").
     pub status: String,
-    /// Quoted or final repair price in cents. Absent until a technician has
-    /// diagnosed the device and quoted a price; see `service::
-    /// validate_price_required_for_status` for which statuses require it.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub estimated_cost_cents: Option<i64>,
-    /// Direct cost of parts/materials in cents.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub material_cost_cents: Option<i64>,
+    /// Ordinary paid work, or free work redoing an earlier job under its warranty.
+    pub kind: RepairKind,
+    /// The work on the job, in order.
+    pub items: Vec<RepairItem>,
+    /// What the customer pays: every item's labour and part price
+    /// (`pos_calc_core::repair::repair_totals`). Stored with the items so reports can add it up.
+    pub price_cents: i64,
+    /// What the parts cost the shop, added up the same way.
+    pub cost_cents: i64,
     /// Staff ID of assigned technician.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assigned_employee_id: Option<String>,
@@ -214,8 +214,7 @@ pub struct RepairListResponse {
 pub struct RepairStats {
     /// Count of repair tickets created today (UTC day boundary).
     pub today_job_count: u64,
-    /// Sum of `estimatedCostCents` (treated as 0 where unset/unquoted) for
-    /// tickets created today.
+    /// Sum of `priceCents` for tickets created today.
     pub today_revenue_cents: i64,
     /// Count of ALL non-deleted tickets (any date) whose status is neither
     /// "delivered" nor "cancelled" — i.e. still open in the pipeline.
@@ -245,12 +244,9 @@ pub struct UpdateRepairRequest {
     pub promised_ready_at: Option<String>,
     /// Updated status.
     pub status: Option<String>,
-    /// Updated customer price estimate in cents. Omit the key to leave the
-    /// existing price untouched; there is no way to explicitly clear a price
-    /// back to unset via this endpoint; nothing in the workflow needs that.
-    pub estimated_cost_cents: Option<i64>,
-    /// Updated material cost in cents.
-    pub material_cost_cents: Option<i64>,
+    /// The job's whole list of items, replacing the stored one. Omit it to leave the items as
+    /// they are. An item sent with the `key` of one already on the job keeps that key.
+    pub items: Option<Vec<RepairItemInput>>,
     /// Updated technician assignment.
     pub assignment: Option<RepairAssignment>,
 }

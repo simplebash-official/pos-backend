@@ -7,7 +7,7 @@ use crate::domain::billing::{
 };
 use crate::domain::inventory::{Product, StockMovementType};
 use crate::modules::billing::repository;
-use crate::modules::{customers, inventory, print_jobs, repairs};
+use crate::modules::{customers, inventory, print_jobs, repairs, warranties};
 use mongodb::bson::{DateTime as BsonDateTime, doc};
 use std::collections::HashMap;
 
@@ -166,24 +166,44 @@ pub(crate) async fn resolve_sale_item(
         "repair" => match &item.source_ticket_key {
             Some(ticket_key) => {
                 let ticket = repairs::service::get_repair(db, ticket_key).await?;
-                let estimated_cost_cents = ticket.estimated_cost_cents.ok_or_else(|| {
-                    AppError::validation_with_code(
+                if ticket.kind.is_rework() {
+                    return Err(AppError::validation_with_code(
                         format!(
-                            "Repair ticket {} has no price yet, set a repair price before billing it",
+                            "Repair ticket {} is a free warranty rework; hand it back from the repair screen instead of billing it",
+                            ticket.ticket_number
+                        ),
+                        codes::REPAIR_IS_REWORK,
+                    ));
+                }
+                if ticket.status == "delivered" {
+                    return Err(AppError::conflict(
+                        codes::INVALID_JOB_STATUS,
+                        format!(
+                            "Repair ticket {} has already been handed back and billed",
+                            ticket.ticket_number
+                        ),
+                    ));
+                }
+                if ticket.items.is_empty() {
+                    return Err(AppError::validation_with_code(
+                        format!(
+                            "Repair ticket {} has no work on it yet, add the work done before billing it",
                             ticket.ticket_number
                         ),
                         codes::REPAIR_PRICE_REQUIRED,
-                    )
-                })?;
+                    ));
+                }
+                // A part sold in the meantime stops the sale before anything is written.
+                repairs::service::check_parts_in_stock(db, &ticket).await?;
                 (
                     item.name
                         .clone()
                         .unwrap_or_else(|| ticket.device_model.clone()),
                     None,
-                    estimated_cost_cents + ticket.material_cost_cents.unwrap_or(0),
+                    ticket.price_cents,
                     Some(ticket.ticket_number),
                     ticket.assigned_employee_name,
-                    Some(ticket.material_cost_cents.unwrap_or(0) / item.quantity.max(1)),
+                    Some(ticket.cost_cents / item.quantity.max(1)),
                     Vec::new(),
                 )
             }
@@ -335,6 +355,7 @@ pub async fn void_invoice(
     id_or_key: &str,
     body: VoidInvoiceRequest,
     voided_by: String,
+    voided_by_name: String,
 ) -> AppResult<(Invoice, Vec<String>)> {
     crate::core::logging::domain::tracked("billing.invoice_voided", async move {
         if body.reason.trim().is_empty() {
@@ -414,6 +435,36 @@ pub async fn void_invoice(
                     item.name
                 ));
             }
+            for serial_number in &item.serial_numbers {
+                if let Err(err) = inventory::service::product_serial::release_sold_serial(
+                    db,
+                    product_key,
+                    serial_number,
+                    &existing.key,
+                )
+                .await
+                {
+                    warnings.push(format!(
+                        "Serial {serial_number} of '{}' could not be put back in stock: {err}",
+                        item.name
+                    ));
+                }
+            }
+        }
+
+        let actor = warranties::service::WarrantyActor {
+            user_id: voided_by.clone(),
+            name: voided_by_name,
+        };
+        if let Err(err) = warranties::service::void_for_invoice(
+            db,
+            &existing.key,
+            &existing.invoice_number,
+            &actor,
+        )
+        .await
+        {
+            warnings.push(format!("The invoice's warranties could not be cancelled: {err}"));
         }
 
         if let Some(customer_key) = &existing.customer_key {

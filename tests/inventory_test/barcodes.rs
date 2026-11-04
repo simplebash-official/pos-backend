@@ -50,7 +50,7 @@ async fn create_product_with_multiple_suppliers_links_and_records_intake_atomica
         Some(json!({
             "name": "iPhone 15 Pro Screen (Multi-Supplier)",
             "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "minStockThreshold": 5,
             "suppliers": [
                 {
@@ -185,7 +185,7 @@ async fn create_product_rejects_duplicate_suppliers_in_same_request() {
         Some(json!({
             "name": "Duplicate Supplier Widget",
             "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "suppliers": [
                 {
                     "supplierKey": supplier_key,
@@ -222,7 +222,7 @@ async fn create_product_rejects_nonexistent_supplier_in_intake_list() {
         Some(json!({
             "name": "Nonexistent Supplier Widget",
             "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "suppliers": [
                 {
                     "supplierKey": valid_supplier_key,
@@ -259,7 +259,7 @@ async fn create_product_rejects_zero_or_negative_supplier_quantity() {
         Some(json!({
             "name": "Zero Qty Supplier Widget",
             "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "suppliers": [
                 {
                     "supplierKey": supplier_key,
@@ -291,7 +291,7 @@ async fn update_product_can_set_barcode() {
         Some(json!({
             "name": "Rebarcoded Widget",
             "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 2000 },
             "minStockThreshold": 1,
             "autoGenerateBarcode": true,
@@ -348,7 +348,7 @@ async fn update_product_barcode_collision_returns_409() {
             Some(json!({
                 "name": name,
                 "categoryKey": category_key,
-                "subcategoryKey": subcategory_key,
+                "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
                 "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 2000 },
                 "minStockThreshold": 1,
                 "barcode": if name == "Owner Widget" { taken.clone() } else { unique_manual_barcode() },
@@ -395,7 +395,7 @@ async fn update_product_re_saving_own_barcode_is_not_a_collision() {
         Some(json!({
             "name": "Self Widget",
             "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 2000 },
             "minStockThreshold": 1,
             "barcode": barcode,
@@ -432,7 +432,7 @@ async fn update_product_rejects_invalid_barcode() {
         Some(json!({
             "name": "Validated Widget",
             "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 2000 },
             "minStockThreshold": 1,
         })),
@@ -471,7 +471,7 @@ async fn get_product_by_barcode_returns_the_matching_product() {
         Some(json!({
             "name": "Scannable Widget",
             "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 2000 },
             "minStockThreshold": 1,
             "barcode": barcode,
@@ -522,7 +522,7 @@ async fn list_products_filters_by_category_and_search() {
         Some(json!({
             "name": "Findable Gadget",
             "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "openingStock": { "quantity": 5, "unitCostCents": 500, "sellingPriceCents": 1200 },
             "minStockThreshold": 1,
         })),
@@ -536,7 +536,7 @@ async fn list_products_filters_by_category_and_search() {
         Some(json!({
             "name": "Unrelated Item",
             "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "openingStock": { "quantity": 5, "unitCostCents": 500, "sellingPriceCents": 1200 },
             "minStockThreshold": 1,
         })),
@@ -573,7 +573,7 @@ async fn list_products_search_matches_barcode() {
         Some(json!({
             "name": "Barcoded Gadget",
             "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "openingStock": { "quantity": 5, "unitCostCents": 500, "sellingPriceCents": 1200 },
             "minStockThreshold": 1,
             "barcode": barcode,

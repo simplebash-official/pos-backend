@@ -1,6 +1,6 @@
 use crate::core::constants::prefixes;
 use crate::core::id::generate_id;
-use crate::domain::repairs::{Repair, compute_job_is_overdue};
+use crate::domain::repairs::{Repair, RepairItem, RepairKind, compute_job_is_overdue};
 use mongodb::bson::DateTime as BsonDateTime;
 use mongodb::bson::oid::ObjectId;
 use serde::{Deserialize, Serialize};
@@ -35,12 +35,14 @@ pub struct RepairDocument {
     pub promised_ready_at: Option<String>,
     /// Lifecycle status ("received", "in_progress", "completed", "delivered", "cancelled").
     pub status: String,
-    /// Estimated or final charge to customer in cents. Absent until quoted.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub estimated_cost_cents: Option<i64>,
-    /// Direct cost of replacement parts/materials used in cents.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub material_cost_cents: Option<i64>,
+    /// Ordinary paid work, or a warranty rework of an earlier job.
+    pub kind: RepairKind,
+    /// The work on the job, stored in their API shape (camelCase).
+    pub items: Vec<RepairItem>,
+    /// Every item's labour and part price, worked out from `items` on every write.
+    pub price_cents: i64,
+    /// Every item's part cost, worked out the same way.
+    pub cost_cents: i64,
     /// User ID of the technician assigned to the repair.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assigned_employee_id: Option<String>,
@@ -93,8 +95,10 @@ impl RepairDocument {
             promised_ready_at: self.promised_ready_at,
             is_overdue,
             status: self.status,
-            estimated_cost_cents: self.estimated_cost_cents,
-            material_cost_cents: self.material_cost_cents,
+            kind: self.kind,
+            items: self.items,
+            price_cents: self.price_cents,
+            cost_cents: self.cost_cents,
             assigned_employee_id: self.assigned_employee_id,
             assigned_employee_name: self.assigned_employee_name,
             split_type: self.split_type,

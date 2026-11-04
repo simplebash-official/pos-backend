@@ -589,7 +589,7 @@ async fn each_shop_has_its_own_print_history() {
         Some(json!({
             "name": "Shop A cable",
             "categoryKey": category_key,
-            "subcategoryKey": sub["data"]["subcategories"][0]["key"],
+            "subcategoryKey": sub["data"]["subcategories"][0]["key"], "warranty": { "coverage": { "kind": "none" } },
             "minStockThreshold": 1,
             "autoGenerateBarcode": true,
         })),

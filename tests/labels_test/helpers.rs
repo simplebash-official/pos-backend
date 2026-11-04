@@ -157,7 +157,7 @@ impl Shop {
         let mut body = json!({
             "name": format!("{name} {}", self.tag),
             "categoryKey": self.category_key,
-            "subcategoryKey": self.subcategory_key,
+            "subcategoryKey": self.subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "minStockThreshold": 1,
         });
         for (key, value) in extra.as_object().expect("the value is an object") {

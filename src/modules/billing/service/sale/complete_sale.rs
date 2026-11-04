@@ -9,9 +9,10 @@ use crate::domain::billing::{
 };
 use crate::domain::inventory::{Product, StockMovementType};
 use crate::domain::sequences::ReserveSequenceRequest;
+use crate::domain::warranties::ProductWarranty;
 use crate::modules::billing::model::InvoiceDocument;
 use crate::modules::billing::repository;
-use crate::modules::{customers, inventory, print_jobs, repairs, sequences};
+use crate::modules::{customers, inventory, print_jobs, repairs, sequences, warranties};
 use mongodb::bson::DateTime as BsonDateTime;
 use std::collections::HashMap;
 
@@ -26,6 +27,13 @@ fn validate_sale_request(body: &CreateSaleRequest) -> AppResult<()> {
         return Err(AppError::validation("A sale must have at least one item"));
     }
     for item in &body.items {
+        if item.warranty_override.is_some()
+            && (item.source_type != "retail" || item.product_key.is_none())
+        {
+            return Err(AppError::validation(
+                "Only a catalogue item can have its warranty changed at the till.",
+            ));
+        }
         if !VALID_SOURCE_TYPES.contains(&item.source_type.as_str()) {
             return Err(AppError::validation(format!(
                 "Invalid item sourceType '{}'. Must be one of: {}",
@@ -134,6 +142,16 @@ fn validate_pricing_adjustments(adjustments: &PricingAdjustments) -> AppResult<(
     Ok(())
 }
 
+/// What every line's post-commit step needs to know about the sale.
+#[derive(Debug)]
+struct SaleContext<'a> {
+    invoice: &'a InvoiceDocument,
+    /// Per request line, in order: the cashier's warranty for it, when it was changed.
+    warranty_overrides: &'a [Option<ProductWarranty>],
+    actor: &'a warranties::service::WarrantyActor,
+    device_id: Option<String>,
+}
+
 /// One line item's post-commit side effect (stock decrement for retail,
 /// ticket-delivered for repair/print) — factored out of `complete_sale` so
 /// every item's side effect can run concurrently via `join_all` rather than
@@ -141,10 +159,12 @@ fn validate_pricing_adjustments(adjustments: &PricingAdjustments) -> AppResult<(
 /// success; never fails the request itself (D4).
 async fn apply_line_item_side_effects(
     db: &Db,
+    line_index: usize,
     item: &InvoiceItem,
     resolved_products: &HashMap<String, Product>,
-    inserted_invoice: &InvoiceDocument,
+    sale: &SaleContext<'_>,
 ) -> Option<String> {
+    let inserted_invoice = sale.invoice;
     match item.source_type.as_str() {
         "retail" => {
             let product_key = item.product_key.as_deref()?;
@@ -172,40 +192,124 @@ async fn apply_line_item_side_effects(
 
             if product.is_serialized {
                 for serial_number in &item.serial_numbers {
-                    if let Ok(serial) = inventory::service::product_serial::resolve_in_stock_serial(
+                    let serial = match inventory::service::product_serial::resolve_in_stock_serial(
                         db,
                         &product.key,
                         serial_number,
                     )
                     .await
-                        && let Some(serial_id) = serial.id
-                        && let Err(err) = inventory::service::product_serial::mark_serial_sold(
-                            db,
-                            serial_id,
-                            &inserted_invoice.key,
-                            product.warranty_months,
-                        )
-                        .await
+                    {
+                        Ok(serial) => serial,
+                        Err(err) => {
+                            return Some(format!(
+                                "Serial {serial_number} of '{}' could not be marked sold: {err}",
+                                item.name
+                            ));
+                        }
+                    };
+                    let Some(serial_id) = serial.id else {
+                        return Some(format!(
+                            "Serial {serial_number} of '{}' has no stored id and was not marked sold",
+                            item.name
+                        ));
+                    };
+                    if let Err(err) = inventory::service::product_serial::mark_serial_sold(
+                        db,
+                        serial_id,
+                        &inserted_invoice.key,
+                    )
+                    .await
                     {
                         return Some(format!(
-                            "serial {serial_number} of {} could not be marked sold: {err}",
-                            product.key
+                            "Serial {serial_number} of '{}' could not be marked sold: {err}",
+                            item.name
                         ));
                     }
                 }
+            }
+
+            let warranty = match &sale.warranty_overrides[line_index] {
+                Some(chosen) => chosen,
+                None => &product.warranty,
+            };
+            if let Err(err) = warranties::service::issue_for_sale_line(
+                db,
+                warranties::service::SaleLine {
+                    invoice_key: &inserted_invoice.key,
+                    invoice_number: &inserted_invoice.invoice_number,
+                    sold_at: inserted_invoice.created_at.to_chrono(),
+                    customer_key: inserted_invoice.customer_key.as_deref(),
+                    customer_name: inserted_invoice.customer_name_snapshot.as_deref(),
+                    customer_phone: inserted_invoice.customer_phone_snapshot.as_deref(),
+                    line_index,
+                    product_key: &product.key,
+                    item_name: &item.name,
+                    quantity: item.quantity,
+                    unit_price_cents: item.unit_price_cents,
+                    serial_numbers: &item.serial_numbers,
+                    warranty,
+                    actor: sale.actor,
+                    device_id: sale.device_id.clone(),
+                },
+            )
+            .await
+            {
+                return Some(format!(
+                    "The warranty for '{}' could not be recorded: {err}",
+                    item.name
+                ));
             }
             None
         }
         "repair" => match &item.source_ticket_key {
             Some(ticket_key) => {
-                if let Err(err) = repairs::service::mark_delivered(db, ticket_key).await {
-                    Some(format!(
-                        "Repair ticket {} could not be marked delivered: {err}",
-                        item.source_ticket_number.as_deref().unwrap_or(ticket_key)
-                    ))
-                } else {
-                    None
+                let ticket_label = item.source_ticket_number.as_deref().unwrap_or(ticket_key);
+                let repair = match repairs::service::mark_delivered(db, ticket_key).await {
+                    Ok(repair) => repair,
+                    Err(err) => {
+                        return Some(format!(
+                            "Repair ticket {ticket_label} could not be marked delivered: {err}"
+                        ));
+                    }
+                };
+                if let Err(err) = repairs::service::use_parts(
+                    db,
+                    &repair,
+                    StockMovementType::RepairPartConsumption,
+                    &inserted_invoice.key,
+                )
+                .await
+                {
+                    return Some(format!(
+                        "The parts of repair ticket {ticket_label} could not be taken out of stock: {err}"
+                    ));
                 }
+                if let Err(err) = warranties::service::issue_for_repair(
+                    db,
+                    warranties::service::RepairLine {
+                        invoice_key: &inserted_invoice.key,
+                        invoice_number: &inserted_invoice.invoice_number,
+                        delivered_at: inserted_invoice.created_at.to_chrono(),
+                        customer_key: inserted_invoice.customer_key.as_deref(),
+                        customer_name: inserted_invoice.customer_name_snapshot.as_deref(),
+                        customer_phone: inserted_invoice.customer_phone_snapshot.as_deref(),
+                        line_index,
+                        repair_key: &repair.key,
+                        ticket_number: &repair.ticket_number,
+                        device_model: &repair.device_model,
+                        device_serial: repair.serial_number.as_deref(),
+                        items: &repair.items,
+                        actor: sale.actor,
+                        device_id: sale.device_id.clone(),
+                    },
+                )
+                .await
+                {
+                    return Some(format!(
+                        "The warranties of repair ticket {ticket_label} could not be recorded: {err}"
+                    ));
+                }
+                None
             }
             None => Some(format!(
                 "Item '{}' is a repair line with no ticket key; its ticket was not updated",
@@ -241,6 +345,16 @@ pub async fn complete_sale(
 ) -> AppResult<CompleteSaleResponse> {
     crate::core::logging::domain::tracked("billing.sale_completed", async move {
         validate_sale_request(&body)?;
+        let warranty_overrides = body
+            .items
+            .iter()
+            .map(|item| {
+                item.warranty_override
+                    .clone()
+                    .map(ProductWarranty::validated)
+                    .transpose()
+            })
+            .collect::<AppResult<Vec<_>>>()?;
 
         // Resolve the linked customer, if any, before any write — a bad
         // customerKey should fail the whole request, not half-complete it.
@@ -553,22 +667,41 @@ pub async fn complete_sale(
         // `warnings` no longer matters (D4: this section only ever collects
         // warnings, never fails the request), so collecting results after the
         // fact is equivalent to the old sequential push.
+        let actor = warranties::service::WarrantyActor {
+            user_id: cashier_id.clone(),
+            name: body.staff.cashier_name.trim().to_string(),
+        };
+        let sale = SaleContext {
+            invoice: &inserted_invoice,
+            warranty_overrides: &warranty_overrides,
+            actor: &actor,
+            device_id: device_id.clone(),
+        };
         let side_effect_warnings: Vec<Option<String>> = match db {
             Db::Mongo(_) => {
-                futures_util::future::join_all(resolved_items.iter().map(|item| {
-                    apply_line_item_side_effects(db, item, &resolved_products, &inserted_invoice)
-                }))
+                futures_util::future::join_all(resolved_items.iter().enumerate().map(
+                    |(line_index, item)| {
+                        apply_line_item_side_effects(
+                            db,
+                            line_index,
+                            item,
+                            &resolved_products,
+                            &sale,
+                        )
+                    },
+                ))
                 .await
             }
             Db::Sqlite(_) => {
                 let mut results = Vec::with_capacity(resolved_items.len());
-                for item in &resolved_items {
+                for (line_index, item) in resolved_items.iter().enumerate() {
                     results.push(
                         apply_line_item_side_effects(
                             db,
+                            line_index,
                             item,
                             &resolved_products,
-                            &inserted_invoice,
+                            &sale,
                         )
                         .await,
                     );

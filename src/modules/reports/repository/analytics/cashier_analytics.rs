@@ -1,5 +1,6 @@
 //! Cashier performance and commission series.
 
+use super::super::commissions::{JobKind, JobMoney, job_money};
 use super::super::sales::{get_i64_flexible, recorded_cents};
 use super::analytics_shared::{align_bucket_instant, date_match, invoices, trunc};
 
@@ -169,6 +170,15 @@ pub(crate) async fn aggregate_cashier_performance(
     }
 }
 
+/// The job kind of the `repairs` or `print_jobs` collection.
+fn job_kind(collection: &str) -> JobKind {
+    if collection == "repairs" {
+        JobKind::Repair
+    } else {
+        JobKind::Print
+    }
+}
+
 /// `Σ earned commission` per `$dateTrunc` bucket, across delivered/completed
 /// repairs + print jobs in `[start, end)`. Bucketed on the job's `created_at`
 /// to match how revenue is recognised on the invoice date.
@@ -200,6 +210,8 @@ pub(crate) async fn aggregate_commission_series(
                     doc! {
                         "$project": {
                             "bucket": trunc(unit),
+                            "price_cents": 1,
+                            "cost_cents": 1,
                             "estimated_cost_cents": 1,
                             "material_cost_cents": 1,
                             "split_type": 1,
@@ -216,8 +228,10 @@ pub(crate) async fn aggregate_commission_series(
                     let Some(ts) = row.get_datetime("bucket").ok().map(|d| d.to_chrono()) else {
                         continue;
                     };
-                    let revenue = recorded_cents(&row, "estimated_cost_cents")?;
-                    let material = recorded_cents(&row, "material_cost_cents")?;
+                    let JobMoney {
+                        revenue_cents: revenue,
+                        cost_cents: material,
+                    } = job_money(&row, job_kind(collection))?;
                     let profit = crate::core::calculations::job_profit_cents(revenue, material);
                     let split_type = row.get_str("split_type").ok();
                     let split_value = row
@@ -241,7 +255,7 @@ pub(crate) async fn aggregate_commission_series(
 
             for table in ["repairs", "print_jobs"] {
                 let query_str = format!(
-                    "SELECT created_at, estimated_cost_cents, material_cost_cents, split_type, split_value FROM {table} WHERE deleted_at IS NULL AND status IN ('completed', 'delivered', 'ready_for_pickup') AND created_at >= ? AND created_at < ?"
+                    "SELECT * FROM {table} WHERE deleted_at IS NULL AND status IN ('completed', 'delivered', 'ready_for_pickup') AND created_at >= ? AND created_at < ?"
                 );
                 let rows = sqlx::query(&query_str)
                     .bind(&start_iso)
@@ -257,8 +271,10 @@ pub(crate) async fn aggregate_commission_series(
                         continue;
                     };
                     let bucket_start = align_bucket_instant(created_at, granularity);
-                    let revenue = recorded_cents(&doc, "estimated_cost_cents")?;
-                    let material = recorded_cents(&doc, "material_cost_cents")?;
+                    let JobMoney {
+                        revenue_cents: revenue,
+                        cost_cents: material,
+                    } = job_money(&doc, job_kind(table))?;
                     let profit = crate::core::calculations::job_profit_cents(revenue, material);
                     let split_type = doc.get_str("split_type").ok();
                     let split_value = doc

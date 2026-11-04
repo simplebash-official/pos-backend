@@ -33,6 +33,7 @@ pub enum AttachmentOwner {
     CashMovement,
     Expense,
     Income,
+    WarrantyClaim,
 }
 
 impl AttachmentOwner {
@@ -43,6 +44,7 @@ impl AttachmentOwner {
             AttachmentOwner::CashMovement => "cash_movement",
             AttachmentOwner::Expense => "expense",
             AttachmentOwner::Income => "income",
+            AttachmentOwner::WarrantyClaim => "warranty_claim",
         }
     }
 
@@ -53,6 +55,7 @@ impl AttachmentOwner {
             "cash_movement" => Some(AttachmentOwner::CashMovement),
             "expense" => Some(AttachmentOwner::Expense),
             "income" => Some(AttachmentOwner::Income),
+            "warranty_claim" => Some(AttachmentOwner::WarrantyClaim),
             _ => None,
         }
     }

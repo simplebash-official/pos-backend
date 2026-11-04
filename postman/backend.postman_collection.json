@@ -217,7 +217,7 @@
                 "sales"
               ]
             },
-            "description": "Completes a sale: creates the invoice (and, unless `payment.isCredit`, its payment record(s)), decrements stock for any `productKey` line items, and marks any linked repair/print-job ticket (`sourceTicketKey`) delivered. `cashierId` is never sent — the completing cashier is always the bearer token's user. There is no tax in this system. The request is grouped into sub-objects: `staff{cashierName}`, `customer{}` (optional — omit for a walk-in with no linked account; only used as typed when `customerKey` is absent, otherwise resolved from the linked `Customer` record), `items[]`, `pricingAdjustments{}` (optional — omit for no discount; `discountType` is `\"percentage\"` [0-100, e.g. 7.5] or `\"fixed\"` [a cents amount]; the server computes the actual `discountCents` from this against the resolved subtotal), and `payment{paymentMethod, isCredit, amountReceivedCents, splitPayments, cardLast4, cardRef, onlineRef, onlineNote, dueDate}`. `shopProfileSnapshot`/`notes`/`warrantyTermsSnapshot`/`documentSelection` stay top-level. Line items are resolved server-side, never trusted from the payload: a retail item's `name`/`sku`/`unitPriceCents` come from the product record via `productKey`, a repair/print item's `unitPriceCents`/`assignedEmployeeName`/`sourceTicketNumber` come from the ticket via `sourceTicketKey`, and an item's `totalCents` is always computed as `unitPriceCents * quantity - discountCents`. `name`/`unitPriceCents` are only required on an item when it has no `productKey`/`sourceTicketKey` to resolve from (an ad-hoc line). `subtotalCents`/`totalCents`/`changeDueCents` are likewise never sent — `subtotalCents` is the sum of the resolved items' `totalCents`, `totalCents` is `subtotalCents - discountCents`, and `changeDueCents` (when `payment.amountReceivedCents` is given) is `amountReceivedCents - totalCents`. An unresolvable `productKey`/`sourceTicketKey`/`customerKey` rejects the whole request before any write. `warnings` in the response surfaces any post-write side effect (stock decrement, ticket status, customer balance) that failed without rolling back the already-durable invoice/payment — see CLAUDE.md's billing module notes.\n\n**Requires the `billing:write` permission** in the token's `permissions` claim — granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role, 400 for an invalid `pricingAdjustments`/split-leg total, 404 if a `productKey`/`sourceTicketKey`/`customerKey` doesn't resolve.\n\nEvery product line (non-serialized) names the price tier it is sold at in `sellingPriceCents` — one of the product's `priceTiers` (400 when missing, 409 `PRICE_TIER_UNAVAILABLE` when no in-stock batch sells at it, 409 `INSUFFICIENT_STOCK` when the tier holds too few units). The units are drawn from that tier's batches oldest first and recorded on the invoice line as `batchAllocations`; the line's `unitCostCents` is their weighted cost. A serialized line sends `serialNumbers` instead and is priced at its units' batch. One line per product and price."
+            "description": "Completes a sale: creates the invoice (and, unless `payment.isCredit`, its payment record(s)), decrements stock for any `productKey` line items, and marks any linked repair/print-job ticket (`sourceTicketKey`) delivered. `cashierId` is never sent — the completing cashier is always the bearer token's user. There is no tax in this system. The request is grouped into sub-objects: `staff{cashierName}`, `customer{}` (optional — omit for a walk-in with no linked account; only used as typed when `customerKey` is absent, otherwise resolved from the linked `Customer` record), `items[]`, `pricingAdjustments{}` (optional — omit for no discount; `discountType` is `\"percentage\"` [0-100, e.g. 7.5] or `\"fixed\"` [a cents amount]; the server computes the actual `discountCents` from this against the resolved subtotal), and `payment{paymentMethod, isCredit, amountReceivedCents, splitPayments, cardLast4, cardRef, onlineRef, onlineNote, dueDate}`. `shopProfileSnapshot`/`notes`/`warrantyTermsSnapshot`/`documentSelection` stay top-level. Line items are resolved server-side, never trusted from the payload: a retail item's `name`/`sku`/`unitPriceCents` come from the product record via `productKey`, a repair/print item's `unitPriceCents`/`assignedEmployeeName`/`sourceTicketNumber` come from the ticket via `sourceTicketKey`, and an item's `totalCents` is always computed as `unitPriceCents * quantity - discountCents`. `name`/`unitPriceCents` are only required on an item when it has no `productKey`/`sourceTicketKey` to resolve from (an ad-hoc line). `subtotalCents`/`totalCents`/`changeDueCents` are likewise never sent — `subtotalCents` is the sum of the resolved items' `totalCents`, `totalCents` is `subtotalCents - discountCents`, and `changeDueCents` (when `payment.amountReceivedCents` is given) is `amountReceivedCents - totalCents`. An unresolvable `productKey`/`sourceTicketKey`/`customerKey` rejects the whole request before any write. `warnings` in the response surfaces any post-write side effect (stock decrement, ticket status, customer balance) that failed without rolling back the already-durable invoice/payment — see CLAUDE.md's billing module notes.\n\n**Requires the `billing:write` permission** in the token's `permissions` claim — granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role, 400 for an invalid `pricingAdjustments`/split-leg total, 404 if a `productKey`/`sourceTicketKey`/`customerKey` doesn't resolve.\n\nEvery product line (non-serialized) names the price tier it is sold at in `sellingPriceCents` — one of the product's `priceTiers` (400 when missing, 409 `PRICE_TIER_UNAVAILABLE` when no in-stock batch sells at it, 409 `INSUFFICIENT_STOCK` when the tier holds too few units). The units are drawn from that tier's batches oldest first and recorded on the invoice line as `batchAllocations`; the line's `unitCostCents` is their weighted cost. A serialized line sends `serialNumbers` instead and is priced at its units' batch. One line per product and price. Each retail line may carry `warrantyOverride` (a product warranty profile) to give that line a different warranty than the product's; it needs `warranties:adjust_at_sale` (Admin, Manager), and coverage `none` gives the line no warranty. Warranty records are issued per sold serial (or per non-serialized line) after the invoice is saved; a failure is a warning."
           },
           "response": []
         },
@@ -268,7 +268,7 @@
                 "sales"
               ]
             },
-            "description": "Completes a sale: creates the invoice (and, unless `payment.isCredit`, its payment record(s)), decrements stock for any `productKey` line items, and marks any linked repair/print-job ticket (`sourceTicketKey`) delivered. `cashierId` is never sent — the completing cashier is always the bearer token's user. There is no tax in this system. The request is grouped into sub-objects: `staff{cashierName}`, `customer{}` (optional — omit for a walk-in with no linked account; only used as typed when `customerKey` is absent, otherwise resolved from the linked `Customer` record), `items[]`, `pricingAdjustments{}` (optional — omit for no discount; `discountType` is `\"percentage\"` [0-100, e.g. 7.5] or `\"fixed\"` [a cents amount]; the server computes the actual `discountCents` from this against the resolved subtotal), and `payment{paymentMethod, isCredit, amountReceivedCents, splitPayments, cardLast4, cardRef, onlineRef, onlineNote, dueDate}`. `shopProfileSnapshot`/`notes`/`warrantyTermsSnapshot`/`documentSelection` stay top-level. Line items are resolved server-side, never trusted from the payload: a retail item's `name`/`sku`/`unitPriceCents` come from the product record via `productKey`, a repair/print item's `unitPriceCents`/`assignedEmployeeName`/`sourceTicketNumber` come from the ticket via `sourceTicketKey`, and an item's `totalCents` is always computed as `unitPriceCents * quantity - discountCents`. `name`/`unitPriceCents` are only required on an item when it has no `productKey`/`sourceTicketKey` to resolve from (an ad-hoc line). `subtotalCents`/`totalCents`/`changeDueCents` are likewise never sent — `subtotalCents` is the sum of the resolved items' `totalCents`, `totalCents` is `subtotalCents - discountCents`, and `changeDueCents` (when `payment.amountReceivedCents` is given) is `amountReceivedCents - totalCents`. An unresolvable `productKey`/`sourceTicketKey`/`customerKey` rejects the whole request before any write. `warnings` in the response surfaces any post-write side effect (stock decrement, ticket status, customer balance) that failed without rolling back the already-durable invoice/payment — see CLAUDE.md's billing module notes.\n\n**Requires the `billing:write` permission** in the token's `permissions` claim — granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role, 400 for an invalid `pricingAdjustments`/split-leg total, 404 if a `productKey`/`sourceTicketKey`/`customerKey` doesn't resolve.\n\nEvery product line (non-serialized) names the price tier it is sold at in `sellingPriceCents` — one of the product's `priceTiers` (400 when missing, 409 `PRICE_TIER_UNAVAILABLE` when no in-stock batch sells at it, 409 `INSUFFICIENT_STOCK` when the tier holds too few units). The units are drawn from that tier's batches oldest first and recorded on the invoice line as `batchAllocations`; the line's `unitCostCents` is their weighted cost. A serialized line sends `serialNumbers` instead and is priced at its units' batch. One line per product and price."
+            "description": "Completes a sale: creates the invoice (and, unless `payment.isCredit`, its payment record(s)), decrements stock for any `productKey` line items, and marks any linked repair/print-job ticket (`sourceTicketKey`) delivered. `cashierId` is never sent — the completing cashier is always the bearer token's user. There is no tax in this system. The request is grouped into sub-objects: `staff{cashierName}`, `customer{}` (optional — omit for a walk-in with no linked account; only used as typed when `customerKey` is absent, otherwise resolved from the linked `Customer` record), `items[]`, `pricingAdjustments{}` (optional — omit for no discount; `discountType` is `\"percentage\"` [0-100, e.g. 7.5] or `\"fixed\"` [a cents amount]; the server computes the actual `discountCents` from this against the resolved subtotal), and `payment{paymentMethod, isCredit, amountReceivedCents, splitPayments, cardLast4, cardRef, onlineRef, onlineNote, dueDate}`. `shopProfileSnapshot`/`notes`/`warrantyTermsSnapshot`/`documentSelection` stay top-level. Line items are resolved server-side, never trusted from the payload: a retail item's `name`/`sku`/`unitPriceCents` come from the product record via `productKey`, a repair/print item's `unitPriceCents`/`assignedEmployeeName`/`sourceTicketNumber` come from the ticket via `sourceTicketKey`, and an item's `totalCents` is always computed as `unitPriceCents * quantity - discountCents`. `name`/`unitPriceCents` are only required on an item when it has no `productKey`/`sourceTicketKey` to resolve from (an ad-hoc line). `subtotalCents`/`totalCents`/`changeDueCents` are likewise never sent — `subtotalCents` is the sum of the resolved items' `totalCents`, `totalCents` is `subtotalCents - discountCents`, and `changeDueCents` (when `payment.amountReceivedCents` is given) is `amountReceivedCents - totalCents`. An unresolvable `productKey`/`sourceTicketKey`/`customerKey` rejects the whole request before any write. `warnings` in the response surfaces any post-write side effect (stock decrement, ticket status, customer balance) that failed without rolling back the already-durable invoice/payment — see CLAUDE.md's billing module notes.\n\n**Requires the `billing:write` permission** in the token's `permissions` claim — granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role, 400 for an invalid `pricingAdjustments`/split-leg total, 404 if a `productKey`/`sourceTicketKey`/`customerKey` doesn't resolve.\n\nEvery product line (non-serialized) names the price tier it is sold at in `sellingPriceCents` — one of the product's `priceTiers` (400 when missing, 409 `PRICE_TIER_UNAVAILABLE` when no in-stock batch sells at it, 409 `INSUFFICIENT_STOCK` when the tier holds too few units). The units are drawn from that tier's batches oldest first and recorded on the invoice line as `batchAllocations`; the line's `unitCostCents` is their weighted cost. A serialized line sends `serialNumbers` instead and is priced at its units' batch. One line per product and price. Each retail line may carry `warrantyOverride` (a product warranty profile) to give that line a different warranty than the product's; it needs `warranties:adjust_at_sale` (Admin, Manager), and coverage `none` gives the line no warranty. Warranty records are issued per sold serial (or per non-serialized line) after the invoice is saved; a failure is a warning."
           },
           "response": []
         },
@@ -640,7 +640,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"invoiceKey\": \"{{invoiceKey}}\",\n  \"returnedItems\": [\n    {\n      \"productKey\": \"{{productKey}}\",\n      \"quantity\": 1,\n      \"reason\": \"defective\",\n      \"condition\": \"resalable\",\n      \"notes\": \"Item returned in original box\",\n      \"sellingPriceCents\": 35000\n    }\n  ],\n  \"paymentMethod\": \"cash\",\n  \"notes\": \"Customer returned defective product\"\n}",
+              "raw": "{\n  \"invoiceKey\": \"{{invoiceKey}}\",\n  \"returnedItems\": [\n    {\n      \"productKey\": \"{{productKey}}\",\n      \"quantity\": 1,\n      \"reason\": \"defective\",\n      \"condition\": \"resalable\",\n      \"notes\": \"Item returned in original box\",\n      \"sellingPriceCents\": 35000\n    }\n  ],\n  \"paymentMethod\": \"cash\",\n  \"notes\": \"Customer returned defective product\",\n  \"warrantyClaimKey\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -658,7 +658,7 @@
                 "credit-notes"
               ]
             },
-            "description": "Creates a credit note against an existing invoice (or, with `noReceipt: true` + `overrideReason` + an Admin token, without one): adjusts stock per returned line's `condition`/`disposition`, calculates net cashback or extra amount due (capped at what was actually paid, allocated across payment methods via `refundBreakdown` for a split-paid invoice), updates customer financials, and updates the invoice's returned quantity / `refundedCents` / `creditNoteCount`.\n\n**Requires the `billing:write` permission** in the token's `permissions` claim. No-receipt and past-return-window requests additionally require the caller to hold `Role::Admin`, with a non-empty `overrideReason`. Returns 401 without token, 403 `PERMISSION_DENIED`/`MANAGER_OVERRIDE_REQUIRED`, 400 if return quantity exceeds purchased quantity or a `damaged` line has no `disposition`, 404 if invoice/product not found, 409 `INVOICE_NOT_ELIGIBLE_FOR_CREDIT_NOTE` if the invoice is voided, `RETURN_WINDOW_EXPIRED` if past the window without override.\n\nReturned units go back into the stock batches the invoice line sold them from (newest first). A product sold at two prices is on two invoice lines; send the line's price as `sellingPriceCents` so the return lands on the right one (a price the invoice never sold it at is a 400). A no-receipt product line must also send `sellingPriceCents` (the price it was sold at); it is valued at that price and restocked into the newest batch ever sold at it (409 `PRICE_TIER_UNAVAILABLE` if none). Exchange items are priced and drawn from batches exactly like sale lines."
+            "description": "Creates a credit note against an existing invoice (or, with `noReceipt: true` + `overrideReason` + an Admin token, without one): adjusts stock per returned line's `condition`/`disposition`, calculates net cashback or extra amount due (capped at what was actually paid, allocated across payment methods via `refundBreakdown` for a split-paid invoice), updates customer financials, and updates the invoice's returned quantity / `refundedCents` / `creditNoteCount`.\n\n**Requires the `billing:write` permission** in the token's `permissions` claim. No-receipt and past-return-window requests additionally require the caller to hold `Role::Admin`, with a non-empty `overrideReason`. Returns 401 without token, 403 `PERMISSION_DENIED`/`MANAGER_OVERRIDE_REQUIRED`, 400 if return quantity exceeds purchased quantity or a `damaged` line has no `disposition`, 404 if invoice/product not found, 409 `INVOICE_NOT_ELIGIBLE_FOR_CREDIT_NOTE` if the invoice is voided, `RETURN_WINDOW_EXPIRED` if past the window without override.\n\nReturned units go back into the stock batches the invoice line sold them from (newest first). A product sold at two prices is on two invoice lines; send the line's price as `sellingPriceCents` so the return lands on the right one (a price the invoice never sold it at is a 400). A no-receipt product line must also send `sellingPriceCents` (the price it was sold at); it is valued at that price and restocked into the newest batch ever sold at it (409 `PRICE_TIER_UNAVAILABLE` if none). Exchange items are priced and drawn from batches exactly like sale lines. Optional `warrantyClaimKey` refunds a warranty claim decided as `refund`: the claim must be on this invoice and its serial must be among the returned ones, the return window does not apply, and creating the note resolves the claim and ends the warranty."
           },
           "response": []
         },
@@ -1286,6 +1286,74 @@
               }
             }
           }
+        },
+        {
+          "name": "Calculate Warranty Period",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/calc/warranty",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "calc",
+                "warranty"
+              ]
+            },
+            "description": "The last covered day of a warranty that starts on `startsOn` (`YYYY-MM-DD`, shop-local) with `coverage` (`{kind: none}`, `{kind: lifetime}` or `{kind: limited, value, unit: days|weeks|months|years}`). Replies `{kind: not_covered}`, `{kind: lifetime}` or `{kind: until, endsOn}`. A period ends the day before the same date one period later; a missing day (31 Feb) runs to the end of the shorter month. Any signed-in user. Nothing is stored. 400 for a bad date or a period out of range (0, or more than about 100 years).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"startsOn\": \"2026-11-03\",\n  \"coverage\": {\n    \"kind\": \"limited\",\n    \"value\": 12,\n    \"unit\": \"months\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Calculate Repair Totals",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/calc/repair",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "calc",
+                "repair"
+              ]
+            },
+            "description": "What a repair job charges and costs from its items: `laborCents`, `partsCents`, `priceCents` (labour + parts) and `costCents` (part costs). Fields still being typed may be absent or null and count as nothing. Needs `repairs:write`. Nothing is stored. 400 for a negative or too large amount or more than 50 items.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"laborCents\": 250000,\n      \"partCents\": 1200000,\n      \"partCostCents\": 850000\n    },\n    {\n      \"laborCents\": 50000\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
         }
       ]
     },
@@ -3559,7 +3627,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"autoGenerateBarcode\": true,\n  \"name\": \"iPhone 15 Pro Max Tempered Glass\",\n  \"categoryKey\": \"{{categoryKey}}\",\n  \"subcategoryKey\": \"{{subcategoryKey}}\",\n  \"minStockThreshold\": 10,\n  \"openingStock\": {\n    \"quantity\": 5,\n    \"unitCostCents\": 400,\n    \"sellingPriceCents\": 1500\n  },\n  \"suppliers\": [\n    {\n      \"supplierKey\": \"{{supplierKey}}\",\n      \"quantity\": 30,\n      \"costPriceCents\": 450,\n      \"sellingPriceCents\": 1500,\n      \"referenceNo\": \"INV-2026-001\",\n      \"notes\": \"Initial stock batch\"\n    }\n  ]\n}",
+                  "raw": "{\n  \"autoGenerateBarcode\": true,\n  \"name\": \"iPhone 15 Pro Max Tempered Glass\",\n  \"categoryKey\": \"{{categoryKey}}\",\n  \"subcategoryKey\": \"{{subcategoryKey}}\",\n  \"minStockThreshold\": 10,\n  \"openingStock\": {\n    \"quantity\": 5,\n    \"unitCostCents\": 400,\n    \"sellingPriceCents\": 1500\n  },\n  \"suppliers\": [\n    {\n      \"supplierKey\": \"{{supplierKey}}\",\n      \"quantity\": 30,\n      \"costPriceCents\": 450,\n      \"sellingPriceCents\": 1500,\n      \"referenceNo\": \"INV-2026-001\",\n      \"notes\": \"Initial stock batch\"\n    }\n  ],\n  \"warranty\": {\n    \"coverage\": {\n      \"kind\": \"limited\",\n      \"value\": 12,\n      \"unit\": \"months\"\n    },\n    \"warrantyType\": \"shop\",\n    \"terms\": \"Screen and water damage are not covered.\"\n  }\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -3577,7 +3645,7 @@
                     "products"
                   ]
                 },
-                "description": "Create a new physical product. `categoryKey`/`subcategoryKey` must be a valid pair — the system-generated keys of an existing category/subcategory (see GET /categories/valid), never their display names. Prices are integer cents. `sku` is NOT sent — it's auto-generated server-side from the resolved category/subcategory names (e.g. \"PHO-SCR-0001\"); the request body has no field for it. For barcode generation, either set `autoGenerateBarcode: true` to have the server mint an EAN-13 barcode, or supply a manual `barcode` (8-14 numeric digits) — the two are mutually exclusive, and both may be omitted if the product doesn't need one yet. `suppliers`, if provided as a list of intakes with `supplierKey`, `quantity`, `costPriceCents`, `referenceNo`, and `notes`, will atomically link each supplier, record purchase history receipts, and compute the starting `stockQuantity` as the sum of all intake quantities. Like `sku`, `barcode` is immutable after creation.\n\n**Requires the `inventory:write` permission** — held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token. `costPriceCents` is returned to Admin callers only; for Manager and Staff the field is absent.\n\nA product stores no price: its units arrive as stock batches, each with its own cost and selling price — `openingStock` for units already on hand (an `opening` batch) and one purchase batch per `suppliers` entry. Both are optional; a product created with neither has no stock and no price until its first purchase. Responses carry `priceTiers` (one per selling price in stock; the cost range only for Admin)."
+                "description": "Create a new physical product. `categoryKey`/`subcategoryKey` must be a valid pair — the system-generated keys of an existing category/subcategory (see GET /categories/valid), never their display names. Prices are integer cents. `sku` is NOT sent — it's auto-generated server-side from the resolved category/subcategory names (e.g. \"PHO-SCR-0001\"); the request body has no field for it. For barcode generation, either set `autoGenerateBarcode: true` to have the server mint an EAN-13 barcode, or supply a manual `barcode` (8-14 numeric digits) — the two are mutually exclusive, and both may be omitted if the product doesn't need one yet. `suppliers`, if provided as a list of intakes with `supplierKey`, `quantity`, `costPriceCents`, `referenceNo`, and `notes`, will atomically link each supplier, record purchase history receipts, and compute the starting `stockQuantity` as the sum of all intake quantities. Like `sku`, `barcode` is immutable after creation.\n\n**Requires the `inventory:write` permission** — held by Admin and Manager only, so a Staff token gets 403 `PERMISSION_DENIED`. Returns 401 without a token. `costPriceCents` is returned to Admin callers only; for Manager and Staff the field is absent.\n\nA product stores no price: its units arrive as stock batches, each with its own cost and selling price — `openingStock` for units already on hand (an `opening` batch) and one purchase batch per `suppliers` entry. Both are optional; a product created with neither has no stock and no price until its first purchase. Responses carry `priceTiers` (one per selling price in stock; the cost range only for Admin). `warranty` is required: `{coverage, warrantyType, terms}` where coverage is `{kind: none}`, `{kind: lifetime}` or `{kind: limited, value, unit}`; a covered product needs `warrantyType` (shop, manufacturer, both), an uncovered one may not have a type or terms. Every unit sold gets its own warranty record (see the Warranties folder)."
               },
               "response": []
             },
@@ -3968,7 +4036,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"name\": \"Laptop Repairs\",\n  \"icon\": \"Laptop\",\n  \"color\": \"indigo\",\n  \"subcategories\": [\n    \"Screens\",\n    \"Keyboards\",\n    \"Batteries\"\n  ]\n}",
+                  "raw": "{\n  \"name\": \"Laptop Repairs\",\n  \"icon\": \"Laptop\",\n  \"color\": \"indigo\",\n  \"subcategories\": [\n    \"Screens\",\n    \"Keyboards\",\n    \"Batteries\"\n  ],\n  \"warrantyTemplate\": {\n    \"coverage\": {\n      \"kind\": \"limited\",\n      \"value\": 12,\n      \"unit\": \"months\"\n    },\n    \"warrantyType\": \"shop\"\n  }\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -3986,7 +4054,7 @@
                     "categories"
                   ]
                 },
-                "description": "Create a new top-level category with its starter subcategories (by name — each becomes its own subcategory document with a generated key). The response's `key`/`subcategories[].key` are what other requests (Create Product, Update/Delete Category, Add/Remove Subcategory) must use — copy them into the `categoryKey`/`subcategoryKey` collection variables.\n\n**Requires admin JWT** (`role: admin` claim) — inherited Bearer token must be an admin token or the API returns 403 `ADMIN_REQUIRED`."
+                "description": "Create a new top-level category with its starter subcategories (by name — each becomes its own subcategory document with a generated key). The response's `key`/`subcategories[].key` are what other requests (Create Product, Update/Delete Category, Add/Remove Subcategory) must use — copy them into the `categoryKey`/`subcategoryKey` collection variables.\n\n**Requires admin JWT** (`role: admin` claim) — inherited Bearer token must be an admin token or the API returns 403 `ADMIN_REQUIRED`. Optional `warrantyTemplate`: the warranty the product form fills in for a new product of this category (coverage `none` on update removes it)."
               },
               "response": []
             },
@@ -4002,7 +4070,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"color\": \"cyan\"\n}",
+                  "raw": "{\n  \"color\": \"cyan\",\n  \"warrantyTemplate\": {\n    \"coverage\": {\n      \"kind\": \"limited\",\n      \"value\": 12,\n      \"unit\": \"months\"\n    },\n    \"warrantyType\": \"shop\"\n  }\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -4021,7 +4089,7 @@
                     "{{categoryKey}}"
                   ]
                 },
-                "description": "Partially update a category, looked up by its key. Renaming `name` is a pure display-label change — products reference this category by its immutable key, so nothing else needs to change.\n\n**Requires admin JWT** (`role: admin` claim) — inherited Bearer token must be an admin token or the API returns 403 `ADMIN_REQUIRED`."
+                "description": "Partially update a category, looked up by its key. Renaming `name` is a pure display-label change — products reference this category by its immutable key, so nothing else needs to change.\n\n**Requires admin JWT** (`role: admin` claim) — inherited Bearer token must be an admin token or the API returns 403 `ADMIN_REQUIRED`. Optional `warrantyTemplate`: the warranty the product form fills in for a new product of this category (coverage `none` on update removes it)."
               },
               "response": []
             },
@@ -5089,7 +5157,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"customer\": {\n    \"customerName\": \"Kasun Silva\",\n    \"customerPhone\": \"0771234567\"\n  },\n  \"deviceModel\": \"iPhone 14\",\n  \"serialNumber\": \"C02XG2AVJHD3\",\n  \"issueDescription\": \"Cracked screen, touch unresponsive in top corner\",\n  \"estimatedCostCents\": 850000,\n  \"promisedReadyAt\": \"2026-09-15\"\n}",
+              "raw": "{\n  \"customer\": {\n    \"customerName\": \"Kasun Silva\",\n    \"customerPhone\": \"0771234567\"\n  },\n  \"deviceModel\": \"iPhone 14\",\n  \"serialNumber\": \"C02XG2AVJHD3\",\n  \"issueDescription\": \"Cracked screen, touch unresponsive in top corner\",\n  \"promisedReadyAt\": \"2026-09-15\",\n  \"items\": [\n    {\n      \"description\": \"Replace screen\",\n      \"laborCents\": 250000,\n      \"warranty\": {\n        \"coverage\": {\n          \"kind\": \"limited\",\n          \"value\": 3,\n          \"unit\": \"months\"\n        },\n        \"warrantyType\": \"shop\",\n        \"terms\": \"Covers the screen fitted; not new cracks.\"\n      },\n      \"part\": {\n        \"source\": \"stock\",\n        \"productKey\": \"{{productKey}}\",\n        \"sellingPriceCents\": 1200000\n      }\n    },\n    {\n      \"description\": \"Clean charging port\",\n      \"laborCents\": 50000,\n      \"warranty\": {\n        \"coverage\": {\n          \"kind\": \"none\"\n        }\n      },\n      \"part\": {\n        \"source\": \"outside\",\n        \"name\": \"Contact cleaner\",\n        \"priceCents\": 10000,\n        \"costCents\": 4000\n      }\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5106,7 +5174,7 @@
                 "repairs"
               ]
             },
-            "description": "Create a repair ticket. `ticketNumber` is never client-supplied — reserved server-side on create. `status` defaults to `received` if omitted. The request nests customer identity into `customer{customerKey, customerName, customerPhone}` and technician assignment into `assignment{assignedEmployeeId, assignedEmployeeName, splitType, splitValue}` (both optional groups). If `customer.customerKey` is set, `customer.customerName`/`customerPhone` in this request are ignored and resolved server-side from the linked `Customer` record instead — only used as typed when there's no `customerKey` (a walk-in with no linked account).\n\n`estimatedCostCents` is **optional** — diagnosis-first repairs often can't be priced at intake, so it may be omitted while `status` is `received`, `diagnosing`, or `cancelled`. Moving a ticket to `ready` or `delivered` (on create or via `PATCH`) requires a price to already be set or included in the same request, otherwise the request is rejected with `400 REPAIR_PRICE_REQUIRED`.\n\n**Requires the `repairs:write` permission** in the token's `permissions` claim — granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role."
+            "description": "Opens a repair job (`REP-000001`). `items` is the work: each has a description, `laborCents`, a `warranty` (`{coverage}` and, when covered, `warrantyType`/`terms`) and at most one `part`: `{source: stock, productKey, serialNumber}` for a serialized product or `{source: stock, productKey, sellingPriceCents}` (one of its current price tiers), priced and costed by the server, or `{source: outside, name, priceCents, costCents}`. `items` may be empty while the device is being looked at; `ready`/`delivered` need at least one (400 `REPAIR_PRICE_REQUIRED`). A job with a stock part is handed back by billing it (400 `REPAIR_PART_INVALID` for `delivered` by hand). The reply carries `priceCents` (labour and part prices) and `costCents` (part costs). Needs `repairs:write`."
           },
           "response": []
         },
@@ -5142,7 +5210,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"status\": \"ready\",\n  \"promisedReadyAt\": \"2026-09-15\"\n}",
+              "raw": "{\n  \"status\": \"ready\",\n  \"promisedReadyAt\": \"2026-09-15\",\n  \"items\": [\n    {\n      \"description\": \"Replace screen\",\n      \"laborCents\": 250000,\n      \"warranty\": {\n        \"coverage\": {\n          \"kind\": \"limited\",\n          \"value\": 3,\n          \"unit\": \"months\"\n        },\n        \"warrantyType\": \"shop\",\n        \"terms\": \"Covers the screen fitted; not new cracks.\"\n      },\n      \"part\": {\n        \"source\": \"stock\",\n        \"productKey\": \"{{productKey}}\",\n        \"sellingPriceCents\": 1200000\n      },\n      \"key\": \"{{repairItemKey}}\"\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5160,7 +5228,7 @@
                 "{{repairKey}}"
               ]
             },
-            "description": "Partially update a repair ticket — omit any field to leave it unchanged. The request nests customer identity into `customer{customerKey, customerName, customerPhone}` and technician assignment into `assignment{assignedEmployeeId, assignedEmployeeName, splitType, splitValue}` (both optional groups). If `customer.customerKey` is set, `customer.customerName`/`customerPhone` in this request are ignored and resolved server-side from the linked `Customer` record instead — only used as typed when there's no `customerKey` (a walk-in with no linked account).\n\n**Requires the `repairs:write` permission** in the token's `permissions` claim — granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role."
+            "description": "Changes what is sent. `items` replaces the whole list: an item sent with the `key` of one already on the job keeps it (400 for a key not on the job); omit `items` to leave them. A handed-back job's items cannot change (409 `REPAIR_ITEMS_LOCKED`). Setting a warranty rework to `delivered` takes its stock parts out of stock (`warranty_rework_part_consumption`). Needs `repairs:write`."
           },
           "response": []
         },
@@ -5186,6 +5254,106 @@
         }
       ],
       "description": "Repair ticket CRUD. `GET /` is now the real list endpoint, not a status stub — see List Repairs' description."
+    },
+    {
+      "name": "Repair Services",
+      "description": "The shop's ready-made repair services (`/api/repair-services`): a name, the usual labour and warranty. The repair form adds one as an item. The key is derived from the name (`rst_` + hash), so the same service added on two tills is one row. Never deleted; hide with `active: false`.",
+      "item": [
+        {
+          "name": "List Repair Services",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/repair-services?includeHidden=true",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "repair-services"
+              ],
+              "query": [
+                {
+                  "key": "includeHidden",
+                  "value": "true",
+                  "description": "Also list hidden services (settings screen).",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "The services by name. Needs `repairs:write`; `includeHidden=true` also lists hidden ones and needs `repair_services:manage`."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Repair Service",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/repair-services",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "repair-services"
+              ]
+            },
+            "description": "Adds a service. 409 `REPAIR_SERVICE_NAME_TAKEN` when another service has the name (case and spaces ignored, hidden ones included). Needs `repair_services:manage` (Admin, Manager).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Screen replacement\",\n  \"laborCents\": 250000,\n  \"warranty\": {\n    \"coverage\": {\n      \"kind\": \"limited\",\n      \"value\": 3,\n      \"unit\": \"months\"\n    },\n    \"warrantyType\": \"shop\"\n  },\n  \"active\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Repair Service",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/repair-services/{{repairServiceKey}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "repair-services",
+                "{{repairServiceKey}}"
+              ]
+            },
+            "description": "Replaces the whole service; `active: false` hides it. 404 `REPAIR_SERVICE_NOT_FOUND`, 409 on a taken name or `VERSION_CONFLICT`. Needs `repair_services:manage`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Screen replacement\",\n  \"laborCents\": 300000,\n  \"warranty\": {\n    \"coverage\": {\n      \"kind\": \"limited\",\n      \"value\": 6,\n      \"unit\": \"months\"\n    },\n    \"warrantyType\": \"shop\"\n  },\n  \"active\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
     },
     {
       "name": "Reports",
@@ -7848,6 +8016,584 @@
           "response": []
         }
       ]
+    },
+    {
+      "name": "Warranties",
+      "item": [
+        {
+          "name": "Look Up Warranties",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/warranties/lookup?q=WTY-000001",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "warranties",
+                "lookup"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "WTY-000001",
+                  "description": "Whatever was scanned or typed: a warranty number (WTY-…), an invoice number (INV-…), an exact serial or IMEI, a phone number (matched on its last nine digits), or the start of a serial (4+ characters). The server decides which; `matchedBy` says."
+                }
+              ]
+            },
+            "description": "The counter lookup. Groups warranties by device (one serial), newest first, at most 200. Needs `warranties:view` (every role). 400 when nothing is typed."
+          },
+          "response": []
+        },
+        {
+          "name": "List Warranties",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/warranties?customerKey={{customerKey}}&invoiceKey={{invoiceKey}}&page=1&limit=50",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "warranties"
+              ],
+              "query": [
+                {
+                  "key": "customerKey",
+                  "value": "{{customerKey}}",
+                  "description": "Only this customer's warranties (not with invoiceKey).",
+                  "disabled": true
+                },
+                {
+                  "key": "invoiceKey",
+                  "value": "{{invoiceKey}}",
+                  "description": "Only this invoice's warranties (not with customerKey).",
+                  "disabled": true
+                },
+                {
+                  "key": "repairKey",
+                  "value": "{{repairKey}}",
+                  "description": "Only the warranties of this repair job's items. Send one of customerKey, invoiceKey or repairKey.",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "1-indexed page.",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "Items per page, at most 200.",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "A page of warranties, newest first, with `state` (active, expiring_soon, expired, under_claim, void) and `daysRemaining` worked out for today. Needs `warranties:view`."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Warranty",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/warranties/{{warrantyKey}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "warranties",
+                "{{warrantyKey}}"
+              ]
+            },
+            "description": "One warranty with its activity log (oldest first), its invoice (number, status, total) and the warranties it replaced or was replaced by. Needs `warranties:view`. 404 `WARRANTY_NOT_FOUND`."
+          },
+          "response": []
+        },
+        {
+          "name": "Void Warranty",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/warranties/{{warrantyKey}}/void",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "warranties",
+                "{{warrantyKey}}",
+                "void"
+              ]
+            },
+            "description": "Cancels a warranty. Needs `warranty_claims:record` and a manager or owner PIN with a reason (`approval`); the PIN is checked on the server (401 `INVALID_PIN`), a blank reason is 400, an already cancelled warranty is 409 `WARRANTY_ALREADY_VOID`. Logged with who asked and who approved.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"approval\": {\n    \"managerPin\": \"1234\",\n    \"reason\": \"Seal broken when the customer came back\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Extend Warranty",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/warranties/{{warrantyKey}}/extend",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "warranties",
+                "{{warrantyKey}}",
+                "extend"
+              ]
+            },
+            "description": "Gives a warranty a longer period, counted from its original first day. Needs `warranty_claims:record` and a manager or owner PIN with a reason. 409 `WARRANTY_NOT_EXTENDED` when the new period does not end later (or it is already lifetime), 409 `WARRANTY_NOT_ACTIVE` when it is cancelled.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coverage\": {\n    \"kind\": \"limited\",\n    \"value\": 2,\n    \"unit\": \"years\"\n  },\n  \"approval\": {\n    \"managerPin\": \"1234\",\n    \"reason\": \"Goodwill for a loyal customer\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Print Warranty Card",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "The warranty's card as a PDF, with the design in force now (`application/pdf`). A card always shows the warranty as it stands today: each change to the warranty prints afresh, so there is no `design=original`. Needs `warranties:view`.",
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/warranties/{{warrantyKey}}/documents/warranty-card?paper=a5&template=doc_temp_Wrnty0Card0V1Std",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "warranties",
+                "{{warrantyKey}}",
+                "documents",
+                "warranty-card"
+              ],
+              "query": [
+                {
+                  "key": "paper",
+                  "value": "a5",
+                  "description": "Required: `a5` (office printer), `thermal-58` or `thermal-80` (receipt roll)."
+                },
+                {
+                  "key": "template",
+                  "value": "doc_temp_Wrnty0Card0V1Std",
+                  "description": "A design family for this print only; defaults to the shop's choice for warranty cards.",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Warranty Claims",
+      "item": [
+        {
+          "name": "Open Claim",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/warranty-claims",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "warranty-claims"
+              ]
+            },
+            "description": "Takes a faulty item in under its warranty. Needs `warranty_claims:record`. The warranty must be in force; one that has run out needs `approval` (manager or owner PIN plus reason), else 409 `WARRANTY_EXPIRED`. Sending `approval` for a warranty still in force is 400. A cancelled warranty is 409 `WARRANTY_NOT_ACTIVE`; one already under a claim is 409 `CLAIM_ALREADY_OPEN`. The warranty is held (`under_claim`) until the claim ends.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"warrantyKey\": \"{{warrantyKey}}\",\n  \"issueDescription\": \"Screen flickers after 10 minutes\",\n  \"voidChecks\": {\n    \"screenCracked\": false,\n    \"liquidDamage\": false,\n    \"sealBroken\": false,\n    \"tampered\": false\n  },\n  \"assignedEmployeeKey\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List Claims",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/warranty-claims?status=open&q=&page=1&limit=50",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "warranty-claims"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "open"
+                },
+                {
+                  "key": "q",
+                  "value": ""
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
+            },
+            "description": "The claims queue, oldest first. `status`: `open` (default view), `all`, or one status (`received`, `inspected`, `decided`, `at_supplier`, `resolved`, `returned`). Optional `warrantyKey`, `invoiceKey`, `supplierKey`, `assignedEmployeeKey`, and `q` (claim/warranty number, serial, item, customer name or phone). Each claim carries `ageDays` and `supplierOverdue`. Needs `warranties:view`."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Claim",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/warranty-claims/{{warrantyClaimKey}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "warranty-claims",
+                "{{warrantyClaimKey}}"
+              ]
+            },
+            "description": "One claim. 404 `CLAIM_NOT_FOUND`. Needs `warranties:view`."
+          },
+          "response": []
+        },
+        {
+          "name": "Inspect Claim",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/warranty-claims/{{warrantyClaimKey}}/inspect",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "warranty-claims",
+                "{{warrantyClaimKey}}",
+                "inspect"
+              ]
+            },
+            "description": "Records what the technician found. Only from `received`, else 409 `CLAIM_STEP_NOT_ALLOWED`. Needs `warranty_claims:record`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"inspectionNotes\": \"Backlight connector loose; no liquid marks\",\n  \"assignedEmployeeKey\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Decide Claim",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/warranty-claims/{{warrantyClaimKey}}/decide",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "warranty-claims",
+                "{{warrantyClaimKey}}",
+                "decide"
+              ]
+            },
+            "description": "A manager or owner chooses `repair`, `replace`, `refund` or `reject` (PIN plus reason, checked on the server). Only after inspection. `reject` ends the claim at once and puts the warranty back in force.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"decision\": \"replace\",\n  \"approval\": {\n    \"managerPin\": \"1234\",\n    \"reason\": \"Fault confirmed, no damage\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Send Claim To Supplier",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/warranty-claims/{{warrantyClaimKey}}/supplier/send",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "warranty-claims",
+                "{{warrantyClaimKey}}",
+                "supplier",
+                "send"
+              ]
+            },
+            "description": "Sends the item to a supplier or maker. From `inspected` or `decided` (not refund or reject). `expectedBackOn` (`YYYY-MM-DD`) cannot be in the past; a claim past it shows `supplierOverdue`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"supplierKey\": \"{{supplierKey}}\",\n  \"reference\": \"RMA-55821\",\n  \"expectedBackOn\": \"2026-11-20\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Record Supplier Return",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/warranty-claims/{{warrantyClaimKey}}/supplier/return",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "warranty-claims",
+                "{{warrantyClaimKey}}",
+                "supplier",
+                "return"
+              ]
+            },
+            "description": "The item is back from the supplier. `outcome`: `repaired`, `replaced`, `credited`, `rejected`. The claim returns to `decided` if a decision exists, otherwise `inspected`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"outcome\": \"repaired\",\n  \"note\": \"Board replaced by distributor\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Resolve Claim",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/warranty-claims/{{warrantyClaimKey}}/resolve",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "warranty-claims",
+                "{{warrantyClaimKey}}",
+                "resolve"
+              ]
+            },
+            "description": "Finishes a `repair` or `replace` decision. Repair: the warranty is back in force with its old end date (omit `replacement`). Replace: `replacement.serialNumber` for a serialized product (an in-stock serial of the same product), or `replacement.sellingPriceCents` (the price tier to take stock from) for a non-serialized one, else 400 `CLAIM_REPLACEMENT_INVALID`. Stock moves as `warranty_replacement`; the new unit gets a warranty from today to the old end date. A refund is finished by a credit note with `warrantyClaimKey`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resolutionNote\": \"Swapped for a new unit\",\n  \"replacement\": {\n    \"serialNumber\": \"IMEI-NEW-0001\",\n    \"sellingPriceCents\": null\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Return Claim To Customer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/warranty-claims/{{warrantyClaimKey}}/return",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "warranty-claims",
+                "{{warrantyClaimKey}}",
+                "return"
+              ]
+            },
+            "description": "The item is handed back. Only from `resolved` and never for a refund."
+          },
+          "response": []
+        },
+        {
+          "name": "Convert Claim To Paid Repair",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/warranty-claims/{{warrantyClaimKey}}/paid-repair",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "warranty-claims",
+                "{{warrantyClaimKey}}",
+                "paid-repair"
+              ]
+            },
+            "description": "Turns a rejected claim into a paid repair job for the same item, once per claim. Needs `warranty_claims:record` and `repairs:write`."
+          },
+          "response": []
+        },
+        {
+          "name": "Open Rework Job",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/warranty-claims/{{warrantyClaimKey}}/rework",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "warranty-claims",
+                "{{warrantyClaimKey}}",
+                "rework"
+              ]
+            },
+            "description": "Opens the free rework job (`kind: warranty_rework`) for a claim on repair work that was decided as a repair, before it is resolved: same customer and device, no items yet, linked back as `reworkRepairKey`/`reworkRepairNumber`. Once per claim. 409 `CLAIM_STEP_NOT_ALLOWED` when not decided as a repair, already resolved or already reworked; 409 `CLAIM_REWORK_INVALID` for a warranty that came with a product. Needs `warranty_claims:record` and `repairs:write`."
+          },
+          "response": []
+        }
+      ]
     }
   ],
   "auth": {
@@ -8027,6 +8773,22 @@
     },
     {
       "key": "supplierCreditKey",
+      "value": ""
+    },
+    {
+      "key": "warrantyKey",
+      "value": "wty_example"
+    },
+    {
+      "key": "warrantyClaimKey",
+      "value": "wcl_example"
+    },
+    {
+      "key": "repairItemKey",
+      "value": ""
+    },
+    {
+      "key": "repairServiceKey",
       "value": ""
     }
   ]

@@ -38,6 +38,13 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
                 .await?;
         }
     }
+    // `categories.warranty_template` arrived with warranty records.
+    let category_cols = table_columns(pool, "categories").await?;
+    if !category_cols.is_empty() && !category_cols.iter().any(|c| c == "warranty_template") {
+        tracing::info!("Migrating 'categories' table: adding 'warranty_template' column");
+        pool.execute("ALTER TABLE categories ADD COLUMN warranty_template TEXT")
+            .await?;
+    }
     // `cash_movements.receipt_key` arrived with supplier receipts too.
     let movement_cols = table_columns(pool, "cash_movements").await?;
     if !movement_cols.is_empty() && !movement_cols.iter().any(|c| c == "receipt_key") {

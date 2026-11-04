@@ -28,7 +28,7 @@ async fn create_named_product(
         Some(json!({
             "name": name,
             "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "openingStock": { "quantity": 5, "unitCostCents": 100, "sellingPriceCents": selling_price_cents },
             "minStockThreshold": 1,
         })),
@@ -180,7 +180,7 @@ async fn cost_price_is_returned_to_admin_only() {
     let create_body = json!({
         "name": "Costed Widget",
         "categoryKey": category_key,
-        "subcategoryKey": subcategory_key,
+        "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
         "barcode": barcode,
         "openingStock": { "quantity": 4, "unitCostCents": 1234, "sellingPriceCents": 2000 },
         "minStockThreshold": 1,
@@ -284,7 +284,7 @@ async fn product_lifecycle_create_get_update_stock_and_delete() {
         Some(json!({
             "name": "Test Widget",
             "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "openingStock": { "quantity": 10, "unitCostCents": 1000, "sellingPriceCents": 2000 },
             "minStockThreshold": 3,
         })),
@@ -423,7 +423,7 @@ async fn create_product_validates_category_and_pricing_and_auto_generates_sequen
         Some(json!({
             "name": "Bad Category Widget",
             "categoryKey": category_key,
-            "subcategoryKey": "subcat_does_not_exist",
+            "subcategoryKey": "subcat_does_not_exist", "warranty": { "coverage": { "kind": "none" } },
             "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 2000 },
             "minStockThreshold": 1,
         })),
@@ -444,7 +444,7 @@ async fn create_product_validates_category_and_pricing_and_auto_generates_sequen
         Some(json!({
             "name": "Mismatched Widget",
             "categoryKey": category_key,
-            "subcategoryKey": other_subcategory_key,
+            "subcategoryKey": other_subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 2000 },
             "minStockThreshold": 1,
         })),
@@ -461,7 +461,7 @@ async fn create_product_validates_category_and_pricing_and_auto_generates_sequen
         Some(json!({
             "name": "Free Widget",
             "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 0 },
             "minStockThreshold": 1,
         })),
@@ -475,7 +475,7 @@ async fn create_product_validates_category_and_pricing_and_auto_generates_sequen
     let body = json!({
         "name": "Sequential Widget",
         "categoryKey": category_key,
-        "subcategoryKey": subcategory_key,
+        "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
         "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 2000 },
         "minStockThreshold": 1,
     });
@@ -507,7 +507,7 @@ async fn create_product_auto_generates_sequential_ean13_barcodes() {
     let body = json!({
         "name": "Auto Barcode Widget",
         "categoryKey": category_key,
-        "subcategoryKey": subcategory_key,
+        "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
         "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 2000 },
         "minStockThreshold": 1,
         "autoGenerateBarcode": true,
@@ -551,7 +551,7 @@ async fn create_product_accepts_manual_barcode() {
         Some(json!({
             "name": "Manual Barcode Widget",
             "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 2000 },
             "minStockThreshold": 1,
             "barcode": barcode,
@@ -578,7 +578,7 @@ async fn create_product_rejects_invalid_manual_barcode() {
             Some(json!({
                 "name": "Invalid Barcode Widget",
                 "categoryKey": category_key,
-                "subcategoryKey": subcategory_key,
+                "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
                 "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 2000 },
                 "minStockThreshold": 1,
                 "barcode": bad_barcode,
@@ -604,7 +604,7 @@ async fn create_product_rejects_duplicate_manual_barcode() {
         Some(json!({
             "name": "First Widget",
             "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 2000 },
             "minStockThreshold": 1,
             "barcode": barcode,
@@ -620,7 +620,7 @@ async fn create_product_rejects_duplicate_manual_barcode() {
         Some(json!({
             "name": "Second Widget",
             "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 2000 },
             "minStockThreshold": 1,
             "barcode": barcode,
@@ -644,7 +644,7 @@ async fn create_product_rejects_barcode_and_auto_generate_together() {
         Some(json!({
             "name": "Conflicting Barcode Widget",
             "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 2000 },
             "minStockThreshold": 1,
             "barcode": "12345678",
@@ -669,7 +669,7 @@ async fn create_product_without_barcode_persists_null() {
         Some(json!({
             "name": "Barcode-Free Widget",
             "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "openingStock": { "quantity": 1, "unitCostCents": 1000, "sellingPriceCents": 2000 },
             "minStockThreshold": 1,
         })),

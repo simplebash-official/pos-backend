@@ -135,7 +135,7 @@ async fn scenario(app: &common::TestApp) {
         app,
         "POST",
         "/api/inventory/products",
-        Some(json!({ "name": format!("Item {tag}"), "categoryKey": category_key_, "subcategoryKey": subcategory_key, "minStockThreshold": 1 })),
+        Some(json!({ "name": format!("Item {tag}"), "categoryKey": category_key_, "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } }, "minStockThreshold": 1 })),
         &admin,
     )
     .await;

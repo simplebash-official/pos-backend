@@ -8,6 +8,7 @@ use crate::domain::inventory::{
     CreateCategoryRequest, CreateProductRequest, OpeningStockRequest, ProductListQuery,
     UpdateCategoryRequest,
 };
+use crate::domain::warranties::ProductWarranty;
 use crate::modules::inventory::service::{category, product};
 use futures_util::{StreamExt, TryStreamExt, stream};
 
@@ -56,6 +57,7 @@ async fn seed_category(db: &Db, cat: SeedCategory) -> Result<CategoryOutcome, Ap
                         name: None,
                         icon: Some(cat.icon.to_string()),
                         color: Some(cat.color.to_string()),
+                        warranty_template: None,
                     },
                 )
                 .await?
@@ -68,6 +70,7 @@ async fn seed_category(db: &Db, cat: SeedCategory) -> Result<CategoryOutcome, Ap
                 name: cat.name.to_string(),
                 icon: cat.icon.to_string(),
                 color: cat.color.to_string(),
+                warranty_template: None,
                 subcategories: subcat_names,
             };
             let created = category::create_category(db, req).await?;
@@ -138,7 +141,7 @@ async fn seed_category(db: &Db, cat: SeedCategory) -> Result<CategoryOutcome, Ap
                 min_stock_threshold: p.min_stock_threshold,
                 suppliers: Vec::new(),
                 is_serialized: false,
-                warranty_months: None,
+                warranty: ProductWarranty::none(),
             };
 
             pending_products.push(req);

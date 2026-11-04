@@ -59,7 +59,7 @@ pub(crate) async fn make_product(
         Some(json!({
             "name": name,
             "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "minStockThreshold": 1,
             "isSerialized": serialized,
         })),

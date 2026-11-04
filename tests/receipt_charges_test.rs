@@ -80,7 +80,7 @@ impl Shop<'_> {
                 json!({
                     "name": format!("{name} {}", self.tag),
                     "categoryKey": self.category_key,
-                    "subcategoryKey": self.subcategory_key,
+                    "subcategoryKey": self.subcategory_key, "warranty": { "coverage": { "kind": "none" } },
                     "minStockThreshold": 1,
                     "isSerialized": serialized,
                 }),

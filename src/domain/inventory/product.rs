@@ -1,6 +1,7 @@
 //! Products, their requests, list queries and price tiers.
 
 use crate::core::error::AppError;
+use crate::domain::warranties::ProductWarranty;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
@@ -75,8 +76,8 @@ pub struct CreateProductRequest {
     /// must supply exact-count serial numbers (see `ProductSerial`).
     #[serde(default)]
     pub is_serialized: bool,
-    /// Warranty length in months for units of this product, if any.
-    pub warranty_months: Option<i64>,
+    /// The warranty each unit comes with; send coverage `none` for no warranty.
+    pub warranty: ProductWarranty,
 }
 
 /// Body for `DELETE /products` (batch delete). Any id that fails to parse
@@ -201,12 +202,10 @@ pub struct Product {
     /// number (see `ProductSerial`) rather than only as an aggregate
     /// `stock_quantity` count.
     pub is_serialized: bool,
-    /// Warranty length in months, snapshotted onto each `ProductSerial.
-    /// warranty_months` at the moment a unit is sold (see
-    /// `billing::service::sale::resolve_sale_item`). `None` means no
-    /// warranty is offered on this product.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub warranty_months: Option<i64>,
+    /// The warranty each unit comes with. Copied onto a warranty record for every unit sold
+    /// (see `warranties::service::issue_for_sale_line`), so changing it later never changes a
+    /// warranty already given.
+    pub warranty: ProductWarranty,
     /// Timestamp when product was created.
     pub created_at: DateTime<Utc>,
     /// Timestamp when product was last modified.
@@ -312,6 +311,6 @@ pub struct UpdateProductRequest {
     pub min_stock_threshold: Option<i64>,
     /// Updated serialized-tracking flag.
     pub is_serialized: Option<bool>,
-    /// Updated warranty length in months.
-    pub warranty_months: Option<i64>,
+    /// Replaces the product's warranty for units sold from now on.
+    pub warranty: Option<ProductWarranty>,
 }

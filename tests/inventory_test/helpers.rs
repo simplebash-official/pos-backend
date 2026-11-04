@@ -118,6 +118,7 @@ pub(crate) async fn seed_category(db: &mongodb::Database) -> String {
             name,
             icon: "Box".to_string(),
             color: "blue".to_string(),
+            warranty_template: None,
             version: 1,
             created_at: now,
             updated_at: now,

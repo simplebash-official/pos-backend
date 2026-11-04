@@ -130,9 +130,12 @@ async fn seed_serialized_product(
             "name": "Serialized Test Phone",
             "categoryKey": category_key,
             "subcategoryKey": subcategory_key,
+            "warranty": {
+                "coverage": { "kind": "limited", "value": warranty_months, "unit": "months" },
+                "warrantyType": "shop",
+            },
             "minStockThreshold": 1,
             "isSerialized": true,
-            "warrantyMonths": warranty_months,
         })),
         &token,
     )
@@ -428,7 +431,7 @@ async fn sale_of_serialized_product_rejects_an_already_sold_serial() {
 }
 
 #[tokio::test]
-async fn sale_of_serialized_product_flips_serial_to_sold_with_warranty_expiry() {
+async fn sale_of_serialized_product_flips_serial_to_sold_and_issues_its_warranty() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);
     let (_prod_id, prod_key, price) = seed_serialized_product(&app, 12).await;
@@ -452,8 +455,29 @@ async fn sale_of_serialized_product_flips_serial_to_sold_with_warranty_expiry() 
     let sold = list_serials(&app, &prod_key, Some("sold")).await;
     assert_eq!(sold.len(), 1);
     assert_eq!(sold[0]["serialNumber"], serials[0]);
-    assert!(sold[0]["warrantyExpiresAt"].is_string());
+    assert!(sold[0].get("warrantyExpiresAt").is_none(), "{}", sold[0]);
     assert_eq!(sold[0]["invoiceKey"], sale_body["data"]["invoice"]["key"]);
+
+    // The warranty is its own record, one per sold serial.
+    let invoice_key = sale_body["data"]["invoice"]["key"]
+        .as_str()
+        .expect("the value is a string");
+    let (status, warranties) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/warranties?invoiceKey={invoice_key}"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{warranties}");
+    let items = warranties["data"]["items"]
+        .as_array()
+        .expect("the value is an array");
+    assert_eq!(items.len(), 1, "{warranties}");
+    assert_eq!(items[0]["serialNumber"], serials[0]);
+    assert_eq!(items[0]["coverage"]["value"], 12);
+    assert_eq!(items[0]["state"], "active");
 
     // The unit sells at, and is costed from, the batch it was received in.
     let line = &sale_body["data"]["invoice"]["items"][0];
@@ -464,6 +488,50 @@ async fn sale_of_serialized_product_flips_serial_to_sold_with_warranty_expiry() 
 
     let in_stock = list_serials(&app, &prod_key, Some("in_stock")).await;
     assert!(in_stock.is_empty());
+}
+
+#[tokio::test]
+async fn voiding_an_invoice_puts_its_sold_serials_back_in_stock_on_mongo() {
+    void_puts_sold_serials_back_in_stock(common::spawn_app().await).await;
+}
+
+#[tokio::test]
+async fn voiding_an_invoice_puts_its_sold_serials_back_in_stock_on_sqlite() {
+    void_puts_sold_serials_back_in_stock(common::spawn_app_sqlite().await).await;
+}
+
+async fn void_puts_sold_serials_back_in_stock(app: common::TestApp) {
+    let token = staff_token(&app.config);
+    let admin = admin_token(&app.config);
+    let (_prod_id, prod_key, price) = seed_serialized_product(&app, 12).await;
+    let (invoice_key, serial) = sell_one_serialized_unit(&app, &token, &prod_key, price, 12).await;
+
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/billing/invoices/{invoice_key}/void"),
+        Some(json!({ "reason": "Entered by mistake" })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    assert_eq!(
+        body["message"], "Invoice voided successfully",
+        "voiding must not leave warnings: {body}"
+    );
+
+    let in_stock = list_serials(&app, &prod_key, Some("in_stock")).await;
+    let unit = in_stock
+        .iter()
+        .find(|s| s["serialNumber"] == serial.as_str())
+        .unwrap_or_else(|| panic!("serial {serial} is back in stock: {in_stock:?}"));
+    assert!(unit.get("invoiceKey").is_none(), "unit: {unit}");
+    assert!(unit.get("soldAt").is_none(), "unit: {unit}");
+
+    // The released unit can be sold again.
+    let (status, body) =
+        complete_serialized_sale(&app, &token, &prod_key, vec![serial.clone()], price).await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
 }
 
 /// Sells one serialized unit and returns its invoice key + serial number.

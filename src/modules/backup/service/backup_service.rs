@@ -63,6 +63,8 @@ pub(crate) async fn restore_backup(
         upgrade_pre_batch_backup(&mut backup.tables);
         upgrade_pre_receipt_backup(&mut backup.tables);
         upgrade_pre_line_total_backup(&mut backup.tables);
+        super::warranty_upgrade::upgrade_pre_warranty_backup(&mut backup.tables);
+        super::repair_items_upgrade::upgrade_pre_repair_items_backup(&mut backup.tables);
 
         if backup.version != BACKUP_SCHEMA_VERSION {
             return Err(AppError::validation(format!(

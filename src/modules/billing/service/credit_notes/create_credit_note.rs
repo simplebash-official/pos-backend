@@ -17,7 +17,7 @@ use crate::domain::sequences::ReserveSequenceRequest;
 use crate::domain::users::Role;
 use crate::modules::billing::model::{CreditNoteDocument, PaymentDocument};
 use crate::modules::billing::repository;
-use crate::modules::{customers, inventory, sequences};
+use crate::modules::{customers, inventory, sequences, warranties};
 use mongodb::bson::DateTime as BsonDateTime;
 use mongodb::bson::oid::ObjectId;
 use std::collections::HashMap;
@@ -362,6 +362,56 @@ async fn transition_returned_serial(db: &Db, item: &CreditNoteItem, credit_note_
     }
 }
 
+/// Cancels the warranties of what came back: each returned serial's, and a non-serialized
+/// line's once all of it has been returned. Best-effort like the stock movement it follows; a
+/// failure is logged, never undoes the credit note.
+async fn void_returned_warranties(
+    db: &Db,
+    created: &CreditNote,
+    actor: &warranties::service::WarrantyActor,
+) {
+    let Some(invoice_key) = created.invoice_key.as_deref() else {
+        return;
+    };
+    for item in &created.returned_items {
+        if let Some(serial_number) = &item.serial_number
+            && let Err(err) = warranties::service::void_for_returned_serial(
+                db,
+                invoice_key,
+                serial_number,
+                &created.credit_note_number,
+                actor,
+            )
+            .await
+        {
+            tracing::warn!(invoice_key, serial_number, error = %err, "could not cancel a returned unit's warranty");
+        }
+    }
+    let invoice = match repository::find_invoice_by_id_or_key(db, invoice_key).await {
+        Ok(Some(invoice)) => invoice,
+        Ok(None) => return,
+        Err(err) => {
+            tracing::warn!(invoice_key, error = %err, "could not read the invoice to cancel returned warranties");
+            return;
+        }
+    };
+    for (line_index, line) in invoice.items.iter().enumerate() {
+        if line.serial_numbers.is_empty()
+            && line.returned_quantity >= line.quantity
+            && let Err(err) = warranties::service::void_for_returned_line(
+                db,
+                invoice_key,
+                line_index,
+                &created.credit_note_number,
+                actor,
+            )
+            .await
+        {
+            tracing::warn!(invoice_key, line_index, error = %err, "could not cancel a returned line's warranty");
+        }
+    }
+}
+
 /// Creates a credit note, processes stock adjustments, calculates
 /// cashback/extra-payment (capped by what was actually paid, allocated
 /// across payment methods for a split-paid invoice), and updates the
@@ -403,6 +453,11 @@ pub async fn create_credit_note(
                 ));
             }
             validate_condition_disposition(item_req.condition, item_req.disposition)?;
+        }
+        if body.no_receipt && body.warranty_claim_key.is_some() {
+            return Err(AppError::validation(
+                "A warranty refund is made against the invoice the item was sold on",
+            ));
         }
         if body.no_receipt && body.invoice_key.is_some() {
             return Err(AppError::validation(
@@ -482,6 +537,16 @@ pub async fn create_credit_note(
         // (a concurrent write already bumped the invoice) re-fetches and
         // re-validates from scratch and retries, bounded to a few attempts.
         let invoice_key = body.invoice_key.as_ref().expect("checked above").clone();
+        let warranty_claim_key = body.warranty_claim_key.clone();
+        if let Some(claim_key) = &warranty_claim_key {
+            let returned_serials: Vec<&str> = body
+                .returned_items
+                .iter()
+                .filter_map(|item| item.serial_number.as_deref())
+                .collect();
+            warranties::service::check_claim_refund(db, claim_key, &invoice_key, &returned_serials)
+                .await?;
+        }
         const MAX_CLAIM_ATTEMPTS: u32 = 3;
         let mut attempt = 0;
 
@@ -512,7 +577,7 @@ pub async fn create_credit_note(
 
             let days_since_sale = (chrono::Utc::now() - invoice.created_at.to_chrono()).num_days();
             let mut is_manager_override = false;
-            if days_since_sale > config.return_window_days {
+            if days_since_sale > config.return_window_days && warranty_claim_key.is_none() {
                 if !has_override_reason {
                     return Err(AppError::conflict(
                         codes::RETURN_WINDOW_EXPIRED,
@@ -629,7 +694,8 @@ pub async fn create_credit_note(
                         quantity: item_req.quantity,
                         unit_cost_cents,
                     }];
-                    inventory::service::product_serial::is_within_warranty(&serial)
+                    warranties::service::serial_within_warranty(db, &invoice.key, serial_number)
+                        .await?
                 } else {
                     None
                 };
@@ -724,6 +790,10 @@ pub async fn create_credit_note(
         // written yet. Proceed to the remaining side effects (sequence
         // reservation, stock movements, payment inserts, the credit-note
         // document itself).
+        let warranty_actor = warranties::service::WarrantyActor {
+            user_id: cashier_id.clone(),
+            name: cashier_name.clone(),
+        };
         let result = finish_create_credit_note(
             db,
             Some((invoice_key_owned, invoice_number)),
@@ -748,6 +818,19 @@ pub async fn create_credit_note(
 
         match &result {
             Ok(created) => {
+                void_returned_warranties(db, created, &warranty_actor).await;
+                if let Some(claim_key) = &warranty_claim_key
+                    && let Err(err) = warranties::service::finish_claim_refund(
+                        db,
+                        claim_key,
+                        &created.key,
+                        &created.credit_note_number,
+                        &warranty_actor,
+                    )
+                    .await
+                {
+                    tracing::error!(claim_key, credit_note = %created.credit_note_number, error = %err, "credit note written but its warranty claim was not closed");
+                }
                 if let Some(customer_key) = &customer_key
                     && created.refund_cash_cents != 0
                     && let Err(err) = customers::service::apply_financial_delta(

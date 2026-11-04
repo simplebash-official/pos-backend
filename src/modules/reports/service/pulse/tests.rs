@@ -20,8 +20,15 @@ fn repair(id: &str, status: &str, tech: Option<&str>, created: &str, cost: i64) 
     from(json!({
         "id": id, "key": id, "ticketNumber": format!("REP-{id}"), "customerName": "Asha",
         "customerPhone": "0771234567", "deviceModel": "Phone", "issueDescription": "x",
-        "isOverdue": false, "status": status, "estimatedCostCents": cost,
-        "materialCostCents": 500, "assignedEmployeeId": tech, "createdAt": created,
+        "isOverdue": false, "status": status, "kind": { "kind": "standard" },
+        "items": [{
+            "key": format!("rit_{id}"), "description": "Fix", "laborCents": cost,
+            "part": { "source": "outside", "name": "Glass" }, "partCents": 500,
+            "partCostCents": 500, "warranty": { "coverage": { "kind": "none" } }
+        }],
+        // What the customer pays is the labour and the part's 500.
+        "priceCents": cost + 500, "costCents": 500,
+        "assignedEmployeeId": tech, "createdAt": created,
         "updatedAt": created, "version": 1
     }))
 }
@@ -127,7 +134,7 @@ fn pending_stock_quotations_are_tracked_and_flagged_ready_when_replenished() {
         "categoryKey": "cat_1", "category": "Accessories",
         "subcategoryKey": "sub_1", "subcategory": "Protectors",
         "stockQuantity": 0, "minStockThreshold": 5,
-        "priceTiers": [], "isSerialized": false,
+        "priceTiers": [], "isSerialized": false, "warranty": { "coverage": { "kind": "none" } },
         "createdAt": NOW, "updatedAt": NOW, "version": 1
     }));
 
@@ -146,7 +153,7 @@ fn pending_stock_quotations_are_tracked_and_flagged_ready_when_replenished() {
         "categoryKey": "cat_1", "category": "Accessories",
         "subcategoryKey": "sub_1", "subcategory": "Protectors",
         "stockQuantity": 5, "minStockThreshold": 5,
-        "priceTiers": [], "isSerialized": false,
+        "priceTiers": [], "isSerialized": false, "warranty": { "coverage": { "kind": "none" } },
         "createdAt": NOW, "updatedAt": NOW, "version": 1
     }));
     inp.products = std::slice::from_ref(&replenished_product);

@@ -4,6 +4,8 @@
 //! them in `core::response::ApiResponse<T>`.
 
 mod domain_repairs;
+mod repair_item;
+mod repair_service;
 
 pub use domain_repairs::CreateRepairRequest;
 pub use domain_repairs::Repair;
@@ -14,3 +16,12 @@ pub use domain_repairs::RepairListResponse;
 pub use domain_repairs::RepairStats;
 pub use domain_repairs::UpdateRepairRequest;
 pub use domain_repairs::compute_job_is_overdue;
+pub use repair_item::RepairItem;
+pub use repair_item::RepairItemInput;
+pub use repair_item::RepairKind;
+pub use repair_item::RepairPart;
+pub use repair_item::RepairPartInput;
+pub use repair_service::RepairService;
+pub use repair_service::RepairServiceListQuery;
+pub use repair_service::SaveRepairServiceRequest;
+pub use repair_service::repair_service_key;

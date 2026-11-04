@@ -384,8 +384,8 @@ async fn opening_balance_migration_turns_stock_into_a_ledger_and_is_idempotent()
     // A legacy row: stock with no movement behind it.
     sqlx::query(
         "INSERT INTO products (key, id, sku, name, category_key, subcategory_key, \
-         stock_quantity, min_stock_threshold, version, created_at, updated_at) \
-         VALUES ('prod_legacy', '64b000000000000000000001', 'LEG-001', 'Legacy', 'cat_x', 'sub_x', 7, 0, 1, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')",
+         stock_quantity, min_stock_threshold, warranty, version, created_at, updated_at) \
+         VALUES ('prod_legacy', '64b000000000000000000001', 'LEG-001', 'Legacy', 'cat_x', 'sub_x', 7, 0, '{\"coverage\":{\"kind\":\"none\"}}', 1, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')",
     )
     .execute(dev.pool())
     .await

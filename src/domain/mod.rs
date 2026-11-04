@@ -36,6 +36,7 @@ pub mod sync_local;
 pub mod sync_v2;
 pub mod system;
 pub mod users;
+pub mod warranties;
 
 pub use domain_items::HealthResponse;
 pub use domain_items::ModuleStatusResponse;

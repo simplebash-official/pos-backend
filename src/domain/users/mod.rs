@@ -4,6 +4,7 @@
 //! handler wraps them in `core::response::ApiResponse<T>`.
 
 mod domain_users;
+mod manager_approval;
 
 pub use domain_users::CATALOG_SORT_IDS;
 pub use domain_users::CreateUserRequest;
@@ -14,3 +15,5 @@ pub use domain_users::User;
 pub use domain_users::UserListQuery;
 pub use domain_users::UserPreferences;
 pub use domain_users::UsersResponse;
+pub use manager_approval::ApprovedBy;
+pub use manager_approval::ManagerApproval;

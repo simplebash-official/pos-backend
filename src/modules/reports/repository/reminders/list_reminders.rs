@@ -4,6 +4,7 @@ use crate::clients::sqlite::map_sqlite_row_to_document;
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use crate::core::error::AppResult;
 use crate::domain::reports::{ReminderEntry, ReminderKind};
+use crate::modules::reports::repository::commissions::{JobKind, job_money};
 use chrono::{NaiveDate, Utc};
 use futures_util::TryStreamExt;
 use mongodb::bson::oid::ObjectId;
@@ -249,11 +250,10 @@ pub(crate) async fn list_reminders(
                 continue;
             };
             let key = doc.get_str("key").unwrap_or_default().to_string();
-            let estimated = doc.get_i64("estimated_cost_cents").unwrap_or(0);
-            let material = if is_repair {
-                doc.get_i64("material_cost_cents").unwrap_or(0)
+            let amount_cents = if is_repair {
+                job_money(&doc, JobKind::Repair)?.revenue_cents
             } else {
-                0
+                doc.get_i64("estimated_cost_cents").unwrap_or(0)
             };
             let title = if is_repair {
                 doc.get_str("device_model").unwrap_or_default().to_string()
@@ -277,7 +277,7 @@ pub(crate) async fn list_reminders(
                 title,
                 customer_name,
                 customer_phone: doc.get_str("customer_phone").ok().map(String::from),
-                amount_cents: estimated + material,
+                amount_cents,
                 due_date: promised.to_string(),
                 days_from_due: days,
                 severity: match bucket {

@@ -30,7 +30,13 @@ pub use pos_calc_core::receipt::{
     CalcReceiptSummary, ChargeKind, CostMode, PaymentMode, PaymentSource, PricingMode,
 };
 
+pub use pos_calc_core::repair::{CalcRepairItem, CalcRepairRequest, RepairTotals};
+
 pub use pos_calc_core::shares::{CalcSharesReply, CalcSharesRequest, ShareLine, SharePart};
+
+pub use pos_calc_core::warranty::{
+    CalcWarrantyReply, CalcWarrantyRequest, WarrantyCoverage, WarrantyUnit,
+};
 
 /// Turns a calculation error into the message the browser shows.
 fn to_js_err(err: impl std::fmt::Display) -> JsValue {
@@ -102,4 +108,16 @@ mod tests {
     fn calendar_date_refuses_a_day_that_does_not_exist() {
         let _ = calendar_date(2026, 1, 30);
     }
+}
+
+/// Works out the last day a warranty starting on a given day covers.
+#[wasm_bindgen]
+pub fn calc_warranty(request: CalcWarrantyRequest) -> Result<CalcWarrantyReply, JsValue> {
+    pos_calc_core::warranty::compute(&request).map_err(to_js_err)
+}
+
+/// Works out what a repair job charges and costs from its items.
+#[wasm_bindgen]
+pub fn calc_repair(request: CalcRepairRequest) -> Result<RepairTotals, JsValue> {
+    pos_calc_core::repair::compute(&request).map_err(to_js_err)
 }

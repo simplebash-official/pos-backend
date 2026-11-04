@@ -48,7 +48,7 @@ async fn delete_products_batch_removes_multiple() {
             Some(json!({
                 "name": "Batch Widget",
                 "categoryKey": category_key,
-                "subcategoryKey": subcategory_key,
+                "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
                 "openingStock": { "quantity": 5, "unitCostCents": 500, "sellingPriceCents": 1200 },
                 "minStockThreshold": 1,
             })),
@@ -91,7 +91,7 @@ async fn low_stock_lists_products_at_or_below_threshold() {
         Some(json!({
             "name": "Low Stock Widget",
             "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "openingStock": { "quantity": 2, "unitCostCents": 500, "sellingPriceCents": 1200 },
             "minStockThreshold": 5,
         })),
@@ -254,7 +254,7 @@ async fn category_admin_crud_lifecycle_and_in_use_guards() {
         Some(json!({
             "name": "Cascade Widget",
             "categoryKey": category_key,
-            "subcategoryKey": alpha_key,
+            "subcategoryKey": alpha_key, "warranty": { "coverage": { "kind": "none" } },
             "openingStock": { "quantity": 1, "unitCostCents": 500, "sellingPriceCents": 1000 },
             "minStockThreshold": 1,
         })),
@@ -501,7 +501,7 @@ async fn inventory_overview_endpoint_returns_metrics_hierarchical_data_and_filte
         Some(json!({
             "name": "RGB LED Strip Light",
             "categoryKey": cat1_key,
-            "subcategoryKey": subcat1_key,
+            "subcategoryKey": subcat1_key, "warranty": { "coverage": { "kind": "none" } },
             "openingStock": { "quantity": 50, "unitCostCents": 1000, "sellingPriceCents": 1800 },
             "minStockThreshold": 10
         })),
@@ -517,7 +517,7 @@ async fn inventory_overview_endpoint_returns_metrics_hierarchical_data_and_filte
         Some(json!({
             "name": "Smart RGB Corner Floor Lamp",
             "categoryKey": cat1_key,
-            "subcategoryKey": subcat1_key,
+            "subcategoryKey": subcat1_key, "warranty": { "coverage": { "kind": "none" } },
             "openingStock": { "quantity": 5, "unitCostCents": 3000, "sellingPriceCents": 6000 },
             "minStockThreshold": 10
         })),
@@ -533,7 +533,7 @@ async fn inventory_overview_endpoint_returns_metrics_hierarchical_data_and_filte
         Some(json!({
             "name": "Ultra Smartwatch Screen Protector",
             "categoryKey": cat1_key,
-            "subcategoryKey": subcat2_key,
+            "subcategoryKey": subcat2_key, "warranty": { "coverage": { "kind": "none" } },
             "openingStock": { "quantity": 20, "unitCostCents": 200, "sellingPriceCents": 500 },
             "minStockThreshold": 5
         })),

@@ -118,7 +118,6 @@ pub(crate) async fn insert_product_serial(
                 .map(|oid| oid.to_hex())
                 .unwrap_or_else(generate_id_hex);
             let sold_at_iso = serial.sold_at.as_ref().map(bson_to_iso);
-            let warranty_expires_at_iso = serial.warranty_expires_at.as_ref().map(bson_to_iso);
             let created_at_iso = bson_to_iso(&serial.created_at);
             let updated_at_iso = bson_to_iso(&serial.updated_at);
 
@@ -126,9 +125,8 @@ pub(crate) async fn insert_product_serial(
                 r#"
                 INSERT INTO product_serials (
                     key, id, product_key, serial_number, batch_key, status, invoice_key,
-                    sold_at, warranty_months, warranty_expires_at, credit_note_key,
-                    version, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    sold_at, credit_note_key, version, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(&serial.key)
@@ -139,8 +137,6 @@ pub(crate) async fn insert_product_serial(
             .bind(serial.status.as_str())
             .bind(&serial.invoice_key)
             .bind(&sold_at_iso)
-            .bind(serial.warranty_months)
-            .bind(&warranty_expires_at_iso)
             .bind(&serial.credit_note_key)
             .bind(serial.version)
             .bind(&created_at_iso)
@@ -167,7 +163,6 @@ pub(super) fn row_to_serial_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<Prod
         AppError::internal(format!("stored serial status `{status_str}` is unknown"))
     })?;
     let sold_at_str: Option<String> = row.get("sold_at");
-    let warranty_expires_at_str: Option<String> = row.get("warranty_expires_at");
     let created_at_str: String = row.get("created_at");
     let updated_at_str: String = row.get("updated_at");
 
@@ -180,10 +175,6 @@ pub(super) fn row_to_serial_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<Prod
         status,
         invoice_key: row.get("invoice_key"),
         sold_at: sold_at_str.map(|s| to_bson_datetime(&s)).transpose()?,
-        warranty_months: row.get("warranty_months"),
-        warranty_expires_at: warranty_expires_at_str
-            .map(|s| to_bson_datetime(&s))
-            .transpose()?,
         credit_note_key: row.get("credit_note_key"),
         version: row.get("version"),
         created_at: to_bson_datetime(&created_at_str)?,
@@ -191,8 +182,50 @@ pub(super) fn row_to_serial_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<Prod
     })
 }
 
+/// Puts a sold unit back on the shelf: status `in_stock`, and the sale's
+/// `invoice_key`/`sold_at` cleared. `None` when no serial
+/// has this id.
+pub(crate) async fn release_serial(
+    db: &Db,
+    id: ObjectId,
+) -> AppResult<Option<ProductSerialDocument>> {
+    match db {
+        Db::Mongo(db) => Ok(product_serials(db)
+            .find_one_and_update(
+                doc! { "_id": id },
+                doc! {
+                    "$set": {
+                        "status": SerialStatus::InStock.as_str(),
+                        "updated_at": mongodb::bson::DateTime::now(),
+                    },
+                    "$unset": { "invoice_key": "", "sold_at": "" },
+                },
+            )
+            .return_document(mongodb::options::ReturnDocument::After)
+            .await?),
+        Db::Sqlite(pool) => {
+            let updated_at_iso = bson_to_iso(&mongodb::bson::DateTime::now());
+            let row = sqlx::query(
+                r#"
+                UPDATE product_serials SET
+                    status = ?, invoice_key = NULL, sold_at = NULL, version = version + 1,
+                    updated_at = ?
+                WHERE id = ?
+                RETURNING *
+                "#,
+            )
+            .bind(SerialStatus::InStock.as_str())
+            .bind(&updated_at_iso)
+            .bind(id.to_hex())
+            .fetch_optional(pool)
+            .await?;
+            row.map(|r| row_to_serial_doc(&r)).transpose()
+        }
+    }
+}
+
 /// Atomically transitions a serial's status and stamps whichever of
-/// `invoice_key`/`sold_at`/`warranty_expires_at`/`credit_note_key` apply to
+/// `invoice_key`/`sold_at`/`credit_note_key` apply to
 /// that transition — callers pass only the fields relevant to their
 /// transition, everything else in `set_doc` is left untouched.
 pub(crate) async fn update_serial(
@@ -233,12 +266,6 @@ pub(crate) async fn update_serial(
             if let Ok(sa) = set_doc.get_datetime("sold_at") {
                 doc.sold_at = Some(*sa);
             }
-            if let Ok(wm) = set_doc.get_i64("warranty_months") {
-                doc.warranty_months = Some(wm);
-            }
-            if let Ok(we) = set_doc.get_datetime("warranty_expires_at") {
-                doc.warranty_expires_at = Some(*we);
-            }
             if let Ok(cnk) = set_doc.get_str("credit_note_key") {
                 doc.credit_note_key = Some(cnk.to_string());
             }
@@ -246,22 +273,19 @@ pub(crate) async fn update_serial(
             doc.version += 1;
 
             let sold_at_iso = doc.sold_at.as_ref().map(bson_to_iso);
-            let warranty_expires_at_iso = doc.warranty_expires_at.as_ref().map(bson_to_iso);
             let updated_at_iso = bson_to_iso(&doc.updated_at);
 
             sqlx::query(
                 r#"
                 UPDATE product_serials SET
-                    status = ?, invoice_key = ?, sold_at = ?, warranty_months = ?,
-                    warranty_expires_at = ?, credit_note_key = ?, version = ?, updated_at = ?
+                    status = ?, invoice_key = ?, sold_at = ?, credit_note_key = ?, version = ?,
+                    updated_at = ?
                 WHERE id = ?
                 "#,
             )
             .bind(doc.status.as_str())
             .bind(&doc.invoice_key)
             .bind(&sold_at_iso)
-            .bind(doc.warranty_months)
-            .bind(&warranty_expires_at_iso)
             .bind(&doc.credit_note_key)
             .bind(doc.version)
             .bind(&updated_at_iso)

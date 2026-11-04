@@ -639,7 +639,7 @@ async fn linked_devices_draw_skus_and_barcodes_from_blocks_then_a_unique_fallbac
 
     let new_product = |name: &str| {
         json!({
-            "name": name, "categoryKey": &category_key, "subcategoryKey": &subcategory_key,
+            "name": name, "categoryKey": &category_key, "subcategoryKey": &subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "minStockThreshold": 1,
             "autoGenerateBarcode": true
         })

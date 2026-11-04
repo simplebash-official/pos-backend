@@ -1,6 +1,5 @@
 use super::service_pulse::ACTIVITY_PER_KIND;
 use super::service_pulse::PulseInput;
-use super::service_pulse::cost;
 use super::service_pulse::percent;
 
 use crate::core::utils::shop_day;
@@ -206,7 +205,7 @@ pub fn compute(input: &PulseInput) -> DashboardPulse {
                     "warning"
                 }
                 .to_string(),
-                amount_cents: cost(r.estimated_cost_cents, r.material_cost_cents),
+                amount_cents: r.price_cents,
             }
         })
         .collect();
@@ -256,7 +255,7 @@ pub fn compute(input: &PulseInput) -> DashboardPulse {
                     "repair",
                     &r.id,
                     &r.ticket_number,
-                    cost(r.estimated_cost_cents, r.material_cost_cents),
+                    r.price_cents,
                     r.created_at,
                 )
             }),
@@ -335,10 +334,7 @@ pub fn compute(input: &PulseInput) -> DashboardPulse {
             .filter(|r| is_active(&r.status))
             .count() as i64,
         ready_repairs_count: ready.len() as i64,
-        uncollected_ready_value_cents: ready
-            .iter()
-            .map(|r| cost(r.estimated_cost_cents, r.material_cost_cents))
-            .sum(),
+        uncollected_ready_value_cents: ready.iter().map(|r| r.price_cents).sum(),
         active_print_jobs_count: input
             .print_jobs
             .iter()

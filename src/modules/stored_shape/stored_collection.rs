@@ -34,6 +34,7 @@ use crate::modules::purchases::model::SupplierCreditDocument;
 use crate::modules::quotations::model::QuotationDocument;
 use crate::modules::recurring_expenses::model::RecurringExpenseDocument;
 use crate::modules::repairs::model::RepairDocument;
+use crate::modules::repairs::model::RepairServiceDocument;
 use crate::modules::sequences::model::SequenceCounterDocument;
 use crate::modules::sessions::model::CashMovementDocument;
 use crate::modules::sessions::model::DrawerStateDocument;
@@ -44,6 +45,9 @@ use crate::modules::supplier_products::model::SupplierProductLinkDocument;
 use crate::modules::suppliers::model::SupplierDocument;
 use crate::modules::tenants::model::TenantDocument;
 use crate::modules::users::model::UserDocument;
+use crate::modules::warranties::model::WarrantyClaimDocument;
+use crate::modules::warranties::model::WarrantyDocument;
+use crate::modules::warranties::model::WarrantyEventDocument;
 use mongodb::bson::Document;
 
 /// A MongoDB collection and the typed document stored in it.
@@ -112,4 +116,8 @@ pub const STORED_COLLECTIONS: &[StoredCollection] = &[
     stored!("suppliers", SupplierDocument),
     stored!("tenants", TenantDocument),
     stored!("users", UserDocument),
+    stored!("warranties", WarrantyDocument),
+    stored!("warranty_events", WarrantyEventDocument),
+    stored!("warranty_claims", WarrantyClaimDocument),
+    stored!("repair_service_templates", RepairServiceDocument),
 ];

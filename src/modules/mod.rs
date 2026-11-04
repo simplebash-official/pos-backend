@@ -37,3 +37,4 @@ pub mod sync;
 pub mod system;
 pub mod tenants;
 pub mod users;
+pub mod warranties;

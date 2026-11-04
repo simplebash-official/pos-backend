@@ -122,7 +122,7 @@ async fn test_sqlite_complete_pos_lifecycle() {
         Some(json!({
             "name": "iPhone 15 Pro",
             "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "openingStock": { "quantity": 10, "unitCostCents": 75000, "sellingPriceCents": 99900 },
             "minStockThreshold": 3
         })),
@@ -159,7 +159,7 @@ async fn test_sqlite_complete_pos_lifecycle() {
         Some(json!({
             "name": "USB Ring Light 10-inch with Phone Holder",
             "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "openingStock": { "quantity": 20, "unitCostCents": 1500, "sellingPriceCents": 2499 },
             "minStockThreshold": 5
         })),
@@ -183,7 +183,7 @@ async fn test_sqlite_complete_pos_lifecycle() {
         Some(json!({
             "name": "Silicone Sport Band 20mm (Black)",
             "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "openingStock": { "quantity": 15, "unitCostCents": 300, "sellingPriceCents": 799 },
             "minStockThreshold": 2
         })),

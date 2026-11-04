@@ -6,7 +6,7 @@ use crate::core::logging::domain::tracked;
 use crate::domain::attachments::{Attachment, AttachmentOwner, UploadAttachmentRequest};
 use crate::modules::attachments::model::AttachmentDocument;
 use crate::modules::attachments::repository;
-use crate::modules::{expenses, incomes, sessions};
+use crate::modules::{expenses, incomes, sessions, warranties};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use mongodb::bson::DateTime as BsonDateTime;
@@ -90,6 +90,9 @@ async fn require_owner(db: &Db, kind: AttachmentOwner, key: &str) -> AppResult<(
         }
         AttachmentOwner::Income => {
             incomes::service::get_income(db, key).await?;
+        }
+        AttachmentOwner::WarrantyClaim => {
+            warranties::service::get_claim(db, key).await?;
         }
     }
     Ok(())

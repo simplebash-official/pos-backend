@@ -383,7 +383,7 @@ pub(crate) fn hydrate_sync_documents(documents: Vec<Document>) -> AppResult<Vec<
         .collect()
 }
 
-const LIST_STATUSES: &[&str] = &["active", "expired", "cancelled"];
+const LIST_STATUSES: &[&str] = &["active", "expired", "fulfilled", "cancelled"];
 
 /// Lists the quotations.
 pub async fn list_quotations(

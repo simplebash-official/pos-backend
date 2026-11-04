@@ -4,6 +4,7 @@
 //! hook `modules::billing`'s complete-sale flow calls (Phase 4) — the same
 //! pattern as `customers::service::apply_financial_delta`.
 
+pub mod migration;
 pub mod model;
 mod repository;
 pub mod routes;

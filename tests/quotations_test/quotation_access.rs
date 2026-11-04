@@ -266,7 +266,7 @@ async fn catalog_lines_use_the_catalog_and_do_not_touch_stock_or_invoices() {
         "/api/inventory/products",
         Some(json!({
             "name": "Galaxy A15", "categoryKey": category_key,
-            "subcategoryKey": subcategory_key, "minStockThreshold": 2,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } }, "minStockThreshold": 2,
             "openingStock": { "quantity": 10, "unitCostCents": 50000, "sellingPriceCents": 65000 }
         })),
         &tok,
@@ -441,6 +441,11 @@ async fn list_search_status_filters_and_pagination() {
     );
     // A cancelled quotation is never reported as expired.
     assert_eq!(cancelled["data"]["quotations"][0]["isExpired"], false);
+
+    // Fulfilled status is a valid filter and returns 200 (not 400).
+    let (status_fulfilled, fulfilled) = list("?status=fulfilled").await;
+    assert_eq!(status_fulfilled, StatusCode::OK);
+    assert_eq!(fulfilled["data"]["total"], 0);
 
     // Search by customer name, by number and by phone.
     assert_eq!(list("?search=amal").await.1["data"]["total"], 1);

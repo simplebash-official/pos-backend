@@ -15,6 +15,7 @@ pub(crate) use users_service::find_user_summary_by_employee_key;
 pub(crate) use users_service::get_user;
 pub(crate) use users_service::get_user_for_caller;
 pub(crate) use users_service::list_users;
+pub(crate) use users_service::require_manager_approval;
 pub use users_service::reset_admin_credentials;
 pub use users_service::set_user_pin;
 pub(crate) use users_service::update_own_preferences;

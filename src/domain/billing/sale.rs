@@ -6,6 +6,7 @@ use super::invoice::PricingAdjustments;
 use super::invoice::StaffRef;
 use super::payment::PaymentDetails;
 use super::payment::PaymentRecord;
+use crate::domain::warranties::ProductWarranty;
 
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -64,6 +65,9 @@ pub struct CreateSaleItemRequest {
     /// serialized; omitted for non-serialized retail lines and for
     /// repair/print lines.
     pub serial_numbers: Option<Vec<String>>,
+    /// A different warranty for this retail line than the product carries (coverage `none`
+    /// gives it none). Needs `warranties:adjust_at_sale`; refused on repair and print lines.
+    pub warranty_override: Option<ProductWarranty>,
 }
 
 /// Body for `POST /billing/sales`, grouped into sub-objects by concern

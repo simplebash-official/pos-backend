@@ -204,12 +204,14 @@ pub(crate) async fn insert_product(
             let updated_at_iso = bson_to_iso(&document.updated_at);
             let deleted_at_iso = document.deleted_at.as_ref().map(bson_to_iso);
             let barcode_source_str = document.barcode_source.map(|s| s.as_str().to_string());
+            let warranty_json = serde_json::to_string(&document.warranty)
+                .expect("a product warranty serializes to JSON");
 
             sqlx::query(
                 r#"
                 INSERT INTO products (
                     key, id, sku, barcode, barcode_source, name, category_key, subcategory_key,
-                    stock_quantity, min_stock_threshold, is_serialized, warranty_months, version,
+                    stock_quantity, min_stock_threshold, is_serialized, warranty, version,
                     created_at, updated_at, deleted_at, updated_by_device
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
@@ -225,7 +227,7 @@ pub(crate) async fn insert_product(
             .bind(document.stock_quantity)
             .bind(document.min_stock_threshold)
             .bind(if document.is_serialized { 1 } else { 0 })
-            .bind(document.warranty_months)
+            .bind(&warranty_json)
             .bind(document.version)
             .bind(&created_at_iso)
             .bind(&updated_at_iso)
@@ -292,8 +294,9 @@ pub(crate) async fn update_product(
             if let Ok(is_ser) = set_doc.get_bool("is_serialized") {
                 doc.is_serialized = is_ser;
             }
-            if let Ok(wm) = set_doc.get_i64("warranty_months") {
-                doc.warranty_months = Some(wm);
+            if let Ok(warranty) = set_doc.get_document("warranty") {
+                doc.warranty = mongodb::bson::deserialize_from_document(warranty.clone())
+                    .map_err(|err| AppError::internal(format!("product warranty: {err}")))?;
             }
             if let Ok(dt) = set_doc.get_datetime("updated_at") {
                 doc.updated_at = *dt;
@@ -304,13 +307,15 @@ pub(crate) async fn update_product(
 
             let updated_at_iso = bson_to_iso(&doc.updated_at);
             let barcode_source_str = doc.barcode_source.map(|s| s.as_str().to_string());
+            let warranty_json = serde_json::to_string(&doc.warranty)
+                .expect("a product warranty serializes to JSON");
 
             sqlx::query(
                 r#"
                 UPDATE products SET
                     name = ?, sku = ?, barcode = ?, barcode_source = ?,
                     category_key = ?, subcategory_key = ?, min_stock_threshold = ?,
-                    is_serialized = ?, warranty_months = ?, version = ?, updated_at = ?
+                    is_serialized = ?, warranty = ?, version = ?, updated_at = ?
                 WHERE id = ?
                 "#,
             )
@@ -322,7 +327,7 @@ pub(crate) async fn update_product(
             .bind(&doc.subcategory_key)
             .bind(doc.min_stock_threshold)
             .bind(if doc.is_serialized { 1 } else { 0 })
-            .bind(doc.warranty_months)
+            .bind(&warranty_json)
             .bind(doc.version)
             .bind(&updated_at_iso)
             .bind(&id_str)

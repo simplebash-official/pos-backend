@@ -15,14 +15,16 @@ use crate::modules::calc::earnings::{CalcEarningsReply, CalcEarningsRequest};
 use crate::modules::calc::invoice_balance::{CalcInvoiceBalanceReply, CalcInvoiceBalanceRequest};
 use crate::modules::calc::quotation::{CalcQuotationReply, CalcQuotationRequest};
 use crate::modules::calc::receipt::{CalcReceiptReply, CalcReceiptRequest};
+use crate::modules::calc::repair::{CalcRepairRequest, RepairTotals};
 use crate::modules::calc::settlement::{CalcSettlementReply, CalcSettlementRequest, OpenBill};
 use crate::modules::calc::shares::{CalcSharesReply, CalcSharesRequest};
 use crate::modules::calc::shift_totals::{
     CalcShiftTotalsReply, CalcShiftTotalsRequest, ShiftFigures,
 };
+use crate::modules::calc::warranty::{CalcWarrantyReply, CalcWarrantyRequest};
 use crate::modules::calc::{
-    cash, checkout, credit_note, earnings, invoice_balance, quotation, receipt, settlement, shares,
-    shift_totals,
+    cash, checkout, credit_note, earnings, invoice_balance, quotation, receipt, repair, settlement,
+    shares, shift_totals, warranty,
 };
 use axum::Json;
 use axum::extract::State;
@@ -409,6 +411,42 @@ pub(super) async fn calc_shift_totals(
     )))
 }
 
+#[utoipa::path(post, path = "/warranty", tag = modules::CALC, request_body = CalcWarrantyRequest,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "The last covered day of a warranty starting on the given day, or lifetime / not covered", body = ApiResponse<CalcWarrantyReply>),
+        (status = 400, description = "The start day is not a date, or the period is out of range", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+    )
+)]
+/// Any signed-in user: it previews a period the product form or the till already shows.
+pub(super) async fn calc_warranty(
+    _user: CurrentUser,
+    Json(body): Json<CalcWarrantyRequest>,
+) -> AppResult<Json<ApiResponse<CalcWarrantyReply>>> {
+    let reply = warranty::compute(&body)?;
+    Ok(Json(ApiResponse::success(reply, "Calculated")))
+}
+
+#[utoipa::path(post, path = "/repair", tag = modules::CALC, request_body = CalcRepairRequest,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "What the repair job charges and costs", body = ApiResponse<RepairTotals>),
+        (status = 400, description = "An amount is negative or too large, or there are too many items", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+    )
+)]
+/// Needs `repairs:write`, like saving the job it previews.
+pub(super) async fn calc_repair(
+    user: CurrentUser,
+    Json(body): Json<CalcRepairRequest>,
+) -> AppResult<Json<ApiResponse<RepairTotals>>> {
+    user.require_permission(perm::REPAIRS_WRITE)?;
+    let reply = repair::compute(&body)?;
+    Ok(Json(ApiResponse::success(reply, "Calculated")))
+}
+
 /// Routes of the calc module.
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
@@ -422,6 +460,8 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(calc_earnings))
         .routes(routes!(calc_shares))
         .routes(routes!(calc_shift_totals))
+        .routes(routes!(calc_warranty))
+        .routes(routes!(calc_repair))
         .routes(routes!(calc_settlement))
         .routes(routes!(calc_invoice_balance))
 }

@@ -270,7 +270,7 @@ async fn out_of_stock_quotation_creation_replenishment_and_fulfillment() {
         Some(json!({
             "name": "Wireless Buds Pro",
             "categoryKey": category_key,
-            "subcategoryKey": subcategory_key,
+            "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
             "minStockThreshold": 2,
             "openingStock": { "quantity": 1, "unitCostCents": 10000, "sellingPriceCents": 15000 }
         })),

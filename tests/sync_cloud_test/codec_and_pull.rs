@@ -440,7 +440,7 @@ async fn an_outdated_desktop_app_cannot_push_or_pull_until_it_updates() {
     let product = json!({
         "id": "prod_from_old_app", "key": "prod_from_old_app", "sku": "OLD-0001",
         "name": "Old app product", "categoryKey": "cat_old", "category": "Accessories",
-        "subcategoryKey": "sub_old", "subcategory": "Cables", "stockQuantity": 0,
+        "subcategoryKey": "sub_old", "warranty": { "coverage": { "kind": "none" } }, "subcategory": "Cables", "stockQuantity": 0,
         "minStockThreshold": 0, "priceTiers": [], "isSerialized": false, "version": 1,
         "createdAt": "2026-10-01T00:00:00Z", "updatedAt": "2026-10-01T00:00:00Z",
     });

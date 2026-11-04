@@ -176,7 +176,7 @@ pub(crate) async fn shop(dev: &Device) -> Value {
             "POST",
             "/api/inventory/products",
             Some(json!({
-                "name": "Phone", "categoryKey": category_key, "subcategoryKey": subcategory_key,
+                "name": "Phone", "categoryKey": category_key, "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } },
                 "minStockThreshold": 2,
                 "openingStock": { "quantity": 10, "unitCostCents": 30000, "sellingPriceCents": 50000 }
             })),
@@ -275,7 +275,7 @@ pub(crate) async fn shop(dev: &Device) -> Value {
     .await;
 
     json!({
-        "categoryKey": category_key, "subcategoryKey": subcategory_key, "productKey": product_key,
+        "categoryKey": category_key, "subcategoryKey": subcategory_key, "warranty": { "coverage": { "kind": "none" } }, "productKey": product_key,
         "productId": product_id, "customerKey": customer_key, "supplierKey": supplier_key, "invoiceKey": invoice_key,
     })
 }

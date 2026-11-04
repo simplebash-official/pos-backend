@@ -54,7 +54,7 @@ pub(crate) async fn aggregate_stats(
                         {
                             "$group": {
                                 "_id": null,
-                                "sum": { "$sum": { "$ifNull": ["$estimated_cost_cents", 0] } },
+                                "sum": { "$sum": "$price_cents" },
                                 "count": { "$sum": 1 },
                             }
                         }
@@ -98,7 +98,7 @@ pub(crate) async fn aggregate_stats(
                 r#"
                 SELECT
                     COUNT(CASE WHEN created_at >= ? AND created_at < ? THEN 1 ELSE NULL END) as today_job_count,
-                    COALESCE(SUM(CASE WHEN created_at >= ? AND created_at < ? THEN COALESCE(estimated_cost_cents, 0) ELSE 0 END), 0) as today_revenue_cents,
+                    COALESCE(SUM(CASE WHEN created_at >= ? AND created_at < ? THEN price_cents ELSE 0 END), 0) as today_revenue_cents,
                     COUNT(CASE WHEN status NOT IN ('delivered', 'cancelled') THEN 1 ELSE NULL END) as pending_job_count
                 FROM repairs
                 WHERE deleted_at IS NULL
@@ -241,10 +241,10 @@ pub(crate) async fn insert(db: &Db, mut document: RepairDocument) -> AppResult<R
                 INSERT INTO repairs (
                     key, id, ticket_number, customer_key, customer_name, customer_phone,
                     device_model, serial_number, issue_description, promised_ready_at,
-                    status, estimated_cost_cents, material_cost_cents, assigned_employee_id,
+                    status, kind, items, price_cents, cost_cents, assigned_employee_id,
                     assigned_employee_name, split_type, split_value, version,
                     created_at, updated_at, deleted_at, updated_by_device
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(&document.key)
@@ -258,8 +258,10 @@ pub(crate) async fn insert(db: &Db, mut document: RepairDocument) -> AppResult<R
             .bind(&document.issue_description)
             .bind(&document.promised_ready_at)
             .bind(&document.status)
-            .bind(document.estimated_cost_cents)
-            .bind(document.material_cost_cents)
+            .bind(serde_json::to_string(&document.kind).expect("a repair kind serializes to JSON"))
+            .bind(serde_json::to_string(&document.items).expect("repair items serialize to JSON"))
+            .bind(document.price_cents)
+            .bind(document.cost_cents)
             .bind(&document.assigned_employee_id)
             .bind(&document.assigned_employee_name)
             .bind(&document.split_type)
@@ -434,6 +436,16 @@ pub(super) fn repairs(db: &TenantDatabase) -> ScopedCollection<RepairDocument> {
     db.collection("repairs")
 }
 
+/// Reads a JSON column of a repair row; a value that does not parse is an error naming it.
+fn stored_json<T: serde::de::DeserializeOwned>(
+    row: &sqlx::sqlite::SqliteRow,
+    column: &str,
+) -> AppResult<T> {
+    let text: String = row.get(column);
+    serde_json::from_str(&text)
+        .map_err(|err| AppError::internal(format!("stored repair {column} is not readable: {err}")))
+}
+
 pub(super) fn row_to_repair_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<RepairDocument> {
     let id_str: String = row.get("id");
     let id = ObjectId::parse_str(&id_str).ok();
@@ -453,8 +465,10 @@ pub(super) fn row_to_repair_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<Repa
         issue_description: row.get("issue_description"),
         promised_ready_at: row.get("promised_ready_at"),
         status: row.get("status"),
-        estimated_cost_cents: row.get("estimated_cost_cents"),
-        material_cost_cents: row.get("material_cost_cents"),
+        kind: stored_json(row, "kind")?,
+        items: stored_json(row, "items")?,
+        price_cents: row.get("price_cents"),
+        cost_cents: row.get("cost_cents"),
         assigned_employee_id: row.get("assigned_employee_id"),
         assigned_employee_name: row.get("assigned_employee_name"),
         split_type: row.get("split_type"),
@@ -514,7 +528,7 @@ pub(crate) async fn set_status_by_key(
 pub(crate) struct StatsAggregateResult {
     /// Count of non-deleted tickets created in `[today_start, today_end)`.
     pub today_job_count: u64,
-    /// Sum of `estimated_cost_cents` (0 where unset) for those same tickets.
+    /// Sum of `price_cents` for those same tickets.
     pub today_revenue_cents: i64,
     /// Count of ALL non-deleted tickets (any date) whose status is neither
     /// "delivered" nor "cancelled".
@@ -562,6 +576,13 @@ pub(crate) async fn update(
                     mongodb::bson::Bson::Double(f) => {
                         assignments.push(format!("{k} = ?"));
                         bindings.push(Some(f.to_string()));
+                    }
+                    mongodb::bson::Bson::Array(_) | mongodb::bson::Bson::Document(_) => {
+                        // `items` and `kind` are JSON columns.
+                        assignments.push(format!("{k} = ?"));
+                        bindings.push(Some(serde_json::to_string(v).map_err(|err| {
+                            AppError::internal(format!("repair {k} does not serialize: {err}"))
+                        })?));
                     }
                     _ => {}
                 }

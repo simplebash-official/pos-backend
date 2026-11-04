@@ -14,10 +14,6 @@ use chrono::{DateTime, Utc};
 
 pub(super) const ACTIVITY_PER_KIND: usize = 10;
 
-pub(super) fn cost(estimate: Option<i64>, material: Option<i64>) -> i64 {
-    estimate.unwrap_or(0) + material.unwrap_or(0)
-}
-
 const PAGE: u64 = 200;
 
 /// Reads what the pulse needs and groups it. A part the caller may not see is left out (no

@@ -81,6 +81,10 @@ pub const REGISTER_SESSION: &str = "sess";
 
 pub const REPAIR: &str = "rep";
 
+pub const REPAIR_ITEM: &str = "rit";
+
+pub const REPAIR_SERVICE: &str = "rst";
+
 pub const SEQUENCE_BLOCK: &str = "seq";
 
 pub const STOCK_BATCH: &str = "stb";
@@ -98,3 +102,9 @@ pub const SUPPLIER_PRODUCT: &str = "splink";
 pub const TENANT: &str = "tnt";
 
 pub const USER: &str = "usr";
+
+pub const WARRANTY: &str = "wty";
+
+pub const WARRANTY_EVENT: &str = "wev";
+
+pub const WARRANTY_CLAIM: &str = "wcl";

@@ -2,6 +2,7 @@
 //! miss-as-an-error convention as every other repository in this codebase —
 //! `service` decides what a missing row means.
 
+pub(crate) mod repair_services_repository;
 mod repairs_repository;
 
 pub(crate) use repairs_repository::aggregate_stats;

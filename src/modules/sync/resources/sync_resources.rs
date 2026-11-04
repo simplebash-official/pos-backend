@@ -351,4 +351,49 @@ pub const SYNC_RESOURCES: &[ResourceSpec] = &[
         order: 162,
         phase: Phase::P3a,
     },
+    // A warranty's status moves both ways (active -> under claim -> active, or void), so it
+    // is last-writer-wins on its version, never deleted. Its log is append-only.
+    ResourceSpec {
+        name: "warranties",
+        table: "warranties",
+        class: MergeClass::Lww,
+        soft_delete: false,
+        derived: &[],
+        local_only: &[],
+        order: 163,
+        phase: Phase::P3a,
+    },
+    ResourceSpec {
+        name: "warrantyEvents",
+        table: "warranty_events",
+        class: MergeClass::AppendOnly,
+        soft_delete: false,
+        derived: &[],
+        local_only: &[],
+        order: 164,
+        phase: Phase::P3a,
+    },
+    // A claim steps forward through its lifecycle on its version, never deleted.
+    ResourceSpec {
+        name: "warrantyClaims",
+        table: "warranty_claims",
+        class: MergeClass::Lww,
+        soft_delete: false,
+        derived: &[],
+        local_only: &[],
+        order: 165,
+        phase: Phase::P3a,
+    },
+    // A shop's ready-made repair services: edited in place, hidden instead of deleted, keyed by
+    // name so two tills adding the same one converge.
+    ResourceSpec {
+        name: "repairServices",
+        table: "repair_service_templates",
+        class: MergeClass::Lww,
+        soft_delete: false,
+        derived: &[],
+        local_only: &[],
+        order: 166,
+        phase: Phase::P3a,
+    },
 ];

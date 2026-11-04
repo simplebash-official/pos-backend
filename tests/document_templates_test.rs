@@ -134,7 +134,8 @@ async fn lists_each_kind_with_its_designs_standard_design_first() {
             "thermal-receipt",
             "credit-note",
             "quotation",
-            "z-report"
+            "z-report",
+            "warranty-card"
         ]
     );
 

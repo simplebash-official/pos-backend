@@ -3,5 +3,7 @@
 //! never leak into request/response payloads.
 
 mod repair_document;
+mod repair_service_document;
 
 pub use repair_document::RepairDocument;
+pub use repair_service_document::RepairServiceDocument;
