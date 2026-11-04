@@ -118,3 +118,6 @@ pub const WARRANTIES_VIEW: &str = "warranties:view";
 pub const WARRANTY_CLAIMS_RECORD: &str = "warranty_claims:record";
 /// Change a line's warranty at the till, away from what the product carries. Admin and Manager.
 pub const WARRANTIES_ADJUST_AT_SALE: &str = "warranties:adjust_at_sale";
+/// See the warranty report: claim rates by product, repair service, technician and supplier,
+/// and what rework cost. Admin and Manager, like the other reports.
+pub const WARRANTY_REPORTS_VIEW: &str = "warranty_reports:view";

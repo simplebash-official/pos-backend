@@ -367,3 +367,59 @@ pub(crate) async fn list_claims(
         }
     }
 }
+
+/// Every claim matching `filter`, in no particular order (for counting).
+pub(crate) async fn all_claims(
+    db: &Db,
+    filter: &ClaimFilter<'_>,
+) -> AppResult<Vec<WarrantyClaimDocument>> {
+    match db {
+        Db::Mongo(mongo) => Ok(claims(mongo)
+            .find(filter.mongo())
+            .await?
+            .try_collect()
+            .await?),
+        Db::Sqlite(pool) => {
+            let (clause, values) = filter.sqlite();
+            let select = format!("SELECT {CLAIM_COLUMNS} FROM warranty_claims WHERE {clause}");
+            let mut query = sqlx::query(&select);
+            for value in &values {
+                query = query.bind(value);
+            }
+            query
+                .fetch_all(pool)
+                .await?
+                .iter()
+                .map(row_to_claim)
+                .collect()
+        }
+    }
+}
+
+/// Claims sent to a supplier on a day from `from` up to, not including, `before` (both
+/// `YYYY-MM-DD`).
+pub(crate) async fn sent_to_supplier_between(
+    db: &Db,
+    from: &str,
+    before: &str,
+) -> AppResult<Vec<WarrantyClaimDocument>> {
+    match db {
+        Db::Mongo(mongo) => Ok(claims(mongo)
+            .find(doc! { "supplier.sentOn": { "$gte": from, "$lt": before } })
+            .await?
+            .try_collect()
+            .await?),
+        Db::Sqlite(pool) => sqlx::query(&format!(
+            "SELECT {CLAIM_COLUMNS} FROM warranty_claims \
+             WHERE json_extract(supplier, '$.sentOn') >= ? \
+             AND json_extract(supplier, '$.sentOn') < ?"
+        ))
+        .bind(from)
+        .bind(before)
+        .fetch_all(pool)
+        .await?
+        .iter()
+        .map(row_to_claim)
+        .collect(),
+    }
+}

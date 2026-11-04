@@ -3,6 +3,8 @@
 
 mod claim;
 mod profile;
+mod report;
+mod stats;
 mod warranty;
 
 pub use claim::ClaimAction;
@@ -28,6 +30,12 @@ pub use pos_calc_core::warranty::WarrantyUnit;
 pub use profile::ProductWarranty;
 pub use profile::WarrantyType;
 pub use profile::coverage_label;
+pub use report::ClaimRateRow;
+pub use report::ReworkMonth;
+pub use report::SupplierClaimRow;
+pub use report::WarrantyReport;
+pub use stats::CLAIM_SLOW_AFTER_DAYS;
+pub use stats::WarrantyStats;
 pub use warranty::ExtendWarrantyRequest;
 pub use warranty::VoidWarrantyRequest;
 pub use warranty::Warranty;
@@ -40,6 +48,7 @@ pub use warranty::WarrantyGroup;
 pub use warranty::WarrantyInvoiceLink;
 pub use warranty::WarrantyListQuery;
 pub use warranty::WarrantyListResponse;
+pub use warranty::WarrantyListState;
 pub use warranty::WarrantyLookupMatch;
 pub use warranty::WarrantyLookupQuery;
 pub use warranty::WarrantyLookupResponse;

@@ -5,10 +5,13 @@
 
 mod claim_outcomes;
 mod claim_steps;
+mod claim_void;
 mod warranty_events;
 mod warranty_issue;
 mod warranty_lifecycle;
 mod warranty_lookup;
+mod warranty_report;
+mod warranty_stats;
 
 pub(crate) use claim_outcomes::check_claim_refund;
 pub(crate) use claim_outcomes::convert_to_paid_repair;
@@ -24,6 +27,7 @@ pub(crate) use claim_steps::open_claim;
 pub(crate) use claim_steps::return_to_customer;
 pub(crate) use claim_steps::send_to_supplier;
 pub(crate) use claim_steps::supplier_return;
+pub(crate) use claim_void::undo_replacements_for_invoice;
 pub(crate) use warranty_events::WarrantyActor;
 pub(crate) use warranty_issue::RepairLine;
 pub(crate) use warranty_issue::SaleLine;
@@ -42,3 +46,6 @@ pub(crate) use warranty_lookup::hydrate_sync_documents;
 pub(crate) use warranty_lookup::hydrate_sync_events;
 pub(crate) use warranty_lookup::list;
 pub(crate) use warranty_lookup::lookup;
+pub(crate) use warranty_report::report;
+pub(crate) use warranty_stats::late_claim_reminders;
+pub(crate) use warranty_stats::stats;

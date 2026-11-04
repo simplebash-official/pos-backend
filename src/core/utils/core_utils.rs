@@ -73,6 +73,15 @@ pub fn shop_day(at: DateTime<Utc>) -> chrono::NaiveDate {
     .date_naive()
 }
 
+/// The UTC instant at which the shop-local `day` begins.
+#[must_use]
+pub fn shop_midnight(day: chrono::NaiveDate) -> DateTime<Utc> {
+    day.and_hms_opt(0, 0, 0)
+        .expect("00:00:00 is always a valid time")
+        .and_utc()
+        - Duration::seconds(i64::from(SHOP_TZ_OFFSET_SECS))
+}
+
 /// Returns the `[start, end)` bounds, as UTC instants, of the shop-local "today" (midnight to
 /// midnight in `SHOP_TZ_OFFSET_SECS`), for the "today's X" stats and list filters.
 #[must_use]

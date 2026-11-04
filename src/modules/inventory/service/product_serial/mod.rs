@@ -19,4 +19,5 @@ pub(crate) use service_product_serial::mark_serial_sold;
 pub(crate) use service_product_serial::release_sold_serial;
 pub(crate) use service_product_serial::resolve_in_stock_serial;
 pub(crate) use service_product_serial::resolve_sold_serial_for_invoice;
+pub(crate) use service_product_serial::serial_batch_key;
 pub(crate) use service_product_serial::transition_serial_on_return;

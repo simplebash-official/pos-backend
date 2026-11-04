@@ -5,13 +5,15 @@ use crate::core::error::{AppError, AppResult};
 use crate::core::utils::shop_day;
 use crate::domain::warranties::{
     Warranty, WarrantyDetail, WarrantyEvent, WarrantyGroup, WarrantyInvoiceLink, WarrantyListQuery,
-    WarrantyListResponse, WarrantyLookupMatch, WarrantyLookupResponse, WarrantyStatus,
+    WarrantyListResponse, WarrantyListState, WarrantyLookupMatch, WarrantyLookupResponse,
+    WarrantyStatus,
 };
 use crate::modules::billing;
 use crate::modules::warranties::model::{WarrantyDocument, WarrantyEventDocument};
 use crate::modules::warranties::repository::{self, WarrantyFilter};
 use chrono::{NaiveDate, Utc};
 use mongodb::bson::Document;
+use pos_calc_core::warranty;
 
 /// Most warranties one lookup returns.
 const LOOKUP_MAX: u64 = 200;
@@ -111,16 +113,33 @@ pub(crate) async fn lookup(db: &Db, q: &str) -> AppResult<WarrantyLookupResponse
     })
 }
 
-/// A page of warranties, newest first, for one customer or one invoice (or all of them).
+/// A page of warranties for one customer, invoice or repair job (newest first), or those ending
+/// within the week (ending soonest first), or all of them.
 pub(crate) async fn list(db: &Db, query: WarrantyListQuery) -> AppResult<WarrantyListResponse> {
-    let filter = match (&query.customer_key, &query.invoice_key, &query.repair_key) {
-        (Some(customer), None, None) => WarrantyFilter::Customer(customer),
-        (None, Some(invoice), None) => WarrantyFilter::InvoiceKey(invoice),
-        (None, None, Some(repair)) => WarrantyFilter::Repair(repair),
-        (None, None, None) => WarrantyFilter::All,
+    let today = today();
+    let from = today.format("%Y-%m-%d").to_string();
+    let until = warranty::expiring_soon_until(today)
+        .format("%Y-%m-%d")
+        .to_string();
+    let filter = match (
+        &query.customer_key,
+        &query.invoice_key,
+        &query.repair_key,
+        query.state,
+    ) {
+        (Some(customer), None, None, None) => WarrantyFilter::Customer(customer),
+        (None, Some(invoice), None, None) => WarrantyFilter::InvoiceKey(invoice),
+        (None, None, Some(repair), None) => WarrantyFilter::Repair(repair),
+        (None, None, None, Some(WarrantyListState::ExpiringSoon)) => {
+            WarrantyFilter::EndingBetween {
+                from: &from,
+                until: &until,
+            }
+        }
+        (None, None, None, None) => WarrantyFilter::All,
         _ => {
             return Err(AppError::validation(
-                "Filter by one of a customer, an invoice or a repair job.",
+                "Filter by one of a customer, an invoice, a repair job or a state.",
             ));
         }
     };
@@ -131,7 +150,7 @@ pub(crate) async fn list(db: &Db, query: WarrantyListQuery) -> AppResult<Warrant
         .clamp(1, LIST_LIMIT_MAX);
     let (items, total) = repository::list(db, &filter, (page - 1) * limit, limit).await?;
     Ok(WarrantyListResponse {
-        items: to_api(items, today())?,
+        items: to_api(items, today)?,
         total,
         page,
         limit,

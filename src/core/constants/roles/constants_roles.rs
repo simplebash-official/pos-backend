@@ -45,6 +45,7 @@ const ADMIN_PERMISSIONS: &[&str] = &[
     perm::WARRANTIES_VIEW,
     perm::WARRANTY_CLAIMS_RECORD,
     perm::WARRANTIES_ADJUST_AT_SALE,
+    perm::WARRANTY_REPORTS_VIEW,
 ];
 
 // Everything an Admin has except full account management — a Manager runs
@@ -88,6 +89,7 @@ const MANAGER_PERMISSIONS: &[&str] = &[
     perm::WARRANTIES_VIEW,
     perm::WARRANTY_CLAIMS_RECORD,
     perm::WARRANTIES_ADJUST_AT_SALE,
+    perm::WARRANTY_REPORTS_VIEW,
 ];
 
 // Day-to-day operational permissions only — no inventory administration, no

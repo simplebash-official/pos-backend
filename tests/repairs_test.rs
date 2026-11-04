@@ -409,12 +409,26 @@ async fn get_repair_by_id_and_key_and_update_status() {
     );
 }
 
+/// A unique tag with no digits: the repair search also reads any digits in the query as a
+/// ticket number (`REP-000012`), which would match other tests' repairs in a shared database.
+fn letters_only_tag() -> String {
+    uuid::Uuid::new_v4()
+        .simple()
+        .to_string()
+        .chars()
+        .take(12)
+        .map(|c| {
+            char::from(b'a' + u8::try_from(c.to_digit(16).expect("a hex digit")).expect("below 16"))
+        })
+        .collect()
+}
+
 #[tokio::test]
 async fn list_repairs_filters_by_search_and_status() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);
 
-    let unique = uuid::Uuid::new_v4().to_string()[..8].to_string();
+    let unique = letters_only_tag();
     let mut payload = sample_repair_payload("6666666");
     payload["customer"]["customerName"] = json!(format!("Findable-{unique}"));
     send_authed(&app.router, "POST", "/api/repairs", Some(payload), &token).await;
@@ -456,7 +470,7 @@ async fn list_repairs_filters_by_date_preset() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);
 
-    let unique = uuid::Uuid::new_v4().to_string()[..8].to_string();
+    let unique = letters_only_tag();
     let name = format!("DatePreset-{unique}");
     let now = BsonDateTime::now();
     let yesterday = BsonDateTime::from_chrono(now.to_chrono() - chrono::Duration::days(1));

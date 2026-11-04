@@ -182,6 +182,17 @@ pub fn clock(ends_on: Option<NaiveDate>, today: NaiveDate) -> WarrantyClock {
     }
 }
 
+/// The last end day that is still "expiring soon" on `today`: a warranty ending between `today`
+/// and this day (both included) is in its last week, matching [`clock`].
+#[must_use]
+pub fn expiring_soon_until(today: NaiveDate) -> NaiveDate {
+    today
+        .checked_add_days(Days::new(
+            u64::try_from(EXPIRING_SOON_DAYS - 1).expect("the expiring window is positive"),
+        ))
+        .expect("a shop day plus a week is a valid date")
+}
+
 /// A warranty period to preview: a coverage starting on a day.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -319,6 +330,20 @@ mod tests {
         );
         assert_eq!(clock(Some(end), day("2026-11-11")), WarrantyClock::Expired);
         assert_eq!(clock(None, day("2099-01-01")), WarrantyClock::Active);
+    }
+
+    #[test]
+    fn the_expiring_window_matches_the_clock() {
+        let today = day("2026-11-03");
+        let last = expiring_soon_until(today);
+        assert_eq!(last, day("2026-11-09"));
+        assert_eq!(clock(Some(last), today), WarrantyClock::ExpiringSoon);
+        assert_eq!(clock(Some(today), today), WarrantyClock::ExpiringSoon);
+        assert_eq!(
+            clock(last.succ_opt(), today),
+            WarrantyClock::Active,
+            "the day after the window has more than a week left"
+        );
     }
 
     #[test]

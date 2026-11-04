@@ -71,21 +71,35 @@ pub(crate) async fn find_serial_id(
     product_key: &str,
     serial_number: &str,
 ) -> AppResult<ObjectId> {
-    let serial = repository::product_serial::find_serial_by_number_and_product(
-        db,
-        serial_number,
-        product_key,
-    )
-    .await?
-    .ok_or_else(|| {
-        AppError::not_found_with_code(
-            format!("Serial number '{serial_number}' not found for this product"),
-            codes::SERIAL_NOT_FOUND,
-        )
-    })?;
-    serial
+    find_serial(db, product_key, serial_number)
+        .await?
         .id
         .ok_or_else(|| AppError::internal("persisted product serial document must have an id"))
+}
+
+/// The stock batch a unit came in with, whatever its status now (a faulty unit taken back
+/// under a warranty claim still names the delivery it came from).
+pub(crate) async fn serial_batch_key(
+    db: &Db,
+    product_key: &str,
+    serial_number: &str,
+) -> AppResult<String> {
+    Ok(find_serial(db, product_key, serial_number).await?.batch_key)
+}
+
+async fn find_serial(
+    db: &Db,
+    product_key: &str,
+    serial_number: &str,
+) -> AppResult<ProductSerialDocument> {
+    repository::product_serial::find_serial_by_number_and_product(db, serial_number, product_key)
+        .await?
+        .ok_or_else(|| {
+            AppError::not_found_with_code(
+                format!("Serial number '{serial_number}' not found for this product"),
+                codes::SERIAL_NOT_FOUND,
+            )
+        })
 }
 
 /// Converts a page of raw `product_serials` documents — as read by the sync

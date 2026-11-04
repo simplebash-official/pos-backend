@@ -3,5 +3,6 @@
 //! and top selling products.
 
 mod reports_routes;
+mod warranty_report_routes;
 
 pub use reports_routes::router;

@@ -23,6 +23,7 @@ pub(crate) use service_stock_batch::NewBatch;
 pub(crate) use service_stock_batch::in_stock_units;
 pub(crate) use service_stock_batch::list_batches;
 pub(crate) use service_stock_batch::move_allocations;
+pub(crate) use service_stock_batch::moved_allocations;
 pub(crate) use service_stock_batch::newest_batch_at_price;
 
 pub(crate) use service_stock_batch::plan_tier_allocation;

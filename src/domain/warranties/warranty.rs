@@ -326,10 +326,20 @@ pub struct WarrantyListQuery {
     pub invoice_key: Option<String>,
     /// Only the warranties of this repair job's items.
     pub repair_key: Option<String>,
+    /// Only warranties in this state; the list is then ordered by end day, soonest first.
+    pub state: Option<WarrantyListState>,
     /// Page number (1-indexed).
     pub page: Option<u64>,
     /// Items per page (at most 200).
     pub limit: Option<u64>,
+}
+
+/// A state `GET /warranties` can list by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WarrantyListState {
+    /// In force and in its last week.
+    ExpiringSoon,
 }
 
 /// The paper a warranty card is printed on.

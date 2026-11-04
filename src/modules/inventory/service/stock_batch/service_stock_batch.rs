@@ -349,6 +349,45 @@ pub(crate) async fn move_allocations(
     Ok(())
 }
 
+/// What `move_allocations` moved for `reference_id` under `movement_type` on one product, as
+/// it was moved: one allocation per movement, oldest first, with its units counted positive.
+pub(crate) async fn moved_allocations(
+    db: &Db,
+    product_key: &str,
+    movement_type: StockMovementType,
+    reference_id: &str,
+) -> AppResult<Vec<BatchAllocation>> {
+    let product = repository::product::find_product_by_key(db, product_key)
+        .await?
+        .ok_or_else(|| {
+            AppError::not_found_with_code("Product not found", codes::PRODUCT_NOT_FOUND)
+        })?;
+    let product_id = product
+        .id
+        .expect("persisted product document must have an id");
+    let movements = repository::stock::find_stock_movements_for_product(db, product_id).await?;
+    let mut allocations = Vec::new();
+    for movement in movements {
+        if movement.movement_type.as_str() != movement_type.as_str()
+            || movement.reference_id.as_deref() != Some(reference_id)
+        {
+            continue;
+        }
+        let batch_key = movement
+            .batch_key
+            .ok_or_else(|| AppError::internal("a movement that moved units names its batch"))?;
+        let batch = get_batch_for_product(db, &batch_key, product_key).await?;
+        allocations.push(BatchAllocation {
+            batch_key,
+            quantity: movement.quantity_delta.abs(),
+            unit_cost_cents: batch
+                .unit_cost_cents
+                .expect("a batch read from the store carries its cost"),
+        });
+    }
+    Ok(allocations)
+}
+
 /// Everything needed to bring a new batch of units into stock.
 #[derive(Debug)]
 pub(crate) struct NewBatch {

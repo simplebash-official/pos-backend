@@ -3,6 +3,7 @@ use crate::core::error::AppResult;
 use crate::core::utils::calculate_pagination;
 use crate::domain::reports::{RemindersQuery, RemindersResponse};
 use crate::modules::reports::repository;
+use crate::modules::warranties;
 
 const DEFAULT_DUE_WITHIN_DAYS: u32 = 7;
 const DEFAULT_LIMIT: u64 = 20;
@@ -14,7 +15,10 @@ pub(crate) async fn get_reminders(db: &Db, query: RemindersQuery) -> AppResult<R
         .clamp(1, 30);
     let (page, limit, skip) = calculate_pagination(query.page, query.limit, DEFAULT_LIMIT, 100);
 
-    let raw = repository::reminders::list_reminders(db, due_within_days, page, limit, skip).await?;
+    let late_claims = warranties::service::late_claim_reminders(db).await?;
+    let raw =
+        repository::reminders::list_reminders(db, late_claims, due_within_days, page, limit, skip)
+            .await?;
 
     Ok(RemindersResponse {
         reminders: raw.entries,
@@ -24,6 +28,7 @@ pub(crate) async fn get_reminders(db: &Db, query: RemindersQuery) -> AppResult<R
         credit_due_soon_amount_cents: raw.credit_due_soon_amount_cents,
         jobs_overdue_count: raw.jobs_overdue_count,
         jobs_due_soon_count: raw.jobs_due_soon_count,
+        claims_late_count: raw.claims_late_count,
         due_within_days,
         total: raw.total,
         page: raw.page,

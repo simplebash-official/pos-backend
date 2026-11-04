@@ -11,6 +11,7 @@ pub(crate) struct RemindersRaw {
     pub credit_due_soon_amount_cents: i64,
     pub jobs_overdue_count: u64,
     pub jobs_due_soon_count: u64,
+    pub claims_late_count: u64,
     pub total: u64,
     pub page: u64,
     pub limit: u64,

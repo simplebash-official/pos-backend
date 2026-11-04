@@ -43,8 +43,11 @@ pub(super) enum Bucket {
     DueSoon,
 }
 
+/// Merges the credit and job reminders worked out here with `late_claims` (warranty claims
+/// waiting too long, all overdue), sorts them and returns one page.
 pub(crate) async fn list_reminders(
     db: &Db,
+    late_claims: Vec<ReminderEntry>,
     due_within_days: u32,
     page: u64,
     limit: u64,
@@ -64,6 +67,7 @@ pub(crate) async fn list_reminders(
         credit_due_soon_amount_cents: 0,
         jobs_overdue_count: 0,
         jobs_due_soon_count: 0,
+        claims_late_count: u64::try_from(late_claims.len()).expect("a reminder count fits in u64"),
         total: 0,
         page,
         limit,
@@ -300,6 +304,8 @@ pub(crate) async fn list_reminders(
             }
         }
     }
+
+    overdue.extend(late_claims);
 
     // Payment overdues first, then most overdue at the top;
     // then due-soon (payment due soon first, then soonest first).

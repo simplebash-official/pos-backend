@@ -12,7 +12,7 @@ use sqlx::sqlite::SqliteRow;
 const WARRANTIES: &str = "warranties";
 const EVENTS: &str = "warranty_events";
 
-const WARRANTY_COLUMNS: &str = "key, id, warranty_number, source_type, invoice_key, \
+pub(super) const WARRANTY_COLUMNS: &str = "key, id, warranty_number, source_type, invoice_key, \
      invoice_number, line_index, product_key, repair_key, repair_item_key, item_name, \
      serial_number, quantity, customer_key, customer_name, customer_phone, customer_phone_tail, \
      coverage, warranty_type, terms, unit_price_cents, starts_on, ends_on, status, void_reason, \
@@ -23,7 +23,7 @@ const EVENT_COLUMNS: &str = "key, id, warranty_key, claim_key, kind, from_status
      note, actor_user_id, actor_name, approved_by_user_id, approved_by_name, version, \
      created_at, updated_at, updated_by_device";
 
-fn warranties(db: &TenantDatabase) -> ScopedCollection<WarrantyDocument> {
+pub(super) fn warranties(db: &TenantDatabase) -> ScopedCollection<WarrantyDocument> {
     db.collection(WARRANTIES)
 }
 
@@ -47,7 +47,7 @@ fn parse_enum<T: serde::de::DeserializeOwned>(field: &str, text: &str) -> AppRes
         .map_err(|_| AppError::internal(format!("stored warranty {field} `{text}` is unknown")))
 }
 
-fn row_to_warranty(row: &SqliteRow) -> AppResult<WarrantyDocument> {
+pub(super) fn row_to_warranty(row: &SqliteRow) -> AppResult<WarrantyDocument> {
     let id: String = row.get("id");
     let coverage: String = row.get("coverage");
     let created_at: String = row.get("created_at");
@@ -269,6 +269,9 @@ pub(crate) enum WarrantyFilter<'a> {
     Customer(&'a str),
     /// The items of one repair job.
     Repair(&'a str),
+    /// In force (not held by a claim) and ending between these days (`YYYY-MM-DD`, both
+    /// included).
+    EndingBetween { from: &'a str, until: &'a str },
     /// Everything.
     All,
 }
@@ -288,29 +291,53 @@ impl WarrantyFilter<'_> {
             WarrantyFilter::PhoneTail(t) => doc! { "customer_phone_tail": *t },
             WarrantyFilter::Customer(k) => doc! { "customer_key": *k },
             WarrantyFilter::Repair(k) => doc! { "repair_key": *k },
+            WarrantyFilter::EndingBetween { from, until } => doc! {
+                "status": "active",
+                "ends_on": { "$gte": *from, "$lte": *until },
+            },
             WarrantyFilter::All => doc! {},
         }
     }
 
-    fn sqlite(&self) -> (&'static str, Option<String>) {
+    fn sqlite(&self) -> (&'static str, Vec<String>) {
         match self {
-            WarrantyFilter::Number(n) => ("warranty_number = ?", Some((*n).to_string())),
-            WarrantyFilter::Serial(s) => ("serial_number = ?", Some((*s).to_string())),
+            WarrantyFilter::Number(n) => ("warranty_number = ?", vec![(*n).to_string()]),
+            WarrantyFilter::Serial(s) => ("serial_number = ?", vec![(*s).to_string()]),
             // `instr` keeps `%` and `_` in a serial literal, unlike LIKE.
             WarrantyFilter::SerialPrefix(p) => {
-                ("instr(serial_number, ?) = 1", Some((*p).to_string()))
+                ("instr(serial_number, ?) = 1", vec![(*p).to_string()])
             }
-            WarrantyFilter::InvoiceNumber(n) => ("invoice_number = ?", Some((*n).to_string())),
-            WarrantyFilter::InvoiceKey(k) => ("invoice_key = ?", Some((*k).to_string())),
-            WarrantyFilter::PhoneTail(t) => ("customer_phone_tail = ?", Some((*t).to_string())),
-            WarrantyFilter::Customer(k) => ("customer_key = ?", Some((*k).to_string())),
-            WarrantyFilter::Repair(k) => ("repair_key = ?", Some((*k).to_string())),
-            WarrantyFilter::All => ("1 = 1", None),
+            WarrantyFilter::InvoiceNumber(n) => ("invoice_number = ?", vec![(*n).to_string()]),
+            WarrantyFilter::InvoiceKey(k) => ("invoice_key = ?", vec![(*k).to_string()]),
+            WarrantyFilter::PhoneTail(t) => ("customer_phone_tail = ?", vec![(*t).to_string()]),
+            WarrantyFilter::Customer(k) => ("customer_key = ?", vec![(*k).to_string()]),
+            WarrantyFilter::Repair(k) => ("repair_key = ?", vec![(*k).to_string()]),
+            WarrantyFilter::EndingBetween { from, until } => (
+                "status = 'active' AND ends_on >= ? AND ends_on <= ?",
+                vec![(*from).to_string(), (*until).to_string()],
+            ),
+            WarrantyFilter::All => ("1 = 1", Vec::new()),
+        }
+    }
+
+    /// Ending soonest first when listing by end day, else newest first.
+    fn mongo_order(&self) -> Document {
+        match self {
+            WarrantyFilter::EndingBetween { .. } => doc! { "ends_on": 1, "key": 1 },
+            _ => doc! { "created_at": -1, "key": -1 },
+        }
+    }
+
+    fn sqlite_order(&self) -> &'static str {
+        match self {
+            WarrantyFilter::EndingBetween { .. } => "ends_on ASC, key ASC",
+            _ => "created_at DESC, key DESC",
         }
     }
 }
 
-/// A page of warranties matching `filter`, newest first, and how many match in all.
+/// A page of warranties matching `filter` (newest first, or ending soonest first for
+/// `EndingBetween`), and how many match in all.
 pub(crate) async fn list(
     db: &Db,
     filter: &WarrantyFilter<'_>,
@@ -323,27 +350,28 @@ pub(crate) async fn list(
             let total = collection.count_documents(filter.mongo()).await?;
             let cursor = collection
                 .find(filter.mongo())
-                .sort(doc! { "created_at": -1, "key": -1 })
+                .sort(filter.mongo_order())
                 .skip(skip)
                 .limit(i64::try_from(limit).expect("page limits are small"))
                 .await?;
             Ok((collect(cursor).await?, total))
         }
         Db::Sqlite(pool) => {
-            let (clause, value) = filter.sqlite();
+            let (clause, values) = filter.sqlite();
             let count_sql = format!("SELECT COUNT(*) FROM warranties WHERE {clause}");
             let mut count = sqlx::query_scalar::<_, i64>(&count_sql);
-            if let Some(value) = &value {
+            for value in &values {
                 count = count.bind(value);
             }
             let total =
                 u64::try_from(count.fetch_one(pool).await?).expect("a row count is never negative");
             let select = format!(
                 "SELECT {WARRANTY_COLUMNS} FROM warranties WHERE {clause} \
-                 ORDER BY created_at DESC, key DESC LIMIT ? OFFSET ?"
+                 ORDER BY {} LIMIT ? OFFSET ?",
+                filter.sqlite_order()
             );
             let mut query = sqlx::query(&select);
-            if let Some(value) = &value {
+            for value in &values {
                 query = query.bind(value);
             }
             let rows = query

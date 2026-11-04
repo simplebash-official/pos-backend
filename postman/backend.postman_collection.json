@@ -5655,7 +5655,7 @@
                 }
               ]
             },
-            "description": "Overdue and due-soon credit invoices and repair/print jobs for the dashboard attention list."
+            "description": "Overdue and due-soon credit invoices and repair/print jobs, plus warranty claims waiting too long (`claim_slow`, `claim_supplier_late`), for the dashboard attention list."
           },
           "response": []
         },
@@ -6244,6 +6244,45 @@
               ]
             },
             "description": "Refund / returns analytics from non-voided credit notes: totals, by reason, by method, top returned products.\n\n**Requires reports:view permission** (Admin and Manager roles)."
+          },
+          "response": []
+        },
+        {
+          "name": "Warranty Report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/reports/warranties?preset=this_month&from=2026-11-01&to=2026-11-30",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "warranties"
+              ],
+              "query": [
+                {
+                  "key": "preset",
+                  "value": "this_month",
+                  "description": "today, yesterday, this_week, this_month, last_month, this_year, all_time or custom (shop-local)."
+                },
+                {
+                  "key": "from",
+                  "value": "2026-11-01",
+                  "description": "First day (YYYY-MM-DD, shop-local) when preset is custom.",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2026-11-30",
+                  "description": "Last day (YYYY-MM-DD, shop-local) when preset is custom.",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Claim rates (claimed / given, in basis points) for warranties given in the period by product, repair service and technician; what each supplier did with the claims sent to it in the period; and rework jobs and their parts cost by month and in all. A warranty cancelled without a claim, or one that only carries on a replaced unit's cover, is left out. Needs `warranty_reports:view` (Admin, Manager)."
           },
           "response": []
         },
@@ -8053,6 +8092,26 @@
           "response": []
         },
         {
+          "name": "Warranty Stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/warranties/stats",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "warranties",
+                "stats"
+              ]
+            },
+            "description": "The warranty desk at a glance for the shop-local today: warranties in force, those ending this week (and the last such day), open claims, claims waiting too long (open over 7 days or a supplier past its day), and the parts cost of rework jobs opened this month. Needs `warranties:view`."
+          },
+          "response": []
+        },
+        {
           "name": "List Warranties",
           "request": {
             "method": "GET",
@@ -8087,7 +8146,13 @@
                 {
                   "key": "repairKey",
                   "value": "{{repairKey}}",
-                  "description": "Only the warranties of this repair job's items. Send one of customerKey, invoiceKey or repairKey.",
+                  "description": "Only the warranties of this repair job's items. Send at most one of customerKey, invoiceKey, repairKey or state.",
+                  "disabled": true
+                },
+                {
+                  "key": "state",
+                  "value": "expiring_soon",
+                  "description": "`expiring_soon`: only warranties in force whose last day is within the coming week, ending soonest first. Not with customerKey, invoiceKey or repairKey.",
                   "disabled": true
                 },
                 {
@@ -8104,7 +8169,7 @@
                 }
               ]
             },
-            "description": "A page of warranties, newest first, with `state` (active, expiring_soon, expired, under_claim, void) and `daysRemaining` worked out for today. Needs `warranties:view`."
+            "description": "A page of warranties, newest first (ending soonest first with `state=expiring_soon`), with `state` (active, expiring_soon, expired, under_claim, void) and `daysRemaining` worked out for today. Needs `warranties:view`."
           },
           "response": []
         },

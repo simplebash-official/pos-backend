@@ -657,6 +657,8 @@ pub fn router() -> OpenApiRouter<AppState> {
         // Receivables & Outstanding credit
         .routes(routes!(get_outstanding_receivables))
         .routes(routes!(get_reminders))
+        // Warranty claim rates, supplier trips and rework cost
+        .routes(routes!(super::warranty_report_routes::get_warranty_report))
         .routes(routes!(get_dashboard_pulse))
         // Employee commissions & performance
         .routes(routes!(get_employee_commissions))

@@ -759,6 +759,159 @@ async fn scenario(app: &common::TestApp) {
     let nobody = common::mint_token(&app.config, Some(Role::Staff), &[]);
     let (status, _) = send(app, "GET", "/api/warranty-claims?status=all", None, &nobody).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // ---- Voiding an invoice after replacements ----
+    // A second delivery of phones, so the unit given out comes from another batch.
+    let more: Vec<String> = (4..6).map(|i| format!("IMEI{}{i}", &tag[..10])).collect();
+    let (status, body) = send(
+        app,
+        "POST",
+        "/api/purchase-receipts",
+        Some(json!({
+            "supplierKey": supplier_key,
+            "date": chrono::Utc::now().to_rfc3339(),
+            "lines": [{
+                "productKey": phone, "quantity": 2, "lineTotalCents": 120_000,
+                "sellingPriceCents": 90_000, "serialNumbers": more,
+            }],
+        })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let phone_units = serial_list(app, &admin, &phone).await;
+    let batch_of = |serial: &str| text(&unit(&phone_units, serial)["batchKey"]);
+    let (old_batch, new_batch) = (batch_of(&serials[3]), batch_of(&more[0]));
+    assert_ne!(old_batch, new_batch);
+    let phone_before = remaining(app, &admin, &phone).await;
+    let charger_before = remaining(app, &admin, &charger).await;
+
+    let (status, sold) = send(
+        app,
+        "POST",
+        "/api/billing/sales",
+        Some(sale(json!([
+            { "productKey": phone, "quantity": 1, "discountCents": 0, "sourceType": "retail",
+              "serialNumbers": [serials[3]] },
+            { "productKey": charger, "quantity": 1, "discountCents": 0, "sourceType": "retail",
+              "sellingPriceCents": 1500 },
+        ]))),
+        &staff,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sold}");
+    let second_invoice = text(&sold["data"]["invoice"]["key"]);
+    let issued = warranties_of(app, &staff, &second_invoice).await;
+    let key_of = |serial: Option<&str>| {
+        text(
+            &issued
+                .iter()
+                .find(|w| w["serialNumber"].as_str() == serial)
+                .expect("the unit has a warranty")["key"],
+        )
+    };
+
+    // The phone is swapped for a unit of the second delivery.
+    let phone_claim = text(&open(app, &staff, &key_of(Some(&serials[3]))).await["key"]);
+    inspect_and_decide(app, &staff, &phone_claim, "replace").await;
+    ok_step(
+        app,
+        &staff,
+        &phone_claim,
+        "resolve",
+        json!({ "replacement": { "serialNumber": more[0] } }),
+    )
+    .await;
+    // The charger is swapped twice: the second claim is on the first replacement.
+    let mut charger_warranty = key_of(None);
+    for _ in 0..2 {
+        let claim = text(&open(app, &staff, &charger_warranty).await["key"]);
+        inspect_and_decide(app, &staff, &claim, "replace").await;
+        let swapped = ok_step(
+            app,
+            &staff,
+            &claim,
+            "resolve",
+            json!({ "replacement": { "sellingPriceCents": 1500 } }),
+        )
+        .await;
+        charger_warranty = text(&swapped["replacementWarrantyKey"]);
+    }
+
+    let (status, voided) = send(
+        app,
+        "POST",
+        &format!("/api/billing/invoices/{second_invoice}/void"),
+        Some(json!({ "reason": "Customer changed their mind" })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{voided}");
+    assert_eq!(voided["message"], "Invoice voided successfully", "{voided}");
+
+    // The unit the customer had goes back to its own batch; the faulty one stays out.
+    let phone_units = serial_list(app, &admin, &phone).await;
+    assert_eq!(unit(&phone_units, &more[0])["status"], "in_stock");
+    assert_eq!(unit(&phone_units, &serials[3])["status"], "returned_faulty");
+    let phone_after = remaining(app, &admin, &phone).await;
+    assert_eq!(
+        phone_after[&old_batch],
+        phone_before[&old_batch] - 1,
+        "the faulty unit's delivery is one short"
+    );
+    assert_eq!(phone_after[&new_batch], phone_before[&new_batch]);
+    let charger_after = remaining(app, &admin, &charger).await;
+    assert_eq!(
+        charger_after.values().sum::<i64>(),
+        charger_before.values().sum::<i64>() - 2,
+        "both faulty chargers stay out; the last one given comes back"
+    );
+}
+
+/// What each of the product's batches has left, by batch key.
+async fn remaining(
+    app: &common::TestApp,
+    token: &str,
+    product_key: &str,
+) -> std::collections::HashMap<String, i64> {
+    let (status, body) = send(
+        app,
+        "GET",
+        &format!("/api/inventory/products/{product_key}/batches"),
+        None,
+        token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    items(&body)
+        .iter()
+        .map(|batch| {
+            (
+                text(&batch["key"]),
+                batch["remainingQuantity"].as_i64().expect("a count"),
+            )
+        })
+        .collect()
+}
+
+async fn serial_list(app: &common::TestApp, token: &str, product_key: &str) -> Vec<Value> {
+    let (status, body) = send(
+        app,
+        "GET",
+        &format!("/api/inventory/products/{product_key}/serials"),
+        None,
+        token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    items(&body)
+}
+
+fn unit<'a>(units: &'a [Value], serial: &str) -> &'a Value {
+    units
+        .iter()
+        .find(|unit| unit["serialNumber"] == serial)
+        .expect("the unit is tracked")
 }
 
 async fn lookup(app: &common::TestApp, token: &str, q: &str) -> Value {

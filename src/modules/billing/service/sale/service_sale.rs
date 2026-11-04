@@ -452,6 +452,18 @@ pub async fn void_invoice(
             }
         }
 
+        if let Err(err) = warranties::service::undo_replacements_for_invoice(
+            db,
+            &existing.key,
+            &existing.invoice_number,
+        )
+        .await
+        {
+            warnings.push(format!(
+                "Units given as warranty replacements could not be put back in stock: {err}"
+            ));
+        }
+
         let actor = warranties::service::WarrantyActor {
             user_id: voided_by.clone(),
             name: voided_by_name,
