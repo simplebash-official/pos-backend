@@ -442,6 +442,11 @@ async fn list_search_status_filters_and_pagination() {
     // A cancelled quotation is never reported as expired.
     assert_eq!(cancelled["data"]["quotations"][0]["isExpired"], false);
 
+    // Fulfilled status is a valid filter and returns 200 (not 400).
+    let (status_fulfilled, fulfilled) = list("?status=fulfilled").await;
+    assert_eq!(status_fulfilled, StatusCode::OK);
+    assert_eq!(fulfilled["data"]["total"], 0);
+
     // Search by customer name, by number and by phone.
     assert_eq!(list("?search=amal").await.1["data"]["total"], 1);
     assert_eq!(list("?search=QUO-0002").await.1["data"]["total"], 1);
