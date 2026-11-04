@@ -14,7 +14,16 @@ jobs:
       # as-is, without discovering the set by its advertised hostname.
       MONGODB_URI: mongodb://localhost:27017/?directConnection=true
       MONGODB_TEST_DB_NAME: jtci_github_actions
+      # Each integration-test binary links its own copy of the crate; full debuginfo
+      # filled the runner's disk ("No space left on device"). CI never uses a debugger.
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
     steps:
+      # Safety margin: drop large preinstalled toolchains this job never uses.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
       - uses: actions/checkout@v4
       # The label and document schema-drift tests read document-server's
       # published schemas from a sibling checkout (`../document-server`), the
