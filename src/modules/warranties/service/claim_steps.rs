@@ -138,11 +138,18 @@ pub(super) async fn release_warranty(
     actor: &WarrantyActor,
 ) -> AppResult<()> {
     let mut warranty = require(db, &claim.warranty_key).await?;
-    if warranty.status != WarrantyStatus::UnderClaim {
-        return Ok(());
-    }
+    let claim_qty = claim.quantity.unwrap_or(1);
+    warranty.claimed_quantity = Some(
+        warranty
+            .claimed_quantity
+            .unwrap_or(claim_qty)
+            .saturating_sub(claim_qty),
+    );
     let expected = warranty.version;
-    warranty.status = WarrantyStatus::Active;
+    let from_status = warranty.status;
+    if warranty.status == WarrantyStatus::UnderClaim {
+        warranty.status = WarrantyStatus::Active;
+    }
     save_warranty(db, &mut warranty, expected).await?;
     warranty_events::record(
         db,
@@ -150,8 +157,8 @@ pub(super) async fn release_warranty(
             warranty_key: &warranty.key,
             claim_key: Some(&claim.key),
             kind: WarrantyEventKind::ClaimAdvanced,
-            from_status: Some(WarrantyStatus::UnderClaim.as_str()),
-            to_status: Some(WarrantyStatus::Active.as_str()),
+            from_status: Some(from_status.as_str()),
+            to_status: Some(warranty.status.as_str()),
             note: Some(format!("Back in force after {}", claim.claim_number)),
             actor,
             approved_by: None,
@@ -213,6 +220,26 @@ pub(crate) async fn open_claim(
             }
             (WarrantyState::Active | WarrantyState::ExpiringSoon, None) => None,
         };
+        let claimed_already = warranty.claimed_quantity.unwrap_or(0);
+        let available_units = (warranty.quantity - claimed_already).max(0);
+        if available_units <= 0 {
+            return Err(AppError::conflict(
+                codes::CLAIM_ALREADY_OPEN,
+                "All units of this warranty already have open or resolved claims.",
+            ));
+        }
+
+        let claim_qty = body.quantity.unwrap_or(1);
+        if claim_qty <= 0 {
+            return Err(AppError::validation("Claim quantity must be at least 1."));
+        }
+        if claim_qty > available_units {
+            return Err(AppError::validation(format!(
+                "Only {available_units} of {} units remain available to claim.",
+                warranty.quantity
+            )));
+        }
+
         let assigned_employee_name = match &body.assigned_employee_key {
             Some(key) => Some(employee_name(db, key).await?),
             None => None,
@@ -221,11 +248,16 @@ pub(crate) async fn open_claim(
         // Reserved first, so a failed reservation never leaves the warranty held.
         let claim_number = next_number(db, "warranty_claim", device_id).await?;
         let expected = warranty.version;
-        warranty.status = WarrantyStatus::UnderClaim;
+        let new_claimed = claimed_already + claim_qty;
+        warranty.claimed_quantity = Some(new_claimed);
         warranty.claim_count += 1;
+        if new_claimed >= warranty.quantity {
+            warranty.status = WarrantyStatus::UnderClaim;
+        }
         save_warranty(db, &mut warranty, expected).await?;
 
         let now = BsonDateTime::now();
+        let serial = body.serial_number.or(warranty.serial_number.clone());
         let claim = repository::insert_claim(
             db,
             WarrantyClaimDocument {
@@ -235,7 +267,8 @@ pub(crate) async fn open_claim(
                 warranty_key: warranty.key.clone(),
                 warranty_number: warranty.warranty_number.clone(),
                 item_name: warranty.item_name.clone(),
-                serial_number: warranty.serial_number.clone(),
+                serial_number: serial,
+                quantity: Some(claim_qty),
                 product_key: warranty.product_key.clone(),
                 invoice_key: warranty.invoice_key.clone(),
                 invoice_number: warranty.invoice_number.clone(),

@@ -32,6 +32,8 @@ pub struct WarrantyDocument {
     pub serial_number: Option<String>,
     pub quantity: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub claimed_quantity: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub customer_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub customer_name: Option<String>,
@@ -80,14 +82,21 @@ impl WarrantyDocument {
             .as_deref()
             .map(|text| stored_day("ends_on", text))
             .transpose()?;
+        let claimed_quantity = self.claimed_quantity.unwrap_or(0);
         let state = match self.status {
             WarrantyStatus::Void => WarrantyState::Void,
             WarrantyStatus::UnderClaim => WarrantyState::UnderClaim,
-            WarrantyStatus::Active => match warranty::clock(ends_on, today) {
-                WarrantyClock::Active => WarrantyState::Active,
-                WarrantyClock::ExpiringSoon => WarrantyState::ExpiringSoon,
-                WarrantyClock::Expired => WarrantyState::Expired,
-            },
+            WarrantyStatus::Active => {
+                if claimed_quantity >= self.quantity && self.quantity > 0 {
+                    WarrantyState::UnderClaim
+                } else {
+                    match warranty::clock(ends_on, today) {
+                        WarrantyClock::Active => WarrantyState::Active,
+                        WarrantyClock::ExpiringSoon => WarrantyState::ExpiringSoon,
+                        WarrantyClock::Expired => WarrantyState::Expired,
+                    }
+                }
+            }
         };
         Ok(Warranty {
             id: self
@@ -106,6 +115,7 @@ impl WarrantyDocument {
             item_name: self.item_name,
             serial_number: self.serial_number,
             quantity: self.quantity,
+            claimed_quantity,
             customer_key: self.customer_key,
             customer_name: self.customer_name,
             customer_phone: self.customer_phone,

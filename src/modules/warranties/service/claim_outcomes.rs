@@ -137,10 +137,18 @@ async fn give_up_unit(
     }
     let from = warranty.status;
     let expected = warranty.version;
-    if warranty.quantity > 1 {
-        warranty.quantity -= 1;
+    let claim_qty = claim.quantity.unwrap_or(1);
+    warranty.claimed_quantity = Some(
+        warranty
+            .claimed_quantity
+            .unwrap_or(claim_qty)
+            .saturating_sub(claim_qty),
+    );
+    if warranty.quantity > claim_qty {
+        warranty.quantity -= claim_qty;
         warranty.status = WarrantyStatus::Active;
     } else {
+        warranty.quantity = 0;
         warranty.status = WarrantyStatus::Void;
         warranty.void_reason = Some(reason.to_string());
     }
@@ -183,6 +191,7 @@ fn replacement_warranty(
         warranty_number: number,
         serial_number,
         quantity: 1,
+        claimed_quantity: Some(0),
         starts_on: today().to_string(),
         status: WarrantyStatus::Active,
         void_reason: None,

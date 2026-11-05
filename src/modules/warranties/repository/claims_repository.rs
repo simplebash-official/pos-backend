@@ -13,7 +13,7 @@ use sqlx::sqlite::SqliteRow;
 const CLAIMS: &str = "warranty_claims";
 
 const CLAIM_COLUMNS: &str = "key, id, claim_number, warranty_key, warranty_number, item_name, \
-     serial_number, product_key, invoice_key, invoice_number, customer_key, customer_name, \
+     serial_number, quantity, product_key, invoice_key, invoice_number, customer_key, customer_name, \
      customer_phone, issue_description, void_checks, assigned_employee_key, \
      assigned_employee_name, status, inspection_notes, decision, decision_reason, \
      decided_by_user_id, decided_by_name, expired_override_by_name, resolution_note, \
@@ -63,6 +63,7 @@ fn row_to_claim(row: &SqliteRow) -> AppResult<WarrantyClaimDocument> {
         warranty_number: row.get("warranty_number"),
         item_name: row.get("item_name"),
         serial_number: row.get("serial_number"),
+        quantity: row.try_get("quantity").ok(),
         product_key: row.get("product_key"),
         invoice_key: row.get("invoice_key"),
         invoice_number: row.get("invoice_number"),
@@ -116,6 +117,7 @@ fn bind_fields<'q>(
         .bind(&claim.warranty_number)
         .bind(&claim.item_name)
         .bind(&claim.serial_number)
+        .bind(claim.quantity.unwrap_or(1))
         .bind(&claim.product_key)
         .bind(&claim.invoice_key)
         .bind(&claim.invoice_number)

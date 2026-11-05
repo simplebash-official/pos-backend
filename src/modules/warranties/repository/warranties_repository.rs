@@ -14,7 +14,7 @@ const EVENTS: &str = "warranty_events";
 
 pub(super) const WARRANTY_COLUMNS: &str = "key, id, warranty_number, source_type, invoice_key, \
      invoice_number, line_index, product_key, repair_key, repair_item_key, item_name, \
-     serial_number, quantity, customer_key, customer_name, customer_phone, customer_phone_tail, \
+     serial_number, quantity, claimed_quantity, customer_key, customer_name, customer_phone, customer_phone_tail, \
      coverage, warranty_type, terms, unit_price_cents, starts_on, ends_on, status, void_reason, \
      replaces_warranty_key, replaced_by_warranty_key, claim_count, version, created_at, \
      updated_at, updated_by_device";
@@ -69,6 +69,7 @@ pub(super) fn row_to_warranty(row: &SqliteRow) -> AppResult<WarrantyDocument> {
         item_name: row.get("item_name"),
         serial_number: row.get("serial_number"),
         quantity: row.get("quantity"),
+        claimed_quantity: row.try_get("claimed_quantity").ok(),
         customer_key: row.get("customer_key"),
         customer_name: row.get("customer_name"),
         customer_phone: row.get("customer_phone"),
@@ -144,7 +145,7 @@ pub(crate) async fn insert_warranty(
             sqlx::query(&format!(
                 "INSERT INTO warranties ({WARRANTY_COLUMNS}) VALUES \
                  (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, \
-                  ?, ?, ?, ?, ?)"
+                  ?, ?, ?, ?, ?, ?)"
             ))
             .bind(&warranty.key)
             .bind(&id)
@@ -159,6 +160,7 @@ pub(crate) async fn insert_warranty(
             .bind(&warranty.item_name)
             .bind(&warranty.serial_number)
             .bind(warranty.quantity)
+            .bind(warranty.claimed_quantity.unwrap_or(0))
             .bind(&warranty.customer_key)
             .bind(&warranty.customer_name)
             .bind(&warranty.customer_phone)
@@ -210,7 +212,7 @@ pub(crate) async fn replace_warranty(
             let result = sqlx::query(
                 "UPDATE warranties SET coverage = ?, warranty_type = ?, terms = ?, ends_on = ?, \
                  status = ?, void_reason = ?, replaces_warranty_key = ?, \
-                 replaced_by_warranty_key = ?, quantity = ?, claim_count = ?, version = ?, \
+                 replaced_by_warranty_key = ?, quantity = ?, claimed_quantity = ?, claim_count = ?, version = ?, \
                  updated_at = ? WHERE key = ? AND version = ?",
             )
             .bind(&coverage)
@@ -222,6 +224,7 @@ pub(crate) async fn replace_warranty(
             .bind(&warranty.replaces_warranty_key)
             .bind(&warranty.replaced_by_warranty_key)
             .bind(warranty.quantity)
+            .bind(warranty.claimed_quantity.unwrap_or(0))
             .bind(warranty.claim_count)
             .bind(warranty.version)
             .bind(bson_to_iso(&warranty.updated_at))

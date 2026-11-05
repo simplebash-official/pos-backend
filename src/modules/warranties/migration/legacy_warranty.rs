@@ -134,6 +134,7 @@ pub fn legacy_warranty(unit: &LegacySoldUnit<'_>) -> Result<MigratedWarranty, St
         item_name: line.name.clone(),
         serial_number: Some(unit.serial_number.to_string()),
         quantity: 1,
+        claimed_quantity: Some(0),
         customer_key: unit.invoice.customer_key.map(str::to_string),
         customer_name: unit.invoice.customer_name.map(str::to_string),
         customer_phone: unit.invoice.customer_phone.map(str::to_string),

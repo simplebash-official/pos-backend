@@ -106,6 +106,8 @@ pub struct Warranty {
     pub serial_number: Option<String>,
     /// Units covered: 1 for a serial, the line's quantity otherwise.
     pub quantity: i64,
+    /// Units currently claimed (in an open claim or resolved).
+    pub claimed_quantity: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub customer_key: Option<String>,
     /// The customer's name when the warranty began.

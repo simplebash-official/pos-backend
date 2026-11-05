@@ -561,8 +561,33 @@ async fn scenario(app: &common::TestApp) {
 
     // ---- The charger: repaired, then one of the two units replaced by price ----
     let charger_key = text(&charger_w["key"]);
+    // Multi-unit partial claim: 1 of 2 units claimed
+    let (status, excessive) = send(
+        app,
+        "POST",
+        "/api/warranty-claims",
+        Some(json!({
+            "warrantyKey": charger_key,
+            "quantity": 3,
+            "issueDescription": "Too many units",
+            "voidChecks": { "physicalDamage": true, "liquidDamage": false, "sealBroken": false, "tampered": false },
+        })),
+        &staff,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{excessive}");
+
     let repair = open(app, &staff, &charger_key).await;
     let repair_key = text(&repair["key"]);
+    assert_eq!(repair["quantity"], 1);
+    let during_partial = detail(app, &staff, &charger_key).await;
+    assert_eq!(during_partial["warranty"]["claimedQuantity"], 1);
+    assert_eq!(during_partial["warranty"]["quantity"], 2);
+    assert_eq!(
+        during_partial["warranty"]["state"], "active",
+        "partial claim leaves remaining units active"
+    );
+
     inspect_and_decide(app, &staff, &repair_key, "repair").await;
     let (status, body) = claim_step(
         app,
@@ -578,6 +603,8 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(repaired["warranty"]["state"], "active");
     assert_eq!(repaired["warranty"]["endsOn"], charger_w["endsOn"]);
     ok_step(app, &staff, &repair_key, "return", Value::Null).await;
+    let returned_detail = detail(app, &staff, &charger_key).await;
+    assert_eq!(returned_detail["warranty"]["claimedQuantity"], 0);
 
     let swap = open(app, &staff, &charger_key).await;
     let swap_key = text(&swap["key"]);

@@ -22,6 +22,8 @@ pub struct WarrantyClaimDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub serial_number: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub quantity: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub product_key: Option<String>,
     pub invoice_key: String,
     pub invoice_number: String,
@@ -107,6 +109,7 @@ impl WarrantyClaimDocument {
             warranty_number: self.warranty_number,
             item_name: self.item_name,
             serial_number: self.serial_number,
+            quantity: self.quantity.unwrap_or(1),
             product_key: self.product_key,
             invoice_key: self.invoice_key,
             invoice_number: self.invoice_number,
