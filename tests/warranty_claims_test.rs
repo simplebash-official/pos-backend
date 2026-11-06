@@ -230,6 +230,96 @@ async fn inspect_and_decide(
     .await
 }
 
+async fn test_warranty_conditions_lifecycle(
+    app: &common::TestApp,
+    staff: &str,
+    warranty_key: &str,
+) {
+    // 1. Initial list returns default fallback conditions when database is empty
+    let (status, body) = send(app, "GET", "/api/warranty-claims/conditions", None, staff).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let conditions = body["data"]["conditions"]
+        .as_array()
+        .expect("conditions array");
+    assert_eq!(conditions.len(), 4);
+    assert_eq!(conditions[0]["name"], "Physical damage / cracks");
+
+    // 2. Add custom condition
+    let (status, body) = send(
+        app,
+        "POST",
+        "/api/warranty-claims/conditions",
+        Some(json!({ "name": "Lens scratched" })),
+        staff,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["name"], "Lens scratched");
+    let lens_key = text(&body["data"]["key"]);
+
+    // 3. Open a claim with custom conditions
+    let (status, body) = send(
+        app,
+        "POST",
+        "/api/warranty-claims",
+        Some(json!({
+            "warrantyKey": warranty_key,
+            "issueDescription": "Lens blurry",
+            "conditions": ["Lens scratched", "Loose USB port"],
+        })),
+        staff,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let claim_key = text(&body["data"]["key"]);
+    let claim_conditions = body["data"]["conditions"]
+        .as_array()
+        .expect("conditions array");
+    assert_eq!(claim_conditions.len(), 2);
+    assert_eq!(claim_conditions[0], "Lens scratched");
+    assert_eq!(claim_conditions[1], "Loose USB port");
+
+    // Resolve and return the test claim so the queue stays clean for subsequent tests
+    inspect_and_decide(app, staff, &claim_key, "reject").await;
+    ok_step(app, staff, &claim_key, "return", Value::Null).await;
+
+    // 4. Verify shop conditions now include "Loose USB port" because it auto-upserted
+    let (status, body) = send(app, "GET", "/api/warranty-claims/conditions", None, staff).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let updated_conditions = body["data"]["conditions"]
+        .as_array()
+        .expect("conditions array");
+    assert!(
+        updated_conditions
+            .iter()
+            .any(|c| c["name"] == "Lens scratched")
+    );
+    assert!(
+        updated_conditions
+            .iter()
+            .any(|c| c["name"] == "Loose USB port")
+    );
+
+    // 5. Delete / deactivate a condition
+    let (status, body) = send(
+        app,
+        "DELETE",
+        &format!("/api/warranty-claims/conditions/{lens_key}"),
+        None,
+        staff,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // 6. Verify deactivated condition is no longer in active list
+    let (status, body) = send(app, "GET", "/api/warranty-claims/conditions", None, staff).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let after_delete = body["data"]["conditions"]
+        .as_array()
+        .expect("conditions array");
+    assert!(!after_delete.iter().any(|c| c["key"] == lens_key));
+}
+
 /// Moves a warranty's end date to yesterday, straight in the store.
 async fn run_out(app: &common::TestApp, key: &str) {
     let yesterday = (chrono::Utc::now() - chrono::Duration::days(3))
@@ -361,6 +451,24 @@ async fn scenario(app: &common::TestApp) {
     let phone_b = warranty_of(Some(&serials[1]));
     let charger_w = warranty_of(None);
     let phone_a_key = text(&phone_a["key"]);
+
+    // ---- Verify dynamic warranty conditions lifecycle ----
+    let (status, cond_sale) = send(
+        app,
+        "POST",
+        "/api/billing/sales",
+        Some(sale(json!([
+            { "productKey": charger, "quantity": 1, "discountCents": 0, "sourceType": "retail",
+              "sellingPriceCents": 1500 },
+        ]))),
+        &staff,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cond_sale}");
+    let cond_inv = text(&cond_sale["data"]["invoice"]["key"]);
+    let cond_warranties = warranties_of(app, &staff, &cond_inv).await;
+    let cond_wty_key = text(&cond_warranties[0]["key"]);
+    test_warranty_conditions_lifecycle(app, &staff, &cond_wty_key).await;
 
     // ---- Phone A: to the supplier and back, then replaced from stock ----
     let claim = open(app, &staff, &phone_a_key).await;

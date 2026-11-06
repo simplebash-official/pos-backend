@@ -496,6 +496,19 @@ pub fn index_specs(tenant_mode: TenantMode) -> Vec<IndexSpec> {
         doc! { "updated_at": 1, "key": 1 },
         false,
     );
+    // Warranty condition templates: condition checklist options per shop.
+    specs.add(
+        "warranty_condition_templates",
+        "warranty_condition_templates_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    specs.add(
+        "warranty_condition_templates",
+        "warranty_condition_templates_active",
+        doc! { "active": 1, "name": 1 },
+        false,
+    );
 
     // Platform directory (`modules::tenants`): shop codes are globally unique
     // and the collection is not tenant-owned, so it is never tenant-prefixed.

@@ -249,6 +249,7 @@ const BACKFILLABLE: &[(&str, &[&str])] = &[
         ],
     ),
     ("users", &["created_at", "is_active", "updated_at"]),
+    ("warranty_claims", &["conditions"]),
 ];
 
 /// Whether `field` of `collection` may be backfilled.
@@ -279,6 +280,7 @@ fn backfill_value(field: &str, object: &Document) -> Option<Bson> {
         "discount_value" => Bson::Double(0.0),
         "address_lines"
         | "batch_allocations"
+        | "conditions"
         | "contact_persons"
         | "errors"
         | "exchange_items"

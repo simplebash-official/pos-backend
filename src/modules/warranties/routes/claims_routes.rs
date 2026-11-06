@@ -9,8 +9,9 @@ use crate::core::middleware::auth::CurrentUser;
 use crate::core::middleware::sync_headers::DeviceId;
 use crate::core::response::{ApiResponse, ErrorResponse};
 use crate::domain::warranties::{
-    ClaimListQuery, ClaimListResponse, DecideClaimRequest, InspectClaimRequest, OpenClaimRequest,
-    ResolveClaimRequest, SendToSupplierRequest, SupplierReturnRequest, WarrantyClaim,
+    ClaimListQuery, ClaimListResponse, CreateConditionRequest, DecideClaimRequest,
+    InspectClaimRequest, OpenClaimRequest, ResolveClaimRequest, SendToSupplierRequest,
+    SupplierReturnRequest, WarrantyClaim, WarrantyCondition, WarrantyConditionsResponse,
 };
 use crate::modules::warranties::service;
 use axum::Json;
@@ -293,9 +294,72 @@ pub(super) async fn open_rework(
     Ok(Json(ApiResponse::success(claim, "Rework job opened")))
 }
 
+#[utoipa::path(get, path = "/conditions", tag = modules::WARRANTY_CLAIMS,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Active condition checklist options for the shop", body = ApiResponse<WarrantyConditionsResponse>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+    )
+)]
+/// Lists the active condition checklist templates for the shop.
+pub(super) async fn list_conditions(
+    State(state): State<AppState>,
+    user: CurrentUser,
+) -> AppResult<Json<ApiResponse<WarrantyConditionsResponse>>> {
+    user.require_permission(perm::WARRANTIES_VIEW)?;
+    let response = service::list_conditions(&state.db).await?;
+    Ok(Json(ApiResponse::success(response, "Conditions retrieved")))
+}
+
+#[utoipa::path(post, path = "/conditions", tag = modules::WARRANTY_CLAIMS,
+    request_body = CreateConditionRequest,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Condition template created or activated", body = ApiResponse<WarrantyCondition>),
+        (status = 400, description = "Invalid or empty name", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+    )
+)]
+/// Creates or activates a condition checklist option for the shop.
+pub(super) async fn create_condition(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Json(body): Json<CreateConditionRequest>,
+) -> AppResult<Json<ApiResponse<WarrantyCondition>>> {
+    user.require_permission(perm::WARRANTY_CLAIMS_RECORD)?;
+    let condition = service::create_condition(&state.db, &body.name).await?;
+    Ok(Json(ApiResponse::success(condition, "Condition created")))
+}
+
+#[utoipa::path(delete, path = "/conditions/{key}", tag = modules::WARRANTY_CLAIMS,
+    params(("key" = String, Path, description = "Condition key (`wcon_…`)")),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Condition template deactivated", body = ApiResponse<WarrantyCondition>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+        (status = 404, description = "Condition not found", body = ErrorResponse),
+    )
+)]
+/// Deactivates a condition checklist option so it no longer appears in future claim intakes.
+pub(super) async fn delete_condition(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(key): Path<String>,
+) -> AppResult<Json<ApiResponse<WarrantyCondition>>> {
+    user.require_permission(perm::WARRANTY_CLAIMS_RECORD)?;
+    let condition = service::delete_condition(&state.db, &key).await?;
+    Ok(Json(ApiResponse::success(condition, "Condition deleted")))
+}
+
 /// Routes of `/api/warranty-claims`.
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
+        // Condition checklist templates.
+        .routes(routes!(list_conditions, create_condition))
+        .routes(routes!(delete_condition))
         // Reads.
         .routes(routes!(open_claim, list_claims))
         .routes(routes!(get_claim))

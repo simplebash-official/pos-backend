@@ -258,6 +258,40 @@ pub(crate) async fn open_claim(
 
         let now = BsonDateTime::now();
         let serial = body.serial_number.or(warranty.serial_number.clone());
+
+        let raw_conditions = body.conditions.unwrap_or_default();
+        let mut conditions = Vec::new();
+        for c in raw_conditions {
+            let trimmed = c.trim();
+            if !trimmed.is_empty() && !conditions.contains(&trimmed.to_string()) {
+                conditions.push(trimmed.to_string());
+                let _ = super::warranty_conditions::record_condition_if_new(db, trimmed).await;
+            }
+        }
+        let void_checks = match body.void_checks {
+            Some(vc) => vc,
+            None => crate::domain::warranties::VoidChecks {
+                physical_damage: conditions.iter().any(|c| {
+                    c.eq_ignore_ascii_case("Physical damage / cracks")
+                        || c.to_lowercase().contains("physical")
+                        || c.to_lowercase().contains("crack")
+                }),
+                liquid_damage: conditions.iter().any(|c| {
+                    c.eq_ignore_ascii_case("Liquid damage")
+                        || c.to_lowercase().contains("liquid")
+                        || c.to_lowercase().contains("water")
+                }),
+                seal_broken: conditions.iter().any(|c| {
+                    c.eq_ignore_ascii_case("Seal broken") || c.to_lowercase().contains("seal")
+                }),
+                tampered: conditions.iter().any(|c| {
+                    c.eq_ignore_ascii_case("Opened or tampered with")
+                        || c.to_lowercase().contains("tamper")
+                }),
+                screen_cracked: None,
+            },
+        };
+
         let claim = repository::insert_claim(
             db,
             WarrantyClaimDocument {
@@ -276,7 +310,8 @@ pub(crate) async fn open_claim(
                 customer_name: warranty.customer_name.clone(),
                 customer_phone: warranty.customer_phone.clone(),
                 issue_description: issue.clone(),
-                void_checks: body.void_checks,
+                void_checks,
+                conditions,
                 assigned_employee_key: body.assigned_employee_key,
                 assigned_employee_name,
                 status: ClaimStatus::Received,

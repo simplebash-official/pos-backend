@@ -836,6 +836,7 @@ CREATE TABLE IF NOT EXISTS warranty_claims (
     customer_phone TEXT,
     issue_description TEXT NOT NULL,
     void_checks TEXT NOT NULL,
+    conditions TEXT NOT NULL DEFAULT '[]',
     assigned_employee_key TEXT,
     assigned_employee_name TEXT,
     status TEXT NOT NULL,
@@ -867,6 +868,20 @@ CREATE INDEX IF NOT EXISTS idx_warranty_claims_status ON warranty_claims(status,
 CREATE INDEX IF NOT EXISTS idx_warranty_claims_warranty ON warranty_claims(warranty_key);
 CREATE INDEX IF NOT EXISTS idx_warranty_claims_invoice ON warranty_claims(invoice_key);
 CREATE INDEX IF NOT EXISTS idx_warranty_claims_sync ON warranty_claims(updated_at, key);
+
+-- Shop warranty condition checklist templates (`modules::warranties`): condition tags maintained
+-- per shop for intake checks. The key is derived from the normalized name.
+CREATE TABLE IF NOT EXISTS warranty_condition_templates (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_warranty_condition_templates_name ON warranty_condition_templates(name COLLATE NOCASE);
 
 -- Ready-made repair services (`modules::repairs`): the key is derived from the name, so the
 -- same service added on two tills is one row. Never deleted; hidden with `active = 0`.

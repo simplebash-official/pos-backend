@@ -108,3 +108,5 @@ pub const WARRANTY: &str = "wty";
 pub const WARRANTY_EVENT: &str = "wev";
 
 pub const WARRANTY_CLAIM: &str = "wcl";
+
+pub const WARRANTY_CONDITION: &str = "wcon";

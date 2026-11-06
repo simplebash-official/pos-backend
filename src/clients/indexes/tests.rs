@@ -61,6 +61,7 @@ fn single_tenant_specs_are_the_historical_set() {
             "warranties_key_unique",
             "warranty_events_key_unique",
             "warranty_claims_key_unique",
+            "warranty_condition_templates_key_unique",
             "repair_service_templates_key_unique",
         ]
     );

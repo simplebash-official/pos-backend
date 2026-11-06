@@ -35,6 +35,7 @@ pub struct WarrantyClaimDocument {
     pub customer_phone: Option<String>,
     pub issue_description: String,
     pub void_checks: VoidChecks,
+    pub conditions: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assigned_employee_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -98,6 +99,25 @@ impl WarrantyClaimDocument {
             }
             _ => false,
         };
+        let conditions = if self.conditions.is_empty() {
+            let mut derived = Vec::new();
+            if self.void_checks.physical_damage || self.void_checks.screen_cracked.unwrap_or(false)
+            {
+                derived.push("Physical damage / cracks".to_string());
+            }
+            if self.void_checks.liquid_damage {
+                derived.push("Liquid damage".to_string());
+            }
+            if self.void_checks.seal_broken {
+                derived.push("Seal broken".to_string());
+            }
+            if self.void_checks.tampered {
+                derived.push("Opened or tampered with".to_string());
+            }
+            derived
+        } else {
+            self.conditions
+        };
         Ok(WarrantyClaim {
             id: self
                 .id
@@ -118,6 +138,7 @@ impl WarrantyClaimDocument {
             customer_phone: self.customer_phone,
             issue_description: self.issue_description,
             void_checks: self.void_checks,
+            conditions,
             assigned_employee_key: self.assigned_employee_key,
             assigned_employee_name: self.assigned_employee_name,
             status: self.status,

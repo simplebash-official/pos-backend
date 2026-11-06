@@ -50,5 +50,6 @@ pub use constants_prefixes::TENANT;
 pub use constants_prefixes::USER;
 pub use constants_prefixes::WARRANTY;
 pub use constants_prefixes::WARRANTY_CLAIM;
+pub use constants_prefixes::WARRANTY_CONDITION;
 pub use constants_prefixes::WARRANTY_EVENT;
 pub use constants_prefixes::opening_batch_key;

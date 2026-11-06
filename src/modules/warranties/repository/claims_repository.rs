@@ -14,7 +14,7 @@ const CLAIMS: &str = "warranty_claims";
 
 const CLAIM_COLUMNS: &str = "key, id, claim_number, warranty_key, warranty_number, item_name, \
      serial_number, quantity, product_key, invoice_key, invoice_number, customer_key, customer_name, \
-     customer_phone, issue_description, void_checks, assigned_employee_key, \
+     customer_phone, issue_description, void_checks, conditions, assigned_employee_key, \
      assigned_employee_name, status, inspection_notes, decision, decision_reason, \
      decided_by_user_id, decided_by_name, expired_override_by_name, resolution_note, \
      replacement_serial_number, replacement_warranty_key, credit_note_key, paid_repair_key, \
@@ -25,11 +25,13 @@ fn claims(db: &TenantDatabase) -> ScopedCollection<WarrantyClaimDocument> {
     db.collection(CLAIMS)
 }
 
-/// A serde value's stored text: an enum's name, or JSON for an object.
+/// A serde value's stored text: an enum's name, or JSON for an object or array.
 fn stored_text<T: serde::Serialize>(value: &T) -> AppResult<String> {
     match serde_json::to_value(value) {
         Ok(serde_json::Value::String(text)) => Ok(text),
-        Ok(other @ serde_json::Value::Object(_)) => Ok(other.to_string()),
+        Ok(other @ (serde_json::Value::Object(_) | serde_json::Value::Array(_))) => {
+            Ok(other.to_string())
+        }
         other => Err(AppError::internal(format!(
             "claim value did not serialize to text: {other:?}"
         ))),
@@ -72,6 +74,12 @@ fn row_to_claim(row: &SqliteRow) -> AppResult<WarrantyClaimDocument> {
         customer_phone: row.get("customer_phone"),
         issue_description: row.get("issue_description"),
         void_checks: parse_json("void_checks", row.get("void_checks"))?,
+        conditions: row
+            .try_get::<String, _>("conditions")
+            .ok()
+            .map(|text| parse_json("conditions", &text))
+            .transpose()?
+            .unwrap_or_default(),
         assigned_employee_key: row.get("assigned_employee_key"),
         assigned_employee_name: row.get("assigned_employee_name"),
         status: parse_enum("status", row.get("status"))?,
@@ -126,6 +134,7 @@ fn bind_fields<'q>(
         .bind(&claim.customer_phone)
         .bind(&claim.issue_description)
         .bind(stored_text(&claim.void_checks)?)
+        .bind(stored_text(&claim.conditions)?)
         .bind(&claim.assigned_employee_key)
         .bind(&claim.assigned_employee_name)
         .bind(stored_text(&claim.status)?)

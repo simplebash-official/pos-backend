@@ -61,6 +61,13 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         pool.execute("ALTER TABLE warranty_claims ADD COLUMN quantity INTEGER NOT NULL DEFAULT 1")
             .await?;
     }
+    if !claim_cols.is_empty() && !claim_cols.iter().any(|c| c == "conditions") {
+        tracing::info!("Migrating 'warranty_claims' table: adding 'conditions' column");
+        pool.execute(
+            "ALTER TABLE warranty_claims ADD COLUMN conditions TEXT NOT NULL DEFAULT '[]'",
+        )
+        .await?;
+    }
     // `cash_movements.receipt_key` arrived with supplier receipts too.
     let movement_cols = table_columns(pool, "cash_movements").await?;
     if !movement_cols.is_empty() && !movement_cols.iter().any(|c| c == "receipt_key") {

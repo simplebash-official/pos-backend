@@ -249,6 +249,7 @@ pub struct WarrantyClaim {
     /// What the customer says is wrong.
     pub issue_description: String,
     pub void_checks: VoidChecks,
+    pub conditions: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assigned_employee_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -310,7 +311,8 @@ pub struct WarrantyClaim {
 pub struct OpenClaimRequest {
     pub warranty_key: String,
     pub issue_description: String,
-    pub void_checks: VoidChecks,
+    pub void_checks: Option<VoidChecks>,
+    pub conditions: Option<Vec<String>>,
     /// How many units of this warranty are being claimed (default 1).
     pub quantity: Option<i64>,
     /// The specific serial number being claimed, if serialized.

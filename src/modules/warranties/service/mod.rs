@@ -6,6 +6,7 @@
 mod claim_outcomes;
 mod claim_steps;
 mod claim_void;
+mod warranty_conditions;
 mod warranty_events;
 mod warranty_issue;
 mod warranty_lifecycle;
@@ -28,6 +29,9 @@ pub(crate) use claim_steps::return_to_customer;
 pub(crate) use claim_steps::send_to_supplier;
 pub(crate) use claim_steps::supplier_return;
 pub(crate) use claim_void::undo_replacements_for_invoice;
+pub(crate) use warranty_conditions::create_condition;
+pub(crate) use warranty_conditions::delete_condition;
+pub(crate) use warranty_conditions::list_conditions;
 pub(crate) use warranty_events::WarrantyActor;
 pub(crate) use warranty_issue::RepairLine;
 pub(crate) use warranty_issue::SaleLine;

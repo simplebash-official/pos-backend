@@ -2,6 +2,7 @@
 //! delivery, and its activity log. Pure types; persistence lives in `modules::warranties`.
 
 mod claim;
+mod condition;
 mod profile;
 mod report;
 mod stats;
@@ -25,6 +26,11 @@ pub use claim::SupplierReturnRequest;
 pub use claim::VoidChecks;
 pub use claim::WarrantyClaim;
 pub use claim::next_status;
+pub use condition::CreateConditionRequest;
+pub use condition::DEFAULT_CONDITIONS;
+pub use condition::WarrantyCondition;
+pub use condition::WarrantyConditionsResponse;
+pub use condition::condition_template_key;
 pub use pos_calc_core::warranty::WarrantyCoverage;
 pub use pos_calc_core::warranty::WarrantyUnit;
 pub use profile::ProductWarranty;
