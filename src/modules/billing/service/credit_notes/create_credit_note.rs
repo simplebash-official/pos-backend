@@ -539,13 +539,13 @@ pub async fn create_credit_note(
         let invoice_key = body.invoice_key.as_ref().expect("checked above").clone();
         let warranty_claim_key = body.warranty_claim_key.clone();
         if let Some(claim_key) = &warranty_claim_key {
-            let returned_serials: Vec<&str> = body
-                .returned_items
-                .iter()
-                .filter_map(|item| item.serial_number.as_deref())
-                .collect();
-            warranties::service::check_claim_refund(db, claim_key, &invoice_key, &returned_serials)
-                .await?;
+            warranties::service::check_claim_refund(
+                db,
+                claim_key,
+                &invoice_key,
+                &body.returned_items,
+            )
+            .await?;
         }
         const MAX_CLAIM_ATTEMPTS: u32 = 3;
         let mut attempt = 0;

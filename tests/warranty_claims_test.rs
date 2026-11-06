@@ -765,6 +765,25 @@ async fn scenario(app: &common::TestApp) {
         StatusCode::BAD_REQUEST,
         "the claimed unit must come back: {body}"
     );
+    let (status, body) = send(
+        app,
+        "POST",
+        "/api/billing/credit-notes",
+        Some(json!({
+            "invoiceKey": invoice_key,
+            "warrantyClaimKey": refund_key,
+            "returnedItems": [{ "productKey": phone, "quantity": 2, "reason": "defective",
+                "condition": "damaged", "disposition": "repair_pending", "serialNumber": serials[1] }],
+            "paymentMethod": "cash",
+        })),
+        &staff,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "serialized qty must be 1: {body}"
+    );
     let (status, note) = send(
         app,
         "POST",
@@ -795,6 +814,116 @@ async fn scenario(app: &common::TestApp) {
         StatusCode::CONFLICT,
         "a refunded item stays: {body}"
     );
+
+    // ---- Multi-unit non-serialized claim: exact refund quantity enforcement ----
+    let mut bulk_body = base("Bulk Item");
+    bulk_body["openingStock"] =
+        json!({ "quantity": 10, "unitCostCents": 500, "sellingPriceCents": 1500 });
+    bulk_body["warranty"] = json!({
+        "coverage": { "kind": "limited", "value": 6, "unit": "months" },
+        "warrantyType": "shop",
+    });
+    let bulk_item = product(app, &admin, bulk_body).await;
+
+    let (status, multi_sale) = send(
+        app,
+        "POST",
+        "/api/billing/sales",
+        Some(sale(json!([
+            { "productKey": bulk_item, "quantity": 4, "discountCents": 0, "sourceType": "retail",
+              "sellingPriceCents": 1500 },
+        ]))),
+        &staff,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{multi_sale}");
+    let multi_inv_key = text(&multi_sale["data"]["invoice"]["key"]);
+    let multi_warranties = warranties_of(app, &staff, &multi_inv_key).await;
+    let multi_wty_key = text(&multi_warranties[0]["key"]);
+    assert_eq!(multi_warranties[0]["quantity"], 4);
+
+    let (status, claim_3) = send(
+        app,
+        "POST",
+        "/api/warranty-claims",
+        Some(json!({
+            "warrantyKey": multi_wty_key,
+            "quantity": 3,
+            "issueDescription": "3 units defective",
+            "voidChecks": { "physicalDamage": false, "liquidDamage": false, "sealBroken": false, "tampered": false },
+        })),
+        &staff,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{claim_3}");
+    let claim_3_key = text(&claim_3["data"]["key"]);
+    inspect_and_decide(app, &staff, &claim_3_key, "refund").await;
+
+    // Attempt refund with quantity 1 (lower than claimed 3) -> rejected
+    let (status, body) = send(
+        app,
+        "POST",
+        "/api/billing/credit-notes",
+        Some(json!({
+            "invoiceKey": multi_inv_key,
+            "warrantyClaimKey": claim_3_key,
+            "returnedItems": [{ "productKey": bulk_item, "quantity": 1, "reason": "defective",
+                "condition": "damaged", "disposition": "repair_pending" }],
+            "paymentMethod": "cash",
+        })),
+        &staff,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "lower quantity rejected: {body}"
+    );
+
+    // Attempt refund with quantity 4 (higher than claimed 3) -> rejected
+    let (status, body) = send(
+        app,
+        "POST",
+        "/api/billing/credit-notes",
+        Some(json!({
+            "invoiceKey": multi_inv_key,
+            "warrantyClaimKey": claim_3_key,
+            "returnedItems": [{ "productKey": bulk_item, "quantity": 4, "reason": "defective",
+                "condition": "damaged", "disposition": "repair_pending" }],
+            "paymentMethod": "cash",
+        })),
+        &staff,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "higher quantity rejected: {body}"
+    );
+
+    // Attempt refund with exact quantity 3 -> succeeds
+    let (status, note_3) = send(
+        app,
+        "POST",
+        "/api/billing/credit-notes",
+        Some(json!({
+            "invoiceKey": multi_inv_key,
+            "warrantyClaimKey": claim_3_key,
+            "returnedItems": [{ "productKey": bulk_item, "quantity": 3, "reason": "defective",
+                "condition": "damaged", "disposition": "repair_pending" }],
+            "paymentMethod": "cash",
+        })),
+        &staff,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{note_3}");
+    let after_claim = detail(app, &staff, &multi_wty_key).await;
+    assert_eq!(
+        after_claim["warranty"]["quantity"], 1,
+        "4 - 3 = 1 unit remains"
+    );
+    assert_eq!(after_claim["warranty"]["claimedQuantity"], 0);
+    assert_eq!(after_claim["warranty"]["state"], "active");
 
     // ---- A warranty that ran out: honoured only with a manager's PIN, then rejected ----
     let new_phone_key = new_key;
