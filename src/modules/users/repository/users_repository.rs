@@ -183,8 +183,8 @@ pub(crate) async fn insert_user(db: &Db, mut document: UserDocument) -> AppResul
 
             sqlx::query(
                 r#"
-                INSERT INTO users (key, id, name, username, password_hash, pin_hash, role, employee_key, is_active, version, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10, $11)
+                INSERT INTO users (key, id, name, username, password_hash, pin_hash, role, employee_key, email, is_active, version, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 1, $11, $12)
                 "#,
             )
             .bind(&document.key)
@@ -195,6 +195,7 @@ pub(crate) async fn insert_user(db: &Db, mut document: UserDocument) -> AppResul
             .bind(&document.pin_hash)
             .bind(document.role.as_str())
             .bind(&document.employee_key)
+            .bind(&document.email)
             .bind(if document.is_active { 1i64 } else { 0i64 })
             .bind(&created_str)
             .bind(&updated_str)
@@ -312,6 +313,14 @@ pub(crate) async fn update_user(
                 updates.push(format!("employee_key = ${}", updates.len() + 1));
                 params.push(emp_key.to_string());
             }
+            if let Ok(email) = set_doc.get_str("email") {
+                updates.push(format!("email = ${}", updates.len() + 1));
+                params.push(email.to_string());
+            }
+            if let Ok(version) = set_doc.get_i64("version") {
+                updates.push(format!("version = ${}", updates.len() + 1));
+                params.push(version.to_string());
+            }
 
             if let Ok(preferences) = set_doc.get_document("preferences")
                 && let Ok(json) = serde_json::to_string(preferences)
@@ -343,6 +352,45 @@ pub(crate) async fn update_user(
     }
 }
 
+/// Updates a user's password hash and increments version atomically.
+pub(crate) async fn update_password_and_bump_version(
+    db: &Db,
+    id: ObjectId,
+    password_hash: &str,
+) -> AppResult<Option<UserDocument>> {
+    match db {
+        Db::Mongo(db) => {
+            let now = BsonDateTime::now();
+            Ok(users(db)
+                .find_one_and_update(
+                    doc! { "_id": id, "deleted_at": Bson::Null },
+                    doc! {
+                        "$set": {
+                            "password_hash": password_hash,
+                            "updated_at": now,
+                        },
+                        "$inc": { "version": 1 },
+                    },
+                )
+                .return_document(ReturnDocument::After)
+                .await?)
+        }
+        Db::Sqlite(pool) => {
+            let id_hex = id.to_hex();
+            let now_str = crate::clients::sqlite::now_utc_iso();
+            sqlx::query(
+                "UPDATE users SET password_hash = $1, version = version + 1, updated_at = $2 WHERE id = $3",
+            )
+            .bind(password_hash)
+            .bind(&now_str)
+            .bind(&id_hex)
+            .execute(pool)
+            .await?;
+            find_user_by_id(db, id).await
+        }
+    }
+}
+
 pub(super) fn user_from_sqlite_row(r: &sqlx::sqlite::SqliteRow) -> AppResult<UserDocument> {
     let id_str: String = r.get("id");
     let role_str: String = r.get("role");
@@ -361,6 +409,7 @@ pub(super) fn user_from_sqlite_row(r: &sqlx::sqlite::SqliteRow) -> AppResult<Use
         })?,
         is_active: is_active_int != 0,
         employee_key: r.get("employee_key"),
+        email: r.get("email"),
         preferences: r
             .get::<Option<String>, _>("preferences_json")
             .map(|raw| serde_json::from_str(&raw))

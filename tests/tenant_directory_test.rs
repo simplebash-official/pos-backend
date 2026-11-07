@@ -145,6 +145,7 @@ async fn tenant_directory_and_multi_tenant_login_roundtrip() {
                         password: password.to_string(),
                         role: Role::Admin,
                         employee_key: None,
+                        email: None,
                     },
                 )
                 .await

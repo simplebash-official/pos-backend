@@ -2,6 +2,7 @@
 //! (Typst PDF rendering). `AppState` holds handles built here so modules
 //! never reconnect/reconstruct a client themselves.
 
+pub mod brevo;
 mod connect_from_config;
 pub mod db;
 pub mod document_server;

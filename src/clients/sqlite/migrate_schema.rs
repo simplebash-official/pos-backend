@@ -90,6 +90,29 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         pool.execute("ALTER TABLE receipt_charges ADD COLUMN description TEXT")
             .await?;
     }
+    // `users.email` arrived with admin password reset support.
+    let user_cols = table_columns(pool, "users").await?;
+    if !user_cols.is_empty() && !user_cols.iter().any(|c| c == "email") {
+        tracing::info!("Migrating 'users' table: adding 'email' column");
+        pool.execute("ALTER TABLE users ADD COLUMN email TEXT")
+            .await?;
+    }
+    // `password_reset_tokens` table for admin password reset.
+    pool.execute(
+        r#"CREATE TABLE IF NOT EXISTS password_reset_tokens (
+            key TEXT PRIMARY KEY,
+            id TEXT NOT NULL,
+            user_key TEXT NOT NULL,
+            token_hash TEXT NOT NULL UNIQUE,
+            expires_at TEXT NOT NULL,
+            used_at TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(user_key) REFERENCES users(key) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_token_hash ON password_reset_tokens(token_hash);
+        CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_key ON password_reset_tokens(user_key);"#,
+    )
+    .await?;
     // A purchase line is priced by its total (`line_total_cents`, the supplier's lot price) with
     // its share of the receipt's extra charges beside it; the per-unit `unit_cost_cents` is gone,
     // so the line has one source of truth. Existing lines get quantity x unit cost and no share.
@@ -413,7 +436,7 @@ async fn migrate_users_to_usernames(pool: &SqlitePool) -> Result<(), sqlx::Error
         sqlx::query_as("SELECT cid, name FROM pragma_table_info('users')")
             .fetch_all(pool)
             .await?;
-    if !cols.iter().any(|(_, n)| n == "email") {
+    if cols.iter().any(|(_, n)| n == "username") || !cols.iter().any(|(_, n)| n == "email") {
         return Ok(());
     }
     tracing::info!("Migrating 'users' table: replacing 'email' with 'username'");

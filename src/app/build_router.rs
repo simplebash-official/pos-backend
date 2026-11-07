@@ -83,6 +83,9 @@ pub fn build_router(state: AppState) -> Router {
     //   GET  /api/health              liveness probe, static payload
     //   POST /api/auth/login          issues the token
     //   GET  /api/auth/shop/{code}    public shop lookup for multi-tenant branding
+    //   POST /api/auth/forgot-password initiate admin password reset
+    //   GET  /api/auth/verify-reset-token verify reset token validity
+    //   POST /api/auth/reset-password reset admin password using valid token
     //   GET  /api/system/setup-status query initial installation and setup status
     //   POST /api/system/setup        bootstrap administrator and initialize database
     //   POST /api/internal/provision  identity -> POS shop hand-off; authenticated by the

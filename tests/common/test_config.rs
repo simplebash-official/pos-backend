@@ -44,6 +44,7 @@ pub fn test_config(overrides: &[(&str, &str)]) -> Config {
         ("CORS_ALLOWED_ORIGINS", ""),
         ("IDENTITY_AUTH", "disabled"),
         ("PROVISIONING", "disabled"),
+        ("EMAIL_SERVICE", "disabled"),
         ("APP_ENV", "development"),
         ("RATE_LIMIT_BURST", "200"),
         ("RATE_LIMIT_REFILL_PER_SEC", "50"),

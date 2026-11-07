@@ -58,6 +58,7 @@ pub struct Config {
     /// The platform this installation reports, e.g. `macos` or `cloud`.
     pub platform: String,
     pub seed_admin: SeedAdminConfig,
+    pub email_service: EmailService,
 }
 
 /// Prints every field except the secrets, which show as `<redacted>`, so a stray
@@ -87,6 +88,7 @@ impl std::fmt::Debug for Config {
             .field("installation_id", &self.installation_id)
             .field("platform", &self.platform)
             .field("seed_admin", &self.seed_admin)
+            .field("email_service", &self.email_service)
             .finish()
     }
 }
@@ -250,6 +252,16 @@ impl Config {
             http_bodies: variables.flag("LOG_HTTP_BODIES")?,
         };
 
+        let email_service = match variables.one_of("EMAIL_SERVICE", &["disabled", "brevo"])? {
+            0 => EmailService::Disabled,
+            _ => EmailService::Brevo {
+                api_key: variables.required("BREVO_API_KEY")?,
+                base_url: variables.required("BREVO_BASE_URL")?,
+                reset_template_id: variables.parsed("BREVO_RESET_TEMPLATE_ID")?,
+                reset_link_base_url: variables.required("RESET_LINK_BASE_URL")?,
+            },
+        };
+
         Ok(Self {
             database,
             jwt_secret,
@@ -271,6 +283,7 @@ impl Config {
             installation_id: variables.required("INSTALLATION_ID")?,
             platform: variables.required("PLATFORM")?,
             seed_admin,
+            email_service,
         })
     }
 }
@@ -356,6 +369,38 @@ impl std::fmt::Debug for Provisioning {
         match self {
             Provisioning::Disabled => formatter.write_str("Disabled"),
             Provisioning::Enabled { .. } => formatter.write_str("Enabled"),
+        }
+    }
+}
+
+/// Transactional email provider for password resets.
+#[derive(Clone, PartialEq, Eq)]
+pub enum EmailService {
+    Disabled,
+    Brevo {
+        api_key: String,
+        base_url: String,
+        reset_template_id: i64,
+        reset_link_base_url: String,
+    },
+}
+
+impl std::fmt::Debug for EmailService {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EmailService::Disabled => write!(formatter, "Disabled"),
+            EmailService::Brevo {
+                base_url,
+                reset_template_id,
+                reset_link_base_url,
+                ..
+            } => formatter
+                .debug_struct("Brevo")
+                .field("api_key", &"<redacted>")
+                .field("base_url", base_url)
+                .field("reset_template_id", reset_template_id)
+                .field("reset_link_base_url", reset_link_base_url)
+                .finish(),
         }
     }
 }

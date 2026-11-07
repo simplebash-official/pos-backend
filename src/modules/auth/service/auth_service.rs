@@ -6,7 +6,8 @@ use crate::core::id::generate_id;
 use crate::core::middleware::auth::Claims;
 use crate::core::utils::calculate_pagination;
 use crate::domain::auth::{
-    LoginRequest, LoginResponse, LoginSessionListQuery, LoginSessionsResponse, ShopLookupResponse,
+    ForgotPasswordRequest, LoginRequest, LoginResponse, LoginSessionListQuery,
+    LoginSessionsResponse, ShopLookupResponse,
 };
 use crate::domain::users::{Role, UpdateMyPreferencesRequest, User};
 use crate::modules::auth::model::LoginSessionDocument;
@@ -288,4 +289,236 @@ pub(crate) async fn update_my_preferences(
     let object_id = ObjectId::parse_str(&current.id)
         .map_err(|_| AppError::unauthorized("Invalid token subject"))?;
     users_service::update_own_preferences(db, object_id, changes).await
+}
+
+fn hash_token(raw_token: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let hash = Sha256::digest(raw_token.as_bytes());
+    hash.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn execute_dummy_hash() {
+    use sha2::{Digest, Sha256};
+    let _ = Sha256::digest(b"dummy_entropy_for_constant_time_forgot_password_defense");
+}
+
+fn generate_reset_token() -> String {
+    use argon2::password_hash::rand_core::{OsRng, RngCore};
+    let mut bytes = [0u8; 32];
+    OsRng.fill_bytes(&mut bytes);
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Initiates an Admin password reset request.
+pub(crate) async fn forgot_password(
+    db: &Db,
+    config: &Config,
+    req: ForgotPasswordRequest,
+) -> AppResult<()> {
+    if config.tenant_mode != crate::core::config::TenantMode::Multi {
+        return forgot_password_in_scope(db, config, req, None).await;
+    }
+
+    let code = req
+        .shop_code
+        .clone()
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+    if code.is_empty() {
+        return Err(AppError::validation("Shop code is required"));
+    }
+
+    let details = tenants_service::lookup_shop_details(db, &code).await?;
+    let Some((tenant, _)) = details else {
+        execute_dummy_hash();
+        return Ok(());
+    };
+
+    crate::core::tenancy::with_tenant(
+        tenant,
+        forgot_password_in_scope(db, config, req, Some(code)),
+    )
+    .await
+}
+
+async fn forgot_password_in_scope(
+    db: &Db,
+    config: &Config,
+    req: ForgotPasswordRequest,
+    shop_code: Option<String>,
+) -> AppResult<()> {
+    let trimmed_id = req.identifier.trim();
+    if trimmed_id.is_empty() {
+        execute_dummy_hash();
+        return Ok(());
+    }
+
+    let admin_opt = users_service::find_admin_document(db).await?;
+    let Some(admin) = admin_opt else {
+        execute_dummy_hash();
+        return Ok(());
+    };
+
+    let username_matches = admin.username.eq_ignore_ascii_case(trimmed_id);
+    let admin_email_matches = admin
+        .email
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|e| !e.is_empty() && e.eq_ignore_ascii_case(trimmed_id));
+
+    let tenant_id_str = crate::core::tenancy::current_tenant().and_then(|t| match t {
+        crate::core::tenancy::Tenant::Id(id) => Some(id.to_string()),
+        _ => None,
+    });
+    let shop_profile =
+        crate::modules::settings::service::get_shop_profile(db, tenant_id_str.as_deref()).await?;
+    let shop_email_matches = !shop_profile.email.trim().is_empty()
+        && shop_profile.email.trim().eq_ignore_ascii_case(trimmed_id);
+
+    if !username_matches && !admin_email_matches && !shop_email_matches {
+        execute_dummy_hash();
+        return Ok(());
+    }
+
+    let recipient_email = admin
+        .email
+        .as_deref()
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+        .or_else(|| {
+            let e = shop_profile.email.trim();
+            if !e.is_empty() { Some(e) } else { None }
+        })
+        .map(str::to_string);
+
+    let raw_token = generate_reset_token();
+    let token_hash = hash_token(&raw_token);
+
+    repository::invalidate_active_tokens_for_user(db, &admin.key).await?;
+
+    let now = mongodb::bson::DateTime::now();
+    let expires_at = mongodb::bson::DateTime::from_millis(now.timestamp_millis() + 15 * 60 * 1000);
+    let token_key = crate::core::id::generate_id(prefixes::PASSWORD_RESET_TOKEN);
+
+    let doc = crate::modules::auth::model::PasswordResetTokenDocument {
+        id: None,
+        key: token_key,
+        user_key: admin.key.clone(),
+        token_hash,
+        expires_at,
+        used_at: None,
+        created_at: now,
+        tenant_id: tenant_id_str,
+    };
+    repository::insert_token(db, doc).await?;
+
+    if let (
+        crate::core::config::EmailService::Brevo {
+            api_key,
+            base_url,
+            reset_template_id,
+            reset_link_base_url,
+        },
+        Some(to_email),
+    ) = (&config.email_service, recipient_email)
+    {
+        let reset_link = if let Some(code) = &shop_code {
+            format!("{reset_link_base_url}?token={raw_token}&shopCode={code}")
+        } else {
+            format!("{reset_link_base_url}?token={raw_token}")
+        };
+        let brevo = crate::clients::brevo::BrevoClient::new(
+            base_url.clone(),
+            api_key.clone(),
+            *reset_template_id,
+        );
+        let to_name = admin.name.clone();
+        let shop_code_clone = shop_code.clone();
+        tokio::spawn(async move {
+            if let Err(err) = brevo
+                .send_password_reset(&to_email, &to_name, &reset_link, shop_code_clone.as_deref())
+                .await
+            {
+                tracing::error!(%err, "failed to send password reset email via Brevo");
+            }
+        });
+    }
+
+    Ok(())
+}
+
+async fn find_and_validate_token(
+    db: &Db,
+    raw_token: &str,
+) -> AppResult<crate::modules::auth::model::PasswordResetTokenDocument> {
+    if raw_token.trim().is_empty() {
+        return Err(AppError::custom(
+            axum::http::StatusCode::BAD_REQUEST,
+            codes::INVALID_OR_EXPIRED_RESET_TOKEN,
+            "Password reset token is invalid or has expired",
+        ));
+    }
+    let token_hash = hash_token(raw_token);
+    let token = repository::find_token_by_hash(db, &token_hash)
+        .await?
+        .ok_or_else(|| {
+            AppError::custom(
+                axum::http::StatusCode::BAD_REQUEST,
+                codes::INVALID_OR_EXPIRED_RESET_TOKEN,
+                "Password reset token is invalid or has expired",
+            )
+        })?;
+
+    if token.used_at.is_some() || token.expires_at.to_chrono() <= Utc::now() {
+        return Err(AppError::custom(
+            axum::http::StatusCode::BAD_REQUEST,
+            codes::INVALID_OR_EXPIRED_RESET_TOKEN,
+            "Password reset token is invalid or has expired",
+        ));
+    }
+
+    Ok(token)
+}
+
+/// Verifies that a password reset token exists, has not expired, and has not been used.
+pub(crate) async fn verify_reset_token(db: &Db, raw_token: &str) -> AppResult<()> {
+    let token = find_and_validate_token(db, raw_token).await?;
+    let _ = token;
+    Ok(())
+}
+
+/// Consumes a valid password reset token and updates the Admin account's password.
+pub(crate) async fn reset_password(db: &Db, raw_token: &str, new_password: &str) -> AppResult<()> {
+    let token = find_and_validate_token(db, raw_token).await?;
+
+    users_service::validate_password_strength(new_password)?;
+    let password_hash = users_service::hash_password(new_password)?;
+
+    repository::mark_token_used(db, &token.key).await?;
+
+    if let Some(tenant_id) = &token.tenant_id {
+        let tenant = crate::core::tenancy::Tenant::id(tenant_id)
+            .map_err(|e| AppError::internal(format!("invalid tenant id on token: {e}")))?;
+        crate::core::tenancy::with_tenant(tenant, async {
+            let admin = users_service::find_admin_document(db)
+                .await?
+                .ok_or_else(|| {
+                    AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND)
+                })?;
+            let admin_id = admin.id.expect("persisted admin document must have an id");
+            users_service::update_admin_password_and_bump_version(db, admin_id, &password_hash)
+                .await
+        })
+        .await?;
+    } else {
+        let admin = users_service::find_admin_document(db)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND)
+            })?;
+        let admin_id = admin.id.expect("persisted admin document must have an id");
+        users_service::update_admin_password_and_bump_version(db, admin_id, &password_hash).await?;
+    }
+
+    Ok(())
 }

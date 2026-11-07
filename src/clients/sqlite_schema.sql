@@ -498,6 +498,7 @@ CREATE TABLE IF NOT EXISTS users (
     pin_hash TEXT,
     role TEXT NOT NULL,
     employee_key TEXT,
+    email TEXT,
     preferences_json TEXT,
     is_active INTEGER NOT NULL DEFAULT 1,
     version INTEGER NOT NULL DEFAULT 1,
@@ -519,6 +520,20 @@ CREATE TABLE IF NOT EXISTS login_sessions (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    user_key TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at TEXT NOT NULL,
+    used_at TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(user_key) REFERENCES users(key) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_token_hash ON password_reset_tokens(token_hash);
+CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_key ON password_reset_tokens(user_key);
 
 CREATE TABLE IF NOT EXISTS sku_counters (
     prefix TEXT PRIMARY KEY,

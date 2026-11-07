@@ -5,9 +5,12 @@
 
 mod domain_auth;
 
+pub use domain_auth::ForgotPasswordRequest;
 pub use domain_auth::LoginRequest;
 pub use domain_auth::LoginResponse;
 pub use domain_auth::LoginSession;
 pub use domain_auth::LoginSessionListQuery;
 pub use domain_auth::LoginSessionsResponse;
+pub use domain_auth::ResetPasswordRequest;
 pub use domain_auth::ShopLookupResponse;
+pub use domain_auth::VerifyResetTokenQuery;

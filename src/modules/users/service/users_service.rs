@@ -67,6 +67,7 @@ pub async fn create_owner_admin_if_absent(
         role: Role::Admin,
         is_active: true,
         employee_key: None,
+        email: None,
         preferences: None,
         pin_hash: None,
         created_at: now,
@@ -147,6 +148,12 @@ pub async fn create_user(db: &Db, body: CreateUserRequest) -> AppResult<User> {
         role: body.role,
         is_active: true,
         employee_key: employee_key.clone(),
+        email: body
+            .email
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
         preferences: None,
         pin_hash: None,
         created_at: now,
@@ -233,7 +240,7 @@ pub(super) fn ensure_manageable(caller_role: Role, target_role: Role) -> AppResu
 }
 
 /// The shop's single Admin document, if one exists.
-pub(super) async fn find_admin_document(db: &Db) -> AppResult<Option<UserDocument>> {
+pub async fn find_admin_document(db: &Db) -> AppResult<Option<UserDocument>> {
     Ok(
         repository::list_users(db, doc! { "role": Role::Admin.as_str() })
             .await?
@@ -320,7 +327,8 @@ pub(crate) async fn get_user_for_caller(
     Ok(document.into_user())
 }
 
-pub(super) fn hash_password(password: &str) -> AppResult<String> {
+/// Hashes a plaintext password string using Argon2id.
+pub fn hash_password(password: &str) -> AppResult<String> {
     let salt = SaltString::generate(&mut OsRng);
     Argon2::default()
         .hash_password(password.as_bytes(), &salt)
@@ -425,6 +433,20 @@ pub async fn reset_admin_credentials(db: &Db, password: &str) -> AppResult<User>
 
     let user = updated.into_user();
     // Existing tokens for this account must be re-checked on their next use.
+    crate::core::middleware::auth::invalidate_account_status(&user.id);
+    Ok(user)
+}
+
+/// Updates the Admin account's password hash and increments version atomically.
+pub async fn update_admin_password_and_bump_version(
+    db: &Db,
+    admin_id: ObjectId,
+    password_hash: &str,
+) -> AppResult<User> {
+    let updated = repository::update_password_and_bump_version(db, admin_id, password_hash)
+        .await?
+        .ok_or_else(|| AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND))?;
+    let user = updated.into_user();
     crate::core::middleware::auth::invalidate_account_status(&user.id);
     Ok(user)
 }
@@ -648,7 +670,8 @@ pub fn validate_owner_login(name: &str, username: &str, password_hash: &str) -> 
     Ok(())
 }
 
-pub(super) fn validate_password_strength(password: &str) -> AppResult<()> {
+/// Validates that password meets minimum complexity requirements (at least 8 characters).
+pub fn validate_password_strength(password: &str) -> AppResult<()> {
     if password.chars().count() < 8 {
         return Err(AppError::validation(
             "Password must be at least 8 characters",

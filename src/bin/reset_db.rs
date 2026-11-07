@@ -86,6 +86,7 @@ async fn main() {
             "document_template_settings",
             "label_templates",
             "label_print_jobs",
+            "password_reset_tokens",
             "login_sessions",
             "users",
             "api_keys",
