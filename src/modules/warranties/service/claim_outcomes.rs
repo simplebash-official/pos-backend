@@ -473,10 +473,11 @@ pub(crate) async fn convert_to_paid_repair(
                 format!("This claim already has repair job {number}."),
             ));
         }
-        let reason = claim
-            .decision_reason
-            .clone()
-            .ok_or_else(|| AppError::internal("a decided claim records why it was decided"))?;
+        // A decision a signed-in manager made themselves carries no written reason.
+        let not_covered = match &claim.decision_reason {
+            Some(reason) => format!("not covered: {reason}"),
+            None => "not covered".to_string(),
+        };
         let repair = repairs::service::create_repair(
             db,
             CreateRepairRequest {
@@ -488,7 +489,7 @@ pub(crate) async fn convert_to_paid_repair(
                 device_model: claim.item_name.clone(),
                 serial_number: claim.serial_number.clone(),
                 issue_description: format!(
-                    "{} (warranty claim {} not covered: {reason})",
+                    "{} (warranty claim {} {not_covered})",
                     claim.issue_description, claim.claim_number
                 ),
                 promised_ready_at: None,

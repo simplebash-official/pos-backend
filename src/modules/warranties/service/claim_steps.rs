@@ -10,6 +10,7 @@ use crate::core::constants::{codes, prefixes};
 use crate::core::error::{AppError, AppResult};
 use crate::core::id::generate_id;
 use crate::core::utils::shop_day;
+use crate::domain::users::ApprovalCaller;
 use crate::domain::warranties::{
     ClaimAction, ClaimDecision, ClaimListQuery, ClaimListResponse, ClaimListStatus, ClaimStatus,
     DecideClaimRequest, InspectClaimRequest, OpenClaimRequest, SendToSupplierRequest,
@@ -184,6 +185,7 @@ pub(crate) async fn open_claim(
     db: &Db,
     body: OpenClaimRequest,
     actor: &WarrantyActor,
+    caller: &ApprovalCaller,
     device_id: Option<String>,
 ) -> AppResult<WarrantyClaim> {
     crate::core::logging::domain::tracked("warranties.claim_opened", async move {
@@ -204,14 +206,14 @@ pub(crate) async fn open_claim(
                     "This item already has an open claim. Carry on with that one.",
                 ));
             }
-            (WarrantyState::Expired, None) => {
+            (WarrantyState::Expired, None) if !caller.self_approves() => {
                 return Err(AppError::conflict(
                     codes::WARRANTY_EXPIRED,
                     "This warranty has run out. A manager or the owner can still honour it.",
                 ));
             }
-            (WarrantyState::Expired, Some(approval)) => {
-                Some(users::service::require_manager_approval(db, approval).await?)
+            (WarrantyState::Expired, approval) => {
+                Some(users::service::resolve_approval(db, caller, approval.as_ref()).await?)
             }
             (WarrantyState::Active | WarrantyState::ExpiringSoon, Some(_)) => {
                 return Err(AppError::validation(
@@ -346,7 +348,10 @@ pub(crate) async fn open_claim(
                 &claim,
                 WarrantyEventKind::ExpiredOverride,
                 None,
-                Some(format!("Honoured after it ran out. {}", approver.reason)),
+                Some(match &approver.reason {
+                    Some(reason) => format!("Honoured after it ran out. {reason}"),
+                    None => "Honoured after it ran out.".to_string(),
+                }),
                 actor,
                 Some(approver),
             )
@@ -409,16 +414,17 @@ pub(crate) async fn decide_claim(
     key: &str,
     body: DecideClaimRequest,
     actor: &WarrantyActor,
+    caller: &ApprovalCaller,
 ) -> AppResult<WarrantyClaim> {
     crate::core::logging::domain::tracked("warranties.claim_decided", async move {
         let mut claim = require_claim(db, key).await?;
         let to = step(&claim, ClaimAction::Decide(body.decision))?;
-        let approver = users::service::require_manager_approval(db, &body.approval).await?;
+        let approver = users::service::resolve_approval(db, caller, body.approval.as_ref()).await?;
         let from = claim.status;
         let expected = claim.version;
         claim.status = to;
         claim.decision = Some(body.decision);
-        claim.decision_reason = Some(approver.reason.clone());
+        claim.decision_reason = approver.reason.clone();
         claim.decided_by_user_id = Some(approver.user_id.clone());
         claim.decided_by_name = Some(approver.name.clone());
         if to == ClaimStatus::Resolved {
@@ -430,7 +436,10 @@ pub(crate) async fn decide_claim(
             &claim,
             WarrantyEventKind::ClaimDecided,
             Some(from),
-            Some(format!("{}: {}", body.decision.as_str(), approver.reason)),
+            Some(match &approver.reason {
+                Some(reason) => format!("{}: {reason}", body.decision.as_str()),
+                None => body.decision.as_str().to_string(),
+            }),
             actor,
             Some(&approver),
         )

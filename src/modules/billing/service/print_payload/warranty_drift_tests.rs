@@ -31,6 +31,7 @@ fn warranty(overrides: Value) -> Warranty {
         "endsOn": "2027-08-22",
         "status": "active",
         "claimCount": 0,
+        "claimedQuantity": 0,
         "state": "active",
         "daysRemaining": 365,
         "version": 1,

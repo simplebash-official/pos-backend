@@ -3,6 +3,7 @@ use super::warranty_lookup::{detail, require};
 use crate::clients::db::Db;
 use crate::core::constants::codes;
 use crate::core::error::{AppError, AppResult};
+use crate::domain::users::ApprovalCaller;
 use crate::domain::warranties::{
     ExtendWarrantyRequest, VoidWarrantyRequest, WarrantyCoverage, WarrantyDetail,
     WarrantyEventKind, WarrantyStatus,
@@ -27,6 +28,7 @@ pub(crate) async fn void(
     key: &str,
     body: VoidWarrantyRequest,
     actor: &WarrantyActor,
+    caller: &ApprovalCaller,
 ) -> AppResult<WarrantyDetail> {
     crate::core::logging::domain::tracked("warranties.voided", async move {
         let mut warranty = require(db, key).await?;
@@ -36,11 +38,11 @@ pub(crate) async fn void(
                 "This warranty is already cancelled.",
             ));
         }
-        let approver = users::service::require_manager_approval(db, &body.approval).await?;
+        let approver = users::service::resolve_approval(db, caller, body.approval.as_ref()).await?;
         let from = warranty.status;
         let expected = warranty.version;
         warranty.status = WarrantyStatus::Void;
-        warranty.void_reason = Some(approver.reason.clone());
+        warranty.void_reason = approver.reason.clone();
         warranty.version += 1;
         warranty.updated_at = BsonDateTime::now();
         if !repository::replace_warranty(db, &warranty, expected).await? {
@@ -54,7 +56,7 @@ pub(crate) async fn void(
                 kind: WarrantyEventKind::Voided,
                 from_status: Some(from.as_str()),
                 to_status: Some(WarrantyStatus::Void.as_str()),
-                note: Some(approver.reason.clone()),
+                note: approver.reason.clone(),
                 actor,
                 approved_by: Some(&approver),
             },
@@ -73,6 +75,7 @@ pub(crate) async fn extend(
     key: &str,
     body: ExtendWarrantyRequest,
     actor: &WarrantyActor,
+    caller: &ApprovalCaller,
 ) -> AppResult<WarrantyDetail> {
     crate::core::logging::domain::tracked("warranties.extended", async move {
         let mut warranty = require(db, key).await?;
@@ -108,7 +111,7 @@ pub(crate) async fn extend(
                 Some(day.to_string())
             }
         };
-        let approver = users::service::require_manager_approval(db, &body.approval).await?;
+        let approver = users::service::resolve_approval(db, caller, body.approval.as_ref()).await?;
         let expected = warranty.version;
         warranty.coverage = body.coverage;
         warranty.ends_on = new_end.clone();
@@ -126,10 +129,10 @@ pub(crate) async fn extend(
                 kind: WarrantyEventKind::Extended,
                 from_status: None,
                 to_status: None,
-                note: Some(format!(
-                    "Extended from {current_end} {until}. {}",
-                    approver.reason
-                )),
+                note: Some(match &approver.reason {
+                    Some(reason) => format!("Extended from {current_end} {until}. {reason}"),
+                    None => format!("Extended from {current_end} {until}."),
+                }),
                 actor,
                 approved_by: Some(&approver),
             },

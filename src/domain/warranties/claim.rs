@@ -337,8 +337,9 @@ pub struct InspectClaimRequest {
 #[serde(rename_all = "camelCase")]
 pub struct DecideClaimRequest {
     pub decision: ClaimDecision,
-    /// The deciding manager's or owner's PIN and why.
-    pub approval: ManagerApproval,
+    /// A Staff member sends the deciding manager's or owner's PIN and why; a signed-in Admin or
+    /// Manager decides for themselves and sends none.
+    pub approval: Option<ManagerApproval>,
 }
 
 /// `POST /warranty-claims/{key}/supplier/send`.
@@ -397,8 +398,9 @@ pub struct QuickReplaceRequest {
     /// The new unit given to the customer.
     pub replacement: ReplacementRequest,
     pub resolution_note: Option<String>,
-    /// The deciding manager's or owner's PIN and why; a replacement is always a manager's call.
-    pub approval: ManagerApproval,
+    /// A replacement is always a manager's call: a Staff member sends the deciding manager's or
+    /// owner's PIN and why; a signed-in Admin or Manager sends none.
+    pub approval: Option<ManagerApproval>,
 }
 
 /// Which claims a list wants.

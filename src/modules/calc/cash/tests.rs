@@ -35,6 +35,7 @@ fn context(cash: i64) -> MovementContext {
         category_limit_cents: None,
         shop_limit_cents: None,
         period_already_paid: false,
+        caller_approves: false,
     }
 }
 
@@ -116,6 +117,16 @@ fn the_shop_limit_counts_for_cash_out_only() {
             .unwrap()
             .pin_required
     );
+}
+
+#[test]
+fn a_signed_in_manager_is_asked_for_no_pin_and_no_reason() {
+    let mut ctx = context(10_000);
+    ctx.caller_approves = true;
+    let over = compute_movement(&movement(CashMovementType::PettyExpense, 20_000), &ctx).unwrap();
+    assert!(over.over_drawer && !over.pin_required && over.blockers.is_empty());
+    let owner = compute_movement(&movement(CashMovementType::OwnerWithdrawal, 100), &ctx).unwrap();
+    assert!(!owner.pin_required && !owner.blockers.contains(&CashMovementBlocker::PinMissing));
 }
 
 #[test]
@@ -208,7 +219,8 @@ fn a_shift_count_is_compared_with_the_drawer() {
         counted_cents: counted,
         closing_float_cents: float,
     };
-    let exact = compute_shift_count(&close(100_000, Some(30_000)), 100_000, Some(200_000)).unwrap();
+    let exact =
+        compute_shift_count(&close(100_000, Some(30_000)), 100_000, Some(200_000), false).unwrap();
     assert_eq!(
         (
             exact.variance_cents,
@@ -219,7 +231,7 @@ fn a_shift_count_is_compared_with_the_drawer() {
     );
     assert_eq!(exact.safe_deposit_cents, Some(70_000));
     assert_eq!(exact.keep_opening_float_cents, Some(100_000));
-    let small = compute_shift_count(&close(99_600, None), 100_000, Some(50_000)).unwrap();
+    let small = compute_shift_count(&close(99_600, None), 100_000, Some(50_000), false).unwrap();
     assert_eq!(
         (
             small.variance_cents,
@@ -233,7 +245,7 @@ fn a_shift_count_is_compared_with_the_drawer() {
         (small.closing_float_cents, small.safe_deposit_cents),
         (Some(50_000), Some(49_600))
     );
-    let large = compute_shift_count(&close(99_000, None), 100_000, Some(50_000)).unwrap();
+    let large = compute_shift_count(&close(99_000, None), 100_000, Some(50_000), false).unwrap();
     assert!(large.pin_required);
     let open = CalcShiftCountRequest {
         session_key: None,
@@ -241,10 +253,18 @@ fn a_shift_count_is_compared_with_the_drawer() {
         counted_cents: 99_900,
         closing_float_cents: None,
     };
-    let opened = compute_shift_count(&open, 100_000, None).unwrap();
+    let opened = compute_shift_count(&open, 100_000, None, false).unwrap();
     assert!(opened.pin_required && opened.safe_deposit_cents.is_none());
-    assert!(compute_shift_count(&close(1_000, Some(2_000)), 0, Some(5_000)).is_err());
-    assert!(compute_shift_count(&open_with_float(), 0, None).is_err());
+    let large_by_manager =
+        compute_shift_count(&close(99_000, None), 100_000, Some(50_000), true).unwrap();
+    assert!(large_by_manager.reason_required && !large_by_manager.pin_required);
+    assert!(
+        !compute_shift_count(&open, 100_000, None, true)
+            .unwrap()
+            .pin_required
+    );
+    assert!(compute_shift_count(&close(1_000, Some(2_000)), 0, Some(5_000), false).is_err());
+    assert!(compute_shift_count(&open_with_float(), 0, None, false).is_err());
 }
 
 fn open_with_float() -> CalcShiftCountRequest {

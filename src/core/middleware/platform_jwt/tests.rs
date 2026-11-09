@@ -304,6 +304,7 @@ fn test_config(
         ("LOG_HTTP_BODIES", "false".to_string()),
         ("INSTALLATION_ID", "inst_unit".to_string()),
         ("PLATFORM", "unit".to_string()),
+        ("EMAIL_SERVICE", "disabled".to_string()),
         ("SEED_ADMIN_NAME", "Admin".to_string()),
         ("SEED_ADMIN_PASSWORD", "unit-test-password".to_string()),
     ]);

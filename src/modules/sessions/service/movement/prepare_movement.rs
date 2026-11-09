@@ -12,6 +12,7 @@ use crate::domain::cash_categories::PayeeType;
 use crate::domain::recurring_expenses::PeriodStatusQuery;
 use crate::domain::sequences::ReserveSequenceRequest;
 use crate::domain::sessions::{CashMovementType, CreateCashMovementRequest};
+use crate::domain::users::ApprovalCaller;
 
 use crate::modules::sessions::model::CashMovementDocument;
 
@@ -61,8 +62,7 @@ fn forbid(applies: bool, present: bool, what: &str) -> AppResult<()> {
 /// drawer earlier in the same save (the owner's own money), counted when checking the drawer limit.
 pub(crate) async fn prepare_movement(
     db: &Db,
-    recorded_by_user_id: String,
-    recorded_by_name: String,
+    caller: &ApprovalCaller,
     body: CreateCashMovementRequest,
     device_id: Option<String>,
     receipt_key: Option<String>,
@@ -74,7 +74,7 @@ pub(crate) async fn prepare_movement(
             return Err(AppError::validation("terminalId is required"));
         }
 
-        let cash_in_drawer = cash_in_drawer(db, body.session_key.as_deref(), &recorded_by_user_id)
+        let cash_in_drawer = cash_in_drawer(db, body.session_key.as_deref(), &caller.user_id)
             .await?
             + cash_added_cents;
 
@@ -212,11 +212,19 @@ pub(crate) async fn prepare_movement(
             }
         }
 
-        // A payout bigger than the cash in the drawer is allowed only when a manager says why.
+        // A payout bigger than the cash in the drawer is allowed only with a manager's approval:
+        // a Staff member sends a manager's PIN and says why; a signed-in manager or owner approves
+        // it themselves and sends neither.
         let takes_cash_out = movement_type.takes_cash_out();
         let over_drawer = movement_type.is_over_drawer(body.amount_cents, cash_in_drawer);
         let override_reason = clean_text("The reason", body.override_reason.as_deref(), NOTE_MAX)?;
-        if over_drawer {
+        if caller.self_approves() {
+            if override_reason.is_some() {
+                return Err(AppError::validation(
+                    "A signed-in manager or owner approves this themselves, so no reason is sent.",
+                ));
+            }
+        } else if over_drawer {
             if body.manager_pin.is_none() || override_reason.is_none() {
                 return Err(AppError::conflict(
                     codes::DRAWER_CASH_EXCEEDED,
@@ -253,21 +261,15 @@ pub(crate) async fn prepare_movement(
         let mut approved_by_id = None;
         let mut approved_by_name = None;
         if pin_needed {
-            let pin = body.manager_pin.as_deref().ok_or_else(|| {
-                AppError::forbidden_with_code(
-                    "A manager or owner PIN is required for this payment",
-                    codes::PIN_NOT_SET,
-                )
-            })?;
-            let approver = users::service::verify_user_pin(db, pin, Some("manager"))
+            let approver = users::service::pin_approver(db, caller, body.manager_pin.as_deref())
                 .await?
                 .ok_or_else(|| {
-                    AppError::unauthorized_with_code(
-                        "Invalid manager/owner PIN",
-                        codes::INVALID_PIN,
+                    AppError::forbidden_with_code(
+                        "A manager or owner PIN is required for this payment",
+                        codes::PIN_NOT_SET,
                     )
                 })?;
-            approved_by_id = Some(approver.id);
+            approved_by_id = Some(approver.user_id);
             approved_by_name = Some(approver.name);
         }
 
@@ -305,8 +307,8 @@ pub(crate) async fn prepare_movement(
             period_end: period.map(|p| p.1),
             reference_no,
             note,
-            recorded_by_user_id,
-            recorded_by_name_snapshot: recorded_by_name,
+            recorded_by_user_id: caller.user_id.clone(),
+            recorded_by_name_snapshot: caller.name.clone(),
             approved_by_user_id: approved_by_id,
             approved_by_name_snapshot: approved_by_name,
             approval_reason: if over_drawer { override_reason } else { None },

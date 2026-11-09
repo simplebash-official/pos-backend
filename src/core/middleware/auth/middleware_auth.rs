@@ -116,6 +116,19 @@ impl CurrentUser {
         Ok(trimmed.to_string())
     }
 
+    /// This caller as the person an approval is resolved for: their id, display name and the
+    /// role in their token.
+    pub async fn approval_caller(
+        &self,
+        db: &crate::clients::db::Db,
+    ) -> AppResult<crate::domain::users::ApprovalCaller> {
+        Ok(crate::domain::users::ApprovalCaller {
+            user_id: self.user_id.clone(),
+            name: self.resolve_name(db).await?,
+            role: self.role,
+        })
+    }
+
     /// The caller's device id, or 403 `DEVICE_TOKEN_REQUIRED` unless the
     /// token is a device token (`scope` contains `device` and it carries a
     /// `did`). Guards the sync push/pull routes, which only registered

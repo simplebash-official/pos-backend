@@ -514,3 +514,112 @@ async fn shift_follows_its_owner_and_the_setting_guard_holds() {
     assert_eq!(status, StatusCode::OK, "Body: {update_res}");
     assert_eq!(update_res["data"]["allowSharedUserSessions"], false);
 }
+
+#[tokio::test]
+async fn a_signed_in_manager_approves_their_own_shift_differences() {
+    let app = common::spawn_app().await;
+    simplebash_pos_backend::seeds::admin::seed_admin(&app.db_handle, &app.config.seed_admin)
+        .await
+        .expect("the admin is seeded");
+    let manager_token = mint_token_for(
+        &app.config,
+        "usr_manager_self",
+        Some(Role::Manager),
+        roles::default_permissions(Role::Manager),
+    );
+    let terminal_id = format!("term_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+
+    // Shift 1 closes leaving 5,000; an owner withdrawal between shifts leaves 4,000 expected.
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/sessions/open",
+        Some(json!({ "terminalId": terminal_id, "openingFloatCents": 5000 })),
+        &manager_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let first = body["data"]["key"].as_str().expect("a key").to_string();
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/sessions/{first}/close"),
+        Some(json!({
+            "countedCashCents": 5000, "closingFloatCents": 5000, "cashDropToSafeCents": 0
+        })),
+        &manager_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // A counted float that differs still needs its explanation, but not a PIN; a PIN is refused.
+    let opening = |extra: serde_json::Value| {
+        let mut body = json!({ "terminalId": terminal_id, "openingFloatCents": 3500 });
+        body.as_object_mut()
+            .expect("an object")
+            .extend(extra.as_object().expect("an object").clone());
+        body
+    };
+    let (status, _) = send_authed(
+        &app.router,
+        "POST",
+        "/api/sessions/open",
+        Some(opening(json!({}))),
+        &manager_token,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "the explanation is still required"
+    );
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/sessions/open",
+        Some(opening(
+            json!({ "discrepancyReason": "Coins taken", "managerPin": "1234" }),
+        )),
+        &manager_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/sessions/open",
+        Some(opening(json!({ "discrepancyReason": "Coins taken" }))),
+        &manager_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let second = body["data"]["key"].as_str().expect("a key").to_string();
+    assert_eq!(body["data"]["openingApprovedById"], "usr_manager_self");
+
+    // A shortage beyond the tolerance closes with the explanation and no PIN.
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/sessions/{second}/close"),
+        Some(json!({
+            "countedCashCents": 2500, "closingFloatCents": 2500, "cashDropToSafeCents": 0,
+            "varianceReason": "Unknown shortage at close"
+        })),
+        &manager_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["varianceApprovedById"], "usr_manager_self");
+
+    // Converting the shortage to a late owner withdrawal needs no PIN either.
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/sessions/{second}/convert-variance"),
+        Some(json!({ "reason": "Owner drawings", "recipient": "Shop Owner" })),
+        &manager_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["data"]["approvedByUserId"], "usr_manager_self");
+}

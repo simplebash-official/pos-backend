@@ -231,18 +231,19 @@ async fn payment_scenario(app: &common::TestApp) {
             "{what}: {status} {body}"
         );
     }
-    // More than the drawer holds needs a manager's PIN and a reason: refused, the stock stays out.
+    // The owner approves their own payout over the drawer, so a receipt that carries a PIN or a
+    // reason is refused and the stock stays out.
     let before = stock().await;
-    let (status, body) = send(
-        router,
-        "POST",
-        "/api/purchase-receipts",
-        Some(receipt(10, Some(drawer_payment(40_000, json!({}))))),
-        &admin,
-    )
-    .await;
-    assert_eq!(status, StatusCode::CONFLICT, "{body}");
-    assert_eq!(body["code"], "DRAWER_CASH_EXCEEDED");
+    for approval in [
+        json!({ "managerPin": "1234" }),
+        json!({ "managerPin": "1234", "overrideReason": "Supplier waiting" }),
+    ] {
+        let mut body = receipt(10, Some(drawer_payment(40_000, json!({}))));
+        body["approval"] = approval;
+        let (status, body) =
+            send(router, "POST", "/api/purchase-receipts", Some(body), &admin).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    }
     assert_eq!(stock().await, before, "a refused payment adds no stock");
     assert_eq!(expected_cash().await, 25_000);
     // The cash terminal is required for the drawer; a day is refused for it.

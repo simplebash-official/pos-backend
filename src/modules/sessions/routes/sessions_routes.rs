@@ -72,9 +72,8 @@ pub(super) async fn close_session(
     Json(body): Json<CloseSessionRequest>,
 ) -> AppResult<Json<ApiResponse<RegisterSession>>> {
     current_user.require_permission(perm::REGISTER_SESSIONS_MANAGE)?;
-    let cashier_name = current_user.resolve_name(&state.db).await?;
-    let session =
-        service::close_session(&state.db, &key, current_user.user_id, cashier_name, body).await?;
+    let caller = current_user.approval_caller(&state.db).await?;
+    let session = service::close_session(&state.db, &key, &caller, body).await?;
 
     Ok(Json(ApiResponse::success(
         session,
@@ -104,16 +103,8 @@ pub(super) async fn convert_variance(
     Json(body): Json<ConvertVarianceRequest>,
 ) -> AppResult<(StatusCode, Json<ApiResponse<CashMovement>>)> {
     current_user.require_permission(perm::REGISTER_SESSIONS_MANAGE)?;
-    let cashier_name = current_user.resolve_name(&state.db).await?;
-    let movement = service::convert_variance(
-        &state.db,
-        &key,
-        current_user.user_id,
-        cashier_name,
-        body,
-        device_id.0,
-    )
-    .await?;
+    let caller = current_user.approval_caller(&state.db).await?;
+    let movement = service::convert_variance(&state.db, &key, &caller, body, device_id.0).await?;
 
     Ok((
         StatusCode::CREATED,
@@ -145,15 +136,8 @@ pub(super) async fn create_cash_movement(
     if service::requires_managed_permission(body.movement_type) {
         current_user.require_permission(perm::CASH_MOVEMENTS_CREATE_MANAGED)?;
     }
-    let cashier_name = current_user.resolve_name(&state.db).await?;
-    let movement = service::record_movement(
-        &state.db,
-        current_user.user_id,
-        cashier_name,
-        body,
-        device_id.0,
-    )
-    .await?;
+    let caller = current_user.approval_caller(&state.db).await?;
+    let movement = service::record_movement(&state.db, &caller, body, device_id.0).await?;
 
     Ok((
         StatusCode::CREATED,
@@ -472,15 +456,8 @@ pub(super) async fn open_session(
     Json(body): Json<OpenSessionRequest>,
 ) -> AppResult<(StatusCode, Json<ApiResponse<RegisterSession>>)> {
     current_user.require_permission(perm::REGISTER_SESSIONS_MANAGE)?;
-    let cashier_name = current_user.resolve_name(&state.db).await?;
-    let session = service::open_session(
-        &state.db,
-        current_user.user_id,
-        cashier_name,
-        body,
-        device_id.0,
-    )
-    .await?;
+    let caller = current_user.approval_caller(&state.db).await?;
+    let session = service::open_session(&state.db, &caller, body, device_id.0).await?;
 
     Ok((
         StatusCode::CREATED,

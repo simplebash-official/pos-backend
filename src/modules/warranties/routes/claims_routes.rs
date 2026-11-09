@@ -41,7 +41,8 @@ pub(super) async fn open_claim(
 ) -> AppResult<Json<ApiResponse<WarrantyClaim>>> {
     user.require_permission(perm::WARRANTY_CLAIMS_RECORD)?;
     let actor = actor(&state, &user).await?;
-    let claim = service::open_claim(&state.db, body, &actor, device_id).await?;
+    let caller = user.approval_caller(&state.db).await?;
+    let claim = service::open_claim(&state.db, body, &actor, &caller, device_id).await?;
     Ok(Json(ApiResponse::success(claim, "Claim opened")))
 }
 
@@ -66,7 +67,8 @@ pub(super) async fn quick_replace(
 ) -> AppResult<Json<ApiResponse<WarrantyClaim>>> {
     user.require_permission(perm::WARRANTY_CLAIMS_RECORD)?;
     let actor = actor(&state, &user).await?;
-    let claim = service::quick_replace(&state.db, body, &actor, device_id).await?;
+    let caller = user.approval_caller(&state.db).await?;
+    let claim = service::quick_replace(&state.db, body, &actor, &caller, device_id).await?;
     Ok(Json(ApiResponse::success(
         claim,
         "Replaced and handed to the customer",
@@ -162,7 +164,8 @@ pub(super) async fn decide_claim(
 ) -> AppResult<Json<ApiResponse<WarrantyClaim>>> {
     user.require_permission(perm::WARRANTY_CLAIMS_RECORD)?;
     let actor = actor(&state, &user).await?;
-    let claim = service::decide_claim(&state.db, &key, body, &actor).await?;
+    let caller = user.approval_caller(&state.db).await?;
+    let claim = service::decide_claim(&state.db, &key, body, &actor, &caller).await?;
     Ok(Json(ApiResponse::success(claim, "Claim decided")))
 }
 

@@ -14,7 +14,7 @@ use mongodb::bson::oid::ObjectId;
 use sqlx::Row;
 
 fn password_reset_tokens(db: &TenantDatabase) -> ScopedCollection<PasswordResetTokenDocument> {
-    db.platform_collection("password_reset_tokens")
+    db.collection("password_reset_tokens")
 }
 
 fn token_from_sqlite_row(r: &sqlx::sqlite::SqliteRow) -> AppResult<PasswordResetTokenDocument> {

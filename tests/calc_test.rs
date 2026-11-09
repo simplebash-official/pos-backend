@@ -341,16 +341,34 @@ async fn a_cash_payment_and_a_shift_count_are_checked_against_the_real_drawer() 
 
     let mut over = request.clone();
     over["amountCents"] = json!(250_000);
-    let (_, body) = post(&app, "/api/calc/cash-movement", &over, Some(&admin)).await;
+    // Staff need a manager's PIN and a reason to go over the drawer.
+    let staff = common::mint_token(
+        &app.config,
+        Some(Role::Staff),
+        roles::default_permissions(Role::Staff),
+    );
+    let (_, body) = post(&app, "/api/calc/cash-movement", &over, Some(&staff)).await;
     assert_eq!(body["data"]["overDrawer"], true);
     assert_eq!(body["data"]["pinRequired"], true);
     assert_eq!(
         body["data"]["blockers"],
         json!(["pin_missing", "override_reason_missing"])
     );
+    // A signed-in manager or owner approves it themselves: no PIN, no reason, nothing stops it.
+    let manager = common::mint_token(
+        &app.config,
+        Some(Role::Manager),
+        roles::default_permissions(Role::Manager),
+    );
+    for token in [&admin, &manager] {
+        let (_, body) = post(&app, "/api/calc/cash-movement", &over, Some(token)).await;
+        assert_eq!(body["data"]["overDrawer"], true);
+        assert_eq!(body["data"]["pinRequired"], false);
+        assert_eq!(body["data"]["blockers"], json!([]));
+    }
 
     let close = json!({ "sessionKey": session_key, "terminalId": null, "countedCents": 199_000, "closingFloatCents": 100_000 });
-    let (status, body) = post(&app, "/api/calc/shift-count", &close, Some(&admin)).await;
+    let (status, body) = post(&app, "/api/calc/shift-count", &close, Some(&staff)).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let data = &body["data"];
     assert_eq!(data["expectedCents"], 200_000);
@@ -364,6 +382,14 @@ async fn a_cash_payment_and_a_shift_count_are_checked_against_the_real_drawer() 
     let mut recorded = close.clone();
     recorded["sessionKey"] = json!("ses_golden");
     golden("shift-count", &recorded, data);
+    for token in [&admin, &manager] {
+        let (_, body) = post(&app, "/api/calc/shift-count", &close, Some(token)).await;
+        assert_eq!(
+            body["data"]["reasonRequired"], true,
+            "the explanation stays"
+        );
+        assert_eq!(body["data"]["pinRequired"], false);
+    }
 
     let both = json!({ "sessionKey": session_key, "terminalId": "term_calc", "countedCents": 1, "closingFloatCents": null });
     let (status, _) = post(&app, "/api/calc/shift-count", &both, Some(&admin)).await;

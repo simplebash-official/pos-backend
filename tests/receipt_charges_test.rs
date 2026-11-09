@@ -441,10 +441,11 @@ async fn scenario(app: &common::TestApp) {
         "source": "drawer", "amountCents": each, "categoryKey": cod,
         "terminalId": shop.terminal, "sessionKey": shop.session_key,
     });
+    // The owner approves this themselves, so a receipt that carries a PIN is refused.
+    body["approval"] = json!({ "managerPin": "1234", "overrideReason": "Courier waiting" });
     let stock_before = shop.batches(&c_key).await.len();
     let (status, refused) = shop.post("/api/purchase-receipts", body).await;
-    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
-    assert_eq!(refused["code"], "DRAWER_CASH_EXCEEDED");
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
     assert_eq!(
         shop.receipts().await,
         receipts_before,

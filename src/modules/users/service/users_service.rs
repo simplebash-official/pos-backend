@@ -4,7 +4,7 @@ use crate::core::error::{AppError, AppResult};
 use crate::core::id::generate_id;
 use crate::domain::employees::EmployeeLoginSummary;
 use crate::domain::users::{
-    ApprovedBy, CATALOG_SORT_IDS, CreateUserRequest, ManagerApproval, Role,
+    ApprovalCaller, ApprovedBy, CATALOG_SORT_IDS, CreateUserRequest, ManagerApproval, Role,
     UpdateMyPreferencesRequest, UpdateUserRequest, User, UserListQuery, UsersResponse,
 };
 use crate::modules::employees;
@@ -751,13 +751,75 @@ pub(super) fn verify_password(password: &str, hash: &str) -> AppResult<bool> {
 /// The longest reason an approval may carry.
 const APPROVAL_REASON_MAX: usize = 500;
 
-/// Checks a manager or owner sign-off: a reason must be given (at most 500 characters) and the
-/// PIN must belong to an active Admin or Manager. 401 `INVALID_PIN` otherwise; nothing is
-/// written.
-pub async fn require_manager_approval(
+/// What a signed-in Admin or Manager is told when their request carries a PIN.
+const SELF_APPROVAL_NO_PIN: &str =
+    "A signed-in manager or owner approves this themselves, so no PIN or reason is sent.";
+
+/// Resolves who approves an action. A signed-in Admin or Manager approves it themselves and must
+/// send no approval (400 otherwise). Anyone else must send one (403 `PIN_NOT_SET` if missing),
+/// checked by [`require_manager_approval`].
+pub(crate) async fn resolve_approval(
     db: &Db,
-    approval: &ManagerApproval,
+    caller: &ApprovalCaller,
+    approval: Option<&ManagerApproval>,
 ) -> AppResult<ApprovedBy> {
+    if caller.self_approves() {
+        if approval.is_some() {
+            return Err(AppError::validation(SELF_APPROVAL_NO_PIN));
+        }
+        return Ok(ApprovedBy {
+            user_id: caller.user_id.clone(),
+            name: caller.name.clone(),
+            reason: None,
+        });
+    }
+    let approval = approval.ok_or_else(|| {
+        AppError::forbidden_with_code("A manager or owner must approve this.", codes::PIN_NOT_SET)
+    })?;
+    require_manager_approval(db, approval).await
+}
+
+/// Resolves who approves an action whose screen sends a bare PIN. A signed-in Admin or Manager
+/// approves it themselves and must send none (400 otherwise). For anyone else the PIN must
+/// belong to an active Admin or Manager (401 `INVALID_PIN`); `Ok(None)` means no PIN was sent,
+/// so the caller raises the error that fits its screen.
+pub(crate) async fn pin_approver(
+    db: &Db,
+    caller: &ApprovalCaller,
+    pin: Option<&str>,
+) -> AppResult<Option<ApprovedBy>> {
+    if caller.self_approves() {
+        if pin.is_some() {
+            return Err(AppError::validation(SELF_APPROVAL_NO_PIN));
+        }
+        return Ok(Some(ApprovedBy {
+            user_id: caller.user_id.clone(),
+            name: caller.name.clone(),
+            reason: None,
+        }));
+    }
+    let Some(pin) = pin else {
+        return Ok(None);
+    };
+    let approver = verify_user_pin(db, pin, Some("manager"))
+        .await?
+        .ok_or_else(|| {
+            AppError::unauthorized_with_code(
+                "That PIN does not belong to a manager or owner.",
+                codes::INVALID_PIN,
+            )
+        })?;
+    Ok(Some(ApprovedBy {
+        user_id: approver.id,
+        name: approver.name,
+        reason: None,
+    }))
+}
+
+/// Checks a Staff member's manager or owner sign-off: a reason must be given (at most 500
+/// characters) and the PIN must belong to an active Admin or Manager. 401 `INVALID_PIN`
+/// otherwise; nothing is written.
+async fn require_manager_approval(db: &Db, approval: &ManagerApproval) -> AppResult<ApprovedBy> {
     let reason = approval.reason.trim();
     if reason.is_empty() {
         return Err(AppError::validation(
@@ -780,7 +842,7 @@ pub async fn require_manager_approval(
     Ok(ApprovedBy {
         user_id: approver.id,
         name: approver.name,
-        reason: reason.to_string(),
+        reason: Some(reason.to_string()),
     })
 }
 

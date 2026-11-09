@@ -176,10 +176,7 @@ pub(super) async fn record_receipt(
             }
         }
     }
-    let recorded_by = RecordedBy {
-        name: current_user.resolve_name(&state.db).await?,
-        user_id: current_user.user_id,
-    };
+    let recorded_by = current_user.approval_caller(&state.db).await?;
     let recorded = receipt::record_receipt(&state.db, Some(recorded_by), body, device_id.0).await?;
     Ok((
         StatusCode::CREATED,

@@ -635,6 +635,60 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(status, StatusCode::OK, "{pdf}");
     assert!(pdf.contains("\"isVoid\":true"), "{pdf}");
 
+    // A signed-in owner approves their own extension and cancellation: no PIN, no reason. Sending
+    // a PIN is refused and changes nothing.
+    let owner_warranty = text(&warranties_of(app, &staff, &override_invoice).await[0]["key"]);
+    let ten_years = json!({ "kind": "limited", "value": 10, "unit": "years" });
+    let (status, body) = send(
+        app,
+        "POST",
+        &format!("/api/warranties/{owner_warranty}/extend"),
+        Some(extend(ten_years.clone(), MANAGER_PIN)),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    let (status, body) = send(
+        app,
+        "POST",
+        &format!("/api/warranties/{owner_warranty}/void"),
+        Some(void_body(MANAGER_PIN, "Not needed")),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    let (status, extended) = send(
+        app,
+        "POST",
+        &format!("/api/warranties/{owner_warranty}/extend"),
+        Some(json!({ "coverage": ten_years })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{extended}");
+    let last = extended["data"]["events"]
+        .as_array()
+        .and_then(|e| e.last())
+        .expect("the extension is logged")
+        .clone();
+    assert_eq!(last["kind"], "extended");
+    assert_eq!(last["approvedByName"], "Owner Olivia");
+    assert!(
+        !text(&last["note"]).contains("Loyal"),
+        "no reason is stored for the owner: {last}"
+    );
+    // Staff are still asked for a manager's PIN.
+    let (status, body) = send(
+        app,
+        "POST",
+        &format!("/api/warranties/{owner_warranty}/extend"),
+        Some(json!({ "coverage": { "kind": "limited", "value": 11, "unit": "years" } })),
+        &staff,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["code"], "PIN_NOT_SET", "{body}");
+
     // Voiding the till-override sale cancels its warranty.
     let (status, body) = send(
         app,

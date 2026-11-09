@@ -55,6 +55,13 @@ pub enum Role {
 }
 
 impl Role {
+    /// Whether a signed-in user with this role approves their own actions: the owner (Admin) and
+    /// a Manager. Staff need a manager's PIN.
+    #[must_use]
+    pub fn self_approves(self) -> bool {
+        matches!(self, Role::Admin | Role::Manager)
+    }
+
     #[must_use]
     /// The name this value has on the wire and in storage.
     pub fn as_str(&self) -> &'static str {

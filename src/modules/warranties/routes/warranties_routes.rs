@@ -127,7 +127,8 @@ pub(super) async fn void_warranty(
 ) -> AppResult<Json<ApiResponse<WarrantyDetail>>> {
     user.require_permission(perm::WARRANTY_CLAIMS_RECORD)?;
     let actor = actor(&state, &user).await?;
-    let detail = service::void(&state.db, &key, body, &actor).await?;
+    let caller = user.approval_caller(&state.db).await?;
+    let detail = service::void(&state.db, &key, body, &actor, &caller).await?;
     Ok(Json(ApiResponse::success(detail, "Warranty cancelled")))
 }
 
@@ -154,7 +155,8 @@ pub(super) async fn extend_warranty(
 ) -> AppResult<Json<ApiResponse<WarrantyDetail>>> {
     user.require_permission(perm::WARRANTY_CLAIMS_RECORD)?;
     let actor = actor(&state, &user).await?;
-    let detail = service::extend(&state.db, &key, body, &actor).await?;
+    let caller = user.approval_caller(&state.db).await?;
+    let detail = service::extend(&state.db, &key, body, &actor, &caller).await?;
     Ok(Json(ApiResponse::success(detail, "Warranty extended")))
 }
 

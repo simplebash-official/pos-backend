@@ -396,8 +396,9 @@ pub struct WarrantyListResponse {
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct VoidWarrantyRequest {
-    /// A manager or owner PIN, and why the warranty is cancelled.
-    pub approval: ManagerApproval,
+    /// A Staff member sends a manager or owner PIN, and why the warranty is cancelled; a
+    /// signed-in Admin or Manager sends none.
+    pub approval: Option<ManagerApproval>,
 }
 
 /// `POST /warranties/{key}/extend`.
@@ -406,6 +407,7 @@ pub struct VoidWarrantyRequest {
 pub struct ExtendWarrantyRequest {
     /// The new coverage, counted from the original first day; it must end later than now.
     pub coverage: WarrantyCoverage,
-    /// A manager or owner PIN, and why it is extended.
-    pub approval: ManagerApproval,
+    /// A Staff member sends a manager or owner PIN, and why it is extended; a signed-in Admin
+    /// or Manager sends none.
+    pub approval: Option<ManagerApproval>,
 }

@@ -12,7 +12,9 @@ use super::claim_steps::{
 use super::warranty_events::WarrantyActor;
 use super::warranty_lookup::require;
 use crate::clients::db::Db;
+use crate::core::constants::codes;
 use crate::core::error::{AppError, AppResult};
+use crate::domain::users::ApprovalCaller;
 use crate::domain::warranties::{
     ClaimDecision, DecideClaimRequest, InspectClaimRequest, OpenClaimRequest, QuickReplaceRequest,
     ResolveClaimRequest, WarrantyClaim, WarrantyState,
@@ -26,17 +28,26 @@ pub(crate) async fn quick_replace(
     db: &Db,
     body: QuickReplaceRequest,
     actor: &WarrantyActor,
+    caller: &ApprovalCaller,
     device_id: Option<String>,
 ) -> AppResult<WarrantyClaim> {
     crate::core::logging::domain::tracked("warranties.claim_quick_replaced", async move {
         // Everything that can be refused without writing is refused first.
         let inspection_notes = required_text(&body.inspection_notes, "what the inspection found")?;
-        users::service::require_manager_approval(db, &body.approval).await?;
+        users::service::resolve_approval(db, caller, body.approval.as_ref()).await?;
         let warranty = require(db, &body.warranty_key).await?;
         // A warranty that is not in force is refused by `open_claim` before it writes anything,
         // with the reason the person needs, so the replacement is only worth checking for one
         // that is.
         let state = warranty.clone().into_warranty(today())?.state;
+        // A quick replace never honours an ended warranty, even for a signed-in manager who
+        // could approve it themselves: that goes through the normal claim.
+        if state == WarrantyState::Expired {
+            return Err(AppError::conflict(
+                codes::WARRANTY_EXPIRED,
+                "This warranty has run out. Start a claim and a manager or the owner can still honour it.",
+            ));
+        }
         if matches!(state, WarrantyState::Active | WarrantyState::ExpiringSoon) {
             let old_serial = body
                 .serial_number
@@ -65,6 +76,7 @@ pub(crate) async fn quick_replace(
                 approval: None,
             },
             actor,
+            caller,
             device_id.clone(),
         )
         .await?;
@@ -87,6 +99,7 @@ pub(crate) async fn quick_replace(
                     approval: body.approval,
                 },
                 actor,
+                caller,
             )
             .await?;
             resolve_claim(

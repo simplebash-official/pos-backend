@@ -15,5 +15,6 @@ pub use domain_users::User;
 pub use domain_users::UserListQuery;
 pub use domain_users::UserPreferences;
 pub use domain_users::UsersResponse;
+pub use manager_approval::ApprovalCaller;
 pub use manager_approval::ApprovedBy;
 pub use manager_approval::ManagerApproval;

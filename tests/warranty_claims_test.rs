@@ -1478,6 +1478,72 @@ async fn quick_replace_scenario(app: &common::TestApp) {
     assert_eq!(body["code"], "WARRANTY_EXPIRED", "{body}");
     assert!(claims_of(app, &staff, &phone_c).await.is_empty());
 
+    // ---- A signed-in owner approves their own claim: no PIN, no reason ----
+    // Sending a PIN is refused before anything is written, in the quick replace and the steps.
+    let (status, body) = quick(
+        app,
+        &admin,
+        quick_body(
+            &phone_c,
+            by_serial(&serials[5]),
+            approval(MANAGER_PIN, "Covered"),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(claims_of(app, &staff, &phone_c).await.is_empty());
+    // The ended warranty is honoured by the owner without a second person.
+    let honoured = open(app, &admin, &phone_c).await;
+    assert_eq!(honoured["expiredOverrideByName"], "Owner Olivia");
+    let honoured_key = text(&honoured["key"]);
+    ok_step(
+        app,
+        &admin,
+        &honoured_key,
+        "inspect",
+        json!({ "inspectionNotes": "Port is worn" }),
+    )
+    .await;
+    let (status, body) = claim_step(
+        app,
+        &admin,
+        &honoured_key,
+        "decide",
+        Some(json!({ "decision": "repair", "approval": approval(MANAGER_PIN, "Covered") })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    let decided = ok_step(
+        app,
+        &admin,
+        &honoured_key,
+        "decide",
+        json!({ "decision": "repair" }),
+    )
+    .await;
+    assert_eq!(decided["decidedByName"], "Owner Olivia");
+    assert!(decided["decisionReason"].is_null(), "{decided}");
+    // Staff still need a manager's PIN for the same step.
+    let waiting = text(&claims_of(app, &staff, &phone_b).await[0]["key"]);
+    ok_step(
+        app,
+        &staff,
+        &waiting,
+        "inspect",
+        json!({ "inspectionNotes": "Port is worn" }),
+    )
+    .await;
+    let (status, body) = claim_step(
+        app,
+        &staff,
+        &waiting,
+        "decide",
+        Some(json!({ "decision": "repair" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["code"], "PIN_NOT_SET", "{body}");
+
     // ---- A charger is swapped from a price tier ----
     let charger_before: i64 = remaining(app, &admin, &charger).await.values().sum();
     let (status, body) = quick(

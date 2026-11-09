@@ -3,6 +3,7 @@ use crate::core::constants::{modules, permissions as perm};
 use crate::core::error::AppResult;
 use crate::core::middleware::auth::{AdminUser, CurrentUser};
 use crate::core::response::{ApiResponse, ErrorResponse};
+use crate::domain::users::Role;
 use crate::modules::calc::cash::{
     CalcCashCountReply, CalcCashCountRequest, CalcCashMovementReply, CalcCashMovementRequest,
     CalcShiftCountReply, CalcShiftCountRequest, MovementContext,
@@ -111,6 +112,7 @@ pub(super) async fn calc_cash_movement(
             category_limit_cents,
             shop_limit_cents,
             period_already_paid,
+            caller_approves: user.role.is_some_and(Role::self_approves),
         },
     )?;
     Ok(Json(ApiResponse::success(reply, "Calculated")))
@@ -364,7 +366,12 @@ pub(super) async fn calc_shift_count(
             ));
         }
     };
-    let reply = cash::compute_shift_count(&body, expected, opening_float)?;
+    let reply = cash::compute_shift_count(
+        &body,
+        expected,
+        opening_float,
+        user.role.is_some_and(Role::self_approves),
+    )?;
     Ok(Json(ApiResponse::success(reply, "Calculated")))
 }
 
