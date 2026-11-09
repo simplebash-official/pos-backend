@@ -24,7 +24,7 @@ use std::collections::HashMap;
 
 /// Enforces the `disposition` iff `condition == Damaged` rule from
 /// `domain::billing::ItemDisposition`'s doc comment.
-fn validate_condition_disposition(
+pub(super) fn validate_condition_disposition(
     condition: ItemCondition,
     disposition: Option<ItemDisposition>,
 ) -> AppResult<()> {
@@ -247,9 +247,8 @@ async fn compute_refund_shape(
 
 /// Applies the condition/disposition -> `StockMovementType` mapping for one
 /// returned item. `Damaged`+`RepairPending` and `PendingInspection` write no
-/// movement at all (parked — out of scope for this pass, see
-/// `CreditNoteStatus::AwaitingResolution`'s doc comment).
-async fn apply_return_stock_movement(
+/// movement at all (a pending line waits for `resolve_credit_note`).
+pub(super) async fn apply_return_stock_movement(
     db: &Db,
     item: &CreditNoteItem,
     credit_note_key: &str,
@@ -319,7 +318,11 @@ async fn apply_return_stock_movement(
 /// `Damaged`+`WriteOffScrap` -> `WrittenOff`; `Damaged`+`RepairPending` or
 /// `PendingInspection` -> `ReturnedFaulty`. Best-effort, same as the stock
 /// movement it accompanies — never fails the whole credit note.
-async fn transition_returned_serial(db: &Db, item: &CreditNoteItem, credit_note_key: &str) {
+pub(super) async fn transition_returned_serial(
+    db: &Db,
+    item: &CreditNoteItem,
+    credit_note_key: &str,
+) {
     let (Some(product_key), Some(serial_number)) = (&item.product_key, &item.serial_number) else {
         return;
     };
@@ -1047,6 +1050,7 @@ async fn finish_create_credit_note(
         voided_at: None,
         voided_by: None,
         voided_reason: None,
+        resolution: None,
         version: 1,
         created_at: now,
         updated_at: now,

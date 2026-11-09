@@ -68,6 +68,13 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         )
         .await?;
     }
+    // `credit_notes.resolution` arrived with resolving a credit note held for inspection.
+    let credit_note_cols = table_columns(pool, "credit_notes").await?;
+    if !credit_note_cols.is_empty() && !credit_note_cols.iter().any(|c| c == "resolution") {
+        tracing::info!("Migrating 'credit_notes' table: adding 'resolution' column");
+        pool.execute("ALTER TABLE credit_notes ADD COLUMN resolution JSON")
+            .await?;
+    }
     // `cash_movements.receipt_key` arrived with supplier receipts too.
     let movement_cols = table_columns(pool, "cash_movements").await?;
     if !movement_cols.is_empty() && !movement_cols.iter().any(|c| c == "receipt_key") {

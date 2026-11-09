@@ -8,8 +8,8 @@ use crate::domain::ModuleStatusResponse;
 use crate::domain::billing::{
     BillingStats, CompleteSaleResponse, CreateCreditNoteRequest, CreateSaleRequest, CreditNote,
     CreditNoteListQuery, CreditNoteListResponse, Invoice, InvoiceListQuery, InvoiceListResponse,
-    PaymentListResponse, PaymentRecord, RecordPaymentRequest, VoidCreditNoteRequest,
-    VoidInvoiceRequest,
+    PaymentListResponse, PaymentRecord, RecordPaymentRequest, ResolveCreditNoteRequest,
+    VoidCreditNoteRequest, VoidInvoiceRequest,
 };
 use crate::domain::settings::{DocumentDesignChoice, DocumentDesignStatus};
 use crate::modules::billing::service;
@@ -195,7 +195,7 @@ pub(super) async fn get_credit_note_document(
         params.template.as_deref(),
         params.design,
         &credit_note.key,
-        "credit-note",
+        credit_note_print_variant(&credit_note),
         data,
     )
     .await?;
@@ -206,6 +206,16 @@ pub(super) async fn get_credit_note_document(
         Body::from(pdf_bytes),
     )
         .into_response())
+}
+
+/// The print cache variant of a credit note. A resolved note prints its inspection outcome, so
+/// it never reuses the PDF stored while its lines were still held for inspection.
+fn credit_note_print_variant(credit_note: &CreditNote) -> &'static str {
+    if credit_note.resolution.is_some() {
+        "credit-note-resolved"
+    } else {
+        "credit-note"
+    }
 }
 
 #[utoipa::path(get, path = "/credit-notes/{id}/documents/{documentType}/design", tag = modules::BILLING,
@@ -237,7 +247,7 @@ pub(super) async fn get_credit_note_document_design(
         "credit-note",
         params.template.as_deref(),
         &credit_note.key,
-        "credit-note",
+        credit_note_print_variant(&credit_note),
     )
     .await?;
     Ok(Json(ApiResponse::success(
@@ -536,6 +546,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(create_credit_note, list_credit_notes))
         .routes(routes!(get_credit_note))
         .routes(routes!(void_credit_note))
+        .routes(routes!(resolve_credit_note))
         .routes(routes!(get_credit_note_document))
         .routes(routes!(get_credit_note_document_design))
 }
@@ -572,6 +583,36 @@ pub(super) async fn void_credit_note(
     Ok(Json(ApiResponse::success(
         credit_note,
         "Credit note voided successfully",
+    )))
+}
+
+#[utoipa::path(post, path = "/credit-notes/{id}/resolve", tag = modules::BILLING,
+    params(("id" = String, Path, description = "Credit note ID or prefixed key")),
+    request_body = ResolveCreditNoteRequest,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Inspection recorded — stock and serials updated, credit note resolved", body = ApiResponse<CreditNote>),
+        (status = 400, description = "Lines do not match what is held for inspection, a disposition is missing, or an Admin/Manager sent an approval", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token, or the manager PIN is wrong", body = ErrorResponse),
+        (status = 403, description = "Permission denied, or a manager approval is required", body = ErrorResponse),
+        (status = 404, description = "Credit note not found", body = ErrorResponse),
+        (status = 409, description = "Not waiting for inspection (already resolved or voided), or changed meanwhile", body = ErrorResponse),
+    )
+)]
+pub(super) async fn resolve_credit_note(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<ResolveCreditNoteRequest>,
+) -> AppResult<Json<ApiResponse<CreditNote>>> {
+    user.require_permission(perm::BILLING_WRITE)?;
+    let caller = user.approval_caller(&state.db).await?;
+    let credit_note =
+        service::credit_notes::resolve_credit_note(&state.db, &id, &caller, body).await?;
+    state.reports_engine.invalidate_active();
+    Ok(Json(ApiResponse::success(
+        credit_note,
+        "Credit note resolved successfully",
     )))
 }
 

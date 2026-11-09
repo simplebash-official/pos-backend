@@ -1,15 +1,16 @@
 use crate::core::constants::prefixes;
 use crate::core::id::generate_id;
 use crate::domain::billing::{
-    CreditNote, CreditNoteItem, Invoice, InvoiceItem, InvoiceStatus, PaymentRecord,
-    RefundBreakdownLeg, SplitPayment, compute_is_overdue,
+    CreditNote, CreditNoteItem, CreditNoteResolution, Invoice, InvoiceItem, InvoiceStatus,
+    PaymentRecord, RefundBreakdownLeg, SplitPayment, compute_is_overdue,
 };
 use mongodb::bson::DateTime as BsonDateTime;
 use mongodb::bson::oid::ObjectId;
 use serde::{Deserialize, Serialize};
 
 /// Credit notes are append-only: every field is written once at insert,
-/// except `status`/`voided_*` which `void_credit_note` sets once.
+/// except `status`/`voided_*` (set once by `void_credit_note`) and `status`/`resolution` (set once
+/// by `resolve_credit_note`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreditNoteDocument {
     /// MongoDB internal document identifier.
@@ -84,6 +85,9 @@ pub struct CreditNoteDocument {
     /// Mandatory reason this credit note was voided.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub voided_reason: Option<String>,
+    /// The inspection outcome for lines returned as `pending_inspection`, once resolved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<CreditNoteResolution>,
     /// Concurrency version number for optimistic locking.
     pub version: i64,
     /// Timestamp when credit note document was created.
@@ -134,6 +138,7 @@ impl CreditNoteDocument {
             voided_at: self.voided_at.map(|d| d.to_chrono()),
             voided_by: self.voided_by,
             voided_reason: self.voided_reason,
+            resolution: self.resolution,
             created_at: self.created_at.to_chrono(),
             updated_at: self.updated_at.to_chrono(),
             version: self.version,

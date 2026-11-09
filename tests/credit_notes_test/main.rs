@@ -2,4 +2,5 @@
 mod common;
 mod helpers;
 mod issuing;
+mod resolving;
 mod voiding;

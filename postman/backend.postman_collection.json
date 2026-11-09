@@ -880,6 +880,42 @@
           "response": []
         },
         {
+          "name": "Resolve Credit Note",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lines\": [\n    { \"lineIndex\": 0, \"condition\": \"resalable\" }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/billing/credit-notes/{{creditNoteKey}}/resolve",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "billing",
+                "credit-notes",
+                "{{creditNoteKey}}",
+                "resolve"
+              ]
+            },
+            "description": "Decides what happens to every unit a credit note holds for inspection (a line returned as `pending_inspection`, status `awaiting_resolution`), then moves the note to `resolved`. `lines` must name every pending line exactly once with a real `condition` (`resalable`, `open_box_discount`, or `damaged` with a `disposition` of `return_to_supplier`, `write_off_scrap` or `repair_pending`). Restocking, write-offs and serial status follow the same mapping as creating a credit note. The stored lines are not rewritten; the outcome is saved as `resolution` (who resolved it, who approved it, the decision per line). Needs `billing:write`. A signed-in Admin or Manager approves it themselves and sends no `approval` (400 otherwise); Staff send `approval {managerPin, reason}` (403 `PIN_NOT_SET` when missing, 401 `INVALID_PIN` when wrong). 409 `CREDIT_NOTE_NOT_AWAITING_RESOLUTION` when it is already resolved or voided; 409 `CREDIT_NOTE_RESOLVE_CONFLICT` when it changed meanwhile."
+          },
+          "response": []
+        },
+        {
           "name": "Get Credit Note Document (PDF)",
           "request": {
             "method": "GET",

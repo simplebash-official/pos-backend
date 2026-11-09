@@ -191,6 +191,10 @@ pub struct CreditNote {
     /// Mandatory reason this credit note was voided.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub voided_reason: Option<String>,
+    /// What the shop decided for every line that was returned as `pending_inspection`. The
+    /// lines themselves are never rewritten; this travels with the `resolved` status.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<CreditNoteResolution>,
     /// Timestamp when the credit note was recorded.
     pub created_at: DateTime<Utc>,
     /// Timestamp when the credit note was last updated.
@@ -289,10 +293,9 @@ pub struct CreditNoteListResponse {
 }
 
 /// A credit note's overall resolution state. `AwaitingResolution` is set
-/// only when at least one line is `ItemCondition::PendingInspection` — this
-/// codebase has no edit-in-place endpoint for any billing document, so
-/// there is deliberately no way to move a credit note out of
-/// `AwaitingResolution` other than `Voided` in this pass.
+/// only when at least one line is `ItemCondition::PendingInspection`. It
+/// leaves that state by `service::credit_notes::resolve_credit_note` (to
+/// `Resolved`, recording a `CreditNoteResolution`) or by voiding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CreditNoteStatus {
@@ -314,9 +317,9 @@ pub enum ItemCondition {
     Damaged,
     /// Works, but opened/used — optionally restocked at a discount.
     OpenBoxDiscount,
-    /// Returned but not yet checked — no stock movement happens until this
-    /// is resolved to one of the other conditions (out of scope for this
-    /// pass, see `CreditNoteStatus::AwaitingResolution`).
+    /// Returned but not yet checked — no stock movement happens until the
+    /// credit note is resolved (`CreditNoteResolution`) to one of the other
+    /// conditions.
     PendingInspection,
 }
 
@@ -372,4 +375,73 @@ pub enum ReturnReason {
 pub struct VoidCreditNoteRequest {
     /// Mandatory reason explaining why the credit note is being voided.
     pub reason: String,
+}
+
+/// One pending line's real condition, decided at inspection.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolveLine {
+    /// Position of the line in the credit note's `returnedItems`.
+    pub line_index: usize,
+    /// The condition found. Never `pending_inspection`.
+    pub condition: ItemCondition,
+    /// What happens to the item — required iff `condition == damaged`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disposition: Option<ItemDisposition>,
+}
+
+/// The recorded outcome of an inspection: every pending line's decision and who made it.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreditNoteResolution {
+    /// When the credit note was resolved.
+    pub resolved_at: DateTime<Utc>,
+    /// User who recorded the inspection.
+    pub resolved_by_user_id: String,
+    /// That user's display name at the time.
+    pub resolved_by_name: String,
+    /// The manager or owner who approved it (the same user when they self-approve).
+    pub approved_by_user_id: String,
+    /// The approver's display name at the time.
+    pub approved_by_name: String,
+    /// The decision for each pending line.
+    pub lines: Vec<ResolveLine>,
+}
+
+/// Body for `POST /billing/credit-notes/{key}/resolve`.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolveCreditNoteRequest {
+    /// A decision for every line still `pending_inspection`, no more and no fewer.
+    pub lines: Vec<ResolveLine>,
+    /// Manager approval. A signed-in Admin or Manager sends none; Staff must.
+    pub approval: Option<crate::domain::users::ManagerApproval>,
+}
+
+impl CreditNote {
+    /// The lines as they stand now: a line held for inspection takes the condition its
+    /// resolution decided. The stored lines are never rewritten (synced credit notes are
+    /// immutable), so everything that needs a line's real condition reads it here.
+    #[must_use]
+    pub fn effective_items(&self) -> Vec<CreditNoteItem> {
+        apply_resolution(&self.returned_items, self.resolution.as_ref())
+    }
+}
+
+/// `items` with each line decided in `resolution` carrying its resolved condition.
+#[must_use]
+pub fn apply_resolution(
+    items: &[CreditNoteItem],
+    resolution: Option<&CreditNoteResolution>,
+) -> Vec<CreditNoteItem> {
+    let mut items = items.to_vec();
+    if let Some(resolution) = resolution {
+        for line in &resolution.lines {
+            if let Some(item) = items.get_mut(line.line_index) {
+                item.condition = line.condition;
+                item.disposition = line.disposition;
+            }
+        }
+    }
+    items
 }

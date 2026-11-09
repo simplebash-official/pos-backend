@@ -5,7 +5,7 @@ use crate::core::id::generate_id;
 use crate::core::utils::{build_bson_regex, calculate_pagination, shop_today_range};
 use crate::domain::billing::{
     CreditNote, CreditNoteListQuery, CreditNoteListResponse, CreditNoteStatus, InvoiceItem,
-    ItemCondition, VoidCreditNoteRequest,
+    ItemCondition, VoidCreditNoteRequest, apply_resolution,
 };
 use crate::domain::inventory::StockMovementType;
 use crate::modules::billing::model::{CreditNoteDocument, PaymentDocument};
@@ -195,7 +195,7 @@ pub async fn void_credit_note(
             ));
         }
 
-        for item in &existing.returned_items {
+        for item in &apply_resolution(&existing.returned_items, existing.resolution.as_ref()) {
             if item.condition != ItemCondition::Resalable
                 && item.condition != ItemCondition::OpenBoxDiscount
             {

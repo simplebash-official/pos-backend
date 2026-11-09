@@ -11,4 +11,5 @@ pub(crate) use repository_credit_notes::find_credit_note_by_id_or_key;
 
 pub(crate) use repository_credit_notes::insert_credit_note;
 pub(crate) use repository_credit_notes::list_credit_notes;
+pub(crate) use repository_credit_notes::resolve_credit_note;
 pub(crate) use repository_credit_notes::update_credit_note_status;

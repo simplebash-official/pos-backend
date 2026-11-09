@@ -19,7 +19,13 @@ const INVOICE_LIFECYCLE: &[&str] = &[
 /// Invoice columns recomputed from ledger rows (never merged from a payload).
 const INVOICE_DERIVED: &[&str] = &["refundedCents", "creditNoteCount"];
 
-const CREDIT_NOTE_LIFECYCLE: &[&str] = &["status", "voidedAt", "voidedBy", "voidedReason"];
+const CREDIT_NOTE_LIFECYCLE: &[&str] = &[
+    "status",
+    "voidedAt",
+    "voidedBy",
+    "voidedReason",
+    "resolution",
+];
 
 /// A quotation's post-creation changes are its lifecycle fields (active -> fulfilled -> cancelled).
 const QUOTATION_LIFECYCLE: &[&str] = &["status", "fulfilledByInvoiceKey", "fulfilledAt"];

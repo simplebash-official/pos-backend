@@ -459,6 +459,7 @@ CREATE TABLE IF NOT EXISTS credit_notes (
     voided_at TEXT,
     voided_by TEXT,
     voided_reason TEXT,
+    resolution JSON,
     session_key TEXT,
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,

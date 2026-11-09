@@ -132,7 +132,7 @@ pub(crate) fn build_credit_note_data(credit_note: &CreditNote, invoice: Option<&
     };
 
     let items: Vec<Value> = credit_note
-        .returned_items
+        .effective_items()
         .iter()
         .map(|item| {
             json!({
