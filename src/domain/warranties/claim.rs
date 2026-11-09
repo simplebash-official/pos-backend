@@ -378,6 +378,29 @@ pub struct ResolveClaimRequest {
     pub replacement: Option<ReplacementRequest>,
 }
 
+/// `POST /warranty-claims/quick-replace`: a faulty unit swapped for a new one at the counter,
+/// recorded as one claim that is opened, inspected, decided as a replacement, finished and
+/// handed over in a single request.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct QuickReplaceRequest {
+    pub warranty_key: String,
+    pub issue_description: String,
+    /// What staff found when they looked at the item.
+    pub inspection_notes: String,
+    pub void_checks: Option<VoidChecks>,
+    pub conditions: Option<Vec<String>>,
+    /// How many units of this warranty are being swapped.
+    pub quantity: Option<i64>,
+    /// The specific serial number being swapped, if the warranty does not name one.
+    pub serial_number: Option<String>,
+    /// The new unit given to the customer.
+    pub replacement: ReplacementRequest,
+    pub resolution_note: Option<String>,
+    /// The deciding manager's or owner's PIN and why; a replacement is always a manager's call.
+    pub approval: ManagerApproval,
+}
+
 /// Which claims a list wants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]

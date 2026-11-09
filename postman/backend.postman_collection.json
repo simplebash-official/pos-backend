@@ -8446,6 +8446,40 @@
           "response": []
         },
         {
+          "name": "Quick Replace",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/warranty-claims/quick-replace",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "warranty-claims",
+                "quick-replace"
+              ]
+            },
+            "description": "Swaps a faulty unit for a new one in one request: opens the claim, inspects it, decides a replacement, finishes it and hands it back. Needs `warranty_claims:record` and a manager or owner PIN with a reason (a replacement is always a manager's call). Checked before anything is written: the inspection note, the PIN, and that the new unit can be given (a serial in stock, or a price tier with stock). A warranty that is cancelled, already under a claim or run out is refused (409), so a run-out one goes through *Open Claim* with an approval. Each step still saves by itself, so a failure after the claim opened leaves an ordinary claim at the step it reached. Give `replacement` as `{serialNumber}` for a serialized item or `{sellingPriceCents}` for one sold by price tier.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"warrantyKey\": \"{{warrantyKey}}\",\n  \"issueDescription\": \"Will not switch on\",\n  \"inspectionNotes\": \"Board is dead, no liquid marks\",\n  \"quantity\": 1,\n  \"replacement\": {\n    \"serialNumber\": \"IMEI-NEW-0001\"\n  },\n  \"resolutionNote\": \"Swapped at the counter\",\n  \"approval\": {\n    \"managerPin\": \"1234\",\n    \"reason\": \"Fault confirmed, no damage\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
           "name": "List Claims",
           "request": {
             "method": "GET",

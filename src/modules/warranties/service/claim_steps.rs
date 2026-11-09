@@ -47,7 +47,7 @@ fn warranty_conflict() -> AppError {
 }
 
 /// Text that must be filled in, trimmed.
-fn required_text(value: &str, what: &str) -> AppResult<String> {
+pub(super) fn required_text(value: &str, what: &str) -> AppResult<String> {
     let text = value.trim();
     if text.is_empty() {
         return Err(AppError::validation(format!("Write {what}.")));

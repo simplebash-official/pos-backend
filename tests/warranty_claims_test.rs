@@ -1191,6 +1191,325 @@ async fn lookup(app: &common::TestApp, token: &str, q: &str) -> Value {
     body["data"].clone()
 }
 
+/// The claims a warranty has, any status.
+async fn claims_of(app: &common::TestApp, token: &str, warranty_key: &str) -> Vec<Value> {
+    let (status, body) = send(
+        app,
+        "GET",
+        &format!("/api/warranty-claims?status=all&warrantyKey={warranty_key}"),
+        None,
+        token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    items(&body)
+}
+
+/// `POST /warranty-claims/quick-replace` with every field a counter sends.
+fn quick_body(warranty_key: &str, replacement: Value, approval: Value) -> Value {
+    json!({
+        "warrantyKey": warranty_key,
+        "issueDescription": "  Will not switch on  ",
+        "inspectionNotes": "Board is dead, no liquid marks",
+        "replacement": replacement,
+        "approval": approval,
+    })
+}
+
+async fn quick(app: &common::TestApp, token: &str, body: Value) -> (StatusCode, Value) {
+    send(
+        app,
+        "POST",
+        "/api/warranty-claims/quick-replace",
+        Some(body),
+        token,
+    )
+    .await
+}
+
+/// One request opens, inspects, decides as a replacement, finishes and hands back a claim.
+/// Everything that can be refused is refused before anything is written.
+async fn quick_replace_scenario(app: &common::TestApp) {
+    simplebash_pos_backend::seeds::admin::seed_admin(&app.db_handle, &app.config.seed_admin)
+        .await
+        .expect("the admin is seeded");
+    let admin = token_for(app, "admin", Role::Admin, "Owner Olivia");
+    user_with_pin(app, &admin, "mgr", (Role::Manager, "manager"), MANAGER_PIN).await;
+    let staff = user_with_pin(app, &admin, "kamal", (Role::Staff, "staff"), STAFF_PIN).await;
+
+    let (status, category) = send(
+        app,
+        "POST",
+        "/api/inventory/categories",
+        Some(json!({
+            "name": format!("Phones {}", uuid::Uuid::new_v4()), "icon": "Box", "color": "blue",
+            "subcategories": ["Smartphones"],
+        })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{category}");
+    let base = |name: &str| {
+        json!({
+            "name": format!("{name} {}", &uuid::Uuid::new_v4().simple().to_string()[..6]),
+            "categoryKey": text(&category["data"]["key"]),
+            "subcategoryKey": text(&category["data"]["subcategories"][0]["key"]),
+            "minStockThreshold": 1,
+        })
+    };
+    let mut phone_body = base("Phone");
+    phone_body["isSerialized"] = json!(true);
+    phone_body["warranty"] = json!({
+        "coverage": { "kind": "limited", "value": 12, "unit": "months" },
+        "warrantyType": "shop",
+    });
+    let phone = product(app, &admin, phone_body).await;
+    let mut charger_body = base("Charger");
+    charger_body["openingStock"] =
+        json!({ "quantity": 10, "unitCostCents": 500, "sellingPriceCents": 1500 });
+    charger_body["warranty"] = json!({
+        "coverage": { "kind": "limited", "value": 6, "unit": "months" },
+        "warrantyType": "manufacturer",
+    });
+    let charger = product(app, &admin, charger_body).await;
+
+    let (status, supplier) = send(
+        app,
+        "POST",
+        "/api/suppliers",
+        Some(json!({
+            "name": format!("Supplier {}", uuid::Uuid::new_v4()), "contactPerson": "Jane",
+            "primaryPhone": "+94770000001", "address": "Colombo", "suppliedCategories": ["Phones"],
+        })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{supplier}");
+    let tag = uuid::Uuid::new_v4().simple().to_string();
+    let serials: Vec<String> = (0..6).map(|i| format!("QIMEI{}{i}", &tag[..10])).collect();
+    let (status, body) = send(
+        app,
+        "POST",
+        "/api/purchase-receipts",
+        Some(json!({
+            "supplierKey": text(&supplier["data"]["key"]),
+            "date": chrono::Utc::now().to_rfc3339(),
+            "lines": [{
+                "productKey": phone, "quantity": 6, "lineTotalCents": 300_000,
+                "sellingPriceCents": 90_000, "serialNumbers": serials,
+            }],
+        })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+
+    // Three phones and one charger are sold; three phones stay in stock to be given out.
+    let (status, sold) = send(
+        app,
+        "POST",
+        "/api/billing/sales",
+        Some(sale(json!([
+            { "productKey": phone, "quantity": 3, "discountCents": 0, "sourceType": "retail",
+              "serialNumbers": [serials[0], serials[1], serials[2]] },
+            { "productKey": charger, "quantity": 1, "discountCents": 0, "sourceType": "retail",
+              "sellingPriceCents": 1500 },
+        ]))),
+        &staff,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sold}");
+    let invoice_key = text(&sold["data"]["invoice"]["key"]);
+    let issued = warranties_of(app, &staff, &invoice_key).await;
+    let warranty_of = |serial: Option<&str>| {
+        text(
+            &issued
+                .iter()
+                .find(|w| w["serialNumber"].as_str() == serial)
+                .expect("the unit has a warranty")["key"],
+        )
+    };
+    let (phone_a, phone_b, phone_c, charger_w) = (
+        warranty_of(Some(&serials[0])),
+        warranty_of(Some(&serials[1])),
+        warranty_of(Some(&serials[2])),
+        warranty_of(None),
+    );
+    let by_serial = |serial: &str| json!({ "serialNumber": serial });
+
+    // ---- Refused before anything is written ----
+    // Nothing written about what was found.
+    let mut no_notes = quick_body(
+        &phone_a,
+        by_serial(&serials[4]),
+        approval(MANAGER_PIN, "Covered"),
+    );
+    no_notes["inspectionNotes"] = json!("   ");
+    let (status, body) = quick(app, &staff, no_notes).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    // A cashier's own PIN is not a manager's.
+    let (status, body) = quick(
+        app,
+        &staff,
+        quick_body(&phone_a, by_serial(&serials[4]), approval(STAFF_PIN, "Me")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+    assert_eq!(body["code"], "INVALID_PIN", "{body}");
+    // A unit that is not in stock, and the faulty unit itself.
+    let (status, body) = quick(
+        app,
+        &staff,
+        quick_body(
+            &phone_a,
+            by_serial(&format!("NOT-IN-STOCK-{tag}")),
+            approval(MANAGER_PIN, "Covered"),
+        ),
+    )
+    .await;
+    assert!(status.is_client_error(), "{status}: {body}");
+    let (status, body) = quick(
+        app,
+        &staff,
+        quick_body(
+            &phone_a,
+            by_serial(&serials[0]),
+            approval(MANAGER_PIN, "Covered"),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "CLAIM_REPLACEMENT_INVALID", "{body}");
+    // Without the permission to record claims.
+    let nobody = common::mint_token(&app.config, Some(Role::Staff), &[]);
+    let (status, body) = quick(
+        app,
+        &nobody,
+        quick_body(
+            &phone_a,
+            by_serial(&serials[4]),
+            approval(MANAGER_PIN, "Covered"),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert!(claims_of(app, &staff, &phone_a).await.is_empty());
+    assert_eq!(
+        detail(app, &staff, &phone_a).await["warranty"]["state"],
+        "active"
+    );
+
+    // ---- A serialized phone is swapped in one request ----
+    let old_ends_on = detail(app, &staff, &phone_a).await["warranty"]["endsOn"].clone();
+    let (status, body) = quick(
+        app,
+        &staff,
+        quick_body(
+            &phone_a,
+            by_serial(&serials[4]),
+            approval(MANAGER_PIN, "Dead board"),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let claim = &body["data"];
+    assert_eq!(claim["status"], "returned", "{body}");
+    assert_eq!(claim["decision"], "replace");
+    assert_eq!(claim["decidedByName"], "mgr");
+    assert_eq!(claim["decisionReason"], "Dead board");
+    assert_eq!(claim["issueDescription"], "Will not switch on");
+    assert_eq!(claim["inspectionNotes"], "Board is dead, no liquid marks");
+    assert_eq!(claim["replacementSerialNumber"], serials[4].as_str());
+    assert!(!claim["returnedOn"].is_null(), "{claim}");
+    let new_key = text(&claim["replacementWarrantyKey"]);
+    let old = detail(app, &staff, &phone_a).await;
+    assert_eq!(old["warranty"]["replacedByWarrantyKey"], new_key.as_str());
+    let new = detail(app, &staff, &new_key).await;
+    assert_eq!(
+        new["warranty"]["endsOn"], old_ends_on,
+        "the old end date carries on"
+    );
+    assert_eq!(new["replaces"]["key"], phone_a.as_str());
+    let units = serial_list(app, &admin, &phone).await;
+    assert_eq!(unit(&units, &serials[0])["status"], "returned_faulty");
+    assert_eq!(unit(&units, &serials[4])["status"], "sold");
+    // The swapped warranty cannot be swapped again.
+    let (status, body) = quick(
+        app,
+        &staff,
+        quick_body(
+            &phone_a,
+            by_serial(&serials[5]),
+            approval(MANAGER_PIN, "Again"),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(claims_of(app, &staff, &phone_a).await.len(), 1);
+
+    // ---- A warranty that already has an open claim, or has run out ----
+    open(app, &staff, &phone_b).await;
+    let (status, body) = quick(
+        app,
+        &staff,
+        quick_body(
+            &phone_b,
+            by_serial(&serials[5]),
+            approval(MANAGER_PIN, "Covered"),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "CLAIM_ALREADY_OPEN", "{body}");
+    assert_eq!(claims_of(app, &staff, &phone_b).await.len(), 1);
+
+    run_out(app, &phone_c).await;
+    let (status, body) = quick(
+        app,
+        &staff,
+        quick_body(
+            &phone_c,
+            by_serial(&serials[5]),
+            approval(MANAGER_PIN, "Covered"),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "WARRANTY_EXPIRED", "{body}");
+    assert!(claims_of(app, &staff, &phone_c).await.is_empty());
+
+    // ---- A charger is swapped from a price tier ----
+    let charger_before: i64 = remaining(app, &admin, &charger).await.values().sum();
+    let (status, body) = quick(
+        app,
+        &staff,
+        quick_body(
+            &charger_w,
+            json!({ "sellingPriceCents": 1500 }),
+            approval(MANAGER_PIN, "Faulty plug"),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["status"], "returned", "{body}");
+    let charger_after: i64 = remaining(app, &admin, &charger).await.values().sum();
+    assert_eq!(charger_after, charger_before - 1, "one unit left stock");
+
+    // ---- Voiding the invoice puts the swapped phone back ----
+    let (status, voided) = send(
+        app,
+        "POST",
+        &format!("/api/billing/invoices/{invoice_key}/void"),
+        Some(json!({ "reason": "Customer changed their mind" })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{voided}");
+    let units = serial_list(app, &admin, &phone).await;
+    assert_eq!(unit(&units, &serials[4])["status"], "in_stock");
+    assert_eq!(unit(&units, &serials[0])["status"], "returned_faulty");
+}
+
 #[tokio::test]
 async fn warranty_claims_on_sqlite() {
     let app = common::spawn_app_sqlite().await;
@@ -1201,5 +1520,18 @@ async fn warranty_claims_on_sqlite() {
 async fn warranty_claims_on_mongo() {
     let app = common::spawn_app_isolated().await;
     scenario(&app).await;
+    app.mongo().drop().await.ok();
+}
+
+#[tokio::test]
+async fn quick_replace_on_sqlite() {
+    let app = common::spawn_app_sqlite().await;
+    quick_replace_scenario(&app).await;
+}
+
+#[tokio::test]
+async fn quick_replace_on_mongo() {
+    let app = common::spawn_app_isolated().await;
+    quick_replace_scenario(&app).await;
     app.mongo().drop().await.ok();
 }

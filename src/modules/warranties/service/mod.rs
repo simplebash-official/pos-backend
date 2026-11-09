@@ -4,6 +4,7 @@
 //! `pub(crate)` functions below, never the repository.
 
 mod claim_outcomes;
+mod claim_quick;
 mod claim_steps;
 mod claim_void;
 mod warranty_conditions;
@@ -19,6 +20,7 @@ pub(crate) use claim_outcomes::convert_to_paid_repair;
 pub(crate) use claim_outcomes::finish_claim_refund;
 pub(crate) use claim_outcomes::open_rework;
 pub(crate) use claim_outcomes::resolve_claim;
+pub(crate) use claim_quick::quick_replace;
 pub(crate) use claim_steps::decide_claim;
 pub(crate) use claim_steps::get_claim;
 pub(crate) use claim_steps::hydrate_sync_claims;

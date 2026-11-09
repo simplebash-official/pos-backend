@@ -17,6 +17,7 @@ pub use claim::ClaimStatus;
 pub use claim::DecideClaimRequest;
 pub use claim::InspectClaimRequest;
 pub use claim::OpenClaimRequest;
+pub use claim::QuickReplaceRequest;
 pub use claim::ReplacementRequest;
 pub use claim::ResolveClaimRequest;
 pub use claim::SendToSupplierRequest;

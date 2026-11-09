@@ -10,8 +10,9 @@ use crate::core::middleware::sync_headers::DeviceId;
 use crate::core::response::{ApiResponse, ErrorResponse};
 use crate::domain::warranties::{
     ClaimListQuery, ClaimListResponse, CreateConditionRequest, DecideClaimRequest,
-    InspectClaimRequest, OpenClaimRequest, ResolveClaimRequest, SendToSupplierRequest,
-    SupplierReturnRequest, WarrantyClaim, WarrantyCondition, WarrantyConditionsResponse,
+    InspectClaimRequest, OpenClaimRequest, QuickReplaceRequest, ResolveClaimRequest,
+    SendToSupplierRequest, SupplierReturnRequest, WarrantyClaim, WarrantyCondition,
+    WarrantyConditionsResponse,
 };
 use crate::modules::warranties::service;
 use axum::Json;
@@ -42,6 +43,34 @@ pub(super) async fn open_claim(
     let actor = actor(&state, &user).await?;
     let claim = service::open_claim(&state.db, body, &actor, device_id).await?;
     Ok(Json(ApiResponse::success(claim, "Claim opened")))
+}
+
+#[utoipa::path(post, path = "/quick-replace", tag = modules::WARRANTY_CLAIMS,
+    request_body = QuickReplaceRequest,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Claim opened, inspected, decided as a replacement, finished and handed back", body = ApiResponse<WarrantyClaim>),
+        (status = 400, description = "Nothing written about what is wrong or what was found, or a quantity below 1", body = ErrorResponse),
+        (status = 401, description = "Missing token, or the PIN is not a manager's or owner's", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+        (status = 404, description = "Warranty or product not found", body = ErrorResponse),
+        (status = 409, description = "Cancelled, run out, already under a claim, or the new unit cannot be given", body = ErrorResponse),
+    )
+)]
+/// Swaps a faulty unit for a new one in one request. Needs a manager or owner PIN and a reason.
+pub(super) async fn quick_replace(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    DeviceId(device_id): DeviceId,
+    Json(body): Json<QuickReplaceRequest>,
+) -> AppResult<Json<ApiResponse<WarrantyClaim>>> {
+    user.require_permission(perm::WARRANTY_CLAIMS_RECORD)?;
+    let actor = actor(&state, &user).await?;
+    let claim = service::quick_replace(&state.db, body, &actor, device_id).await?;
+    Ok(Json(ApiResponse::success(
+        claim,
+        "Replaced and handed to the customer",
+    )))
 }
 
 #[utoipa::path(get, path = "/", tag = modules::WARRANTY_CLAIMS,
@@ -363,6 +392,8 @@ pub fn router() -> OpenApiRouter<AppState> {
         // Reads.
         .routes(routes!(open_claim, list_claims))
         .routes(routes!(get_claim))
+        // The whole replacement in one request.
+        .routes(routes!(quick_replace))
         // Steps, in lifecycle order.
         .routes(routes!(inspect_claim))
         .routes(routes!(decide_claim))

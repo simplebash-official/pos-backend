@@ -31,25 +31,27 @@ fn replacement_invalid(message: impl Into<String>) -> AppError {
 
 /// The new unit, checked and its stock planned, before anything is written.
 #[derive(Debug)]
-struct PlannedReplacement {
+pub(super) struct PlannedReplacement {
     product_key: String,
     /// The faulty unit coming back and the in-stock unit going out, for a serialized item.
     serials: Option<(ProductSerialDocument, ProductSerialDocument)>,
     allocations: Vec<BatchAllocation>,
 }
 
-async fn plan_replacement(
+pub(super) async fn plan_replacement(
     db: &Db,
-    claim: &WarrantyClaimDocument,
+    product_key: Option<&str>,
+    old_serial: Option<&str>,
+    invoice_key: &str,
     replacement: &ReplacementRequest,
 ) -> AppResult<PlannedReplacement> {
-    let Some(product_key) = claim.product_key.clone() else {
+    let Some(product_key) = product_key.map(str::to_string) else {
         return Err(replacement_invalid(
             "Only an item sold from stock can be replaced from stock.",
         ));
     };
     let product = inventory::service::product::get_product_by_key(db, &product_key).await?;
-    match (&claim.serial_number, replacement) {
+    match (old_serial, replacement) {
         (
             Some(old_serial),
             ReplacementRequest {
@@ -72,7 +74,7 @@ async fn plan_replacement(
                 db,
                 &product_key,
                 old_serial,
-                &claim.invoice_key,
+                invoice_key,
             )
             .await?;
             let (_, allocations) = inventory::service::stock_batch::allocations_for_serials(
@@ -235,9 +237,16 @@ pub(crate) async fn resolve_claim(
                     "A repaired item keeps its own unit; leave the replacement out.",
                 ));
             }
-            (ClaimDecision::Replace, Some(replacement)) => {
-                Some(plan_replacement(db, &claim, replacement).await?)
-            }
+            (ClaimDecision::Replace, Some(replacement)) => Some(
+                plan_replacement(
+                    db,
+                    claim.product_key.as_deref(),
+                    claim.serial_number.as_deref(),
+                    &claim.invoice_key,
+                    replacement,
+                )
+                .await?,
+            ),
             (ClaimDecision::Replace, None) => {
                 return Err(replacement_invalid("Choose the new unit to give."));
             }
