@@ -508,7 +508,11 @@ async fn mongo_create_list_cancel_and_print() {
         .expect("the value is a string")
         .to_string();
 
-    let (status, _) = call(&app.router, "GET", "/api/quotations", None, &staff).await;
+    let (status, staff_list) = call(&app.router, "GET", "/api/quotations", None, &staff).await;
+    assert_eq!(status, StatusCode::OK, "{staff_list}");
+
+    let bare = common::mint_token(&app.config, Some(Role::Staff), &[]);
+    let (status, _) = call(&app.router, "GET", "/api/quotations", None, &bare).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
     let (status, list) = call(

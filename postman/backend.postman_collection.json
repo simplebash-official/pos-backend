@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "4a99e5db-6dab-4289-be33-7994c1253468",
     "name": "backend",
-    "description": "Rust/Axum API backend for simplebash-pos, a point-of-sale system for a repair/retail shop.\n\nAll requests inherit the collection-level Bearer auth (`{{accessToken}}`) — set it once per environment (Development/Production) after obtaining a JWT via Auth > Login (its Tests script auto-populates `{{accessToken}}`/`{{userId}}` for you on success, so nothing to copy/paste). Admin-gated endpoints (inventory category/subcategory writes, Billing > Void Invoice / Close Invoice, and every Suppliers/Supplier Products/Purchases request — reads included) require the token's `role` claim to be `admin`. Permission-gated endpoints (all of Inventory except the module-status stub, Customers writes, Employees CRUD, Billing > Complete Sale/Record Payment/Credit Notes, Repairs writes, Print Jobs writes, Quotations (every route, `quotations:manage` — Admin and Manager only), Reports reads (`reports:view`), Users CRUD, Auth > List Login Sessions) require the token's `permissions` claim to include a specific permission (e.g. `inventory:read`, `inventory:write`, `customers:write`, `employees:read`, `employees:write`, `billing:write`, `repairs:write`, `print_jobs:write`, `quotations:manage`, `reports:view`, `users:manage`, `sessions:view`) — see CLAUDE.md's \"Auth, users & permissions\" section for the full role→permission table; the default seeded Admin (`cargo run --bin seed_all` or `cargo run --bin seed_admin` with credentials `admin@pos.com` / `admin@1234`) has every permission. Users CRUD is additionally scoped by an Admin/Manager hierarchy on top of that permission gate — see the Users folder's description.\n\nOnly these endpoints work without a token at all: Health, Auth > Login, Swagger, and the `GET /` module-status stubs still remaining on Inventory/Billing/Reports (Customers, Repairs, Employees, and Print Jobs have real authenticated `GET /` list endpoints). Everything else returns 401 `UNAUTHORIZED` without a valid Bearer token, and 403 `PERMISSION_DENIED`/`ADMIN_REQUIRED` if the token lacks the required permission or role.\n\nBase URL (`{{backendBaseUrl}}`), and the access token, are environment variables — switch the active Postman environment to point requests at dev vs prod.",
+    "description": "Rust/Axum API backend for simplebash-pos, a point-of-sale system for a repair/retail shop.\n\nAll requests inherit the collection-level Bearer auth (`{{accessToken}}`) — set it once per environment (Development/Production) after obtaining a JWT via Auth > Login (its Tests script auto-populates `{{accessToken}}`/`{{userId}}` for you on success, so nothing to copy/paste). Admin-gated endpoints (inventory category/subcategory writes, Billing > Void Invoice / Close Invoice, and every Suppliers/Supplier Products/Purchases request — reads included) require the token's `role` claim to be `admin`. Permission-gated endpoints (all of Inventory except the module-status stub, Customers writes, Employees CRUD, Billing > Complete Sale/Record Payment/Credit Notes, Repairs writes, Print Jobs writes, Quotations (every route, `quotations:manage` — Admin, Manager and Staff), Reports reads (`reports:view`), Users CRUD, Auth > List Login Sessions) require the token's `permissions` claim to include a specific permission (e.g. `inventory:read`, `inventory:write`, `customers:write`, `employees:read`, `employees:write`, `billing:write`, `repairs:write`, `print_jobs:write`, `quotations:manage`, `reports:view`, `users:manage`, `sessions:view`) — see CLAUDE.md's \"Auth, users & permissions\" section for the full role→permission table; the default seeded Admin (`cargo run --bin seed_all` or `cargo run --bin seed_admin` with credentials `admin@pos.com` / `admin@1234`) has every permission. Users CRUD is additionally scoped by an Admin/Manager hierarchy on top of that permission gate — see the Users folder's description.\n\nOnly these endpoints work without a token at all: Health, Auth > Login, Swagger, and the `GET /` module-status stubs still remaining on Inventory/Billing/Reports (Customers, Repairs, Employees, and Print Jobs have real authenticated `GET /` list endpoints). Everything else returns 401 `UNAUTHORIZED` without a valid Bearer token, and 403 `PERMISSION_DENIED`/`ADMIN_REQUIRED` if the token lacks the required permission or role.\n\nBase URL (`{{backendBaseUrl}}`), and the access token, are environment variables — switch the active Postman environment to point requests at dev vs prod.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "_exporter_id": "46626151"
   },
@@ -4899,7 +4899,7 @@
                 }
               ]
             },
-            "description": "List quotations, newest first, with search, status filter and pagination. `isExpired` is derived from `validUntil`; it is never stored.\n\n**Requires a valid Bearer token whose `permissions` claim includes `quotations:manage`** (held by the Admin and Manager roles only). Staff and permission-less tokens get 403 `PERMISSION_DENIED`; a missing token gets 401."
+            "description": "List quotations, newest first, with search, status filter and pagination. `isExpired` is derived from `validUntil`; it is never stored.\n\n**Requires a valid Bearer token whose `permissions` claim includes `quotations:manage`** (held by Admin, Manager and Staff). Permission-less tokens get 403 `PERMISSION_DENIED`; a missing token gets 401."
           },
           "response": []
         },
@@ -4947,7 +4947,7 @@
                 "quotations"
               ]
             },
-            "description": "Create a quotation. It is a price offer only: no stock, payment, invoice or report is touched. `quotationNumber` (`QUO-0001`…) is reserved server-side. Every total is recomputed by the server — none is accepted from the client. A line with `productKey` takes its name, SKU and price from the catalog; a line without one is ad hoc and needs `name` + `unitPriceCents`. With `customer.customerKey` the customer's own record is used; without it `customer.customerName` is required (walk-in). `validUntil` is `YYYY-MM-DD`, today or later. The shop profile is read from Settings and frozen on the quotation.\n\n**Requires a valid Bearer token whose `permissions` claim includes `quotations:manage`** (held by the Admin and Manager roles only). Staff and permission-less tokens get 403 `PERMISSION_DENIED`; a missing token gets 401.\n\nA `productKey` line quotes the price in `sellingPriceCents`, which must be one of the product's current `priceTiers` (409 `PRICE_TIER_UNAVAILABLE` otherwise)."
+            "description": "Create a quotation. It is a price offer only: no stock, payment, invoice or report is touched. `quotationNumber` (`QUO-0001`…) is reserved server-side. Every total is recomputed by the server — none is accepted from the client. A line with `productKey` takes its name, SKU and price from the catalog; a line without one is ad hoc and needs `name` + `unitPriceCents`. With `customer.customerKey` the customer's own record is used; without it `customer.customerName` is required (walk-in). `validUntil` is `YYYY-MM-DD`, today or later. The shop profile is read from Settings and frozen on the quotation.\n\n**Requires a valid Bearer token whose `permissions` claim includes `quotations:manage`** (held by Admin, Manager and Staff). Permission-less tokens get 403 `PERMISSION_DENIED`; a missing token gets 401.\n\nA `productKey` line quotes the price in `sellingPriceCents`, which must be one of the product's current `priceTiers` (409 `PRICE_TIER_UNAVAILABLE` otherwise)."
           },
           "response": []
         },
@@ -4967,7 +4967,7 @@
                 "{{quotationKey}}"
               ]
             },
-            "description": "Get one quotation by its `id` or prefixed `key` (404 `QUOTATION_NOT_FOUND` if unknown).\n\n**Requires a valid Bearer token whose `permissions` claim includes `quotations:manage`** (held by the Admin and Manager roles only). Staff and permission-less tokens get 403 `PERMISSION_DENIED`; a missing token gets 401."
+            "description": "Get one quotation by its `id` or prefixed `key` (404 `QUOTATION_NOT_FOUND` if unknown).\n\n**Requires a valid Bearer token whose `permissions` claim includes `quotations:manage`** (held by Admin, Manager and Staff). Permission-less tokens get 403 `PERMISSION_DENIED`; a missing token gets 401."
           },
           "response": []
         },
@@ -4988,7 +4988,7 @@
                 "cancel"
               ]
             },
-            "description": "Mark an active quotation cancelled. It stays listed and printable (the PDF is stamped CANCELLED). Cancelling twice returns 409 `QUOTATION_ALREADY_CANCELLED`.\n\n**Requires a valid Bearer token whose `permissions` claim includes `quotations:manage`** (held by the Admin and Manager roles only). Staff and permission-less tokens get 403 `PERMISSION_DENIED`; a missing token gets 401."
+            "description": "Mark an active quotation cancelled. It stays listed and printable (the PDF is stamped CANCELLED). Cancelling twice returns 409 `QUOTATION_ALREADY_CANCELLED`.\n\n**Requires a valid Bearer token whose `permissions` claim includes `quotations:manage`** (held by Admin, Manager and Staff). Permission-less tokens get 403 `PERMISSION_DENIED`; a missing token gets 401."
           },
           "response": []
         },
@@ -5022,7 +5022,7 @@
                 }
               ]
             },
-            "description": "Render (or serve the cached) quotation as an A4 PDF through document-server. A cancelled quotation is cached separately from the active one.\n\n**Requires a valid Bearer token whose `permissions` claim includes `quotations:manage`** (held by the Admin and Manager roles only). Staff and permission-less tokens get 403 `PERMISSION_DENIED`; a missing token gets 401."
+            "description": "Render (or serve the cached) quotation as an A4 PDF through document-server. A cancelled quotation is cached separately from the active one.\n\n**Requires a valid Bearer token whose `permissions` claim includes `quotations:manage`** (held by Admin, Manager and Staff). Permission-less tokens get 403 `PERMISSION_DENIED`; a missing token gets 401."
           },
           "response": []
         },

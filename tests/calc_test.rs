@@ -264,6 +264,20 @@ async fn a_quotation_calculation_needs_the_quotations_permission() {
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let staff = common::mint_token(
+        &app.config,
+        Some(Role::Staff),
+        roles::default_permissions(Role::Staff),
+    );
+    let (status, body) = post(
+        &app,
+        "/api/calc/quotation",
+        &quotation_request(),
+        Some(&staff),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
 }
 
 fn cash_count_request() -> Value {
