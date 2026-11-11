@@ -485,11 +485,11 @@ fn invalid_lifecycle_inputs_are_rejected() {
 }
 
 #[test]
-fn no_op_edits_are_not_meaningful_conflicts() {
+fn no_op_edits_and_storage_ids_are_not_meaningful_conflicts() {
     let s = spec("products").unwrap();
-    let a = json!({ "key": "p1", "priceCents": 100, "stockQuantity": 3, "updatedAt": "x", "version": 2 });
-    let b = json!({ "key": "p1", "priceCents": 100, "stockQuantity": 99, "updatedAt": "y", "version": 5 });
-    let c = json!({ "key": "p1", "priceCents": 120, "stockQuantity": 3, "updatedAt": "x", "version": 2 });
+    let a = json!({ "id": "aa11", "key": "p1", "priceCents": 100, "stockQuantity": 3, "updatedAt": "x", "version": 2 });
+    let b = json!({ "id": "bb22", "key": "p1", "priceCents": 100, "stockQuantity": 99, "updatedAt": "y", "version": 5 });
+    let c = json!({ "id": "aa11", "key": "p1", "priceCents": 120, "stockQuantity": 3, "updatedAt": "x", "version": 2 });
     assert!(!is_meaningful_conflict(s, &a, &b));
     assert!(is_meaningful_conflict(s, &a, &c));
 }

@@ -49,17 +49,25 @@ fn trigger_sql(
     event: &str,
 ) -> String {
     let ms = meta_ms_expr(resource, key_expr, "NEW.updated_at");
+    // Use DELETE + INSERT / ON CONFLICT DO UPDATE rather than INSERT OR REPLACE:
+    // SQLite degrades OR REPLACE to ABORT inside triggers fired by an outer
+    // `INSERT ... ON CONFLICT DO UPDATE`, raising constraint errors on upsert.
     format!(
         "CREATE TRIGGER IF NOT EXISTS sync_{name}_{suffix} AFTER {event} ON {table}
          WHEN (SELECT capture_enabled = 1 AND applying = 0 FROM sync_state WHERE id = 1)
          BEGIN
-           INSERT OR REPLACE INTO sync_outbox (resource, key, op, enqueued_at)
+           DELETE FROM sync_outbox WHERE resource = '{resource}' AND key = {key_expr};
+           INSERT INTO sync_outbox (resource, key, op, enqueued_at)
              VALUES ('{resource}', {key_expr},
                      CASE WHEN {delete_expr} THEN 'delete' ELSE 'upsert' END,
                      strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
-           INSERT OR REPLACE INTO sync_row_meta (resource, key, updated_at_ms, device_id, version)
+           INSERT INTO sync_row_meta (resource, key, updated_at_ms, device_id, version)
              VALUES ('{resource}', {key_expr}, {ms},
-                     (SELECT device_id FROM sync_state WHERE id = 1), {version_expr});
+                     (SELECT device_id FROM sync_state WHERE id = 1), {version_expr})
+             ON CONFLICT(resource, key) DO UPDATE SET
+               updated_at_ms = excluded.updated_at_ms,
+               device_id = excluded.device_id,
+               version = excluded.version;
          END;",
         suffix = if event == "INSERT" { "ins" } else { "upd" },
     )
@@ -81,13 +89,18 @@ fn delete_trigger_sql(
         "CREATE TRIGGER IF NOT EXISTS sync_{name}_del AFTER DELETE ON {table}
          WHEN (SELECT capture_enabled = 1 AND applying = 0 FROM sync_state WHERE id = 1)
          BEGIN
-           INSERT OR REPLACE INTO sync_outbox (resource, key, op, enqueued_at)
+           DELETE FROM sync_outbox WHERE resource = '{resource}' AND key = {key_expr};
+           INSERT INTO sync_outbox (resource, key, op, enqueued_at)
              VALUES ('{resource}', {key_expr}, '{op}', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
-           INSERT OR REPLACE INTO sync_row_meta (resource, key, updated_at_ms, device_id, version)
+           INSERT INTO sync_row_meta (resource, key, updated_at_ms, device_id, version)
              VALUES ('{resource}', {key_expr},
                      MAX({now_ms} + (SELECT clock_offset_ms FROM sync_state WHERE id = 1),
                          COALESCE((SELECT updated_at_ms FROM sync_row_meta WHERE resource = '{resource}' AND key = {key_expr}), 0) + 1),
-                     (SELECT device_id FROM sync_state WHERE id = 1), {version_expr});
+                     (SELECT device_id FROM sync_state WHERE id = 1), {version_expr})
+             ON CONFLICT(resource, key) DO UPDATE SET
+               updated_at_ms = excluded.updated_at_ms,
+               device_id = excluded.device_id,
+               version = excluded.version;
          END;"
     )
 }
@@ -128,10 +141,14 @@ pub async fn install_triggers(pool: &SqlitePool) -> AppResult<()> {
                 .into_iter()
                 .filter(|c| !spec.derived.contains(&c.as_str()))
                 .collect();
-            statements.push(format!("DROP TRIGGER IF EXISTS sync_{}_upd", spec.table));
             format!("UPDATE OF {}", watched.join(", "))
         };
         for event in ["INSERT", update_event.as_str()] {
+            let suffix = if event == "INSERT" { "ins" } else { "upd" };
+            statements.push(format!(
+                "DROP TRIGGER IF EXISTS sync_{}_{suffix}",
+                spec.table
+            ));
             statements.push(trigger_sql(
                 spec.table,
                 spec.table,
@@ -150,6 +167,7 @@ pub async fn install_triggers(pool: &SqlitePool) -> AppResult<()> {
         } else {
             "COALESCE(OLD.version, 1) + 1"
         };
+        statements.push(format!("DROP TRIGGER IF EXISTS sync_{}_del", spec.table));
         statements.push(delete_trigger_sql(
             spec.table,
             spec.table,
@@ -160,6 +178,7 @@ pub async fn install_triggers(pool: &SqlitePool) -> AppResult<()> {
         ));
     }
     // Deleting a subcategory changes its parent category (still present).
+    statements.push("DROP TRIGGER IF EXISTS sync_subcategories_del".to_string());
     statements.push(delete_trigger_sql(
         "subcategories",
         "subcategories",
@@ -172,6 +191,10 @@ pub async fn install_triggers(pool: &SqlitePool) -> AppResult<()> {
     // A subcategory is not a wire resource: it travels folded into its parent
     // category, so a change to it re-enqueues the parent.
     for event in ["INSERT", "UPDATE"] {
+        let suffix = if event == "INSERT" { "ins" } else { "upd" };
+        statements.push(format!(
+            "DROP TRIGGER IF EXISTS sync_subcategories_{suffix}"
+        ));
         statements.push(trigger_sql(
             "subcategories",
             "subcategories",

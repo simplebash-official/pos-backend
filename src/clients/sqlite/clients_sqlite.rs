@@ -168,6 +168,9 @@ pub fn map_sqlite_row_to_document(row: &sqlx::sqlite::SqliteRow) -> mongodb::bso
                         | "is_manager_override"
                         | "is_active"
                         | "has_out_of_stock_items"
+                        | "allow_shared_user_sessions"
+                        | "has_late_movements"
+                        | "recorded_late"
                 ) {
                     doc.insert(name, mongodb::bson::Bson::Boolean(val != 0));
                 } else {

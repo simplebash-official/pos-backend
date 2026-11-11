@@ -284,7 +284,9 @@ pub(crate) async fn hydrate(
         )?,
         // The expense ledger has no read-time enrichment on its stored rows, so the wire shape is
         // the stored fields in camelCase.
-        "expenses" | "expensePayments" | "expense_payments" => {
+        "expenses" | "expensePayments" | "expense_payments" | "shopProfiles" | "shop_profiles"
+        | "drawerState" | "drawer_state" | "registerSessions" | "register_sessions"
+        | "cashMovements" | "cash_movements" => {
             documents.into_iter().map(stored_fields_to_json).collect()
         }
         "stockMovements" | "stock_movements" => {
@@ -318,13 +320,6 @@ pub(crate) async fn hydrate(
         "users" => to_values(crate::modules::users::sync_payload::hydrate_sync_documents(
             documents,
         )?)?,
-        "registerSessions" | "register_sessions" => to_values(
-            crate::modules::sessions::service::hydrate_session_sync_documents(documents)?,
-        )?,
-        "cashMovements" | "cash_movements" => to_values(
-            crate::modules::sessions::service::hydrate_movement_sync_documents(db, documents)
-                .await?,
-        )?,
         "warranties" => to_values(crate::modules::warranties::service::hydrate_sync_documents(
             documents,
         )?)?,

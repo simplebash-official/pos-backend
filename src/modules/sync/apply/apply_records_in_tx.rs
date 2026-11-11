@@ -485,11 +485,38 @@ fn add_scope(spec: &ResourceSpec, rec: &ChangeRecord, scope: &mut DerivedScope) 
         "invoices" => {
             scope.invoice_keys.insert(rec.key.clone());
             scope.customer_keys.extend(text("customerKey"));
+            scope.session_keys.extend(text("sessionKey"));
         }
-        "payments" => scope.invoice_keys.extend(text("invoiceKey")),
+        "payments" => {
+            scope.invoice_keys.extend(text("invoiceKey"));
+            scope.session_keys.extend(text("sessionKey"));
+        }
         "creditNotes" => {
             scope.invoice_keys.extend(text("invoiceKey"));
             scope.customer_keys.extend(text("customerKey"));
+        }
+        "registerSessions" => {
+            scope.session_keys.insert(rec.key.clone());
+            scope.drawer_keys.insert("shop".to_string());
+            if let Some(cashier) = text("cashierId") {
+                scope.drawer_keys.insert(cashier);
+            } else if rec.payload.is_none() {
+                scope.refresh_drawers = true;
+            }
+        }
+        "cashMovements" => {
+            if let Some(session) = text("sessionKey") {
+                scope.session_keys.insert(session);
+            } else {
+                scope.drawer_keys.insert("shop".to_string());
+                scope.drawer_keys.extend(text("recordedByUserId"));
+            }
+        }
+        "drawerState" => {
+            scope.drawer_keys.insert(rec.key.clone());
+        }
+        "shopProfiles" => {
+            scope.refresh_drawers = true;
         }
         _ => {}
     }
@@ -709,6 +736,17 @@ pub(super) async fn apply_records_in_tx(
                         {
                             conflicts.push(conflict);
                         }
+                        if spec.name == "registerSessions"
+                            && matches!(
+                                payload.get("status").and_then(Value::as_str),
+                                Some("open" | "closing" | "reopened")
+                            )
+                            && let Some(conflict) =
+                                extra_shared_session_conflict(&mut *conn, &rec.key, conflicts)
+                                    .await?
+                        {
+                            conflicts.push(conflict);
+                        }
                         if spec.name == "categories" {
                             reconcile_subcategories(&mut *conn, &rec.key, payload, ms, device)
                                 .await?;
@@ -773,6 +811,74 @@ async fn extra_admin_conflict(
         detail: serde_json::json!({
             "column": "role", "originalValue": "admin", "storedValue": "admin",
             "reason": "MULTIPLE_ADMINS", "adminKeys": admin_keys,
+        }),
+    }))
+}
+
+/// Shared-shop mode allows only one active register session at a time, enforced
+/// on REST open/reopen endpoints which offline devices bypass. When two devices
+/// open shared shifts while offline, both sessions and their transactions are
+/// kept, `find_active_session_for_shop` picks `(opened_at ASC, key ASC)`, and
+/// the shop owner is told through a conflict.
+async fn extra_shared_session_conflict(
+    conn: &mut SqliteConnection,
+    key: &str,
+    raised: &[NewConflict],
+) -> AppResult<Option<NewConflict>> {
+    let shared: Option<i64> = sqlx::query_scalar(
+        "SELECT allow_shared_user_sessions FROM shop_profiles WHERE key = 'main' AND deleted_at IS NULL LIMIT 1",
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+    if shared != Some(1) {
+        return Ok(None);
+    }
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT key, opened_at FROM register_sessions \
+         WHERE status IN ('open', 'closing', 'reopened') AND deleted_at IS NULL",
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut active: Vec<(i64, String)> = rows
+        .into_iter()
+        .map(|(k, opened_at)| {
+            (
+                crate::modules::sync::derived_session::parse_rfc3339_ms(&opened_at),
+                k,
+            )
+        })
+        .collect();
+    active.sort();
+    let active_keys: Vec<String> = active.into_iter().map(|(_, k)| k).collect();
+    if active_keys.len() < 2 || !active_keys.iter().any(|k| k == key) {
+        return Ok(None);
+    }
+    let same_batch = raised
+        .iter()
+        .any(|c| c.resource == "registerSessions" && c.entity_key == key);
+    let stored: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sync_conflicts WHERE kind = ? AND resource = 'registerSessions' AND entity_key = ? \
+         AND resolved_at IS NULL AND detail LIKE '%MULTIPLE_ACTIVE_SHARED_SESSIONS%'",
+    )
+    .bind(ConflictKind::UniqueViolation.as_str())
+    .bind(key)
+    .fetch_one(&mut *conn)
+    .await?;
+    if same_batch || stored > 0 {
+        return Ok(None);
+    }
+    let canonical = active_keys[0].clone();
+    Ok(Some(NewConflict {
+        kind: ConflictKind::UniqueViolation,
+        resource: "registerSessions".to_string(),
+        entity_key: key.to_string(),
+        detail: serde_json::json!({
+            "column": "status",
+            "originalValue": "open",
+            "storedValue": "open",
+            "reason": "MULTIPLE_ACTIVE_SHARED_SESSIONS",
+            "activeSessionKeys": active_keys,
+            "canonicalKey": canonical,
         }),
     }))
 }

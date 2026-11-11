@@ -43,22 +43,28 @@ pub async fn reserve_sequence(
             return finish_reservation(db, name, String::new(), 0, start, end, req.device_id).await;
         }
 
-        let (prefix, padding) = match name.to_lowercase().as_str() {
-            "invoice" | "invoices" => ("INV-", 6),
-            "creditnote" | "creditnotes" | "credit_note" | "credit_notes" => ("CN-", 6),
-            "repair" | "repairs" => ("REP-", 6),
-            "printjob" | "printjobs" | "print_job" | "print_jobs" => ("PRN-", 6),
-            "purchase" | "purchases" => ("PUR-", 6),
-            "order" | "orders" => ("ORD-", 6),
-            "session" | "sessions" | "register_session" | "register_sessions" => ("SES-", 6),
-            "cash_movement" | "cash_movements" | "cashmovement" | "cashmovements" => ("CSH-", 6),
-            "expense" | "expenses" => ("EXP-", 6),
-            "income" | "incomes" => ("INC-", 6),
-            "warranty" => ("WTY-", 6),
-            "warranty_claim" => ("WCL-", 6),
+        let (prefix, padding, counter_name) = match name.to_lowercase().as_str() {
+            "invoice" | "invoices" => ("INV-", 6, name.as_str()),
+            "creditnote" | "creditnotes" | "credit_note" | "credit_notes" => {
+                ("CN-", 6, name.as_str())
+            }
+            "repair" | "repairs" => ("REP-", 6, name.as_str()),
+            "printjob" | "printjobs" | "print_job" | "print_jobs" => ("PRN-", 6, "printjob"),
+            "purchase" | "purchases" => ("PUR-", 6, name.as_str()),
+            "order" | "orders" => ("ORD-", 6, name.as_str()),
+            "session" | "sessions" | "register_session" | "register_sessions" => {
+                ("SES-", 6, "session")
+            }
+            "cash_movement" | "cash_movements" | "cashmovement" | "cashmovements" => {
+                ("CSH-", 6, "cash_movement")
+            }
+            "expense" | "expenses" => ("EXP-", 6, name.as_str()),
+            "income" | "incomes" => ("INC-", 6, name.as_str()),
+            "warranty" => ("WTY-", 6, name.as_str()),
+            "warranty_claim" => ("WCL-", 6, name.as_str()),
             // Four digits: quotations are rarer than invoices. No year in the
             // number — the counter is one running sequence.
-            "quotation" | "quotations" => ("QUO-", 4),
+            "quotation" | "quotations" => ("QUO-", 4, name.as_str()),
             _ => {
                 return Err(AppError::validation_with_code(
                     format!("Unknown sequence name: {name}"),
@@ -87,7 +93,7 @@ pub async fn reserve_sequence(
         }
 
         let (start, end) =
-            repository::reserve_block(db, &name, prefix, padding, block_size).await?;
+            repository::reserve_block(db, counter_name, prefix, padding, block_size).await?;
 
         finish_reservation(
             db,

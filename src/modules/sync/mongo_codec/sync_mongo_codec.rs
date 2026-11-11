@@ -32,7 +32,9 @@ const DATETIME_FIELDS: &[&str] = &[
     "updated_at",
     "deleted_at",
     "voided_at",
+    "opened_at",
     "closed_at",
+    "reopened_at",
     "recorded_at",
     "sold_at",
     "received_at",
@@ -75,6 +77,7 @@ fn enrichment_fields(resource: &str) -> &'static [&'static str] {
         "categories" => &["subcategories"],
         "warranties" => &["state", "daysRemaining"],
         "warrantyClaims" => &["ageDays", "supplierOverdue"],
+        "cashMovements" => &["categoryName", "reversedByKey", "undoUntil"],
         _ => &[],
     }
 }

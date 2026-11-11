@@ -164,51 +164,130 @@ pub(crate) async fn apply_upsert(
     let mut document = build_document(spec, record, encoded, existing, effective_ms, device_id);
     let collection = coll(db, spec.table)?;
 
-    match existing {
-        Some(_) => {
-            collection
-                .replace_one(doc! { "key": &record.key }, document.clone())
-                .await?;
-        }
-        None => {
-            resolve_unique_collisions(
-                db,
-                spec,
-                &record.key,
-                &mut document,
-                effective_ms,
-                device_id,
-                conflicts,
-            )
-            .await?;
-            if let Err(err) = collection.insert_one(document.clone()).await {
-                // `_id` is unique across ALL tenants of a collection. A pushed id that is
-                // already taken (by another tenant, or forged) refuses just that change;
-                // the message stays generic so it cannot be used to probe other tenants.
-                let message = err.to_string();
-                if message.contains("E11000") {
-                    return Ok(WriteOutcome::Rejected(if message.contains("_id_") {
-                        "ID_CONFLICT"
-                    } else {
-                        "UNIQUE_CONFLICT"
-                    }));
-                }
-                return Err(err.into());
-            }
-        }
+    if existing.is_none() {
+        resolve_unique_collisions(
+            db,
+            spec,
+            &record.key,
+            &mut document,
+            effective_ms,
+            device_id,
+            conflicts,
+        )
+        .await?;
     }
-
+    // Fold subcategories before writing the parent category so `cloud_capture`
+    // sees all subcategories committed when the `categories` change event fires.
     if spec.name == "categories" {
         fold_subcategories(db, record, payload, effective_ms, device_id).await?;
     }
+
+    if existing.is_some() {
+        collection
+            .replace_one(doc! { "key": &record.key }, document.clone())
+            .await?;
+    } else if let Err(err) = collection.insert_one(document.clone()).await {
+        // `_id` is unique across ALL tenants of a collection. A pushed id that is
+        // already taken (by another tenant, or forged) refuses just that change;
+        // the message stays generic so it cannot be used to probe other tenants.
+        let message = err.to_string();
+        if message.contains("E11000") {
+            return Ok(WriteOutcome::Rejected(if message.contains("_id_") {
+                "ID_CONFLICT"
+            } else {
+                "UNIQUE_CONFLICT"
+            }));
+        }
+        return Err(err.into());
+    }
+
     if spec.name == "users"
         && payload.get("role").and_then(Value::as_str) == Some("admin")
         && let Some(conflict) = extra_admin_conflict(db, &record.key, conflicts).await?
     {
         conflicts.push(conflict);
     }
+    if spec.name == "registerSessions"
+        && matches!(
+            payload.get("status").and_then(Value::as_str),
+            Some("open" | "closing" | "reopened")
+        )
+        && let Some(conflict) = extra_shared_session_conflict(db, &record.key, conflicts).await?
+    {
+        conflicts.push(conflict);
+    }
     note_scope(spec, Some(payload), &record.key, &document, scope);
     Ok(WriteOutcome::Written)
+}
+
+/// Shared-shop mode allows only one active register session at a time, enforced
+/// on REST open/reopen endpoints which offline devices bypass. When two devices
+/// open shared shifts while offline, both sessions and their transactions are
+/// kept, `find_active_session_for_shop` selects `(opened_at ASC, key ASC)`, and
+/// the shop owner is told through a conflict.
+async fn extra_shared_session_conflict(
+    db: &Db,
+    key: &str,
+    raised: &[NewConflict],
+) -> AppResult<Option<NewConflict>> {
+    let shared = coll(db, "shop_profiles")?
+        .find_one(doc! { "key": "main", "deleted_at": Bson::Null })
+        .await?
+        .and_then(|d| d.get_bool("allow_shared_user_sessions").ok())
+        .unwrap_or(false);
+    if !shared {
+        return Ok(None);
+    }
+    let mut cursor = coll(db, "register_sessions")?
+        .find(doc! {
+            "status": { "$in": ["open", "closing", "reopened"] },
+            "deleted_at": Bson::Null,
+        })
+        .await?;
+    let mut active: Vec<(i64, String)> = Vec::new();
+    while cursor.advance().await? {
+        let doc = cursor.deserialize_current()?;
+        if let Ok(k) = doc.get_str("key") {
+            let opened_ms = doc
+                .get_datetime("opened_at")
+                .map(|d| d.timestamp_millis())
+                .unwrap_or(0);
+            active.push((opened_ms, k.to_string()));
+        }
+    }
+    active.sort();
+    let active_keys: Vec<String> = active.into_iter().map(|(_, k)| k).collect();
+    if active_keys.len() < 2 || !active_keys.iter().any(|k| k == key) {
+        return Ok(None);
+    }
+    let same_batch = raised
+        .iter()
+        .any(|c| c.resource == "registerSessions" && c.entity_key == key);
+    let stored = coll(db, crate::modules::sync::cloud_store::CONFLICTS)?
+        .count_documents(doc! {
+            "kind": ConflictKind::UniqueViolation.as_str(),
+            "resource": "registerSessions",
+            "entity_key": key,
+            "detail.reason": "MULTIPLE_ACTIVE_SHARED_SESSIONS",
+        })
+        .await?;
+    if same_batch || stored > 0 {
+        return Ok(None);
+    }
+    let canonical = active_keys[0].clone();
+    Ok(Some(NewConflict {
+        kind: ConflictKind::UniqueViolation,
+        resource: "registerSessions".to_string(),
+        entity_key: key.to_string(),
+        detail: serde_json::json!({
+            "column": "status",
+            "originalValue": "open",
+            "storedValue": "open",
+            "reason": "MULTIPLE_ACTIVE_SHARED_SESSIONS",
+            "activeSessionKeys": active_keys,
+            "canonicalKey": canonical,
+        }),
+    }))
 }
 
 /// The one-admin-per-shop rule is enforced only by the users service create

@@ -3,4 +3,5 @@ mod codec_and_pull;
 mod common;
 mod helpers;
 mod push_and_conflicts;
+mod shared_sessions;
 mod web_edits;

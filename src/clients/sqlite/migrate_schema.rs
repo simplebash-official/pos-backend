@@ -190,6 +190,15 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .execute("ALTER TABLE shop_profiles ADD COLUMN allow_shared_user_sessions INTEGER NOT NULL DEFAULT 0")
             .await?;
     }
+    if !shop_profile_cols.is_empty() && !shop_profile_cols.iter().any(|n| n == "updated_by_device")
+    {
+        pool.execute("ALTER TABLE shop_profiles ADD COLUMN updated_by_device TEXT")
+            .await?;
+    }
+    if !shop_profile_cols.is_empty() && !shop_profile_cols.iter().any(|n| n == "deleted_at") {
+        pool.execute("ALTER TABLE shop_profiles ADD COLUMN deleted_at TEXT")
+            .await?;
+    }
     if !shop_profile_cols.is_empty() {
         // Legacy writes wrote `key` ("main") into `shop_profiles.id`; sync requires a unique 24-hex ObjectId.
         pool.execute(
