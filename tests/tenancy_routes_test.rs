@@ -16,7 +16,9 @@ use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use mongodb::bson::{Document, doc};
 use serde_json::{Value, json};
 use simplebash_pos_backend::core::constants::roles;
+use simplebash_pos_backend::core::tenancy::{Tenant, with_tenant};
 use simplebash_pos_backend::domain::users::Role;
+use simplebash_pos_backend::modules::settings::service::ensure_shop_profile;
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -130,6 +132,12 @@ fn admin_token(app: &common::TestApp, tenant: Option<&str>) -> String {
 }
 
 async fn seed_tenant_a(app: &common::TestApp, token: &str) -> Seed {
+    with_tenant(
+        Tenant::id("tenant_a").expect("valid tenant id"),
+        ensure_shop_profile(&app.db_handle, Some("Shop A")),
+    )
+    .await
+    .expect("shop profile initializes for tenant_a");
     let uniq = Uuid::new_v4().simple().to_string();
     let mut needles = Vec::new();
 
@@ -350,6 +358,12 @@ async fn tenant_b_sees_nothing_of_tenant_a_on_any_get_route() {
     let token_b = admin_token(&app, Some("tenant_b"));
 
     let seed = seed_tenant_a(&app, &token_a).await;
+    with_tenant(
+        Tenant::id("tenant_b").expect("valid tenant id"),
+        ensure_shop_profile(&app.db_handle, Some("Shop B")),
+    )
+    .await
+    .expect("shop profile initializes for tenant_b");
     let routes = get_routes(&app.router).await;
 
     for strict in STRICT_404.iter().chain(LIST_ROUTES) {

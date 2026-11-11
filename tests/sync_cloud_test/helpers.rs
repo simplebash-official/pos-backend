@@ -7,8 +7,10 @@ use mongodb::bson::oid::ObjectId;
 
 use serde_json::{Value, json};
 use simplebash_pos_backend::core::constants::roles;
+use simplebash_pos_backend::core::tenancy::{Tenant, with_tenant};
 
 use simplebash_pos_backend::domain::users::Role;
+use simplebash_pos_backend::modules::settings::service::ensure_shop_profile;
 
 use simplebash_pos_backend::modules::sync::cloud_capture::run_consumer;
 
@@ -208,6 +210,12 @@ pub(crate) fn statuses(body: &Value) -> Vec<String> {
 
 /// A quotation made through the REST API (a web user, or a device's own UI).
 pub(crate) async fn web_quotation(app: &common::TestApp, tid: &str, who: &str) -> Value {
+    with_tenant(
+        Tenant::id(tid).expect("valid tenant id"),
+        ensure_shop_profile(&app.db_handle, Some("Test Shop")),
+    )
+    .await
+    .expect("shop profile initializes");
     let (status, body) = call(
         &app.router,
         "POST",
@@ -246,6 +254,12 @@ pub(crate) struct Seed {
 }
 
 pub(crate) async fn seed_tenant(app: &common::TestApp, tid: &str) -> Seed {
+    with_tenant(
+        Tenant::id(tid).expect("valid tenant id"),
+        ensure_shop_profile(&app.db_handle, Some("Test Shop")),
+    )
+    .await
+    .expect("shop profile initializes");
     let token = admin_token(app, tid);
     let uniq = Uuid::new_v4().simple().to_string();
     let (status, body) = call(

@@ -7,6 +7,7 @@ use mongodb::bson::{Bson, Document, doc};
 use serde_json::{Value, json};
 
 use simplebash_pos_backend::core::tenancy::{Tenant, with_tenant};
+use simplebash_pos_backend::modules::settings::service::ensure_shop_profile;
 
 use simplebash_pos_backend::modules::sync::apply_mongo::test_support::hydrate_for_test;
 
@@ -562,6 +563,12 @@ async fn a_pushed_cashier_logs_in_by_shop_code_and_a_web_delete_reaches_devices(
         .await
         .expect("the awaited step succeeds");
     let tid = shop.key.clone();
+    with_tenant(
+        Tenant::id(&tid).expect("valid tenant id"),
+        ensure_shop_profile(&app.db_handle, Some("Cashier Shop")),
+    )
+    .await
+    .expect("shop profile initializes");
 
     let hash = Argon2::default()
         .hash_password(b"cashier-pass-9", &SaltString::generate(&mut OsRng))
