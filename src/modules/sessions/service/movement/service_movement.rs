@@ -54,7 +54,7 @@ pub(crate) async fn bank_cash_moves(
 }
 
 /// The cash the drawer holds right now: the open shift's expected cash, or, between shifts, the
-/// user's own running balance.
+/// active drawer's running balance (`"shop"` in `SharedShop` mode, `user_key` in `Personal` mode).
 pub(crate) async fn cash_in_drawer(
     db: &Db,
     session_key: Option<&str>,
@@ -69,18 +69,28 @@ pub(crate) async fn cash_in_drawer(
                     codes::SESSION_NOT_FOUND,
                 )
             })?;
-        if !matches!(
-            session.status,
-            SessionStatus::Open | SessionStatus::Reopened
-        ) {
-            return Err(AppError::validation_with_code(
+        match session.status {
+            SessionStatus::Open | SessionStatus::Reopened => Ok(session.calculate_expected_cash()),
+            SessionStatus::Closing => Err(AppError::conflict(
+                codes::SESSION_CLOSING,
+                "Cash count is in progress for this register session",
+            )),
+            SessionStatus::Closed => Err(AppError::validation_with_code(
                 "This shift is not open, so cash cannot be recorded on it.",
                 codes::NO_ACTIVE_SESSION,
+            )),
+        }
+    } else {
+        if let Some(active) = super::super::session::resolve_active_session(db, user_key).await?
+            && active.status == SessionStatus::Closing
+        {
+            return Err(AppError::conflict(
+                codes::SESSION_CLOSING,
+                "Cash count is in progress for this register session",
             ));
         }
-        Ok(session.calculate_expected_cash())
-    } else {
-        Ok(drawer::get_drawer_state(db, user_key)
+        let drawer_key = super::super::session::active_drawer_key(db, None, user_key).await?;
+        Ok(drawer::get_drawer_state(db, &drawer_key)
             .await?
             .map_or(0, |state| state.current_balance_cents))
     }
@@ -474,15 +484,28 @@ async fn prepare_reversal(
                     codes::SESSION_NOT_FOUND,
                 )
             })?;
-        if !matches!(
-            session.status,
-            SessionStatus::Open | SessionStatus::Reopened
-        ) {
-            return Err(AppError::validation_with_code(
-                "That shift is closed. Reopen it first to reverse this movement.",
-                codes::NO_ACTIVE_SESSION,
-            ));
+        match session.status {
+            SessionStatus::Open | SessionStatus::Reopened => {}
+            SessionStatus::Closing => {
+                return Err(AppError::conflict(
+                    codes::SESSION_CLOSING,
+                    "Cash count is in progress for this register session",
+                ));
+            }
+            SessionStatus::Closed => {
+                return Err(AppError::validation_with_code(
+                    "That shift is closed. Reopen it first to reverse this movement.",
+                    codes::NO_ACTIVE_SESSION,
+                ));
+            }
         }
+    } else if let Some(active) = super::super::session::resolve_active_session(db, &user_id).await?
+        && active.status == SessionStatus::Closing
+    {
+        return Err(AppError::conflict(
+            codes::SESSION_CLOSING,
+            "Cash count is in progress for this register session",
+        ));
     }
 
     let age = chrono::Utc::now() - original.created_at.to_chrono();
@@ -618,22 +641,27 @@ pub(crate) async fn to_movements(
         .collect())
 }
 
-/// Whose drawer a movement moves: the shift owner's when it belongs to a shift (whichever machine
-/// typed it), otherwise the person who recorded it.
+/// Whose drawer a movement moves: `"shop"` in `SharedShop` mode; otherwise the shift owner's
+/// when tied to a shift, or the person who recorded it between shifts.
 pub(crate) async fn drawer_owner(
     db: &Db,
     session_key: Option<&str>,
     recorded_by_user_id: &str,
 ) -> AppResult<String> {
-    let Some(session_key) = session_key else {
-        return Ok(recorded_by_user_id.to_string());
+    let session = match session_key {
+        Some(key) => Some(
+            sessions::find_session_by_key(db, key)
+                .await?
+                .ok_or_else(|| {
+                    AppError::not_found_with_code(
+                        "Register session not found",
+                        codes::SESSION_NOT_FOUND,
+                    )
+                })?,
+        ),
+        None => None,
     };
-    let session = sessions::find_session_by_key(db, session_key)
-        .await?
-        .ok_or_else(|| {
-            AppError::not_found_with_code("Register session not found", codes::SESSION_NOT_FOUND)
-        })?;
-    Ok(session.cashier_id)
+    super::super::session::active_drawer_key(db, session.as_ref(), recorded_by_user_id).await
 }
 
 /// Books a validated movement on the shift and the drawer, in the caller's transaction, so the

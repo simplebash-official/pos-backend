@@ -1,21 +1,89 @@
 use super::super::movement;
 use crate::clients::db::Db;
-use crate::core::constants::{codes, prefixes};
-use crate::core::error::{AppError, AppResult};
+use crate::clients::uow::Unit;
+use crate::core::constants::codes;
+use crate::core::constants::prefixes;
+use crate::core::error::AppError;
+use crate::core::error::AppResult;
 use crate::core::id::generate_id;
 use crate::domain::sequences::ReserveSequenceRequest;
-use crate::domain::sessions::{
-    CashMovement, CashMovementType, CloseSessionRequest, ConvertVarianceRequest,
-    OpenSessionRequest, RegisterSession, ReopenSessionRequest, SessionListQuery,
-    SessionListResponse, SessionStatus, SubmitBlindCountRequest, VARIANCE_TOLERANCE_CENTS,
-};
+use crate::domain::sessions::ActiveSessionsSummaryResponse;
+use crate::domain::sessions::CashMovement;
+use crate::domain::sessions::CashMovementType;
+use crate::domain::sessions::CloseSessionRequest;
+use crate::domain::sessions::ConvertVarianceRequest;
+use crate::domain::sessions::OpenSessionRequest;
+use crate::domain::sessions::RegisterSession;
+use crate::domain::sessions::ReopenSessionRequest;
+use crate::domain::sessions::SessionListQuery;
+use crate::domain::sessions::SessionListResponse;
+use crate::domain::sessions::SessionStatus;
+use crate::domain::sessions::SubmitBlindCountRequest;
+use crate::domain::sessions::VARIANCE_TOLERANCE_CENTS;
+use crate::domain::settings::ShiftMode;
 use crate::domain::users::Role;
-use crate::modules::sessions::model::{
-    CashMovementDocument, DrawerStateDocument, RegisterSessionDocument,
-};
-use crate::modules::sessions::repository::{drawer, movements, sessions};
-use crate::modules::{cash_categories, sequences, users};
+use crate::modules::cash_categories;
+use crate::modules::sequences;
+use crate::modules::sessions::model::CashMovementDocument;
+use crate::modules::sessions::model::DrawerStateDocument;
+use crate::modules::sessions::model::RegisterSessionDocument;
+use crate::modules::sessions::repository::drawer;
+use crate::modules::sessions::repository::movements;
+use crate::modules::sessions::repository::sessions;
+use crate::modules::settings;
+use crate::modules::users;
 use mongodb::bson::DateTime as BsonDateTime;
+
+/// Fixed drawer ledger `user_key` used for all cash drawers when the shop runs in shared-shop shift mode.
+pub const SHOP_DRAWER_KEY: &str = "shop";
+
+#[must_use]
+fn drawer_key_for_mode(mode: ShiftMode, cashier_id: &str) -> String {
+    match mode {
+        ShiftMode::Personal => cashier_id.to_string(),
+        ShiftMode::SharedShop => SHOP_DRAWER_KEY.to_string(),
+    }
+}
+
+#[must_use]
+fn active_session_conflict_message(
+    mode: ShiftMode,
+    cashier_name: &str,
+    existing: &RegisterSessionDocument,
+) -> String {
+    match mode {
+        ShiftMode::Personal => format!(
+            "Cashier '{}' already has active session ({}) open on terminal '{}'",
+            cashier_name, existing.session_number, existing.terminal_id
+        ),
+        ShiftMode::SharedShop => format!(
+            "Shop already has active register session ({}) opened by '{}' on terminal '{}'",
+            existing.session_number, existing.cashier_name_snapshot, existing.terminal_id
+        ),
+    }
+}
+
+/// Returns the shop's active shift mode based on persisted shop profile settings.
+pub async fn current_shift_mode<'a>(unit: impl Into<Unit<'a>>) -> AppResult<ShiftMode> {
+    let profile = settings::service::get_shop_profile(unit).await?;
+    Ok(ShiftMode::from_allow_shared(
+        profile.allow_shared_user_sessions,
+    ))
+}
+
+/// Resolves the `drawer_state.user_key` affected by transactions under the current shift mode.
+pub async fn active_drawer_key<'a>(
+    unit: impl Into<Unit<'a>>,
+    session: Option<&RegisterSessionDocument>,
+    fallback_user_id: &str,
+) -> AppResult<String> {
+    let mode = current_shift_mode(unit).await?;
+    let cashier_id = match session {
+        Some(s) => s.cashier_id.as_str(),
+        None => fallback_user_id,
+    };
+    Ok(drawer_key_for_mode(mode, cashier_id))
+}
 
 /// Backs out of a started close: a counted ("closing") shift goes back to open (or reopened, if it
 /// had been reopened) and the recorded count is cleared. Open and reopened shifts are left alone.
@@ -42,6 +110,8 @@ pub async fn cancel_close(db: &Db, session_key: &str) -> AppResult<RegisterSessi
     } else {
         SessionStatus::Open
     };
+    session.closing_cashier_id = None;
+    session.closing_cashier_name_snapshot = None;
     session.expected_cash_cents = None;
     session.counted_cash_cents = None;
     session.cash_variance_cents = None;
@@ -49,7 +119,12 @@ pub async fn cancel_close(db: &Db, session_key: &str) -> AppResult<RegisterSessi
 
     let updated = sessions::update_session(db, &session)
         .await?
-        .ok_or_else(|| AppError::internal("Failed to cancel closing of register session"))?;
+        .ok_or_else(|| {
+            AppError::conflict(
+                codes::VERSION_CONFLICT,
+                "Register session was modified concurrently; please retry",
+            )
+        })?;
 
     Ok(updated.into_register_session())
 }
@@ -68,7 +143,7 @@ pub async fn close_session(
     if body.closing_float_cents < 0 {
         return Err(AppError::validation("closingFloatCents cannot be negative"));
     }
-    let safe_deposit = body.cash_drop_to_safe_cents.unwrap_or(0);
+    let safe_deposit = body.cash_drop_to_safe_cents.unwrap_or_default();
     if safe_deposit < 0 {
         return Err(AppError::validation(
             "cashDropToSafeCents cannot be negative",
@@ -101,13 +176,11 @@ pub async fn close_session(
     let mut variance_approved_by_name = None;
 
     if variance != 0 {
-        if body
-            .variance_reason
-            .as_deref()
-            .unwrap_or("")
-            .trim()
-            .is_empty()
-        {
+        let missing_reason = match body.variance_reason.as_deref() {
+            Some(reason) => reason.trim().is_empty(),
+            None => true,
+        };
+        if missing_reason {
             return Err(AppError::validation_with_code(
                 format!(
                     "Cash variance of {} cents requires a variance explanation reason",
@@ -153,22 +226,35 @@ pub async fn close_session(
     session.variance_approved_by_name = variance_approved_by_name;
     session.status = SessionStatus::Closed;
 
-    let updated = sessions::update_session(db, &session)
+    let mut tx = db.begin().await?;
+    let updated = sessions::update_session(&mut tx, &session)
         .await?
-        .ok_or_else(|| AppError::internal("Failed to update register session status to closed"))?;
+        .ok_or_else(|| {
+            AppError::conflict(
+                codes::VERSION_CONFLICT,
+                "Register session was modified concurrently; please retry",
+            )
+        })?;
 
     // Update drawer ledger: retains the specified closing float for next shift
+    let drawer_key = active_drawer_key(&mut tx, Some(&updated), &updated.cashier_id).await?;
     drawer::upsert_drawer_state(
-        db,
+        &mut tx,
         DrawerStateDocument {
-            user_key: session.cashier_id.clone(),
+            id: None,
+            key: drawer_key.clone(),
+            user_key: drawer_key,
             current_balance_cents: body.closing_float_cents,
-            last_session_key: Some(session.key.clone()),
+            last_session_key: Some(updated.key.clone()),
             last_closing_float_cents: body.closing_float_cents,
+            version: 1,
+            created_at: now,
             updated_at: now,
+            updated_by_device: None,
         },
     )
     .await?;
+    tx.commit().await?;
 
     Ok(updated.into_register_session())
 }
@@ -195,7 +281,12 @@ pub async fn convert_variance(
             AppError::not_found_with_code("Register session not found", codes::SESSION_NOT_FOUND)
         })?;
 
-    let variance = session.cash_variance_cents.unwrap_or(0);
+    let Some(variance) = session.cash_variance_cents else {
+        return Err(AppError::conflict(
+            codes::VARIANCE_APPROVAL_REQUIRED,
+            "Cannot convert variance: session has no recorded cash variance",
+        ));
+    };
     if variance >= 0 {
         return Err(AppError::conflict(
             codes::VARIANCE_APPROVAL_REQUIRED,
@@ -264,14 +355,23 @@ pub async fn convert_variance(
         updated_at: now,
     };
 
-    let inserted = movements::insert_cash_movement(db, movement_doc).await?;
+    let mut tx = db.begin().await?;
+    let inserted = movements::insert_cash_movement(&mut tx, movement_doc).await?;
 
     // Update session: record owner withdrawal, clear variance shortage, and flag late movements
     session.total_owner_withdrawals_cents += shortage_amount;
     session.expected_cash_cents = Some(session.calculate_expected_cash());
     session.cash_variance_cents = Some(0);
     session.has_late_movements = true;
-    sessions::update_session(db, &session).await?;
+    sessions::update_session(&mut tx, &session)
+        .await?
+        .ok_or_else(|| {
+            AppError::conflict(
+                codes::VERSION_CONFLICT,
+                "Register session was modified concurrently; please retry",
+            )
+        })?;
+    tx.commit().await?;
 
     Ok(movement::to_movements(db, vec![inserted]).await?.remove(0))
 }
@@ -285,36 +385,28 @@ pub(crate) fn expected_opening_float(
     state.map_or(counted_cents, |s| s.current_balance_cents)
 }
 
-/// Returns the active session for cashier.
+/// Returns active sessions across `open`, `closing`, and `reopened` statuses plus the summed
+/// balance across all `drawer_state` rows, used by Settings UI before toggling shift mode.
+pub async fn get_active_sessions_summary(db: &Db) -> AppResult<ActiveSessionsSummaryResponse> {
+    let docs = sessions::list_active_sessions(db).await?;
+    let drawer_states = drawer::list_drawer_states(db).await?;
+    let drawer_balance_total_cents = drawer_states.iter().map(|s| s.current_balance_cents).sum();
+    Ok(ActiveSessionsSummaryResponse {
+        active_sessions: docs
+            .into_iter()
+            .map(RegisterSessionDocument::into_register_session)
+            .collect(),
+        drawer_balance_total_cents,
+    })
+}
+
+/// Returns the active session for `cashier_id` (`ShiftMode::Personal`) or the shop (`ShiftMode::SharedShop`).
 pub async fn get_active_session_for_cashier(
     db: &Db,
     cashier_id: &str,
 ) -> AppResult<Option<RegisterSession>> {
-    let session = sessions::find_active_session_for_cashier(db, cashier_id).await?;
-    match session {
-        Some(s) => {
-            let mut reg = s.into_register_session();
-            populate_missing_cashier_name(db, &mut reg).await;
-            Ok(Some(reg))
-        }
-        None => Ok(None),
-    }
-}
-
-/// Returns the active session for terminal.
-pub async fn get_active_session_for_terminal(
-    db: &Db,
-    terminal_id: &str,
-) -> AppResult<Option<RegisterSession>> {
-    let session = sessions::find_active_session_for_terminal(db, terminal_id).await?;
-    match session {
-        Some(s) => {
-            let mut reg = s.into_register_session();
-            populate_missing_cashier_name(db, &mut reg).await;
-            Ok(Some(reg))
-        }
-        None => Ok(None),
-    }
+    let session = resolve_active_session(db, cashier_id).await?;
+    Ok(session.map(RegisterSessionDocument::into_register_session))
 }
 
 /// Returns the session.
@@ -324,9 +416,7 @@ pub async fn get_session(db: &Db, key: &str) -> AppResult<RegisterSession> {
         .ok_or_else(|| {
             AppError::not_found_with_code("Register session not found", codes::SESSION_NOT_FOUND)
         })?;
-    let mut reg = session.into_register_session();
-    populate_missing_cashier_name(db, &mut reg).await;
-    Ok(reg)
+    Ok(session.into_register_session())
 }
 
 /// Lists the sessions.
@@ -336,12 +426,10 @@ pub async fn list_sessions(db: &Db, query: SessionListQuery) -> AppResult<Sessio
     let (docs, total) = sessions::list_sessions(db, &query).await?;
     let total_pages = total.div_ceil(limit);
 
-    let mut sessions = Vec::with_capacity(docs.len());
-    for d in docs {
-        let mut reg = d.into_register_session();
-        populate_missing_cashier_name(db, &mut reg).await;
-        sessions.push(reg);
-    }
+    let sessions = docs
+        .into_iter()
+        .map(RegisterSessionDocument::into_register_session)
+        .collect();
 
     Ok(SessionListResponse {
         sessions,
@@ -352,7 +440,7 @@ pub async fn list_sessions(db: &Db, query: SessionListQuery) -> AppResult<Sessio
     })
 }
 
-/// Opens the session.
+/// Opens a register session (one per cashier in `Personal` mode; one shop-wide in `SharedShop` mode).
 pub async fn open_session(
     db: &Db,
     cashier_id: String,
@@ -367,19 +455,20 @@ pub async fn open_session(
         return Err(AppError::validation("openingFloatCents cannot be negative"));
     }
 
-    // Guard: only 1 open session per cashier
-    if let Some(existing) = sessions::find_active_session_for_cashier(db, &cashier_id).await? {
+    let mode = current_shift_mode(db).await?;
+    let existing = match mode {
+        ShiftMode::Personal => sessions::find_active_session_for_cashier(db, &cashier_id).await?,
+        ShiftMode::SharedShop => sessions::find_active_session_for_shop(db).await?,
+    };
+    if let Some(existing) = existing {
         return Err(AppError::conflict(
             codes::SESSION_ALREADY_OPEN,
-            format!(
-                "Cashier '{}' already has active session ({}) open on terminal '{}'",
-                cashier_name, existing.session_number, existing.terminal_id
-            ),
+            active_session_conflict_message(mode, &cashier_name, &existing),
         ));
     }
 
-    // Ledger check: the cashier's own balance from their last close and outside movements.
-    let drawer_state = drawer::get_drawer_state(db, &cashier_id).await?;
+    let drawer_key = drawer_key_for_mode(mode, &cashier_id);
+    let drawer_state = drawer::get_drawer_state(db, &drawer_key).await?;
     let expected_opening_float =
         expected_opening_float(drawer_state.as_ref(), body.opening_float_cents);
 
@@ -388,13 +477,11 @@ pub async fn open_session(
     let mut approved_by_name = None;
 
     if discrepancy != 0 {
-        if body
-            .discrepancy_reason
-            .as_deref()
-            .unwrap_or("")
-            .trim()
-            .is_empty()
-        {
+        let missing_reason = match body.discrepancy_reason.as_deref() {
+            Some(reason) => reason.trim().is_empty(),
+            None => true,
+        };
+        if missing_reason {
             return Err(AppError::validation_with_code(
                 format!(
                     "Counted float ({} cents) differs from drawer balance ({} cents). A discrepancy reason is required.",
@@ -445,7 +532,7 @@ pub async fn open_session(
         session_number,
         terminal_id: body.terminal_id.clone(),
         cashier_id: cashier_id.clone(),
-        cashier_name_snapshot: cashier_name,
+        cashier_name_snapshot: cashier_name.clone(),
         status: SessionStatus::Open,
         opened_at: now,
         opening_float_cents: body.opening_float_cents,
@@ -486,55 +573,58 @@ pub async fn open_session(
         version: 1,
         created_at: now,
         updated_at: now,
+        deleted_at: None,
+        updated_by_device: None,
     };
 
-    let inserted = sessions::insert_session(db, session_doc).await?;
+    let mut tx = db.begin().await?;
+    let tx_mode = current_shift_mode(&mut tx).await?;
+    if tx_mode != mode {
+        return Err(AppError::conflict(
+            codes::VERSION_CONFLICT,
+            "Shift mode changed while opening session; please retry",
+        ));
+    }
+    let tx_existing = match tx_mode {
+        ShiftMode::Personal => {
+            sessions::find_active_session_for_cashier(&mut tx, &cashier_id).await?
+        }
+        ShiftMode::SharedShop => sessions::find_active_session_for_shop(&mut tx).await?,
+    };
+    if let Some(existing) = tx_existing {
+        return Err(AppError::conflict(
+            codes::SESSION_ALREADY_OPEN,
+            active_session_conflict_message(tx_mode, &cashier_name, &existing),
+        ));
+    }
+
+    let inserted = sessions::insert_session(&mut tx, session_doc).await?;
+    let tx_drawer_state = drawer::get_drawer_state(&mut tx, &drawer_key).await?;
+    let last_closing_float_cents = match tx_drawer_state {
+        Some(s) => s.last_closing_float_cents,
+        None => 0,
+    };
 
     // Update drawer ledger balance to match opening float
     drawer::upsert_drawer_state(
-        db,
+        &mut tx,
         DrawerStateDocument {
-            user_key: cashier_id.clone(),
+            id: None,
+            key: drawer_key.clone(),
+            user_key: drawer_key,
             current_balance_cents: body.opening_float_cents,
             last_session_key: Some(inserted.key.clone()),
-            last_closing_float_cents: drawer_state
-                .map(|s| s.last_closing_float_cents)
-                .unwrap_or(0),
+            last_closing_float_cents,
+            version: 1,
+            created_at: now,
             updated_at: now,
+            updated_by_device: None,
         },
     )
     .await?;
+    tx.commit().await?;
 
     Ok(inserted.into_register_session())
-}
-
-/// If a session's `cashier_name_snapshot` is empty (e.g. from an older session opened
-/// when cashier names were not propagated), resolve it from `users::service::get_user`.
-pub async fn populate_missing_cashier_name(db: &Db, session: &mut RegisterSession) {
-    if session.cashier_name_snapshot.trim().is_empty()
-        && let Ok(oid) = mongodb::bson::oid::ObjectId::parse_str(&session.cashier_id)
-        && let Ok(user) = users::service::get_user(db, oid).await
-    {
-        let trimmed = user.name.trim();
-        if !trimmed.is_empty() {
-            session.cashier_name_snapshot = trimmed.to_string();
-        }
-    }
-    if let Some(ref closing_id) = session.closing_cashier_id
-        && session
-            .closing_cashier_name_snapshot
-            .as_deref()
-            .unwrap_or("")
-            .trim()
-            .is_empty()
-        && let Ok(oid) = mongodb::bson::oid::ObjectId::parse_str(closing_id)
-        && let Ok(user) = users::service::get_user(db, oid).await
-    {
-        let trimmed = user.name.trim();
-        if !trimmed.is_empty() {
-            session.closing_cashier_name_snapshot = Some(trimmed.to_string());
-        }
-    }
 }
 
 /// Reopens the session.
@@ -569,20 +659,6 @@ pub async fn reopen_session(
         ));
     }
 
-    // Ensure this cashier does not already have another active session
-    if let Some(existing) =
-        sessions::find_active_session_for_cashier(db, &session.cashier_id).await?
-        && existing.key != session.key
-    {
-        return Err(AppError::conflict(
-            codes::SESSION_ALREADY_OPEN,
-            format!(
-                "Cannot reopen session: cashier already has an active register session ({}) open",
-                existing.session_number
-            ),
-        ));
-    }
-
     let now = BsonDateTime::now();
     session.status = SessionStatus::Reopened;
     session.closed_at = None;
@@ -603,39 +679,119 @@ pub async fn reopen_session(
     session.reopened_by_name = Some(user_name);
     session.reopened_reason = Some(body.reason);
 
-    // Restore drawer ledger balance to expected cash for resumed operation
     let expected_cash = session.calculate_expected_cash();
+
+    let mut tx = db.begin().await?;
+    let mode = current_shift_mode(&mut tx).await?;
+    let conflict = match mode {
+        ShiftMode::Personal => {
+            sessions::find_active_session_for_cashier(&mut tx, &session.cashier_id).await?
+        }
+        ShiftMode::SharedShop => sessions::find_active_session_for_shop(&mut tx).await?,
+    };
+    if let Some(existing) = conflict
+        && existing.key != session.key
+    {
+        return Err(AppError::conflict(
+            codes::SESSION_ALREADY_OPEN,
+            match mode {
+                ShiftMode::Personal => format!(
+                    "Cannot reopen session: cashier already has an active register session ({}) open",
+                    existing.session_number
+                ),
+                ShiftMode::SharedShop => format!(
+                    "Cannot reopen session: shop already has an active register session ({}) open",
+                    existing.session_number
+                ),
+            },
+        ));
+    }
+
+    let updated = sessions::update_session(&mut tx, &session)
+        .await?
+        .ok_or_else(|| {
+            AppError::conflict(
+                codes::VERSION_CONFLICT,
+                "Register session was modified concurrently; please retry",
+            )
+        })?;
+
+    // Restore drawer ledger balance to expected cash for resumed operation
+    let drawer_key = drawer_key_for_mode(mode, &updated.cashier_id);
     drawer::upsert_drawer_state(
-        db,
+        &mut tx,
         DrawerStateDocument {
-            user_key: session.cashier_id.clone(),
+            id: None,
+            key: drawer_key.clone(),
+            user_key: drawer_key,
             current_balance_cents: expected_cash,
-            last_session_key: Some(session.key.clone()),
-            last_closing_float_cents: session.opening_float_cents,
+            last_session_key: Some(updated.key.clone()),
+            last_closing_float_cents: updated.opening_float_cents,
+            version: 1,
+            created_at: now,
             updated_at: now,
+            updated_by_device: None,
         },
     )
     .await?;
-
-    let updated = sessions::update_session(db, &session)
-        .await?
-        .ok_or_else(|| AppError::internal("Failed to reopen register session"))?;
+    tx.commit().await?;
 
     Ok(updated.into_register_session())
 }
 
-/// The user's own open shift, whichever machine it was opened on: the shift follows the user.
+/// Resolves the active session for `cashier_id`: their own in `Personal` mode, or the shop's in `SharedShop` mode.
 pub async fn resolve_active_session(
     db: &Db,
     cashier_id: &str,
 ) -> AppResult<Option<RegisterSessionDocument>> {
-    sessions::find_active_session_for_cashier(db, cashier_id).await
+    match current_shift_mode(db).await? {
+        ShiftMode::Personal => sessions::find_active_session_for_cashier(db, cashier_id).await,
+        ShiftMode::SharedShop => sessions::find_active_session_for_shop(db).await,
+    }
 }
 
-/// Submits the blind count.
+/// Resolves the session for recording sales, payments, or credit notes, enforcing mid-count locks (`409 SESSION_CLOSING`).
+pub async fn resolve_writable_session(
+    db: &Db,
+    requested_session_key: Option<&str>,
+    cashier_id: &str,
+) -> AppResult<Option<RegisterSessionDocument>> {
+    let session = match requested_session_key {
+        Some(key) => {
+            let doc = sessions::find_session_by_key(db, key)
+                .await?
+                .ok_or_else(|| {
+                    AppError::not_found_with_code(
+                        "Register session not found",
+                        codes::SESSION_NOT_FOUND,
+                    )
+                })?;
+            Some(doc)
+        }
+        None => resolve_active_session(db, cashier_id).await?,
+    };
+    let Some(session) = session else {
+        return Ok(None);
+    };
+    match session.status {
+        SessionStatus::Open | SessionStatus::Reopened => Ok(Some(session)),
+        SessionStatus::Closing => Err(AppError::conflict(
+            codes::SESSION_CLOSING,
+            "Cash count is in progress for this register session",
+        )),
+        SessionStatus::Closed => Err(AppError::conflict(
+            codes::SESSION_ALREADY_CLOSED,
+            "Cannot record transactions against a closed register session",
+        )),
+    }
+}
+
+/// Submits the blind count and locks the shift in `closing` status until closed or canceled.
 pub async fn submit_blind_count(
     db: &Db,
     session_key: &str,
+    cashier_id: String,
+    cashier_name: String,
     body: SubmitBlindCountRequest,
 ) -> AppResult<RegisterSession> {
     if body.counted_cash_cents < 0 {
@@ -661,6 +817,8 @@ pub async fn submit_blind_count(
     let expected_cash = session.calculate_expected_cash();
     let variance = body.counted_cash_cents - expected_cash;
 
+    session.closing_cashier_id = Some(cashier_id);
+    session.closing_cashier_name_snapshot = Some(cashier_name);
     session.expected_cash_cents = Some(expected_cash);
     session.counted_cash_cents = Some(body.counted_cash_cents);
     session.cash_variance_cents = Some(variance);
@@ -669,7 +827,12 @@ pub async fn submit_blind_count(
 
     let updated = sessions::update_session(db, &session)
         .await?
-        .ok_or_else(|| AppError::internal("Failed to save blind count on session"))?;
+        .ok_or_else(|| {
+            AppError::conflict(
+                codes::VERSION_CONFLICT,
+                "Register session was modified concurrently; please retry",
+            )
+        })?;
 
     Ok(updated.into_register_session())
 }

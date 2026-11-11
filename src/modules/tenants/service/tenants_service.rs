@@ -217,7 +217,8 @@ pub async fn provision_shop(
 
     // Every shop starts with the drawer's built-in cash categories (idempotent on a replay).
     with_tenant(Tenant::id(tenant_id)?, async {
-        cash_categories::service::ensure_system_categories(db).await
+        cash_categories::service::ensure_system_categories(db).await?;
+        crate::modules::settings::service::ensure_shop_profile(db, Some(name.trim())).await
     })
     .await?;
 

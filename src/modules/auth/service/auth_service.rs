@@ -164,8 +164,10 @@ async fn login_in_scope(
             return Err(tenants_service::suspended_error(&info));
         }
 
-        // Staff work from one machine: while their shift is open, no other machine may sign in.
+        // In Personal mode, staff work from one machine: while their shift is open, no other machine may sign in.
         if user.role == Role::Staff
+            && sessions::service::current_shift_mode(db).await?
+                == crate::domain::settings::ShiftMode::Personal
             && let Some(shift) = sessions::service::resolve_active_session(db, &user.id).await?
             && device_id.as_deref() != Some(shift.terminal_id.as_str())
         {

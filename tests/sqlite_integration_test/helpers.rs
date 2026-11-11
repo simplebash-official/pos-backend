@@ -58,6 +58,9 @@ pub(crate) async fn setup_sqlite_app() -> SqliteTestContext {
         config.document_server_api_key.clone(),
     ));
     let db_handle = Db::Sqlite(pool);
+    simplebash_pos_backend::modules::settings::service::ensure_shop_profile(&db_handle, None)
+        .await
+        .expect("shop profile should initialize in SQLite test context");
     let reports_engine = Arc::new(
         simplebash_pos_backend::modules::reports::engine::AnalyticsEngine::new(db_handle.clone()),
     );

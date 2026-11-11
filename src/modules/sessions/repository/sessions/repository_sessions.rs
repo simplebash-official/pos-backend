@@ -1,56 +1,76 @@
 use crate::clients::db::Db;
-use crate::clients::sqlite::{bson_to_iso, generate_id_hex, to_bson_datetime};
-use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
-use crate::clients::uow::{Backend, Unit};
-use crate::core::error::{AppError, AppResult};
-use crate::domain::sessions::{CashMovementType, SessionListQuery, SessionStatus};
+use crate::clients::sqlite::bson_to_iso;
+use crate::clients::sqlite::generate_id_hex;
+use crate::clients::sqlite::to_bson_datetime;
+use crate::clients::tenant_db::ScopedCollection;
+use crate::clients::tenant_db::TenantDatabase;
+use crate::clients::uow::Backend;
+use crate::clients::uow::Unit;
+use crate::core::error::AppError;
+use crate::core::error::AppResult;
+use crate::domain::sessions::CashMovementType;
+use crate::domain::sessions::SessionListQuery;
+use crate::domain::sessions::SessionStatus;
 use crate::modules::sessions::model::RegisterSessionDocument;
 use futures_util::TryStreamExt;
+use mongodb::bson::Bson;
+use mongodb::bson::DateTime as BsonDateTime;
+use mongodb::bson::doc;
 use mongodb::bson::oid::ObjectId;
-use mongodb::bson::{DateTime as BsonDateTime, doc};
 use sqlx::Row;
 
-/// Counts the active sessions.
-pub async fn count_active_sessions(db: &Db) -> AppResult<i64> {
-    match db {
-        Db::Mongo(mongo_db) => {
+const ACTIVE_STATUSES: [&str; 3] = ["open", "closing", "reopened"];
+
+/// Counts the active sessions across `open`, `closing`, and `reopened` statuses.
+pub async fn count_active_sessions<'a>(unit: impl Into<Unit<'a>>) -> AppResult<i64> {
+    let mut unit = unit.into();
+    match unit.backend().await? {
+        Backend::Mongo(mongo_db, session) => {
             let count = sessions_col(mongo_db)
-                .count_documents(doc! { "status": { "$in": ["open", "closing", "reopened"] } })
+                .count_documents_in(
+                    doc! {
+                        "status": { "$in": ACTIVE_STATUSES },
+                        "deleted_at": Bson::Null,
+                    },
+                    session,
+                )
                 .await?;
             Ok(count as i64)
         }
-        Db::Sqlite(pool) => {
+        Backend::Sqlite(mut conn) => {
             let count: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM register_sessions WHERE status IN ('open', 'closing', 'reopened') AND deleted_at IS NULL"
+                "SELECT COUNT(*) FROM register_sessions WHERE status IN ('open', 'closing', 'reopened') AND deleted_at IS NULL",
             )
-            .fetch_one(pool)
+            .fetch_one(&mut *conn)
             .await?;
             Ok(count)
         }
     }
 }
 
-/// Finds the active session for cashier; `None` when there is none.
-pub async fn find_active_session_for_cashier(
-    db: &Db,
+/// Finds the active session for `cashier_id`; `None` when there is none.
+pub async fn find_active_session_for_cashier<'a>(
+    unit: impl Into<Unit<'a>>,
     cashier_id: &str,
 ) -> AppResult<Option<RegisterSessionDocument>> {
-    match db {
-        Db::Mongo(mongo_db) => {
-            let doc = sessions_col(mongo_db)
+    let mut unit = unit.into();
+    match unit.backend().await? {
+        Backend::Mongo(mongo_db, session) => Ok(crate::in_session!(
+            sessions_col(mongo_db)
                 .find_one(doc! {
                     "cashier_id": cashier_id,
-                    "status": { "$in": ["open", "closing", "reopened"] }
+                    "status": { "$in": ACTIVE_STATUSES },
+                    "deleted_at": Bson::Null,
                 })
-                .await?;
-            Ok(doc)
-        }
-        Db::Sqlite(pool) => {
+                .sort(doc! { "opened_at": 1, "key": 1 }),
+            session
+        )?),
+        Backend::Sqlite(mut conn) => {
             let row = sqlx::query(
-                "SELECT * FROM register_sessions WHERE cashier_id = ? AND status IN ('open', 'closing', 'reopened') AND deleted_at IS NULL"
+                "SELECT * FROM register_sessions WHERE cashier_id = ? AND status IN ('open', 'closing', 'reopened') AND deleted_at IS NULL ORDER BY opened_at ASC, key ASC LIMIT 1",
             )
             .bind(cashier_id)
-            .fetch_optional(pool)
+            .fetch_optional(&mut *conn)
             .await?;
 
             row.map(|r| session_from_sqlite_row(&r)).transpose()
@@ -58,30 +78,59 @@ pub async fn find_active_session_for_cashier(
     }
 }
 
-/// Finds the active session for terminal; `None` when there is none.
-pub async fn find_active_session_for_terminal(
-    db: &Db,
-    terminal_id: &str,
+/// Finds the active shop-wide session (used in `ShiftMode::SharedShop`); `None` when none exists.
+pub async fn find_active_session_for_shop<'a>(
+    unit: impl Into<Unit<'a>>,
 ) -> AppResult<Option<RegisterSessionDocument>> {
-    match db {
-        Db::Mongo(mongo_db) => {
-            let doc = sessions_col(mongo_db)
+    let mut unit = unit.into();
+    match unit.backend().await? {
+        Backend::Mongo(mongo_db, session) => Ok(crate::in_session!(
+            sessions_col(mongo_db)
                 .find_one(doc! {
-                    "terminal_id": terminal_id,
-                    "status": { "$in": ["open", "closing", "reopened"] }
+                    "status": { "$in": ACTIVE_STATUSES },
+                    "deleted_at": Bson::Null,
                 })
-                .await?;
-            Ok(doc)
-        }
-        Db::Sqlite(pool) => {
+                .sort(doc! { "opened_at": 1, "key": 1 }),
+            session
+        )?),
+        Backend::Sqlite(mut conn) => {
             let row = sqlx::query(
-                "SELECT * FROM register_sessions WHERE terminal_id = ? AND status IN ('open', 'closing', 'reopened') AND deleted_at IS NULL"
+                "SELECT * FROM register_sessions WHERE status IN ('open', 'closing', 'reopened') AND deleted_at IS NULL ORDER BY opened_at ASC, key ASC LIMIT 1",
             )
-            .bind(terminal_id)
-            .fetch_optional(pool)
+            .fetch_optional(&mut *conn)
             .await?;
 
             row.map(|r| session_from_sqlite_row(&r)).transpose()
+        }
+    }
+}
+
+/// Lists all active sessions (`open`, `closing`, `reopened`) ordered by `opened_at ASC, key ASC`.
+pub async fn list_active_sessions<'a>(
+    unit: impl Into<Unit<'a>>,
+) -> AppResult<Vec<RegisterSessionDocument>> {
+    let mut unit = unit.into();
+    match unit.backend().await? {
+        Backend::Mongo(mongo_db, session) => Ok(sessions_col(mongo_db)
+            .find_all_in(
+                doc! {
+                    "status": { "$in": ACTIVE_STATUSES },
+                    "deleted_at": Bson::Null,
+                },
+                Some(doc! { "opened_at": 1, "key": 1 }),
+                session,
+            )
+            .await?),
+        Backend::Sqlite(mut conn) => {
+            let rows = sqlx::query(
+                "SELECT * FROM register_sessions WHERE status IN ('open', 'closing', 'reopened') AND deleted_at IS NULL ORDER BY opened_at ASC, key ASC",
+            )
+            .fetch_all(&mut *conn)
+            .await?;
+
+            rows.into_iter()
+                .map(|r| session_from_sqlite_row(&r))
+                .collect()
         }
     }
 }
@@ -94,7 +143,7 @@ pub async fn find_session_by_id_or_key(
     if let Ok(object_id) = ObjectId::parse_str(id_or_key)
         && let Db::Mongo(mongo_db) = db
         && let Some(doc) = sessions_col(mongo_db)
-            .find_one(doc! { "_id": object_id })
+            .find_one(doc! { "_id": object_id, "deleted_at": Bson::Null })
             .await?
     {
         return Ok(Some(doc));
@@ -106,14 +155,15 @@ pub async fn find_session_by_id_or_key(
                     "$or": [
                         { "key": id_or_key },
                         { "session_number": id_or_key },
-                    ]
+                    ],
+                    "deleted_at": Bson::Null,
                 })
                 .await?;
             Ok(doc)
         }
         Db::Sqlite(pool) => {
             let row = sqlx::query(
-                "SELECT * FROM register_sessions WHERE (key = ? OR session_number = ? OR id = ?) AND deleted_at IS NULL"
+                "SELECT * FROM register_sessions WHERE (key = ? OR session_number = ? OR id = ?) AND deleted_at IS NULL",
             )
             .bind(id_or_key)
             .bind(id_or_key)
@@ -127,17 +177,21 @@ pub async fn find_session_by_id_or_key(
 }
 
 /// Finds the session by key; `None` when there is none.
-pub async fn find_session_by_key(db: &Db, key: &str) -> AppResult<Option<RegisterSessionDocument>> {
-    match db {
-        Db::Mongo(mongo_db) => {
-            let doc = sessions_col(mongo_db).find_one(doc! { "key": key }).await?;
-            Ok(doc)
-        }
-        Db::Sqlite(pool) => {
+pub async fn find_session_by_key<'a>(
+    unit: impl Into<Unit<'a>>,
+    key: &str,
+) -> AppResult<Option<RegisterSessionDocument>> {
+    let mut unit = unit.into();
+    match unit.backend().await? {
+        Backend::Mongo(mongo_db, session) => Ok(crate::in_session!(
+            sessions_col(mongo_db).find_one(doc! { "key": key, "deleted_at": Bson::Null }),
+            session
+        )?),
+        Backend::Sqlite(mut conn) => {
             let row =
                 sqlx::query("SELECT * FROM register_sessions WHERE key = ? AND deleted_at IS NULL")
                     .bind(key)
-                    .fetch_optional(pool)
+                    .fetch_optional(&mut *conn)
                     .await?;
 
             row.map(|r| session_from_sqlite_row(&r)).transpose()
@@ -303,17 +357,18 @@ pub async fn increment_session_sales(
 }
 
 /// Inserts the session.
-pub async fn insert_session(
-    db: &Db,
+pub async fn insert_session<'a>(
+    unit: impl Into<Unit<'a>>,
     mut doc: RegisterSessionDocument,
 ) -> AppResult<RegisterSessionDocument> {
-    match db {
-        Db::Mongo(mongo_db) => {
-            let res = sessions_col(mongo_db).insert_one(&doc).await?;
+    let mut unit = unit.into();
+    match unit.backend().await? {
+        Backend::Mongo(mongo_db, session) => {
+            let res = sessions_col(mongo_db).insert_one_in(&doc, session).await?;
             doc.id = res.inserted_id.as_object_id();
             Ok(doc)
         }
-        Db::Sqlite(pool) => {
+        Backend::Sqlite(mut conn) => {
             let id = doc
                 .id
                 .map(|oid| oid.to_hex())
@@ -323,6 +378,7 @@ pub async fn insert_session(
             let reopened_at_iso = doc.reopened_at.as_ref().map(bson_to_iso);
             let created_at_iso = bson_to_iso(&doc.created_at);
             let updated_at_iso = bson_to_iso(&doc.updated_at);
+            let deleted_at_iso = doc.deleted_at.as_ref().map(bson_to_iso);
             let opening_denom_json = doc
                 .opening_denominations
                 .as_ref()
@@ -349,13 +405,14 @@ pub async fn insert_session(
                     reopened_reason, total_cash_sales_cents, total_card_sales_cents,
                     total_online_sales_cents, total_credit_sales_cents, total_cash_refunds_cents,
                     total_pay_in_cents, total_pay_out_cents, total_owner_withdrawals_cents,
-                    total_cash_drops_cents, has_late_movements, version, created_at, updated_at
+                    total_cash_drops_cents, has_late_movements, version, created_at, updated_at,
+                    deleted_at, updated_by_device
                 ) VALUES (
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?
                 )
-                "#
+                "#,
             )
             .bind(&doc.key)
             .bind(&id)
@@ -403,7 +460,9 @@ pub async fn insert_session(
             .bind(doc.version)
             .bind(&created_at_iso)
             .bind(&updated_at_iso)
-            .execute(pool)
+            .bind(&deleted_at_iso)
+            .bind(&doc.updated_by_device)
+            .execute(&mut *conn)
             .await?;
 
             doc.id = ObjectId::parse_str(&id).ok();
@@ -423,7 +482,7 @@ pub async fn list_sessions(
 
     match db {
         Db::Mongo(mongo_db) => {
-            let mut filter = doc! {};
+            let mut filter = doc! { "deleted_at": Bson::Null };
             if let Some(terminal_id) = &query.terminal_id {
                 filter.insert("terminal_id", terminal_id);
             }
@@ -565,6 +624,7 @@ pub(crate) fn session_from_sqlite_row(
     let reopened_at_str: Option<String> = row.get("reopened_at");
     let created_at_str: String = row.get("created_at");
     let updated_at_str: String = row.get("updated_at");
+    let deleted_at_str: Option<String> = row.get("deleted_at");
     let has_late_movements_int: i64 = row.get("has_late_movements");
 
     Ok(RegisterSessionDocument {
@@ -617,6 +677,11 @@ pub(crate) fn session_from_sqlite_row(
         version: row.get("version"),
         created_at: to_bson_datetime(&created_at_str)?,
         updated_at: to_bson_datetime(&updated_at_str)?,
+        deleted_at: deleted_at_str
+            .as_deref()
+            .map(to_bson_datetime)
+            .transpose()?,
+        updated_by_device: row.get("updated_by_device"),
     })
 }
 
@@ -624,28 +689,33 @@ pub(super) fn sessions_col(db: &TenantDatabase) -> ScopedCollection<RegisterSess
     db.collection("register_sessions")
 }
 
-/// Updates the session.
-pub async fn update_session(
-    db: &Db,
+/// Updates the session using optimistic locking on `(key, version)`. Returns `Ok(None)` on version conflict.
+pub async fn update_session<'a>(
+    unit: impl Into<Unit<'a>>,
     doc: &RegisterSessionDocument,
 ) -> AppResult<Option<RegisterSessionDocument>> {
     let now = BsonDateTime::now();
-    match db {
-        Db::Mongo(mongo_db) => {
+    let mut unit = unit.into();
+    match unit.backend().await? {
+        Backend::Mongo(mongo_db, session) => {
             let mut update_doc = doc.clone();
             update_doc.updated_at = now;
             update_doc.version += 1;
 
-            let filter = doc! { "key": &doc.key, "version": doc.version };
+            let filter = doc! {
+                "key": &doc.key,
+                "version": doc.version,
+                "deleted_at": Bson::Null,
+            };
             let res = sessions_col(mongo_db)
-                .replace_one(filter, &update_doc)
+                .replace_one_in(filter, &update_doc, session)
                 .await?;
             if res.matched_count == 0 {
                 return Ok(None);
             }
             Ok(Some(update_doc))
         }
-        Db::Sqlite(pool) => {
+        Backend::Sqlite(mut conn) => {
             let opened_at_iso = bson_to_iso(&doc.opened_at);
             let closed_at_iso = doc.closed_at.as_ref().map(bson_to_iso);
             let reopened_at_iso = doc.reopened_at.as_ref().map(bson_to_iso);
@@ -702,8 +772,9 @@ pub async fn update_session(
                     total_cash_drops_cents = ?,
                     has_late_movements = ?,
                     version = version + 1,
-                    updated_at = ?
-                WHERE key = ? AND version = ?
+                    updated_at = ?,
+                    updated_by_device = ?
+                WHERE key = ? AND version = ? AND deleted_at IS NULL
                 "#,
             )
             .bind(doc.status.as_str())
@@ -744,16 +815,23 @@ pub async fn update_session(
             .bind(doc.total_cash_drops_cents)
             .bind(if doc.has_late_movements { 1 } else { 0 })
             .bind(&updated_at_iso)
+            .bind(&doc.updated_by_device)
             .bind(&doc.key)
             .bind(doc.version)
-            .execute(pool)
+            .execute(&mut *conn)
             .await?;
 
             if res.rows_affected() == 0 {
                 return Ok(None);
             }
 
-            find_session_by_key(db, &doc.key).await
+            let row =
+                sqlx::query("SELECT * FROM register_sessions WHERE key = ? AND deleted_at IS NULL")
+                    .bind(&doc.key)
+                    .fetch_optional(&mut *conn)
+                    .await?;
+
+            row.map(|r| session_from_sqlite_row(&r)).transpose()
         }
     }
 }

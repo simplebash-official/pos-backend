@@ -104,7 +104,10 @@ const BACKFILLABLE: &[(&str, &[&str])] = &[
             "version",
         ],
     ),
-    ("drawer_state", &["updated_at"]),
+    (
+        "drawer_state",
+        &["created_at", "key", "updated_at", "version"],
+    ),
     (
         "employees",
         &["created_at", "status", "updated_at", "version"],
@@ -265,6 +268,7 @@ fn is_backfillable(collection: &str, field: &str) -> bool {
 fn backfill_value(field: &str, object: &Document) -> Option<Bson> {
     let value = match field {
         "version" => Bson::Int64(1),
+        "key" => object.get("user_key").cloned()?,
         "created_at" => object
             .get("updated_at")
             .cloned()

@@ -1,11 +1,13 @@
-use crate::core::constants::prefixes;
-use crate::core::id::generate_id;
-use crate::domain::sessions::{
-    CashDirection, CashMovement, CashMovementType, DrawerState, RegisterSession, SessionStatus,
-};
+use crate::domain::sessions::CashDirection;
+use crate::domain::sessions::CashMovement;
+use crate::domain::sessions::CashMovementType;
+use crate::domain::sessions::DrawerState;
+use crate::domain::sessions::RegisterSession;
+use crate::domain::sessions::SessionStatus;
 use mongodb::bson::DateTime as BsonDateTime;
 use mongodb::bson::oid::ObjectId;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 /// How a cash movement is stored in the database.
@@ -67,11 +69,7 @@ impl CashMovementDocument {
         reversed_by_key: Option<String>,
         undo_window_seconds: i64,
     ) -> CashMovement {
-        let key = if self.key.is_empty() {
-            generate_id(prefixes::CASH_MOVEMENT)
-        } else {
-            self.key
-        };
+        let key = self.key;
         CashMovement {
             id: self
                 .id
@@ -119,12 +117,19 @@ impl CashMovementDocument {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 /// How a drawer state is stored in the database.
 pub struct DrawerStateDocument {
+    #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
+    pub id: Option<ObjectId>,
+    pub key: String,
     pub user_key: String,
     pub current_balance_cents: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_session_key: Option<String>,
     pub last_closing_float_cents: i64,
+    pub version: i64,
+    pub created_at: BsonDateTime,
     pub updated_at: BsonDateTime,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_by_device: Option<String>,
 }
 
 impl DrawerStateDocument {
@@ -214,6 +219,10 @@ pub struct RegisterSessionDocument {
     pub version: i64,
     pub created_at: BsonDateTime,
     pub updated_at: BsonDateTime,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<BsonDateTime>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_by_device: Option<String>,
 }
 
 impl RegisterSessionDocument {
@@ -236,11 +245,7 @@ impl RegisterSessionDocument {
         let cash_variance = self
             .cash_variance_cents
             .or_else(|| self.counted_cash_cents.map(|c| c - expected_cash));
-        let key = if self.key.is_empty() {
-            generate_id(prefixes::REGISTER_SESSION)
-        } else {
-            self.key
-        };
+        let key = self.key;
         RegisterSession {
             id: self
                 .id

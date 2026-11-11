@@ -269,8 +269,9 @@ pub async fn ensure_system_categories(db: &Db) -> AppResult<CashCategorySeedResu
         .await?;
         created += 1;
     }
-    // The drawer rules are the same kind of required starting data, and every shop passes through here.
+    // The drawer rules and shop profile are required starting data, and every shop passes through here.
     crate::modules::cash_settings::service::ensure_settings(db).await?;
+    crate::modules::settings::service::ensure_shop_profile(db, None).await?;
     Ok(CashCategorySeedResult { created, existing })
 }
 

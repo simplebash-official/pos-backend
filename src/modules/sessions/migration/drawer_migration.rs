@@ -94,7 +94,11 @@ pub async fn migrate_mongo(db: &Database, mode: Mode) -> AppResult<Report> {
             if let Some(tenant) = &tenant_id {
                 filter.insert(TENANT_FIELD, tenant);
             }
+            let updated_at = *row
+                .get_datetime("updated_at")
+                .map_err(|e| AppError::internal(format!("drawer_state.updated_at: {e}")))?;
             let mut fresh = filter.clone();
+            fresh.insert("key", &user_key);
             fresh.insert("current_balance_cents", balance_cents);
             if let Ok(key) = row.get_str("last_session_key") {
                 fresh.insert("last_session_key", key);
@@ -105,11 +109,9 @@ pub async fn migrate_mongo(db: &Database, mode: Mode) -> AppResult<Report> {
                     AppError::internal(format!("drawer_state.last_closing_float_cents: {e}"))
                 })?,
             );
-            fresh.insert(
-                "updated_at",
-                *row.get_datetime("updated_at")
-                    .map_err(|e| AppError::internal(format!("drawer_state.updated_at: {e}")))?,
-            );
+            fresh.insert("version", 1_i64);
+            fresh.insert("created_at", updated_at);
+            fresh.insert("updated_at", updated_at);
             // A row the new code already wrote for this user is newer than any machine row.
             drawers
                 .update_one(filter, doc! { "$setOnInsert": fresh })

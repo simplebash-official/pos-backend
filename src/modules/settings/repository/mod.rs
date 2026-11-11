@@ -4,5 +4,6 @@ mod settings_repository;
 
 pub(crate) use settings_repository::find_document_template_settings;
 pub(crate) use settings_repository::find_shop_profile;
+pub(crate) use settings_repository::insert_shop_profile_if_absent;
 pub(crate) use settings_repository::upsert_document_template_settings;
 pub(crate) use settings_repository::upsert_shop_profile;

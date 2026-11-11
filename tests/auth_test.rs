@@ -484,3 +484,106 @@ async fn preferences_require_a_token() {
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
+
+async fn login_with_device(
+    router: &axum::Router,
+    username: &str,
+    password: &str,
+    device_id: &str,
+) -> (StatusCode, Value) {
+    use tower::ServiceExt as _;
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/api/auth/login")
+        .header(axum::http::header::CONTENT_TYPE, "application/json")
+        .header("x-device-id", device_id)
+        .body(axum::body::Body::from(
+            json!({ "username": username, "password": password }).to_string(),
+        ))
+        .expect("the request is well formed");
+    let response = router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("the awaited step succeeds");
+    let body = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+    (status, body)
+}
+
+#[tokio::test]
+async fn staff_login_on_other_device_respects_shift_mode() {
+    let app = common::spawn_app_sqlite().await;
+    let admin = admin_token(&app.config);
+    let (_staff_id, username, password) = create_user(&app.router, &admin, "staff").await;
+
+    // Personal mode: Staff opens on dev_1 -> second login on dev_2 blocked with SESSION_OPEN_ON_OTHER_DEVICE
+    let (status, login_body) = login_with_device(&app.router, &username, &password, "dev_1").await;
+    assert_eq!(status, StatusCode::OK, "{login_body}");
+    let staff_token = login_body["data"]["token"]
+        .as_str()
+        .expect("token present")
+        .to_string();
+
+    let (status, open_res) = send_authed(
+        &app.router,
+        "POST",
+        "/api/sessions/open",
+        Some(json!({ "terminalId": "dev_1", "openingFloatCents": 10_000 })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{open_res}");
+    let session_key = open_res["data"]["key"]
+        .as_str()
+        .expect("session key")
+        .to_string();
+
+    let (status, conflict_body) =
+        login_with_device(&app.router, &username, &password, "dev_2").await;
+    assert_eq!(status, StatusCode::CONFLICT, "{conflict_body}");
+    assert_eq!(conflict_body["code"], "SESSION_OPEN_ON_OTHER_DEVICE");
+
+    // Close and drop cash to 0 so mode switch succeeds
+    let (status, close_res) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/sessions/{session_key}/close"),
+        Some(json!({
+            "countedCashCents": 10_000,
+            "closingFloatCents": 0,
+            "cashDropToSafeCents": 10_000
+        })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{close_res}");
+
+    let (status, mode_res) = send_authed(
+        &app.router,
+        "PUT",
+        "/api/settings/shop-profile",
+        Some(json!({ "allowSharedUserSessions": true })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{mode_res}");
+
+    // SharedShop mode: Staff opens on dev_1 -> logging in on dev_2 succeeds
+    let (status, open2_res) = send_authed(
+        &app.router,
+        "POST",
+        "/api/sessions/open",
+        Some(json!({ "terminalId": "dev_1", "openingFloatCents": 5_000 })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{open2_res}");
+
+    let (status, ok_body) = login_with_device(&app.router, &username, &password, "dev_2").await;
+    assert_eq!(status, StatusCode::OK, "{ok_body}");
+}

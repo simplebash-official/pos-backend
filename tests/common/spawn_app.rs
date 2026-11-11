@@ -68,6 +68,7 @@ pub(super) const TRANSACTIONAL_COLLECTIONS: &[&str] = &[
     "stock_batches",
     "stock_movements",
     "product_serials",
+    "shop_profiles",
 ];
 
 /// Start-up work done once per database and process, however many tests start an app on it at

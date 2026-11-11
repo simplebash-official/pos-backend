@@ -66,6 +66,9 @@ pub(crate) async fn setup() -> Ctx {
         config.document_server_api_key.clone(),
     ));
     let db = Db::Sqlite(pool);
+    simplebash_pos_backend::modules::settings::service::ensure_shop_profile(&db, None)
+        .await
+        .expect("shop profile should initialize in quotations SQLite test context");
     let reports_engine = Arc::new(
         simplebash_pos_backend::modules::reports::engine::AnalyticsEngine::new(db.clone()),
     );

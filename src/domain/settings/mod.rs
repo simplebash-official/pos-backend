@@ -11,6 +11,7 @@ pub use domain_settings::DocumentDesignFamily;
 pub use domain_settings::DocumentDesignStatus;
 pub use domain_settings::DocumentKindSettings;
 pub use domain_settings::DocumentTemplatesResponse;
+pub use domain_settings::ShiftMode;
 pub use domain_settings::ShopProfileResponse;
 pub use domain_settings::StoredDocumentDesign;
 pub use domain_settings::UpdateDocumentTemplatesRequest;

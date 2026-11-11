@@ -1044,7 +1044,7 @@
                 "cash-movement"
               ]
             },
-            "description": "Live figures for the cash payment form: the cash in the drawer now (the open shift's expected cash, or the signed-in user's own running balance between shifts), the drawer after this payment, whether it goes over the drawer, whether a manager PIN is needed (owner and staff payments, the category's limit, the shop-wide limit for cash out, going over the drawer), and `blockers` (what still stops the payment being saved, in order). `pinEntered`/`pinVerified`/`overrideReasonEntered` say what the person has done; the PIN itself is never sent. Nothing is stored. **Requires `cash_movements:create` (plus `cash_movements:create:managed` for rent, staff and supplier payments).**",
+            "description": "Live figures for the cash payment form: the cash in the drawer now (the open shift's expected cash, or the signed-in user's own running balance between shifts), the drawer after this payment, whether it goes over the drawer, whether a manager PIN is needed (owner and staff payments, the category's limit, the shop-wide limit for cash out, going over the drawer), and `blockers` (what still stops the payment being saved, in order). `pinEntered`/`pinVerified`/`overrideReasonEntered` say what the person has done; the PIN itself is never sent. Nothing is stored. **Requires `cash_movements:create` (plus `cash_movements:create:managed` for rent, staff and supplier payments).** Returns `409 SESSION_CLOSING` if the target/active register shift is in `closing` status.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"movementType\": \"petty_expense\",\n  \"amountCents\": 30000,\n  \"categoryKey\": \"{{cashCategoryKey}}\",\n  \"sessionKey\": \"{{sessionKey}}\",\n  \"terminalId\": \"term_front\",\n  \"payeeKey\": null,\n  \"payeeName\": \"\",\n  \"period\": null,\n  \"settlementAmountsCents\": [],\n  \"pinEntered\": false,\n  \"pinVerified\": false,\n  \"overrideReasonEntered\": false,\n  \"confirmDuplicate\": false\n}",
@@ -2123,6 +2123,322 @@
       ]
     },
     {
+      "name": "Register Sessions",
+      "item": [
+        {
+          "name": "Open Register Session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/sessions/open",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "sessions",
+                "open"
+              ]
+            },
+            "description": "Opens a register shift. In Personal mode (`allowSharedUserSessions: false`) allows 1 active shift per cashier; in SharedShop mode (`allowSharedUserSessions: true`) allows 1 active shift shop-wide (`409 SESSION_ALREADY_OPEN`). Requires `register_sessions:manage`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"terminalId\": \"term_front\",\n  \"openingFloatCents\": 10000,\n  \"openingNote\": \"Morning float\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Active Sessions Summary",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/sessions/active-summary",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "sessions",
+                "active-summary"
+              ]
+            },
+            "description": "Returns all active shifts (`open`, `closing`, `reopened`) plus `drawerBalanceTotalCents` across all `drawer_state` rows. Used by Settings UI before switching shift mode. Requires `register_sessions:view`."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Current Session",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/sessions/current?terminal_id=term_front",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "sessions",
+                "current"
+              ],
+              "query": [
+                {
+                  "key": "terminal_id",
+                  "value": "term_front"
+                }
+              ]
+            },
+            "description": "Returns the active shift for the signed-in cashier (`Personal` mode, device-filtered for Staff) or the single shop-wide active shift (`SharedShop` mode, visible on all terminals). Requires `register_sessions:view`."
+          },
+          "response": []
+        },
+        {
+          "name": "List Register Sessions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/sessions?page=1&limit=20",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "sessions"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Paginated list of register sessions. Requires `register_sessions:view`."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Register Session",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/sessions/{{sessionKey}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "sessions",
+                "{{sessionKey}}"
+              ]
+            },
+            "description": "Fetch a single register session by key, sessionNumber, or id. Requires `register_sessions:view`."
+          },
+          "response": []
+        },
+        {
+          "name": "Submit Blind Count",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/sessions/{{sessionKey}}/blind-count",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "sessions",
+                "{{sessionKey}}",
+                "blind-count"
+              ]
+            },
+            "description": "Records the blind cash count, sets `closingCashierId`/`closingCashierNameSnapshot`, and locks the shift in `closing` status (`409 SESSION_CLOSING` blocks new sales, invoice payments, credit notes, and cash movements; `409 VERSION_CONFLICT` on concurrent update). Requires `register_sessions:manage`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countedCashCents\": 10000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel Close",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/sessions/{{sessionKey}}/cancel-close",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "sessions",
+                "{{sessionKey}}",
+                "cancel-close"
+              ]
+            },
+            "description": "Cancels an in-progress close: returns a `closing` shift to `open`/`reopened` and clears blind count fields including `closingCashierId`/`closingCashierNameSnapshot`. Returns `409 SESSION_ALREADY_CLOSED` or `409 VERSION_CONFLICT`. Requires `register_sessions:manage`."
+          },
+          "response": []
+        },
+        {
+          "name": "Close Register Session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/sessions/{{sessionKey}}/close",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "sessions",
+                "{{sessionKey}}",
+                "close"
+              ]
+            },
+            "description": "Closes the register shift and retains `closingFloatCents` on the active drawer (`user_key` in Personal mode, `\"shop\"` in SharedShop mode). Anyone with `register_sessions:manage` may close a shared shift. Returns `409 SESSION_ALREADY_CLOSED` or `409 VERSION_CONFLICT`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countedCashCents\": 10000,\n  \"closingFloatCents\": 5000,\n  \"cashDropToSafeCents\": 5000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reopen Register Session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/sessions/{{sessionKey}}/reopen",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "sessions",
+                "{{sessionKey}}",
+                "reopen"
+              ]
+            },
+            "description": "Reopens a closed shift (Admin/Manager only). Enforces active-shift uniqueness for the current mode (`409 SESSION_ALREADY_OPEN`) and optimistic concurrency (`409 VERSION_CONFLICT`).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Missed late cash adjustment\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Convert Variance",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/sessions/{{sessionKey}}/convert-variance",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "sessions",
+                "{{sessionKey}}",
+                "convert-variance"
+              ]
+            },
+            "description": "Converts a cash shortage on the session into a late `owner_withdrawal` movement atomically (`409 VERSION_CONFLICT` on concurrent modification). Requires `register_sessions:manage` and a manager/owner PIN.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Owner withdrew cash\",\n  \"recipient\": \"Shop Owner\",\n  \"managerPin\": \"1234\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Z-Report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/sessions/{{sessionKey}}/z-report",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "sessions",
+                "{{sessionKey}}",
+                "z-report"
+              ]
+            },
+            "description": "Generates the Z-Report summary for a session. Requires `register_sessions:view`."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "Cash Movements",
       "item": [
         {
@@ -2141,7 +2457,7 @@
                 "drawer-state"
               ]
             },
-            "description": "The signed-in user's running drawer balance: what they kept at their last close plus cash moved since. The balance belongs to the user (the shift owner), not to the machine, so the same user on two machines sees one balance and two users never share one. `data` is null for a user who has never held cash.\n\n**Requires `register_sessions:view`.**"
+            "description": "Returns the active drawer balance: signed-in user drawer (`Personal` mode) or the shop-wide `\"shop\"` drawer (`SharedShop` mode). `data` is null before the drawer has held cash.\n\n**Requires `register_sessions:view`.**"
           },
           "response": []
         },
@@ -2166,7 +2482,7 @@
                 "movements"
               ]
             },
-            "description": "Record one drawer cash event. `movementType` is one of petty_expense | rent_and_bills | staff_payment | supplier_payment | owner_withdrawal | add_cash | cash_drop | no_sale. The category must belong to that kind of payment and be visible; `customLabel` is only for the type's Other category. Each type asks for its own fields and refuses the rest: rent_and_bills needs a vendor `payeeKey` and `periodStart`/`periodEnd` (YYYY-MM-DD); staff_payment a staff `payeeKey`; supplier_payment a supplier `payeeKey`; owner_withdrawal a `payeeName`; no_sale has `amountCents` 0 and no payee. A name typed on a petty_expense is saved to the payee list. A manager or owner `managerPin` is required for owner_withdrawal, staff_payment and any payout above the category's `requiresApprovalOverCents`. `sessionKey` may be omitted only for cash taken out between shifts.\n\n**Requires `cash_movements:create`**; rent_and_bills, staff_payment and supplier_payment also need `cash_movements:create:managed` (Admin and Manager).\n\nA payout (any outgoing kind or a cash drop) bigger than the cash the drawer holds (the open shift's expected cash, or the drawer's running balance between shifts) is refused with 409 `DRAWER_CASH_EXCEEDED` unless a manager or owner `managerPin` and an `overrideReason` are sent; both are kept on the entry (`approvedBy…`, `approvalReason`).\n\nA rent_and_bills payment for a month that is already paid (a regular bill paid in full, or anything recorded for that category and payee when there is no regular bill) is refused with 409 `PERIOD_ALREADY_PAID` unless `confirmDuplicate` is true.\n\n`settlements` (supplier_payment only): the supplier receipts this payment pays and how much of it goes to each; the parts may not exceed the amount and each may not exceed what its receipt still owes (409 `RECEIPT_OVERPAID`). What is not allocated stays on the supplier's account. Reversing a payment recorded with a receipt also reverses the owner's capital recorded with it.",
+            "description": "Record one drawer cash event. `movementType` is one of petty_expense | rent_and_bills | staff_payment | supplier_payment | owner_withdrawal | add_cash | cash_drop | no_sale. The category must belong to that kind of payment and be visible; `customLabel` is only for the type's Other category. Each type asks for its own fields and refuses the rest: rent_and_bills needs a vendor `payeeKey` and `periodStart`/`periodEnd` (YYYY-MM-DD); staff_payment a staff `payeeKey`; supplier_payment a supplier `payeeKey`; owner_withdrawal a `payeeName`; no_sale has `amountCents` 0 and no payee. A name typed on a petty_expense is saved to the payee list. A manager or owner `managerPin` is required for owner_withdrawal, staff_payment and any payout above the category's `requiresApprovalOverCents`. `sessionKey` may be omitted only for cash taken out between shifts.\n\n**Requires `cash_movements:create`**; rent_and_bills, staff_payment and supplier_payment also need `cash_movements:create:managed` (Admin and Manager).\n\nA payout (any outgoing kind or a cash drop) bigger than the cash the drawer holds (the open shift's expected cash, or the drawer's running balance between shifts) is refused with 409 `DRAWER_CASH_EXCEEDED` unless a manager or owner `managerPin` and an `overrideReason` are sent; both are kept on the entry (`approvedBy…`, `approvalReason`).\n\nA rent_and_bills payment for a month that is already paid (a regular bill paid in full, or anything recorded for that category and payee when there is no regular bill) is refused with 409 `PERIOD_ALREADY_PAID` unless `confirmDuplicate` is true.\n\n`settlements` (supplier_payment only): the supplier receipts this payment pays and how much of it goes to each; the parts may not exceed the amount and each may not exceed what its receipt still owes (409 `RECEIPT_OVERPAID`). What is not allocated stays on the supplier's account. Reversing a payment recorded with a receipt also reverses the owner's capital recorded with it.\n\nReturns `409 SESSION_CLOSING` if the target/active register shift is in `closing` (blind-count) status.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"movementType\": \"petty_expense\",\n  \"amountCents\": 1500,\n  \"sessionKey\": \"{{sessionKey}}\",\n  \"terminalId\": \"term_front\",\n  \"categoryKey\": \"{{cashCategoryKey}}\",\n  \"customLabel\": null,\n  \"payeeKey\": null,\n  \"payeeName\": \"Corner shop\",\n  \"periodStart\": null,\n  \"periodEnd\": null,\n  \"referenceNo\": null,\n  \"note\": \"Biscuits\",\n  \"managerPin\": null,\n  \"overrideReason\": null,\n  \"confirmDuplicate\": false,\n  \"settlements\": [\n    {\n      \"receiptKey\": \"{{receiptKey}}\",\n      \"amountCents\": 800000\n    }\n  ]\n}",
@@ -2226,7 +2542,7 @@
                 "reverse"
               ]
             },
-            "description": "Cancel a movement by recording its opposite; the original is never edited or deleted. Its `undoUntil` says how long the person who recorded it can undo it without a manager (120 seconds); after that, or for someone else's movement, only a Manager or Admin (`cash_movements:reverse`) can, and `reason` is required. The drawer and the shift's totals move back. A movement can be reversed once (409 `MOVEMENT_ALREADY_REVERSED`); a reversal or a no-sale open cannot be reversed (400 `MOVEMENT_NOT_REVERSIBLE`); the shift must be open. A reversed drawer payment stops counting as an expense.\n\n**Requires `cash_movements:create`.**"
+            "description": "Cancel a movement by recording its opposite; the original is never edited or deleted. Its `undoUntil` says how long the person who recorded it can undo it without a manager (120 seconds); after that, or for someone else's movement, only a Manager or Admin (`cash_movements:reverse`) can, and `reason` is required. The drawer and the shift's totals move back. A movement can be reversed once (409 `MOVEMENT_ALREADY_REVERSED`); a reversal or a no-sale open cannot be reversed (400 `MOVEMENT_NOT_REVERSIBLE`); the shift must be open. A reversed drawer payment stops counting as an expense.\n\n**Requires `cash_movements:create`.**\n\nReturns `409 SESSION_CLOSING` if the shift is in `closing` status."
           },
           "response": []
         },
@@ -7461,6 +7777,60 @@
     {
       "name": "Settings",
       "item": [
+        {
+          "name": "Get Shop Profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/settings/shop-profile",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "settings",
+                "shop-profile"
+              ]
+            },
+            "description": "Returns the shop profile, including `allowSharedUserSessions` (`false` = Personal per-cashier shifts, `true` = SharedShop single shift & `\"shop\"` drawer)."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Shop Profile",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/settings/shop-profile",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "settings",
+                "shop-profile"
+              ]
+            },
+            "description": "Admin only (`settings:manage`). Updates shop profile fields. Switching `allowSharedUserSessions` is transactional and requires BOTH zero active shifts across `open`/`closing`/`reopened` (`409 ACTIVE_SESSIONS_EXIST`) AND zero total balance across `drawer_state` (`409 DRAWER_BALANCE_NONZERO`).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tradingName\": \"Shop 55\",\n  \"allowSharedUserSessions\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
         {
           "name": "Get Document Designs",
           "request": {

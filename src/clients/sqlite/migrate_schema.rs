@@ -190,6 +190,13 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .execute("ALTER TABLE shop_profiles ADD COLUMN allow_shared_user_sessions INTEGER NOT NULL DEFAULT 0")
             .await?;
     }
+    if !shop_profile_cols.is_empty() {
+        // Legacy writes wrote `key` ("main") into `shop_profiles.id`; sync requires a unique 24-hex ObjectId.
+        pool.execute(
+            "UPDATE shop_profiles SET id = lower(hex(randomblob(12))) WHERE key = 'main' AND (id = 'main' OR length(id) != 24)",
+        )
+        .await?;
+    }
 
     // Check if 'generated_documents' table is missing required columns from earlier schema versions
     let gen_doc_cols: Vec<(i32, String)> =
@@ -325,7 +332,58 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         }
     }
     migrate_drawer_state_to_users(pool).await?;
+    migrate_drawer_state_sync_columns(pool).await?;
 
+    Ok(())
+}
+
+/// Ensures `drawer_state` carries the sync metadata columns (`key`, `id`, `version`, `created_at`,
+/// `updated_by_device`) and backfills existing rows before `idx_drawer_state_key_unique` runs.
+async fn migrate_drawer_state_sync_columns(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    let columns = table_columns(pool, "drawer_state").await?;
+    if columns.is_empty() {
+        return Ok(());
+    }
+    for (column, ddl) in [
+        (
+            "key",
+            "ALTER TABLE drawer_state ADD COLUMN key TEXT NOT NULL DEFAULT ''",
+        ),
+        (
+            "id",
+            "ALTER TABLE drawer_state ADD COLUMN id TEXT NOT NULL DEFAULT ''",
+        ),
+        (
+            "version",
+            "ALTER TABLE drawer_state ADD COLUMN version INTEGER NOT NULL DEFAULT 1",
+        ),
+        (
+            "created_at",
+            "ALTER TABLE drawer_state ADD COLUMN created_at TEXT NOT NULL DEFAULT ''",
+        ),
+        (
+            "updated_by_device",
+            "ALTER TABLE drawer_state ADD COLUMN updated_by_device TEXT",
+        ),
+    ] {
+        if !columns.iter().any(|c| c == column) {
+            pool.execute(ddl).await?;
+        }
+    }
+    pool.execute("UPDATE drawer_state SET key = user_key WHERE key = '' OR key IS NULL")
+        .await?;
+    pool.execute(
+        "UPDATE drawer_state SET id = lower(hex(randomblob(12))) WHERE id = '' OR id IS NULL OR length(id) != 24",
+    )
+    .await?;
+    pool.execute(
+        "UPDATE drawer_state SET created_at = updated_at WHERE created_at = '' OR created_at IS NULL",
+    )
+    .await?;
+    pool.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_drawer_state_key_unique ON drawer_state(key)",
+    )
+    .await?;
     Ok(())
 }
 

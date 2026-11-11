@@ -3,14 +3,27 @@ use crate::core::constants::permissions as perm;
 use crate::core::error::AppResult;
 use crate::core::middleware::auth::CurrentUser;
 use crate::core::middleware::sync_headers::DeviceId;
-use crate::core::response::{ApiResponse, ErrorResponse};
-use crate::domain::sessions::{
-    CashMovement, CashMovementListQuery, CashMovementListResponse, CloseSessionRequest,
-    ConvertVarianceRequest, CreateCashMovementRequest, DrawerState, OpenSessionRequest,
-    RegisterSession, ReopenSessionRequest, ReverseCashMovementRequest, SessionListQuery,
-    SessionListResponse, SubmitBlindCountRequest, ZReportResponse,
-};
-use crate::domain::settings::{DocumentDesignChoice, DocumentDesignStatus};
+use crate::core::response::ApiResponse;
+use crate::core::response::ErrorResponse;
+use crate::domain::sessions::ActiveSessionsSummaryResponse;
+use crate::domain::sessions::CashMovement;
+use crate::domain::sessions::CashMovementListQuery;
+use crate::domain::sessions::CashMovementListResponse;
+use crate::domain::sessions::CloseSessionRequest;
+use crate::domain::sessions::ConvertVarianceRequest;
+use crate::domain::sessions::CreateCashMovementRequest;
+use crate::domain::sessions::DrawerState;
+use crate::domain::sessions::OpenSessionRequest;
+use crate::domain::sessions::RegisterSession;
+use crate::domain::sessions::ReopenSessionRequest;
+use crate::domain::sessions::ReverseCashMovementRequest;
+use crate::domain::sessions::SessionListQuery;
+use crate::domain::sessions::SessionListResponse;
+use crate::domain::sessions::SubmitBlindCountRequest;
+use crate::domain::sessions::ZReportResponse;
+use crate::domain::settings::DocumentDesignChoice;
+use crate::domain::settings::DocumentDesignStatus;
+use crate::domain::settings::ShiftMode;
 use crate::domain::users::Role;
 use crate::modules::sessions::repository::drawer;
 use crate::modules::sessions::service;
@@ -33,7 +46,7 @@ use utoipa_axum::routes;
     responses(
         (status = 200, description = "Closing cancelled, session back in use", body = ApiResponse<RegisterSession>),
         (status = 404, description = "Session not found", body = ErrorResponse),
-        (status = 409, description = "Session already closed", body = ErrorResponse)
+        (status = 409, description = "Session already closed or version conflict", body = ErrorResponse)
     ),
     security(("bearerAuth" = [])),
     tag = "Register Sessions"
@@ -60,7 +73,8 @@ pub(super) async fn cancel_close(
     request_body = CloseSessionRequest,
     responses(
         (status = 200, description = "Register session closed", body = ApiResponse<RegisterSession>),
-        (status = 400, description = "Validation failed", body = ErrorResponse)
+        (status = 400, description = "Validation failed", body = ErrorResponse),
+        (status = 409, description = "Session already closed or version conflict", body = ErrorResponse)
     ),
     security(("bearerAuth" = [])),
     tag = "Register Sessions"
@@ -130,7 +144,8 @@ pub(super) async fn convert_variance(
     request_body = CreateCashMovementRequest,
     responses(
         (status = 201, description = "Cash movement recorded", body = ApiResponse<CashMovement>),
-        (status = 400, description = "Validation failed", body = ErrorResponse)
+        (status = 400, description = "Validation failed", body = ErrorResponse),
+        (status = 409, description = "Session closing lock or drawer limit conflict", body = ErrorResponse)
     ),
     security(("bearerAuth" = [])),
     tag = "Cash Movements"
@@ -197,12 +212,33 @@ pub(super) async fn get_cash_movement(
 
 #[utoipa::path(
     get,
+    path = "/active-summary",
+    responses(
+        (status = 200, description = "Active register sessions across open/closing/reopened and summed drawer balance", body = ApiResponse<ActiveSessionsSummaryResponse>)
+    ),
+    security(("bearerAuth" = [])),
+    tag = "Register Sessions"
+)]
+pub(super) async fn get_active_sessions_summary(
+    State(state): State<AppState>,
+    current_user: CurrentUser,
+) -> AppResult<Json<ApiResponse<ActiveSessionsSummaryResponse>>> {
+    current_user.require_permission(perm::REGISTER_SESSIONS_VIEW)?;
+    let summary = service::get_active_sessions_summary(&state.db).await?;
+    Ok(Json(ApiResponse::success(
+        summary,
+        "Active sessions summary retrieved successfully",
+    )))
+}
+
+#[utoipa::path(
+    get,
     path = "/current",
     params(
         ("terminal_id" = Option<String>, Query, description = "Terminal ID to check active session for")
     ),
     responses(
-        (status = 200, description = "Current active session for terminal or cashier", body = ApiResponse<Option<RegisterSession>>)
+        (status = 200, description = "Current active session for user (Personal) or shop (SharedShop)", body = ApiResponse<Option<RegisterSession>>)
     ),
     security(("bearerAuth" = [])),
     tag = "Register Sessions"
@@ -216,17 +252,17 @@ pub(super) async fn get_current_session(
     current_user.require_permission(perm::REGISTER_SESSIONS_VIEW)?;
 
     let terminal_id = query.terminal_id.as_deref().or(device_id.0.as_deref());
-    let mut session = service::resolve_active_session(&state.db, &current_user.user_id)
+    let mode = service::current_shift_mode(&state.db).await?;
+    let session = service::resolve_active_session(&state.db, &current_user.user_id)
         .await?
-        // Staff work from one machine: their shift is not shown on any other.
+        // In Personal mode, Staff work from one machine: their shift is not shown on any other.
+        // In SharedShop mode, Staff see the single shop-wide shift from any terminal.
         .filter(|s| {
-            current_user.role != Some(Role::Staff) || Some(s.terminal_id.as_str()) == terminal_id
+            mode == ShiftMode::SharedShop
+                || current_user.role != Some(Role::Staff)
+                || Some(s.terminal_id.as_str()) == terminal_id
         })
         .map(|s| s.into_register_session());
-
-    if let Some(ref mut s) = session {
-        service::session::populate_missing_cashier_name(&state.db, s).await;
-    }
 
     Ok(Json(ApiResponse::success(
         session,
@@ -238,7 +274,7 @@ pub(super) async fn get_current_session(
     get,
     path = "/drawer-state",
     responses(
-        (status = 200, description = "The signed-in user's drawer balance", body = ApiResponse<Option<DrawerState>>)
+        (status = 200, description = "Current drawer balance (signed-in user's drawer in Personal mode, or 'shop' in SharedShop mode)", body = ApiResponse<Option<DrawerState>>)
     ),
     security(("bearerAuth" = [])),
     tag = "Register Sessions"
@@ -248,7 +284,8 @@ pub(super) async fn get_drawer_state(
     current_user: CurrentUser,
 ) -> AppResult<Json<ApiResponse<Option<DrawerState>>>> {
     current_user.require_permission(perm::REGISTER_SESSIONS_VIEW)?;
-    let drawer_state = drawer::get_drawer_state(&state.db, &current_user.user_id).await?;
+    let drawer_key = service::active_drawer_key(&state.db, None, &current_user.user_id).await?;
+    let drawer_state = drawer::get_drawer_state(&state.db, &drawer_key).await?;
     Ok(Json(ApiResponse::success(
         drawer_state.map(|s| s.into_drawer_state()),
         "Drawer state retrieved successfully",
@@ -336,8 +373,7 @@ pub(super) async fn get_z_report_document(
 ) -> AppResult<Response> {
     current_user.require_permission(perm::REGISTER_SESSIONS_VIEW)?;
     let report = service::generate_z_report(&state.db, &key).await?;
-    let shop =
-        settings::service::get_shop_profile(&state.db, current_user.tenant_id.as_deref()).await?;
+    let shop = settings::service::get_shop_profile(&state.db).await?;
     let shop_val = serde_json::to_value(&shop)?;
     let data =
         crate::modules::billing::service::print_payload::build_z_report_data(&report, &shop_val);
@@ -575,6 +611,7 @@ pub(super) async fn reverse_cash_movement(
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(open_session))
+        .routes(routes!(get_active_sessions_summary))
         .routes(routes!(get_current_session))
         .routes(routes!(get_drawer_state))
         .routes(routes!(list_sessions))
@@ -602,7 +639,8 @@ pub fn router() -> OpenApiRouter<AppState> {
     request_body = SubmitBlindCountRequest,
     responses(
         (status = 200, description = "Blind count recorded", body = ApiResponse<RegisterSession>),
-        (status = 404, description = "Session not found", body = ErrorResponse)
+        (status = 404, description = "Session not found", body = ErrorResponse),
+        (status = 409, description = "Session already closed or version conflict", body = ErrorResponse)
     ),
     security(("bearerAuth" = [])),
     tag = "Register Sessions"
@@ -614,7 +652,10 @@ pub(super) async fn submit_blind_count(
     Json(body): Json<SubmitBlindCountRequest>,
 ) -> AppResult<Json<ApiResponse<RegisterSession>>> {
     current_user.require_permission(perm::REGISTER_SESSIONS_MANAGE)?;
-    let session = service::submit_blind_count(&state.db, &key, body).await?;
+    let cashier_name = current_user.resolve_name(&state.db).await?;
+    let session =
+        service::submit_blind_count(&state.db, &key, current_user.user_id, cashier_name, body)
+            .await?;
     Ok(Json(ApiResponse::success(
         session,
         "Blind count recorded successfully",

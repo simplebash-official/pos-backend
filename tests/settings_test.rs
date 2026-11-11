@@ -172,3 +172,77 @@ async fn test_shop_profile_empty_trading_name_rejected() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(res["success"], false);
 }
+
+#[tokio::test]
+async fn test_shop_profile_errors_when_uninitialized_and_ensure_is_idempotent() {
+    use tower::ServiceExt as _;
+
+    let app = common::spawn_app_sqlite().await;
+    if let simplebash_pos_backend::clients::db::Db::Sqlite(pool) = &app.db_handle {
+        sqlx::query("DELETE FROM shop_profiles")
+            .execute(pool)
+            .await
+            .expect("delete shop_profiles row");
+    }
+
+    let admin_token = common::mint_token(
+        &app.config,
+        Some(simplebash_pos_backend::domain::users::Role::Admin),
+        simplebash_pos_backend::core::constants::roles::default_permissions(
+            simplebash_pos_backend::domain::users::Role::Admin,
+        ),
+    );
+
+    let req = axum::http::Request::builder()
+        .method("GET")
+        .uri("/api/settings/shop-profile")
+        .header(
+            axum::http::header::AUTHORIZATION,
+            format!("Bearer {admin_token}"),
+        )
+        .body(axum::body::Body::empty())
+        .expect("request builds");
+    let resp = app
+        .router
+        .clone()
+        .oneshot(req)
+        .await
+        .expect("oneshot succeeds");
+    assert_eq!(resp.status(), axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+
+    simplebash_pos_backend::modules::settings::service::ensure_shop_profile(
+        &app.db_handle,
+        Some("First Trading Name"),
+    )
+    .await
+    .expect("first ensure succeeds");
+    simplebash_pos_backend::modules::settings::service::ensure_shop_profile(
+        &app.db_handle,
+        Some("Second Trading Name"),
+    )
+    .await
+    .expect("second ensure is idempotent");
+
+    let req2 = axum::http::Request::builder()
+        .method("GET")
+        .uri("/api/settings/shop-profile")
+        .header(
+            axum::http::header::AUTHORIZATION,
+            format!("Bearer {admin_token}"),
+        )
+        .body(axum::body::Body::empty())
+        .expect("request builds");
+    let resp2 = app
+        .router
+        .clone()
+        .oneshot(req2)
+        .await
+        .expect("oneshot succeeds");
+    assert_eq!(resp2.status(), axum::http::StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp2.into_body(), usize::MAX)
+        .await
+        .expect("body reads");
+    let json: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
+    assert_eq!(json["data"]["tradingName"], "First Trading Name");
+    assert_eq!(json["data"]["allowSharedUserSessions"], false);
+}

@@ -555,3 +555,105 @@ async fn record_payment_after_deposit_pays_off_to_paid() {
     .await;
     assert_eq!(customer_body["data"]["outstandingBalanceCents"], 0);
 }
+
+#[tokio::test]
+async fn sales_and_invoice_payments_return_session_closing_during_shared_blind_count() {
+    let app = common::spawn_app_isolated().await;
+    let admin = crate::helpers::admin_token(&app.config);
+    let staff = staff_token(&app.config);
+    let (_customer_id, customer_key) = seed_customer(&app).await;
+
+    let (status, profile_res) = send_authed(
+        &app.router,
+        "PUT",
+        "/api/settings/shop-profile",
+        Some(json!({ "allowSharedUserSessions": true })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{profile_res}");
+
+    let (status, open_res) = send_authed(
+        &app.router,
+        "POST",
+        "/api/sessions/open",
+        Some(json!({ "terminalId": "term_bill_1", "openingFloatCents": 10_000 })),
+        &staff,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{open_res}");
+    let session_key = open_res["data"]["key"]
+        .as_str()
+        .expect("session key")
+        .to_string();
+
+    let mut credit_sale = base_sale_payload();
+    credit_sale["customer"] = json!({ "customerKey": customer_key });
+    credit_sale["payment"]["isCredit"] = json!(true);
+    credit_sale["payment"]["amountReceivedCents"] = json!(0);
+    credit_sale["payment"]["dueDate"] = json!("2099-01-01");
+    credit_sale["items"] = json!([{
+        "name": "Deferred Service",
+        "unitPriceCents": 50_000,
+        "quantity": 1,
+        "discountCents": 0,
+        "sourceType": "retail",
+    }]);
+
+    let (status, sale_res) = send_authed(
+        &app.router,
+        "POST",
+        "/api/billing/sales",
+        Some(credit_sale),
+        &staff,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sale_res}");
+    let invoice_key = sale_res["data"]["invoice"]["key"]
+        .as_str()
+        .expect("invoice key")
+        .to_string();
+
+    // Enter Closing state via blind count
+    let (status, bc_res) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/sessions/{session_key}/blind-count"),
+        Some(json!({ "countedCashCents": 10_000 })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{bc_res}");
+
+    let mut blocked_sale = base_sale_payload();
+    blocked_sale["items"] = json!([{
+        "name": "Blocked Cash Item",
+        "unitPriceCents": 2_000,
+        "quantity": 1,
+        "discountCents": 0,
+        "sourceType": "retail",
+    }]);
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/billing/sales",
+        Some(blocked_sale),
+        &staff,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "SESSION_CLOSING");
+
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/billing/invoices/{invoice_key}/payments"),
+        Some(json!({ "amountCents": 25_000, "paymentMethod": "cash" })),
+        &staff,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "SESSION_CLOSING");
+
+    let _ = app.mongo().drop().await;
+}

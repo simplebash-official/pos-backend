@@ -142,29 +142,30 @@ pub struct ShopProfileResponse {
     pub allow_shared_user_sessions: bool,
 }
 
-impl Default for ShopProfileResponse {
-    fn default() -> Self {
-        Self {
-            id: "shop-main".to_string(),
-            version: 1,
-            legal_name: String::new(),
-            trading_name: String::new(),
-            address_lines: Vec::new(),
-            primary_phone: String::new(),
-            secondary_phone: String::new(),
-            email: String::new(),
-            website: String::new(),
-            business_reg_no: String::new(),
-            logo_base64: String::new(),
-            bank_name: String::new(),
-            bank_branch: String::new(),
-            account_name: String::new(),
-            account_number: String::new(),
-            default_warranty_text: String::new(),
-            default_footer_text: String::new(),
-            receipt_footer_text: String::new(),
-            allow_shared_user_sessions: false,
+/// How active register sessions and cash drawers are scoped within a shop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShiftMode {
+    /// Each staff/manager/admin opens their own shift and owns their own drawer balance.
+    Personal,
+    /// One shared shop shift and one `"shop"` drawer shared across all logged-in staff/devices.
+    SharedShop,
+}
+
+impl ShiftMode {
+    /// Converts the persisted `allow_shared_user_sessions` flag into an explicit [`ShiftMode`].
+    #[must_use]
+    pub const fn from_allow_shared(allow_shared_user_sessions: bool) -> Self {
+        if allow_shared_user_sessions {
+            Self::SharedShop
+        } else {
+            Self::Personal
         }
+    }
+
+    /// Converts this mode back into the persisted `allow_shared_user_sessions` flag.
+    #[must_use]
+    pub const fn as_allow_shared(self) -> bool {
+        matches!(self, Self::SharedShop)
     }
 }
 

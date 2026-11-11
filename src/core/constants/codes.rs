@@ -137,6 +137,8 @@ pub const INVALID_PIN: &str = "INVALID_PIN";
 pub const PIN_NOT_SET: &str = "PIN_NOT_SET";
 pub const OWNER_APPROVAL_REQUIRED: &str = "OWNER_APPROVAL_REQUIRED";
 pub const ACTIVE_SESSIONS_EXIST: &str = "ACTIVE_SESSIONS_EXIST";
+pub const DRAWER_BALANCE_NONZERO: &str = "DRAWER_BALANCE_NONZERO";
+pub const SESSION_CLOSING: &str = "SESSION_CLOSING";
 
 // Cash categories & payees Status Codes
 pub const CASH_CATEGORY_NOT_FOUND: &str = "CASH_CATEGORY_NOT_FOUND";

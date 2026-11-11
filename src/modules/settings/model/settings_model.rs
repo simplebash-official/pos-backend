@@ -45,6 +45,8 @@ pub struct ShopProfileDocument {
     pub version: i64,
     pub created_at: BsonDateTime,
     pub updated_at: BsonDateTime,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_by_device: Option<String>,
 }
 
 impl ShopProfileDocument {

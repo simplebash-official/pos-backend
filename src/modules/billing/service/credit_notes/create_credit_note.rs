@@ -939,12 +939,13 @@ async fn finish_create_credit_note(
         }
     }
 
-    let resolved_session_key = match &session_key {
-        Some(k) => Some(k.clone()),
-        None => crate::modules::sessions::service::resolve_active_session(db, &cashier_id)
-            .await?
-            .map(|s| s.key),
-    };
+    let resolved_session_doc = crate::modules::sessions::service::resolve_writable_session(
+        db,
+        session_key.as_deref(),
+        &cashier_id,
+    )
+    .await?;
+    let resolved_session_key = resolved_session_doc.as_ref().map(|s| s.key.clone());
 
     let now = BsonDateTime::now();
     let mut refund_payment_keys = Vec::new();
@@ -994,13 +995,15 @@ async fn finish_create_credit_note(
                     cash_refunded,
                 )
                 .await?;
-                let session =
-                    crate::modules::sessions::repository::sessions::find_session_by_key(db, s_key)
-                        .await?
-                        .ok_or_else(|| AppError::internal("the refund's session disappeared"))?;
+                let drawer_key = crate::modules::sessions::service::active_drawer_key(
+                    db,
+                    resolved_session_doc.as_ref(),
+                    &cashier_id,
+                )
+                .await?;
                 crate::modules::sessions::repository::drawer::update_drawer_balance(
                     db,
-                    &session.cashier_id,
+                    &drawer_key,
                     -cash_refunded,
                 )
                 .await?;

@@ -78,10 +78,10 @@ pub async fn get_document_templates(
     security(("bearerAuth" = []))
 )]
 pub async fn get_shop_profile(
-    user: CurrentUser,
+    _user: CurrentUser,
     State(state): State<AppState>,
 ) -> AppResult<Json<ApiResponse<ShopProfileResponse>>> {
-    let profile = service::get_shop_profile(&state.db, user.tenant_id.as_deref()).await?;
+    let profile = service::get_shop_profile(&state.db).await?;
     Ok(Json(ApiResponse::success(
         profile,
         "Shop profile retrieved successfully",
@@ -136,6 +136,7 @@ pub async fn update_document_templates(
         (status = 400, description = "Validation error", body = ErrorResponse),
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
         (status = 403, description = "Admin role required", body = ErrorResponse),
+        (status = 409, description = "Active shifts exist (ACTIVE_SESSIONS_EXIST) or drawer balance is non-zero (DRAWER_BALANCE_NONZERO)", body = ErrorResponse),
     ),
     security(("bearerAuth" = []))
 )]

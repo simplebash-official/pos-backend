@@ -82,12 +82,13 @@ pub async fn record_payment(
             ));
         }
 
-        let resolved_session_key = match body.session_key {
-            Some(k) => Some(k),
-            None => crate::modules::sessions::service::resolve_active_session(db, &recorded_by_user_id)
-            .await?
-            .map(|s| s.key),
-        };
+        let resolved_session_doc = crate::modules::sessions::service::resolve_writable_session(
+            db,
+            body.session_key.as_deref(),
+            &recorded_by_user_id,
+        )
+        .await?;
+        let resolved_session_key = resolved_session_doc.as_ref().map(|s| s.key.clone());
 
         let now = BsonDateTime::now();
         let payment_document = PaymentDocument {
@@ -98,7 +99,7 @@ pub async fn record_payment(
             payment_method: body.payment_method.clone(),
             notes: body.notes,
             session_key: resolved_session_key.clone(),
-            recorded_by_user_id,
+            recorded_by_user_id: recorded_by_user_id.clone(),
             recorded_by_name_snapshot: recorded_by_name,
             recorded_at: now,
             version: 1,
@@ -123,13 +124,15 @@ pub async fn record_payment(
             .await?;
 
             if cash_delta != 0 {
-                let session =
-                    crate::modules::sessions::repository::sessions::find_session_by_key(db, s_key)
-                        .await?
-                        .ok_or_else(|| AppError::internal("the payment's session disappeared"))?;
+                let drawer_key = crate::modules::sessions::service::active_drawer_key(
+                    db,
+                    resolved_session_doc.as_ref(),
+                    &recorded_by_user_id,
+                )
+                .await?;
                 crate::modules::sessions::repository::drawer::update_drawer_balance(
                     db,
-                    &session.cashier_id,
+                    &drawer_key,
                     cash_delta,
                 )
                 .await?;

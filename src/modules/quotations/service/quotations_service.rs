@@ -186,7 +186,7 @@ async fn resolve_item(db: &Db, line: CreateQuotationItem) -> AppResult<Quotation
 /// read from settings and frozen onto the row (never taken from the client).
 pub async fn create_quotation(
     db: &Db,
-    tenant_id: Option<&str>,
+    _tenant_id: Option<&str>,
     body: CreateQuotationRequest,
     device_id: Option<String>,
 ) -> AppResult<Quotation> {
@@ -262,7 +262,7 @@ pub async fn create_quotation(
             compute_order_discount(subtotal_cents, body.pricing_adjustments.as_ref());
         let total_cents = (subtotal_cents - discount_cents).max(0);
 
-        let shop = settings::service::get_shop_profile(db, tenant_id).await?;
+        let shop = settings::service::get_shop_profile(db).await?;
         let shop_profile_snapshot = serde_json::to_value(shop)
             .map_err(|e| AppError::internal(format!("Could not read the shop profile: {e}")))?;
 

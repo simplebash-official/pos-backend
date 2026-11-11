@@ -172,7 +172,7 @@ const LABEL_SLUG: &str = "product-label";
 pub(super) async fn render(
     db: &Db,
     doc_server: &DocumentServerClient,
-    tenant_id: Option<&str>,
+    _tenant_id: Option<&str>,
     width_mm: f64,
     height_mm: f64,
     elements: &[LabelElement],
@@ -181,7 +181,7 @@ pub(super) async fn render(
     for sticker in stickers {
         super::validate::check_code_fits(elements, &sticker.code, &sticker.name)?;
     }
-    let shop = settings::service::get_shop_profile(db, tenant_id).await?;
+    let shop = settings::service::get_shop_profile(db).await?;
     let data = super::payload::build_label_data(
         width_mm,
         height_mm,

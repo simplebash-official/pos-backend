@@ -58,6 +58,7 @@ pub(super) async fn calc_cash_count(
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
         (status = 403, description = "Permission denied", body = ErrorResponse),
         (status = 404, description = "Shift or category not found", body = ErrorResponse),
+        (status = 409, description = "Cash count is in progress for the register session (SESSION_CLOSING)", body = ErrorResponse),
     )
 )]
 /// Same access as recording the movement (`cash_movements:create`, plus the managed one for rent,
@@ -349,10 +350,12 @@ pub(super) async fn calc_shift_count(
                 Some(session.opening_float_cents),
             )
         }
-        // Opening: the user's own balance is expected, whichever machine they open on.
+        // Opening: the active drawer balance for the shop (SharedShop) or the user (Personal).
         (None, Some(_terminal_id)) => {
+            let drawer_key =
+                sessions::service::active_drawer_key(&state.db, None, &user.user_id).await?;
             let drawer =
-                sessions::repository::drawer::get_drawer_state(&state.db, &user.user_id).await?;
+                sessions::repository::drawer::get_drawer_state(&state.db, &drawer_key).await?;
             (
                 sessions::service::expected_opening_float(drawer.as_ref(), body.counted_cents),
                 None,

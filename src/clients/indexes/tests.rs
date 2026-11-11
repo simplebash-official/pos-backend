@@ -21,11 +21,11 @@ fn single_tenant_specs_are_the_historical_set() {
     // + cash_categories key/type-name + payees key/type-name + cash_movements category/payee
     // + expenses key/date + expense_payments expense_key + incomes key/date + account_openings key + balance_openings key + advance_recoveries key/employee_key + attachments key/owner + cash_settings key + purchase_receipts key/supplier-reference + purchases receipt_key
     // + receipt_settlements key/receipt_key/payment_key + supplier_credits key/supplier_key/receipt_key
-    // + receipt_charges key/receipt_key/supplier_key + drawer_state user_key
+    // + receipt_charges key/receipt_key/supplier_key + drawer_state user_key/key + register_sessions status
     // + warranties key/sync/number/serial/invoice key/invoice number/customer/phone
     // + warranty_events key/warranty key/sync
     // + warranty_claims key/sync/status/warranty key/invoice key.
-    assert_eq!(specs.len(), 89);
+    assert_eq!(specs.len(), 91);
     assert!(specs.iter().all(|s| s.keys.get(TENANT_FIELD).is_none()));
     assert!(names(&specs).contains(&"products.sync_updated_at_key".to_string()));
     assert!(names(&specs).contains(&"idempotency_keys.idempotency_ttl".to_string()));
@@ -53,6 +53,7 @@ fn single_tenant_specs_are_the_historical_set() {
             "balance_openings_key_unique",
             "advance_recoveries_key_unique",
             "attachments_key_unique",
+            "drawer_state_key_unique",
             "cash_settings_key_unique",
             "shop_profiles_key_unique",
             "document_template_settings_key_unique",

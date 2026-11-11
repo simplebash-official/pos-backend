@@ -4,6 +4,7 @@
 
 mod domain_sessions;
 
+pub use domain_sessions::ActiveSessionsSummaryResponse;
 pub use domain_sessions::CashDirection;
 pub use domain_sessions::CashMovement;
 pub use domain_sessions::CashMovementListQuery;

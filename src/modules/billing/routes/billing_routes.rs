@@ -56,6 +56,7 @@ pub(super) async fn close_invoice(
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
         (status = 403, description = "Permission denied", body = ErrorResponse),
         (status = 404, description = "customerKey does not resolve to an existing customer", body = ErrorResponse),
+        (status = 409, description = "Active register shift is closing (SESSION_CLOSING), closed (SESSION_ALREADY_CLOSED), or insufficient stock", body = ErrorResponse),
     )
 )]
 pub(super) async fn complete_sale(
@@ -88,7 +89,7 @@ pub(super) async fn complete_sale(
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
         (status = 403, description = "Permission denied, or manager override required (no-receipt / past return window)", body = ErrorResponse),
         (status = 404, description = "Invoice or product not found", body = ErrorResponse),
-        (status = 409, description = "Invoice not eligible for a credit note, or past the return window without override", body = ErrorResponse),
+        (status = 409, description = "Invoice not eligible for a credit note, past the return window without override, or register shift is closing (SESSION_CLOSING)", body = ErrorResponse),
     )
 )]
 pub(super) async fn create_credit_note(
@@ -484,7 +485,7 @@ pub(super) async fn list_payments(
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
         (status = 403, description = "Permission denied", body = ErrorResponse),
         (status = 404, description = "Invoice not found", body = ErrorResponse),
-        (status = 409, description = "Invoice already cancelled, or payment exceeds outstanding balance", body = ErrorResponse),
+        (status = 409, description = "Invoice already cancelled, payment exceeds outstanding balance, or register shift is closing (SESSION_CLOSING)", body = ErrorResponse),
     )
 )]
 pub(super) async fn record_payment(
