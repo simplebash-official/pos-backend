@@ -277,7 +277,7 @@ pub(crate) async fn bootstrap(cloud: &common::TestApp, d: &mut Device) {
 
 /// Reserve a block of invoice and quotation numbers from the cloud and hand them to the device.
 pub(crate) async fn reserve_blocks(cloud: &common::TestApp, d: &Device) {
-    for name in ["invoice", "quotation"] {
+    for name in ["invoice", "quotation", "session", "cashMovement"] {
         let (status, body) = call(
             &cloud.router,
             "POST",
@@ -422,9 +422,9 @@ pub(crate) async fn table_rows(pool: &SqlitePool, table: &str) -> Vec<Value> {
             for meta in ["updated_at", "version", "updated_by_device"] {
                 object.remove(meta);
             }
-            // Categories and subcategories carry no legacy id on the wire (everything
-            // joins them by key), so each device mints its own.
-            if table == "subcategories" || table == "categories" {
+            // Categories, subcategories, and the locally seeded shop profile are joined
+            // by business key across replicas while each SQLite DB keeps its own id.
+            if table == "subcategories" || table == "categories" || table == "shop_profiles" {
                 object.remove("id");
                 object.remove("_id");
             }

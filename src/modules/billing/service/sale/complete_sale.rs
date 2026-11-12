@@ -1,7 +1,7 @@
 use super::service_sale::resolve_sale_items;
 use crate::clients::db::Db;
 use crate::core::calculations;
-use crate::core::constants::{codes, prefixes};
+use crate::core::constants::prefixes;
 use crate::core::error::{AppError, AppResult};
 use crate::core::id::generate_id;
 use crate::domain::billing::{
@@ -401,33 +401,22 @@ pub async fn complete_sale(
             calculations::validate_split_payments(total_cents, legs)?;
         }
 
-        // Resolve the register session: if specified, validate it; otherwise detect active session for terminal/cashier
-        let session_doc = match &body.session_key {
-            Some(key) => {
-                let sess =
-                    crate::modules::sessions::repository::sessions::find_session_by_key(db, key)
-                        .await?
-                        .ok_or_else(|| {
-                            AppError::not_found_with_code(
-                                "Register session not found",
-                                codes::SESSION_NOT_FOUND,
-                            )
-                        })?;
-                if sess.status == crate::domain::sessions::SessionStatus::Closed {
-                    return Err(AppError::conflict(
-                        codes::SESSION_ALREADY_CLOSED,
-                        "The specified register session is already closed",
-                    ));
-                }
-                Some(sess)
-            }
-            None => {
-                crate::modules::sessions::service::resolve_active_session(db, &cashier_id).await?
-            }
-        };
+        // Resolve and lock-check the register session (rejects closed or mid-count closing shifts).
+        let session_doc = crate::modules::sessions::service::resolve_writable_session(
+            db,
+            body.session_key.as_deref(),
+            &cashier_id,
+        )
+        .await?;
         let active_session_key = session_doc.as_ref().map(|s| s.key.clone());
-        // The cash belongs to the shift owner's drawer, whichever machine rang the sale up.
-        let active_session_owner = session_doc.as_ref().map(|s| s.cashier_id.clone());
+        // Cash updates the shop's shared drawer in SharedShop mode, or the shift owner's drawer in Personal mode.
+        let active_session_owner = match session_doc.as_ref() {
+            Some(sess) => Some(
+                crate::modules::sessions::service::active_drawer_key(db, Some(sess), &cashier_id)
+                    .await?,
+            ),
+            None => None,
+        };
 
         let reservation = sequences::service::reserve_sequence(
             db,

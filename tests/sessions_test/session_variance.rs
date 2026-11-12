@@ -371,7 +371,7 @@ async fn shift_follows_its_owner_and_the_setting_guard_holds() {
     assert_eq!(status, StatusCode::OK);
     assert!(res["data"].is_null());
 
-    // 5. Close session 1
+    // 5. Close session 1 keeping 10,000 in drawer, verify 2B DRAWER_BALANCE_NONZERO guard, then drop to safe
     let (status, close_res) = send_authed(
         &app.router,
         "POST",
@@ -386,7 +386,42 @@ async fn shift_follows_its_owner_and_the_setting_guard_holds() {
     .await;
     assert_eq!(status, StatusCode::OK, "Body: {close_res}");
 
-    // 6. With active sessions = 0, updating allowSharedUserSessions to true succeeds
+    let (status, balance_conflict) = send_authed(
+        &app.router,
+        "PUT",
+        "/api/settings/shop-profile",
+        Some(json!({ "allowSharedUserSessions": true })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "Body: {balance_conflict}");
+    assert_eq!(balance_conflict["code"], "DRAWER_BALANCE_NONZERO");
+
+    let (status, _) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/sessions/{session_1_key}/reopen"),
+        Some(json!({ "reason": "Drop float to safe before enabling SharedShop" })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, close_zero_res) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/sessions/{session_1_key}/close"),
+        Some(json!({
+            "countedCashCents": 10000,
+            "closingFloatCents": 0,
+            "cashDropToSafeCents": 10000
+        })),
+        &cashier1_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {close_zero_res}");
+
+    // 6. With active sessions = 0 and drawer balance = 0, updating allowSharedUserSessions to true succeeds
     let (status, update_res) = send_authed(
         &app.router,
         "PUT",
@@ -400,7 +435,7 @@ async fn shift_follows_its_owner_and_the_setting_guard_holds() {
     assert_eq!(status, StatusCode::OK, "Body: {update_res}");
     assert_eq!(update_res["data"]["allowSharedUserSessions"], true);
 
-    // 7. In Shared Mode, Cashier 2 opens shift on term_2
+    // 7. In SharedShop Mode, Cashier 2 opens shift on term_2
     let (status, open_res) = send_authed_with_device(
         &app.router,
         "POST",
@@ -419,7 +454,7 @@ async fn shift_follows_its_owner_and_the_setting_guard_holds() {
         .expect("the value is a string")
         .to_string();
 
-    // 8. Mid-shift guard in reverse: attempting to switch back to isolated mode while session 2 is active fails
+    // 8. Mid-shift guard in reverse: attempting to switch back to personal mode while session 2 is active fails
     let (status, conflict_res) = send_authed(
         &app.router,
         "PUT",
@@ -433,8 +468,7 @@ async fn shift_follows_its_owner_and_the_setting_guard_holds() {
     assert_eq!(status, StatusCode::CONFLICT, "Body: {conflict_res}");
     assert_eq!(conflict_res["code"], "ACTIVE_SESSIONS_EXIST");
 
-    // 9. Same rules with the setting on (it no longer changes shift lookup):
-    // a) Cashier 1 on term_2 does not join Cashier 2's shift
+    // 9. In SharedShop Mode, every cashier on any machine (or without device header) sees the shared shift:
     let (status, res) = send_authed_with_device(
         &app.router,
         "GET",
@@ -445,9 +479,8 @@ async fn shift_follows_its_owner_and_the_setting_guard_holds() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(res["data"].is_null(), "another user's shift leaked: {res}");
+    assert_eq!(res["data"]["key"], session_2_key);
 
-    // b) Cashier 2 gets his shift on term_2, and not without a device
     let (status, res) = send_authed_with_device(
         &app.router,
         "GET",
@@ -459,6 +492,7 @@ async fn shift_follows_its_owner_and_the_setting_guard_holds() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(res["data"]["key"], session_2_key);
+
     let (status, res) = send_authed(
         &app.router,
         "GET",
@@ -468,12 +502,8 @@ async fn shift_follows_its_owner_and_the_setting_guard_holds() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(
-        res["data"].is_null(),
-        "staff shift shown without its machine: {res}"
-    );
+    assert_eq!(res["data"]["key"], session_2_key);
 
-    // c) Cashier 1 with NO device_id has no session and returns null
     let (status, res) = send_authed(
         &app.router,
         "GET",
@@ -483,24 +513,24 @@ async fn shift_follows_its_owner_and_the_setting_guard_holds() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(res["data"].is_null());
+    assert_eq!(res["data"]["key"], session_2_key);
 
-    // 10. Close session 2
+    // 10. Staff Cashier 1 (not the opener) can close the shared shift, dropping all cash to safe
     let (status, close_res) = send_authed(
         &app.router,
         "POST",
         &format!("/api/sessions/{session_2_key}/close"),
         Some(json!({
             "countedCashCents": 5000,
-            "closingFloatCents": 5000,
-            "cashDropToSafeCents": 0
+            "closingFloatCents": 0,
+            "cashDropToSafeCents": 5000
         })),
-        &cashier2_token,
+        &cashier1_token,
     )
     .await;
     assert_eq!(status, StatusCode::OK, "Body: {close_res}");
 
-    // 11. Now switching back to isolated mode succeeds
+    // 11. Now switching back to personal mode succeeds
     let (status, update_res) = send_authed(
         &app.router,
         "PUT",

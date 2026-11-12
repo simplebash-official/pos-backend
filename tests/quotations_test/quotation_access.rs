@@ -15,7 +15,7 @@ use crate::helpers::{call, create, date_in, request, setup, token, valid_body};
 // ============================================================================
 
 #[tokio::test]
-async fn only_admin_and_manager_can_use_quotations() {
+async fn staff_manager_and_admin_can_use_quotations() {
     let ctx = setup().await;
     let admin = token(&ctx.config, Role::Admin);
     let manager = token(&ctx.config, Role::Manager);
@@ -23,49 +23,47 @@ async fn only_admin_and_manager_can_use_quotations() {
     // A token that has a role but none of the permissions.
     let bare = common::mint_token(&ctx.config, Some(Role::Manager), &[]);
 
-    // Admin and Manager can create.
-    for tok in [&admin, &manager] {
+    // Admin, Manager and Staff can create.
+    for tok in [&admin, &manager, &staff] {
         let (status, body) = create(&ctx.router, tok, valid_body()).await;
         assert_eq!(status, StatusCode::OK, "{body}");
     }
-    let (_, created) = create(&ctx.router, &admin, valid_body()).await;
+    let (_, created) = create(&ctx.router, &staff, valid_body()).await;
     let key = created["data"]["key"]
         .as_str()
         .expect("the value is a string")
         .to_string();
 
-    // Staff and permission-less tokens are refused on every route.
-    for tok in [&staff, &bare] {
-        for (method, uri, body) in [
-            ("GET", "/api/quotations".to_string(), None),
-            ("POST", "/api/quotations".to_string(), Some(valid_body())),
-            ("GET", format!("/api/quotations/{key}"), None),
-            ("POST", format!("/api/quotations/{key}/cancel"), None),
-            (
-                "GET",
-                format!("/api/quotations/{key}/document?design=current"),
-                None,
-            ),
-        ] {
-            let (status, _, bytes) = request(&ctx.router, method, &uri, body, Some(tok)).await;
-            assert_eq!(status, StatusCode::FORBIDDEN, "{method} {uri}");
-            let json: Value = serde_json::from_slice(&bytes).expect("the text is valid JSON");
-            assert_eq!(json["code"], "PERMISSION_DENIED");
-        }
+    // Permission-less tokens are refused on every route.
+    for (method, uri, body) in [
+        ("GET", "/api/quotations".to_string(), None),
+        ("POST", "/api/quotations".to_string(), Some(valid_body())),
+        ("GET", format!("/api/quotations/{key}"), None),
+        ("POST", format!("/api/quotations/{key}/cancel"), None),
+        (
+            "GET",
+            format!("/api/quotations/{key}/document?design=current"),
+            None,
+        ),
+    ] {
+        let (status, _, bytes) = request(&ctx.router, method, &uri, body, Some(&bare)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{method} {uri}");
+        let json: Value = serde_json::from_slice(&bytes).expect("the text is valid JSON");
+        assert_eq!(json["code"], "PERMISSION_DENIED");
     }
 
     // And a missing token is a 401, not a 403.
     let (status, _, _) = request(&ctx.router, "GET", "/api/quotations", None, None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
-    // The permission itself is held by exactly Admin and Manager.
+    // The permission itself is held by Admin, Manager and Staff.
     assert!(roles::default_permissions(Role::Admin).contains(&perm::QUOTATIONS_MANAGE));
     assert!(roles::default_permissions(Role::Manager).contains(&perm::QUOTATIONS_MANAGE));
-    assert!(!roles::default_permissions(Role::Staff).contains(&perm::QUOTATIONS_MANAGE));
+    assert!(roles::default_permissions(Role::Staff).contains(&perm::QUOTATIONS_MANAGE));
 
-    // Staff really saw nothing created on their behalf.
-    let (_, list) = call(&ctx.router, "GET", "/api/quotations", None, &admin).await;
-    assert_eq!(list["data"]["total"], 3);
+    // Staff can list and sees all created quotations (3 from loop + 1 created by staff = 4).
+    let (_, list) = call(&ctx.router, "GET", "/api/quotations", None, &staff).await;
+    assert_eq!(list["data"]["total"], 4);
 }
 
 // ============================================================================

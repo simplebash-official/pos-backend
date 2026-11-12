@@ -9,7 +9,7 @@
 //! Safe to run against SQLite or MongoDB.
 //! Run with: `cargo run --bin seed_all`
 
-use simplebash_pos_backend::core::config::Config;
+use simplebash_pos_backend::core::config::{Config, TenantMode};
 use simplebash_pos_backend::{clients, seeds};
 
 #[tokio::main]
@@ -18,6 +18,12 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     let config = Config::from_env().expect("invalid configuration");
+    if config.tenant_mode == TenantMode::Multi {
+        eprintln!(
+            "seed_all is for single-shop deployments only (TENANT_MODE=multi shops are seeded per tenant)"
+        );
+        std::process::exit(2);
+    }
     let db = clients::connect_from_config(&config)
         .await
         .expect("failed to connect to database");

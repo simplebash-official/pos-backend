@@ -159,13 +159,11 @@ pub async fn generate_z_report(db: &Db, session_key: &str) -> AppResult<ZReportR
         expected_cash_cents: expected_cash,
         counted_cash_cents: counted_cash,
         variance_cents: variance,
-        closing_float_cents: session_doc.closing_float_cents.unwrap_or(0),
-        safe_deposit_cents: session_doc.cash_drop_to_safe_cents.unwrap_or(0),
+        closing_float_cents: session_doc.closing_float_cents.unwrap_or_default(),
+        safe_deposit_cents: session_doc.cash_drop_to_safe_cents.unwrap_or_default(),
     };
 
-    let mut session = session_doc.into_register_session();
-    crate::modules::sessions::service::session::populate_missing_cashier_name(db, &mut session)
-        .await;
+    let session = session_doc.into_register_session();
 
     Ok(ZReportResponse {
         session,

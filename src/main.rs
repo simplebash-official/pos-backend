@@ -59,34 +59,54 @@ async fn main() {
         clients::indexes::ensure_indexes(mongo_db.unscoped(), config.tenant_mode).await;
     }
 
-    // The drawer's starting categories are required reference data, not demo data, so they
-    // are ensured on every start (idempotent). A multi-tenant cloud has no shop in scope here:
-    // each shop gets them when it is provisioned.
-    if config.tenant_mode != simplebash_pos_backend::core::config::TenantMode::Multi
-        && let Err(err) =
+    // The drawer's starting categories, drawer rules, and shop profile are required reference data,
+    // not demo data, so they are ensured on every start (idempotent).
+    if config.tenant_mode == simplebash_pos_backend::core::config::TenantMode::Multi {
+        if config.auto_seed {
+            tracing::warn!(
+                "AUTO_SEED=true is ignored in multi-tenant mode; multi-tenant shops are initialized per tenant"
+            );
+        }
+        match simplebash_pos_backend::modules::tenants::service::ensure_existing_tenants_data(&db)
+            .await
+        {
+            Ok(tenants) => {
+                tracing::info!(
+                    tenants,
+                    "Verified required system data for existing tenants"
+                );
+            }
+            Err(err) => {
+                tracing::error!(%err, "failed to ensure required system data for existing tenants");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        if let Err(err) =
             simplebash_pos_backend::modules::cash_categories::service::ensure_system_categories(&db)
                 .await
-    {
-        tracing::error!(%err, "failed to ensure the built-in cash categories");
-        std::process::exit(1);
-    }
+        {
+            tracing::error!(%err, "failed to ensure the built-in cash categories");
+            std::process::exit(1);
+        }
 
-    if config.auto_seed {
-        tracing::info!("AUTO_SEED is enabled — checking and seeding database...");
-        let summary = simplebash_pos_backend::seeds::seed_all(&db, &config.seed_admin)
-            .await
-            .unwrap_or_else(|err| {
-                tracing::error!(%err, "automated database seeding failed");
-                std::process::exit(1);
-            });
-        tracing::info!(
-            admin = %summary.admin.message,
-            providers = summary.providers.categories_created,
-            suppliers = summary.suppliers.suppliers_created,
-            customers = summary.customers.customers_created,
-            products = summary.inventory.products_created,
-            "Automated database seeding finished successfully"
-        );
+        if config.auto_seed {
+            tracing::info!("AUTO_SEED is enabled — checking and seeding database...");
+            let summary = simplebash_pos_backend::seeds::seed_all(&db, &config.seed_admin)
+                .await
+                .unwrap_or_else(|err| {
+                    tracing::error!(%err, "automated database seeding failed");
+                    std::process::exit(1);
+                });
+            tracing::info!(
+                admin = %summary.admin.message,
+                providers = summary.providers.categories_created,
+                suppliers = summary.suppliers.suppliers_created,
+                customers = summary.customers.customers_created,
+                products = summary.inventory.products_created,
+                "Automated database seeding finished successfully"
+            );
+        }
     }
 
     let document_server = clients::document_server::DocumentServerClient::new(

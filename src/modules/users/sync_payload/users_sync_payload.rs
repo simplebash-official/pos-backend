@@ -51,6 +51,7 @@ pub(crate) fn hydrate_sync_documents(documents: Vec<Document>) -> AppResult<Vec<
                 name: field("name")?,
                 username: field("username")?,
                 password_hash: field("password_hash")?,
+                pin_hash: text(&doc, "pin_hash"),
                 role: field("role")?,
                 is_active: flag(&doc, "is_active"),
                 employee_key: text(&doc, "employee_key"),
@@ -72,6 +73,7 @@ pub(crate) struct UserSyncPayload {
     pub name: String,
     pub username: String,
     pub password_hash: String,
+    pub pin_hash: Option<String>,
     pub role: String,
     pub is_active: bool,
     pub employee_key: Option<String>,
@@ -86,5 +88,30 @@ pub(super) fn version(doc: &Document) -> i64 {
         Some(Bson::Int64(v)) => *v,
         Some(Bson::Int32(v)) => i64::from(*v),
         _ => 1,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hydrate_sync_documents;
+    use mongodb::bson::{doc, oid::ObjectId};
+
+    #[test]
+    fn hydrate_preserves_pin_hash_alongside_password_hash() {
+        let oid = ObjectId::new();
+        let out = hydrate_sync_documents(vec![doc! {
+            "_id": oid,
+            "key": "usr_1",
+            "name": "Manager",
+            "username": "mgr",
+            "password_hash": "$argon2$pw",
+            "pin_hash": "$argon2$pin",
+            "role": "manager",
+            "is_active": true,
+            "version": 1_i64,
+        }])
+        .expect("hydrate succeeds");
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].pin_hash.as_deref(), Some("$argon2$pin"));
     }
 }

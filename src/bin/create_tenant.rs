@@ -37,7 +37,16 @@ async fn main() {
         None => service::create_tenant(&db, &shop_code, &name).await,
     };
     match created {
-        Ok(t) => println!("created tenant {} (shop code '{}')", t.key, t.shop_code),
+        Ok(t) => {
+            if let Err(err) = service::ensure_tenant_data(&db, &t.key, &t.name).await {
+                eprintln!(
+                    "created tenant {} but failed to initialize shop data: {err}",
+                    t.key
+                );
+                std::process::exit(1);
+            }
+            println!("created tenant {} (shop code '{}')", t.key, t.shop_code);
+        }
         Err(err) => {
             eprintln!("could not create tenant: {err}");
             std::process::exit(1);

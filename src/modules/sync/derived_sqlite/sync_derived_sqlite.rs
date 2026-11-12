@@ -3,6 +3,9 @@ use crate::core::id::generate_id;
 use crate::domain::billing::{InvoiceItem, InvoiceStatus};
 use crate::domain::sync_v2::{ConflictKind, DerivedScope, NewConflict};
 use crate::modules::billing::service::credit_notes::{LineHint, line_match};
+use crate::modules::sync::derived_session::{
+    SessionLedger, drawer_delta_for_movement, parse_rfc3339_ms,
+};
 use chrono::Utc;
 use sqlx::{Row, SqliteConnection};
 use std::collections::BTreeSet;
@@ -19,6 +22,7 @@ pub async fn recompute(
 ) -> AppResult<Vec<NewConflict>> {
     let mut conflicts = Vec::new();
     let mut customer_keys: BTreeSet<String> = scope.customer_keys.clone();
+    let mut drawer_keys: BTreeSet<String> = scope.drawer_keys.clone();
 
     for invoice_key in &scope.invoice_keys {
         if let Some(customer_key) = recompute_invoice(conn, invoice_key, &mut conflicts).await? {
@@ -33,6 +37,21 @@ pub async fn recompute(
     }
     for batch_key in &scope.batch_keys {
         recompute_batch(conn, batch_key, &mut conflicts).await?;
+    }
+    for session_key in &scope.session_keys {
+        if let Some(cashier_id) = recompute_session(conn, session_key).await? {
+            drawer_keys.insert("shop".to_string());
+            drawer_keys.insert(cashier_id);
+        }
+    }
+    if scope.refresh_drawers {
+        let keys: Vec<String> = sqlx::query_scalar("SELECT key FROM drawer_state")
+            .fetch_all(&mut *conn)
+            .await?;
+        drawer_keys.extend(keys);
+    }
+    for drawer_key in &drawer_keys {
+        recompute_drawer(conn, drawer_key).await?;
     }
     Ok(conflicts)
 }
@@ -326,6 +345,298 @@ async fn recompute_product(
         }
     }
     Ok(())
+}
+
+/// Recomputes `register_sessions` derived totals, `has_late_movements`, and
+/// (when `closing`/`closed`) `expected_cash_cents`/`cash_variance_cents` from
+/// the `payments`, `invoices`, and `cash_movements` ledgers.
+async fn recompute_session(conn: &mut SqliteConnection, key: &str) -> AppResult<Option<String>> {
+    let Some(row) = sqlx::query(
+        "SELECT cashier_id, status, opening_float_cents, counted_cash_cents, \
+                total_cash_sales_cents, total_card_sales_cents, total_online_sales_cents, \
+                total_credit_sales_cents, total_cash_refunds_cents, total_pay_in_cents, \
+                total_pay_out_cents, total_owner_withdrawals_cents, total_cash_drops_cents, \
+                has_late_movements, expected_cash_cents, cash_variance_cents \
+         FROM register_sessions WHERE key = ? AND deleted_at IS NULL",
+    )
+    .bind(key)
+    .fetch_optional(&mut *conn)
+    .await?
+    else {
+        return Ok(None);
+    };
+
+    let cashier_id: String = row.get("cashier_id");
+    let status: String = row.get("status");
+    let opening_float: i64 = row.get("opening_float_cents");
+    let counted_cash: Option<i64> = row.get("counted_cash_cents");
+
+    let mut ledger = SessionLedger::default();
+
+    let payment_rows: Vec<(i64, String, Option<String>)> = sqlx::query_as(
+        "SELECT amount_cents, payment_method, notes FROM payments \
+         WHERE session_key = ? AND deleted_at IS NULL",
+    )
+    .bind(key)
+    .fetch_all(&mut *conn)
+    .await?;
+    for (amount, method, notes) in payment_rows {
+        ledger.record_payment(amount, &method, notes.as_deref());
+    }
+
+    let credit_rows: Vec<(i64, Option<i64>)> = sqlx::query_as(
+        "SELECT total_cents, amount_received_cents FROM invoices \
+         WHERE session_key = ? AND is_credit != 0 AND deleted_at IS NULL",
+    )
+    .bind(key)
+    .fetch_all(&mut *conn)
+    .await?;
+    for (total, received) in credit_rows {
+        ledger.record_credit_invoice(total, received);
+    }
+
+    let movement_rows: Vec<(String, i64, Option<String>, i64)> = sqlx::query_as(
+        "SELECT movement_type, amount_cents, reverses_key, recorded_late FROM cash_movements \
+         WHERE session_key = ? AND deleted_at IS NULL",
+    )
+    .bind(key)
+    .fetch_all(&mut *conn)
+    .await?;
+    for (movement_type, amount, reverses_key, recorded_late) in movement_rows {
+        ledger.record_movement(
+            &movement_type,
+            amount,
+            reverses_key.is_some(),
+            recorded_late != 0,
+        );
+    }
+
+    let (expected_opt, variance_opt) = ledger.closing_cash(&status, opening_float, counted_cash);
+
+    let old_cash_sales: i64 = row.get("total_cash_sales_cents");
+    let old_card_sales: i64 = row.get("total_card_sales_cents");
+    let old_online_sales: i64 = row.get("total_online_sales_cents");
+    let old_credit_sales: i64 = row.get("total_credit_sales_cents");
+    let old_cash_refunds: i64 = row.get("total_cash_refunds_cents");
+    let old_pay_in: i64 = row.get("total_pay_in_cents");
+    let old_pay_out: i64 = row.get("total_pay_out_cents");
+    let old_withdrawals: i64 = row.get("total_owner_withdrawals_cents");
+    let old_drops: i64 = row.get("total_cash_drops_cents");
+    let old_late: i64 = row.get("has_late_movements");
+    let old_expected: Option<i64> = row.get("expected_cash_cents");
+    let old_variance: Option<i64> = row.get("cash_variance_cents");
+
+    let unchanged = old_cash_sales == ledger.total_cash_sales_cents
+        && old_card_sales == ledger.total_card_sales_cents
+        && old_online_sales == ledger.total_online_sales_cents
+        && old_credit_sales == ledger.total_credit_sales_cents
+        && old_cash_refunds == ledger.total_cash_refunds_cents
+        && old_pay_in == ledger.total_pay_in_cents
+        && old_pay_out == ledger.total_pay_out_cents
+        && old_withdrawals == ledger.total_owner_withdrawals_cents
+        && old_drops == ledger.total_cash_drops_cents
+        && (old_late != 0) == ledger.has_late_movements
+        && old_expected == expected_opt
+        && old_variance == variance_opt;
+
+    if !unchanged {
+        sqlx::query(
+            "UPDATE register_sessions SET \
+             total_cash_sales_cents = ?, total_card_sales_cents = ?, total_online_sales_cents = ?, \
+             total_credit_sales_cents = ?, total_cash_refunds_cents = ?, total_pay_in_cents = ?, \
+             total_pay_out_cents = ?, total_owner_withdrawals_cents = ?, total_cash_drops_cents = ?, \
+             has_late_movements = ?, expected_cash_cents = ?, cash_variance_cents = ?, \
+             version = version + 1, updated_at = ? \
+             WHERE key = ?",
+        )
+        .bind(ledger.total_cash_sales_cents)
+        .bind(ledger.total_card_sales_cents)
+        .bind(ledger.total_online_sales_cents)
+        .bind(ledger.total_credit_sales_cents)
+        .bind(ledger.total_cash_refunds_cents)
+        .bind(ledger.total_pay_in_cents)
+        .bind(ledger.total_pay_out_cents)
+        .bind(ledger.total_owner_withdrawals_cents)
+        .bind(ledger.total_cash_drops_cents)
+        .bind(i64::from(ledger.has_late_movements))
+        .bind(expected_opt)
+        .bind(variance_opt)
+        .bind(now_iso())
+        .bind(key)
+        .execute(&mut *conn)
+        .await?;
+    }
+
+    Ok(Some(cashier_id))
+}
+
+/// Recomputes `drawer_state.current_balance_cents` from the owning active shift's
+/// expected cash, or when between shifts, from `last_closing_float_cents` plus
+/// unlinked cash movements recorded after the latest closed shift.
+async fn recompute_drawer(conn: &mut SqliteConnection, drawer_key: &str) -> AppResult<()> {
+    let Some(drawer_row) = sqlx::query(
+        "SELECT current_balance_cents, last_session_key, last_closing_float_cents \
+         FROM drawer_state WHERE key = ?",
+    )
+    .bind(drawer_key)
+    .fetch_optional(&mut *conn)
+    .await?
+    else {
+        return Ok(());
+    };
+    let old_balance: i64 = drawer_row.get("current_balance_cents");
+    let last_session_key: Option<String> = drawer_row.get("last_session_key");
+    let last_closing_float: i64 = drawer_row.get("last_closing_float_cents");
+
+    let shared_shop_opt: Option<i64> = sqlx::query_scalar(
+        "SELECT allow_shared_user_sessions FROM shop_profiles WHERE key = 'main' AND deleted_at IS NULL LIMIT 1",
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+    let shared_bool_opt = shared_shop_opt.map(|v| v != 0);
+
+    let active_mode_matches = if drawer_key == "shop" {
+        shared_bool_opt != Some(false)
+    } else {
+        shared_bool_opt != Some(true)
+    };
+
+    let target_balance = if active_mode_matches {
+        let active_rows = if drawer_key == "shop" {
+            sqlx::query(
+                "SELECT key, opened_at, opening_float_cents, total_cash_sales_cents, \
+                        total_pay_in_cents, total_pay_out_cents, total_cash_refunds_cents, \
+                        total_owner_withdrawals_cents, total_cash_drops_cents \
+                 FROM register_sessions \
+                 WHERE status IN ('open', 'closing', 'reopened') AND deleted_at IS NULL",
+            )
+            .fetch_all(&mut *conn)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT key, opened_at, opening_float_cents, total_cash_sales_cents, \
+                        total_pay_in_cents, total_pay_out_cents, total_cash_refunds_cents, \
+                        total_owner_withdrawals_cents, total_cash_drops_cents \
+                 FROM register_sessions \
+                 WHERE cashier_id = ? AND status IN ('open', 'closing', 'reopened') AND deleted_at IS NULL",
+            )
+            .bind(drawer_key)
+            .fetch_all(&mut *conn)
+            .await?
+        };
+        let mut active_candidates: Vec<(i64, String, i64)> = active_rows
+            .into_iter()
+            .map(|r| {
+                let opened: String = r.get("opened_at");
+                let k: String = r.get("key");
+                let expected: i64 = r.get::<i64, _>("opening_float_cents")
+                    + r.get::<i64, _>("total_cash_sales_cents")
+                    + r.get::<i64, _>("total_pay_in_cents")
+                    - r.get::<i64, _>("total_pay_out_cents")
+                    - r.get::<i64, _>("total_cash_refunds_cents")
+                    - r.get::<i64, _>("total_owner_withdrawals_cents")
+                    - r.get::<i64, _>("total_cash_drops_cents");
+                (parse_rfc3339_ms(&opened), k, expected)
+            })
+            .collect();
+        active_candidates.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
+        if let Some((_, _, expected)) = active_candidates.into_iter().next() {
+            expected
+        } else {
+            let cutoff_ms =
+                latest_closed_at_ms_sqlite(conn, last_session_key.as_deref(), drawer_key).await?;
+            let between_delta = between_shift_delta_sqlite(conn, drawer_key, cutoff_ms).await?;
+            last_closing_float + between_delta
+        }
+    } else {
+        last_closing_float
+    };
+
+    if target_balance != old_balance {
+        sqlx::query(
+            "UPDATE drawer_state SET current_balance_cents = ?, version = version + 1, updated_at = ? \
+             WHERE key = ?",
+        )
+        .bind(target_balance)
+        .bind(now_iso())
+        .bind(drawer_key)
+        .execute(&mut *conn)
+        .await?;
+    }
+    Ok(())
+}
+
+async fn latest_closed_at_ms_sqlite(
+    conn: &mut SqliteConnection,
+    last_session_key: Option<&str>,
+    drawer_key: &str,
+) -> AppResult<Option<i64>> {
+    let mut best: Option<i64> = None;
+    if let Some(last_key) = last_session_key {
+        let closed_at: Option<Option<String>> = sqlx::query_scalar(
+            "SELECT closed_at FROM register_sessions \
+             WHERE key = ? AND status = 'closed' AND deleted_at IS NULL",
+        )
+        .bind(last_key)
+        .fetch_optional(&mut *conn)
+        .await?;
+        if let Some(Some(ts)) = closed_at {
+            best = Some(parse_rfc3339_ms(&ts));
+        }
+    }
+    let closed_timestamps: Vec<Option<String>> = if drawer_key == "shop" {
+        sqlx::query_scalar(
+            "SELECT closed_at FROM register_sessions WHERE status = 'closed' AND deleted_at IS NULL",
+        )
+        .fetch_all(&mut *conn)
+        .await?
+    } else {
+        sqlx::query_scalar(
+            "SELECT closed_at FROM register_sessions \
+             WHERE cashier_id = ? AND status = 'closed' AND deleted_at IS NULL",
+        )
+        .bind(drawer_key)
+        .fetch_all(&mut *conn)
+        .await?
+    };
+    for ts in closed_timestamps.into_iter().flatten() {
+        let ms = parse_rfc3339_ms(&ts);
+        best = Some(best.map_or(ms, |cur| cur.max(ms)));
+    }
+    Ok(best)
+}
+
+async fn between_shift_delta_sqlite(
+    conn: &mut SqliteConnection,
+    drawer_key: &str,
+    cutoff_ms: Option<i64>,
+) -> AppResult<i64> {
+    let rows: Vec<(String, i64, Option<String>, String)> = if drawer_key == "shop" {
+        sqlx::query_as(
+            "SELECT movement_type, amount_cents, reverses_key, created_at FROM cash_movements \
+             WHERE session_key IS NULL AND deleted_at IS NULL",
+        )
+        .fetch_all(&mut *conn)
+        .await?
+    } else {
+        sqlx::query_as(
+            "SELECT movement_type, amount_cents, reverses_key, created_at FROM cash_movements \
+             WHERE session_key IS NULL AND recorded_by_user_id = ? AND deleted_at IS NULL",
+        )
+        .bind(drawer_key)
+        .fetch_all(&mut *conn)
+        .await?
+    };
+    let mut delta = 0i64;
+    for (movement_type, amount, reverses_key, created_at) in rows {
+        if let Some(cutoff) = cutoff_ms
+            && parse_rfc3339_ms(&created_at) <= cutoff
+        {
+            continue;
+        }
+        delta += drawer_delta_for_movement(&movement_type, amount, reverses_key.is_some());
+    }
+    Ok(delta)
 }
 
 /// Persists conflicts raised while applying or recomputing.

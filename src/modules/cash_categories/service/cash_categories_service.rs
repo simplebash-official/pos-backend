@@ -225,6 +225,7 @@ const SEEDED_AT_MS: i64 = 1_767_225_600_000;
 
 /// Creates any shipped category this shop is missing. Never touches an existing row, so edits survive.
 pub async fn ensure_system_categories(db: &Db) -> AppResult<CashCategorySeedResult> {
+    db.require_active_tenant_scope()?;
     let mut created = 0;
     let mut existing = 0;
     let mut next_sort: HashMap<&'static str, i64> = HashMap::new();
@@ -269,8 +270,9 @@ pub async fn ensure_system_categories(db: &Db) -> AppResult<CashCategorySeedResu
         .await?;
         created += 1;
     }
-    // The drawer rules are the same kind of required starting data, and every shop passes through here.
+    // The drawer rules and shop profile are required starting data, and every shop passes through here.
     crate::modules::cash_settings::service::ensure_settings(db).await?;
+    crate::modules::settings::service::ensure_shop_profile(db, None).await?;
     Ok(CashCategorySeedResult { created, existing })
 }
 

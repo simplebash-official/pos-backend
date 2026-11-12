@@ -58,6 +58,39 @@ impl<T: DeserializeOwned + Send + Sync> ScopedCollection<T> {
         self.inner.find(scope_filter(&self.tenant, filter))
     }
 
+    /// Collects all tenant documents matching `filter` inside a transaction's session when present.
+    pub async fn find_all_in(
+        &self,
+        filter: Document,
+        sort: Option<Document>,
+        session: Option<&mut mongodb::ClientSession>,
+    ) -> Result<Vec<T>, MongoError> {
+        use futures_util::TryStreamExt;
+        let mut find = self.find(filter);
+        if let Some(sort) = sort {
+            find = find.sort(sort);
+        }
+        match session {
+            Some(session) => {
+                let mut cursor = find.session(&mut *session).await?;
+                let mut stream = cursor.stream(session);
+                let mut out = Vec::new();
+                while let Some(doc) = stream.try_next().await? {
+                    out.push(doc);
+                }
+                Ok(out)
+            }
+            None => {
+                let mut cursor = find.await?;
+                let mut out = Vec::new();
+                while let Some(doc) = cursor.try_next().await? {
+                    out.push(doc);
+                }
+                Ok(out)
+            }
+        }
+    }
+
     /// Finds the one; `None` when there is none.
     pub fn find_one(&self, filter: Document) -> FindOne<'_, T> {
         self.inner.find_one(scope_filter(&self.tenant, filter))
@@ -117,9 +150,22 @@ impl<T: DeserializeOwned + Send + Sync> ScopedCollection<T> {
 
     /// Counts the documents.
     pub async fn count_documents(&self, filter: Document) -> Result<u64, MongoError> {
-        self.inner
-            .count_documents(scope_filter(&self.tenant, filter))
-            .await
+        self.count_documents_in(filter, None).await
+    }
+
+    /// [`Self::count_documents`] inside a transaction's session when there is one.
+    pub async fn count_documents_in(
+        &self,
+        filter: Document,
+        session: Option<&mut mongodb::ClientSession>,
+    ) -> Result<u64, MongoError> {
+        let action = self
+            .inner
+            .count_documents(scope_filter(&self.tenant, filter));
+        match session {
+            Some(session) => action.session(session).await,
+            None => action.await,
+        }
     }
 
     /// The distinct values of `field` among the tenant's documents matching `filter`.
@@ -184,15 +230,27 @@ impl<T: Serialize + DeserializeOwned + Send + Sync> ScopedCollection<T> {
         filter: Document,
         replacement: impl Borrow<T>,
     ) -> Result<mongodb::results::UpdateResult, MongoError> {
+        self.replace_one_in(filter, replacement, None).await
+    }
+
+    /// [`Self::replace_one`] inside a transaction's session when there is one.
+    pub async fn replace_one_in(
+        &self,
+        filter: Document,
+        replacement: impl Borrow<T>,
+        session: Option<&mut mongodb::ClientSession>,
+    ) -> Result<mongodb::results::UpdateResult, MongoError> {
         let mut document = match mongodb::bson::serialize_to_bson(replacement.borrow())? {
             Bson::Document(d) => d,
             _ => return Err(MongoError::custom("replacement is not a document")),
         };
         document = self.stamp_doc(document);
-        self.inner
-            .clone_with_type::<Document>()
-            .replace_one(scope_filter(&self.tenant, filter), document)
-            .await
+        let collection = self.inner.clone_with_type::<Document>();
+        let action = collection.replace_one(scope_filter(&self.tenant, filter), document);
+        match session {
+            Some(session) => action.session(session).await,
+            None => action.await,
+        }
     }
 }
 

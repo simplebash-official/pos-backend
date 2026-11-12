@@ -165,8 +165,12 @@ async fn login_in_scope(
             return Err(tenants_service::suspended_error(&info));
         }
 
-        // Staff work from one machine: while their shift is open, no other machine may sign in.
+        // In Personal mode with `allowStaffMultiDeviceSessions = false`, staff work from one
+        // machine: while their shift is open, no other machine may sign in.
         if user.role == Role::Staff
+            && !sessions::service::current_shift_policy(db)
+                .await?
+                .allows_staff_multi_device()
             && let Some(shift) = sessions::service::resolve_active_session(db, &user.id).await?
             && device_id.as_deref() != Some(shift.terminal_id.as_str())
         {
@@ -370,8 +374,7 @@ async fn forgot_password_in_scope(
         crate::core::tenancy::Tenant::Id(id) => Some(id.to_string()),
         _ => None,
     });
-    let shop_profile =
-        crate::modules::settings::service::get_shop_profile(db, tenant_id_str.as_deref()).await?;
+    let shop_profile = crate::modules::settings::service::get_shop_profile(db).await?;
     let shop_email_matches = !shop_profile.email.trim().is_empty()
         && shop_profile.email.trim().eq_ignore_ascii_case(trimmed_id);
 

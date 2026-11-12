@@ -312,6 +312,10 @@ pub struct CreateCashMovementRequest {
 pub const DENOMINATION_RUPEES: [i64; 10] = [5000, 1000, 500, 100, 50, 20, 10, 5, 2, 1];
 
 /// Persistent ledger of cash surviving across shifts, one per user (the shift owner).
+/// Current balance of a cash drawer (`drawer_state`).
+///
+/// Keyed by `user_key`: `"shop"` in [`crate::domain::settings::ShiftMode::SharedShop`] mode, or
+/// the user's id in [`crate::domain::settings::ShiftMode::Personal`] mode.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DrawerState {
@@ -450,6 +454,15 @@ pub struct SessionListResponse {
     pub page: u64,
     pub limit: u64,
     pub total_pages: u64,
+}
+
+/// Active register shifts across all open statuses plus the shop's total drawer balance.
+/// Used by Settings before switching between Personal and Shared Shop shift modes.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ActiveSessionsSummaryResponse {
+    pub active_sessions: Vec<RegisterSession>,
+    pub drawer_balance_total_cents: i64,
 }
 
 /// Status of a cash register session / shift.

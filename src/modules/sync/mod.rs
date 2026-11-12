@@ -8,6 +8,7 @@ pub(crate) mod cloud_store;
 pub mod compaction;
 pub mod cursor;
 pub(crate) mod derived_mongo;
+pub(crate) mod derived_session;
 pub mod derived_sqlite;
 pub mod live;
 pub(crate) mod mongo_codec;

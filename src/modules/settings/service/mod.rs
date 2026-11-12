@@ -3,6 +3,7 @@
 mod settings_service;
 
 pub use settings_service::SHOP_PROFILE_KEY;
+pub use settings_service::ensure_shop_profile;
 pub(crate) use settings_service::get_document_template_settings;
 pub(crate) use settings_service::get_document_templates;
 pub(crate) use settings_service::get_shop_profile;

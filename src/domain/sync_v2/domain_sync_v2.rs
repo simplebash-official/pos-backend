@@ -133,6 +133,10 @@ pub struct DerivedScope {
     pub batch_keys: BTreeSet<String>,
     pub customer_keys: BTreeSet<String>,
     pub invoice_keys: BTreeSet<String>,
+    pub session_keys: BTreeSet<String>,
+    pub drawer_keys: BTreeSet<String>,
+    /// Recomputes every existing `drawer_state` row (e.g. after `shopProfiles` changes shift mode).
+    pub refresh_drawers: bool,
 }
 
 impl DerivedScope {
@@ -143,6 +147,9 @@ impl DerivedScope {
             && self.batch_keys.is_empty()
             && self.customer_keys.is_empty()
             && self.invoice_keys.is_empty()
+            && self.session_keys.is_empty()
+            && self.drawer_keys.is_empty()
+            && !self.refresh_drawers
     }
 
     /// Adds everything `other` needs recomputed to this scope.
@@ -151,6 +158,9 @@ impl DerivedScope {
         self.batch_keys.extend(other.batch_keys);
         self.customer_keys.extend(other.customer_keys);
         self.invoice_keys.extend(other.invoice_keys);
+        self.session_keys.extend(other.session_keys);
+        self.drawer_keys.extend(other.drawer_keys);
+        self.refresh_drawers |= other.refresh_drawers;
     }
 }
 

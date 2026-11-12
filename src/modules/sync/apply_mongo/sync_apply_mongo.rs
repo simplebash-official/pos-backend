@@ -187,7 +187,12 @@ pub(super) fn note_scope(
     doc: &Document,
     scope: &mut DerivedScope,
 ) {
-    let text = |name: &str| payload.and_then(|p| p.get(name)).and_then(Value::as_str);
+    let text = |camel: &str, snake: &str| {
+        payload
+            .and_then(|p| p.get(camel))
+            .and_then(Value::as_str)
+            .or_else(|| doc.get_str(snake).ok())
+    };
     match spec.name {
         "products" => {
             if let Ok(id) = doc.get_object_id("_id") {
@@ -195,10 +200,10 @@ pub(super) fn note_scope(
             }
         }
         "stockMovements" => {
-            if let Some(id) = text("productId") {
+            if let Some(id) = text("productId", "product_id") {
                 scope.product_ids.insert(id.to_string());
             }
-            if let Some(batch) = text("batchKey") {
+            if let Some(batch) = text("batchKey", "batch_key") {
                 scope.batch_keys.insert(batch.to_string());
             }
         }
@@ -210,22 +215,51 @@ pub(super) fn note_scope(
         }
         "invoices" => {
             scope.invoice_keys.insert(key.to_string());
-            if let Some(customer) = text("customerKey") {
+            if let Some(customer) = text("customerKey", "customer_key") {
                 scope.customer_keys.insert(customer.to_string());
+            }
+            if let Some(session) = text("sessionKey", "session_key") {
+                scope.session_keys.insert(session.to_string());
             }
         }
         "payments" => {
-            if let Some(invoice) = text("invoiceKey") {
+            if let Some(invoice) = text("invoiceKey", "invoice_key") {
                 scope.invoice_keys.insert(invoice.to_string());
+            }
+            if let Some(session) = text("sessionKey", "session_key") {
+                scope.session_keys.insert(session.to_string());
             }
         }
         "creditNotes" => {
-            if let Some(invoice) = text("invoiceKey") {
+            if let Some(invoice) = text("invoiceKey", "invoice_key") {
                 scope.invoice_keys.insert(invoice.to_string());
             }
-            if let Some(customer) = text("customerKey") {
+            if let Some(customer) = text("customerKey", "customer_key") {
                 scope.customer_keys.insert(customer.to_string());
             }
+        }
+        "registerSessions" => {
+            scope.session_keys.insert(key.to_string());
+            scope.drawer_keys.insert("shop".to_string());
+            if let Some(cashier) = text("cashierId", "cashier_id") {
+                scope.drawer_keys.insert(cashier.to_string());
+            }
+        }
+        "cashMovements" => {
+            if let Some(session) = text("sessionKey", "session_key") {
+                scope.session_keys.insert(session.to_string());
+            } else {
+                scope.drawer_keys.insert("shop".to_string());
+                if let Some(user) = text("recordedByUserId", "recorded_by_user_id") {
+                    scope.drawer_keys.insert(user.to_string());
+                }
+            }
+        }
+        "drawerState" => {
+            scope.drawer_keys.insert(key.to_string());
+        }
+        "shopProfiles" => {
+            scope.refresh_drawers = true;
         }
         _ => {}
     }

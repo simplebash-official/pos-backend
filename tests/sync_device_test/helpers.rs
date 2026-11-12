@@ -295,9 +295,9 @@ pub(crate) async fn table_rows(pool: &SqlitePool, table: &str) -> Vec<Value> {
             for meta in ["updated_at", "version", "updated_by_device"] {
                 object.remove(meta);
             }
-            // Subcategories have no legacy id on the wire (they are joined by key), so
-            // each device mints its own.
-            if table == "subcategories" {
+            // Subcategories and the locally seeded shop profile mint a per-device id
+            // while remaining keyed by business key across replicas.
+            if table == "subcategories" || table == "shop_profiles" {
                 object.remove("id");
                 object.remove("_id");
             }
@@ -307,6 +307,7 @@ pub(crate) async fn table_rows(pool: &SqlitePool, table: &str) -> Vec<Value> {
 }
 
 pub(crate) const SYNCED: &[&str] = &[
+    "shop_profiles",
     "categories",
     "subcategories",
     "suppliers",
@@ -318,6 +319,9 @@ pub(crate) const SYNCED: &[&str] = &[
     "receipt_settlements",
     "supplier_credits",
     "receipt_charges",
+    "register_sessions",
+    "cash_movements",
+    "drawer_state",
     "expenses",
     "expense_payments",
     "stock_movements",

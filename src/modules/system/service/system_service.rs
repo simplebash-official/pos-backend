@@ -163,7 +163,8 @@ pub(crate) async fn perform_setup(
         // 2. Bootstrap the default API key
         seeds::api_key::seed_api_key(db).await?;
 
-        // 3. Conditional Seeding: if user requested sample data, seed categories, inventory, suppliers & customers
+        // 3. Ensure shop profile exists & conditional seeding if user requested sample data
+        crate::modules::settings::service::ensure_shop_profile(db, None).await?;
         if body.load_sample_data {
             seed_sample_data(db).await?;
         }
@@ -235,6 +236,8 @@ pub(crate) async fn perform_tenant_setup(
 
         let scope = crate::core::tenancy::Tenant::id(tenant_key)?;
         crate::core::tenancy::with_tenant(scope, async {
+            crate::modules::settings::service::ensure_shop_profile(db, Some(tenant.name.trim()))
+                .await?;
             if load_sample_data {
                 seed_sample_data(db).await?;
             }

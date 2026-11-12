@@ -959,6 +959,7 @@ CREATE TABLE IF NOT EXISTS shop_profiles (
     default_footer_text TEXT NOT NULL DEFAULT '',
     receipt_footer_text TEXT NOT NULL DEFAULT '',
     allow_shared_user_sessions INTEGER NOT NULL DEFAULT 0,
+    allow_staff_multi_device_sessions INTEGER NOT NULL DEFAULT 0,
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -1019,6 +1020,7 @@ CREATE TABLE IF NOT EXISTS register_sessions (
 
 CREATE INDEX IF NOT EXISTS idx_register_sessions_terminal_status ON register_sessions(terminal_id, status);
 CREATE INDEX IF NOT EXISTS idx_register_sessions_cashier_id ON register_sessions(cashier_id);
+CREATE INDEX IF NOT EXISTS idx_register_sessions_status ON register_sessions(status);
 CREATE INDEX IF NOT EXISTS idx_register_sessions_created_at ON register_sessions(created_at);
 CREATE INDEX IF NOT EXISTS idx_register_sessions_sync ON register_sessions(updated_at, key);
 
@@ -1302,12 +1304,18 @@ CREATE INDEX IF NOT EXISTS idx_payees_name ON payees(payee_type, normalized_name
 CREATE INDEX IF NOT EXISTS idx_payees_sync ON payees(updated_at, key);
 
 CREATE TABLE IF NOT EXISTS drawer_state (
+    key TEXT NOT NULL DEFAULT '',
+    id TEXT NOT NULL DEFAULT '',
     user_key TEXT PRIMARY KEY,
     current_balance_cents INTEGER NOT NULL DEFAULT 0,
     last_session_key TEXT,
     last_closing_float_cents INTEGER NOT NULL DEFAULT 0,
-    updated_at TEXT NOT NULL
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL,
+    updated_by_device TEXT
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_drawer_state_key_unique ON drawer_state(key);
 
 
 

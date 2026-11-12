@@ -106,8 +106,7 @@ pub const EMPLOYEES_READ: &str = "employees:read";
 pub const EMPLOYEES_WRITE: &str = "employees:write";
 
 /// Create, list, print/reprint and cancel customer quotations (price offers,
-/// not sales). Granted to Admin and Manager only — Staff tokens get a 403 from
-/// every `/api/quotations` route, so hiding the UI is never the only guard.
+/// not sales). Granted to Admin, Manager and Staff.
 pub const QUOTATIONS_MANAGE: &str = "quotations:manage";
 
 /// Look up warranties and see their history. Granted to every role: checking a warranty is a

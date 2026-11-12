@@ -18,6 +18,8 @@ pub fn label_column(table: &str) -> Option<&'static str> {
         "product_serials" => Some("serial_number"),
         "register_sessions" => Some("session_number"),
         "cash_movements" => Some("movement_number"),
+        "shop_profiles" => Some("trading_name"),
+        "drawer_state" => Some("user_key"),
         "cash_categories" | "payees" => Some("name"),
         "expenses" => Some("expense_number"),
         "receipt_settlements" => Some("payment_key"),

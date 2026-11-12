@@ -8,5 +8,6 @@ pub(crate) use tenants_repository::complete_tenant_setup;
 pub(crate) use tenants_repository::find_tenant_by_key;
 pub(crate) use tenants_repository::find_tenant_by_shop_code;
 pub(crate) use tenants_repository::insert_tenant;
+pub(crate) use tenants_repository::list_all_tenants;
 pub(crate) use tenants_repository::set_tenant_suspended;
 pub(crate) use tenants_repository::update_tenant_name;

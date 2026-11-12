@@ -1,6 +1,8 @@
 use crate::clients::db::Db;
 use crate::core::error::{AppError, AppResult};
-use crate::core::sync_merge::{Decision, IncomingChange, META_KEYS, clamp_updated_at, decide};
+use crate::core::sync_merge::{
+    Decision, IncomingChange, clamp_updated_at, decide, is_meaningful_conflict,
+};
 use crate::domain::sync_v2::{
     AckStatus, ChangeAck, ChangeOp, ChangeRecord, ConflictKind, DerivedScope, NewConflict,
     PushRequest, PushResponse,
@@ -13,7 +15,6 @@ use crate::modules::sync::derived_mongo::recompute_derived;
 use crate::modules::sync::resources::{ResourceSpec, spec as resource_spec, without_secrets};
 use crate::modules::sync::service::hydrate;
 use chrono::Utc;
-use serde_json::Value;
 
 /// Most changes one push may carry.
 pub(crate) const MAX_PUSH_CHANGES: usize = 500;
@@ -28,22 +29,6 @@ fn ack(record: &ChangeRecord, status: AckStatus, reason: Option<&str>, clamped: 
     }
 }
 
-/// True when the two payloads differ in something other than write metadata.
-fn differs_ignoring_meta(a: &Value, b: &Value) -> bool {
-    let strip = |v: &Value| -> Value {
-        match v {
-            Value::Object(map) => Value::Object(
-                map.iter()
-                    .filter(|(k, _)| !META_KEYS.contains(&k.as_str()))
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect(),
-            ),
-            other => other.clone(),
-        }
-    };
-    strip(a) != strip(b)
-}
-
 /// The record that lost last-writer-wins, kept for review.
 async fn lww_loser_conflict(
     db: &Db,
@@ -55,9 +40,9 @@ async fn lww_loser_conflict(
         .await?
         .into_iter()
         .next();
-    // A no-op edit (same content, different timestamp) is not a conflict.
+    // A no-op edit (or one differing only in timestamps/derived columns) is not a conflict.
     if let (Some(local), Some(incoming)) = (winning.as_ref(), record.payload.as_ref())
-        && !differs_ignoring_meta(local, incoming)
+        && !is_meaningful_conflict(spec, local, incoming)
     {
         return Ok(None);
     }

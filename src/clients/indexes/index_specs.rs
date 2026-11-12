@@ -361,6 +361,19 @@ pub fn index_specs(tenant_mode: TenantMode) -> Vec<IndexSpec> {
         doc! { "user_key": 1 },
         false,
     );
+    specs.add(
+        "drawer_state",
+        "drawer_state_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    // Active-shift lookups in Personal and SharedShop modes filter on `status` and `deleted_at`.
+    specs.add(
+        "register_sessions",
+        "register_sessions_status",
+        doc! { "status": 1, "deleted_at": 1 },
+        false,
+    );
     // The shop's drawer rules (`modules::cash_settings`): one row.
     specs.add(
         "cash_settings",

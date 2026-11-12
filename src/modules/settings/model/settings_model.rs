@@ -42,9 +42,12 @@ pub struct ShopProfileDocument {
     pub default_footer_text: String,
     pub receipt_footer_text: String,
     pub allow_shared_user_sessions: bool,
+    pub allow_staff_multi_device_sessions: bool,
     pub version: i64,
     pub created_at: BsonDateTime,
     pub updated_at: BsonDateTime,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_by_device: Option<String>,
 }
 
 impl ShopProfileDocument {
@@ -74,6 +77,7 @@ impl ShopProfileDocument {
             default_footer_text: self.default_footer_text,
             receipt_footer_text: self.receipt_footer_text,
             allow_shared_user_sessions: self.allow_shared_user_sessions,
+            allow_staff_multi_device_sessions: self.allow_staff_multi_device_sessions,
         }
     }
 }

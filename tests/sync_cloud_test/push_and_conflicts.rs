@@ -7,6 +7,7 @@ use mongodb::bson::{Bson, Document, doc};
 use serde_json::{Value, json};
 
 use simplebash_pos_backend::core::tenancy::{Tenant, with_tenant};
+use simplebash_pos_backend::modules::settings::service::ensure_shop_profile;
 
 use simplebash_pos_backend::modules::sync::apply_mongo::test_support::hydrate_for_test;
 
@@ -478,27 +479,13 @@ async fn snapshot_pagination_is_consistent() {
     let dev = device_token(&app, "tnt_p", "dev_p1").await;
 
     let mut expected = 0u64;
-    for table in [
-        "categories",
-        "suppliers",
-        "products",
-        "stock_batches",
-        "supplier_products",
-        "employees",
-        "customers",
-        "purchases",
-        "stock_movements",
-        "product_serials",
-        "repairs",
-        "print_jobs",
-        "invoices",
-        "payments",
-        "credit_notes",
-        "quotations",
-    ] {
+    for spec in simplebash_pos_backend::modules::sync::resources::SYNC_RESOURCES
+        .iter()
+        .filter(|s| s.phase == simplebash_pos_backend::modules::sync::resources::Phase::P3a)
+    {
         expected += app
             .mongo()
-            .collection::<Document>(table)
+            .collection::<Document>(spec.table)
             .count_documents(doc! { "tenant_id": "tnt_p", "deleted_at": Bson::Null })
             .await
             .expect("the awaited step succeeds");
@@ -562,6 +549,12 @@ async fn a_pushed_cashier_logs_in_by_shop_code_and_a_web_delete_reaches_devices(
         .await
         .expect("the awaited step succeeds");
     let tid = shop.key.clone();
+    with_tenant(
+        Tenant::id(&tid).expect("valid tenant id"),
+        ensure_shop_profile(&app.db_handle, Some("Cashier Shop")),
+    )
+    .await
+    .expect("shop profile initializes");
 
     let hash = Argon2::default()
         .hash_password(b"cashier-pass-9", &SaltString::generate(&mut OsRng))

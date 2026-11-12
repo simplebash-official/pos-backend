@@ -4,7 +4,9 @@ use axum::http::StatusCode;
 
 use serde_json::{Value, json};
 use simplebash_pos_backend::core::constants::roles;
+use simplebash_pos_backend::core::tenancy::{Tenant, with_tenant};
 use simplebash_pos_backend::domain::users::Role;
+use simplebash_pos_backend::modules::settings::service::ensure_shop_profile;
 
 use crate::common;
 use crate::helpers::{
@@ -560,6 +562,14 @@ async fn each_shop_has_its_own_print_history() {
         )
     };
     let (shop_a, shop_b) = (admin_of("tnt_jobs_a"), admin_of("tnt_jobs_b"));
+    for tenant in ["tnt_jobs_a", "tnt_jobs_b"] {
+        with_tenant(
+            Tenant::id(tenant).expect("valid tenant id"),
+            ensure_shop_profile(&app.db_handle, Some("Test Shop")),
+        )
+        .await
+        .expect("shop profile should initialize for multi-tenant labels test");
+    }
 
     let (status, category) = send(
         &app.router,

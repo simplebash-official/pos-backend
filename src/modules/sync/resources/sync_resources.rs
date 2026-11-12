@@ -4,6 +4,16 @@ use super::resource_spec::ResourceSpec;
 
 pub const SYNC_RESOURCES: &[ResourceSpec] = &[
     ResourceSpec {
+        name: "shopProfiles",
+        table: "shop_profiles",
+        class: MergeClass::Lww,
+        soft_delete: false,
+        derived: &[],
+        local_only: &[],
+        order: 5,
+        phase: Phase::P3a,
+    },
+    ResourceSpec {
         name: "categories",
         table: "categories",
         class: MergeClass::Lww,
@@ -194,9 +204,22 @@ pub const SYNC_RESOURCES: &[ResourceSpec] = &[
     ResourceSpec {
         name: "registerSessions",
         table: "register_sessions",
-        class: MergeClass::Lww,
+        class: MergeClass::LwwWithDerived,
         soft_delete: true,
-        derived: &[],
+        derived: &[
+            "total_cash_sales_cents",
+            "total_card_sales_cents",
+            "total_online_sales_cents",
+            "total_credit_sales_cents",
+            "total_cash_refunds_cents",
+            "total_pay_in_cents",
+            "total_pay_out_cents",
+            "total_owner_withdrawals_cents",
+            "total_cash_drops_cents",
+            "has_late_movements",
+            "expected_cash_cents",
+            "cash_variance_cents",
+        ],
         local_only: &[],
         order: 145,
         phase: Phase::P3a,
@@ -239,6 +262,16 @@ pub const SYNC_RESOURCES: &[ResourceSpec] = &[
         derived: &[],
         local_only: &[],
         order: 150,
+        phase: Phase::P3a,
+    },
+    ResourceSpec {
+        name: "drawerState",
+        table: "drawer_state",
+        class: MergeClass::LwwWithDerived,
+        soft_delete: false,
+        derived: &["current_balance_cents"],
+        local_only: &[],
+        order: 151,
         phase: Phase::P3a,
     },
     ResourceSpec {
