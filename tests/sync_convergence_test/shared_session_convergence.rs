@@ -514,8 +514,8 @@ async fn shared_shop_sessions_two_offline_devices_and_joining_bootstrap_converge
 
     for d in &devices {
         let profile_row = &table_rows(d.pool(), "shop_profiles").await[0];
-        assert_eq!(profile_row["allow_shared_user_sessions"], 0);
-        assert_eq!(profile_row["allow_staff_multi_device_sessions"], 1);
+        assert_eq!(profile_row["allow_shared_user_sessions"], false);
+        assert_eq!(profile_row["allow_staff_multi_device_sessions"], true);
         let drawers = table_rows(d.pool(), "drawer_state").await;
         let shop = drawers
             .iter()
