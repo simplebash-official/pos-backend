@@ -2,6 +2,7 @@
 
 use super::tenant_db::TenantDatabase;
 
+use crate::core::error::{AppError, AppResult};
 use crate::core::tenancy::Tenant;
 use mongodb::Database as MongoDatabase;
 use sqlx::SqlitePool;
@@ -83,5 +84,19 @@ impl Db {
             Db::Mongo(_) => "mongodb",
             Db::Sqlite(_) => "sqlite",
         }
+    }
+
+    /// Rejects operations executed against a multi-tenant MongoDB handle with no
+    /// active tenant in scope (`Tenant::Deny`) so seeding/backfill cannot stamp
+    /// `"__deny__"` rows into tenant-scoped collections.
+    pub fn require_active_tenant_scope(&self) -> AppResult<()> {
+        if let Some(mongo) = self.as_mongo()
+            && matches!(mongo.effective_tenant(), Tenant::Deny)
+        {
+            return Err(AppError::internal(
+                "Cannot write shop-scoped data without an active tenant scope",
+            ));
+        }
+        Ok(())
     }
 }

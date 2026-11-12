@@ -49,6 +49,7 @@ pub(crate) async fn get_document_templates(
 /// Modeled on `cash_settings::service::ensure_settings`: missing shop profile is an internal error,
 /// never a silent code default.
 pub async fn ensure_shop_profile(db: &Db, initial_trading_name: Option<&str>) -> AppResult<()> {
+    db.require_active_tenant_scope()?;
     let seeded_at = BsonDateTime::from_millis(1_767_225_600_000);
     let initial_name = match initial_trading_name {
         Some(name) => name.trim(),
@@ -56,7 +57,7 @@ pub async fn ensure_shop_profile(db: &Db, initial_trading_name: Option<&str>) ->
     };
 
     if let Some(mut existing) = repository::find_shop_profile(db, SHOP_PROFILE_KEY).await? {
-        if existing.trading_name.is_empty() && !initial_name.is_empty() {
+        if existing.trading_name.trim().is_empty() && !initial_name.is_empty() {
             existing.trading_name = initial_name.to_string();
             existing.version += 1;
             existing.updated_at = BsonDateTime::now();

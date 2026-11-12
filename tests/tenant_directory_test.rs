@@ -12,22 +12,26 @@ use axum::body::Body;
 
 use axum::http::{Request, StatusCode, header};
 use jsonwebtoken::{DecodingKey, Validation, decode};
+use mongodb::bson::{Document, doc};
 use serde_json::{Value, json};
 use simplebash_pos_backend::app::AppState;
 use simplebash_pos_backend::clients::db::Db;
 use simplebash_pos_backend::clients::document_server::DocumentServerClient;
 use simplebash_pos_backend::clients::mongo::connect;
 use simplebash_pos_backend::clients::tenant_db::TenantDatabase;
-use simplebash_pos_backend::core::config::TenantMode;
+use simplebash_pos_backend::core::config::{SeedAdminConfig, TenantMode};
 use simplebash_pos_backend::core::middleware::auth::Claims;
-use simplebash_pos_backend::core::tenancy::{Tenant, with_tenant};
+use simplebash_pos_backend::core::tenancy::{DENY_TENANT, Tenant, with_tenant};
 use simplebash_pos_backend::domain::users::{CreateUserRequest, Role};
+use simplebash_pos_backend::modules::cash_categories::service::ensure_system_categories;
+use simplebash_pos_backend::modules::cash_settings::service::ensure_settings;
 use simplebash_pos_backend::modules::reports::engine::AnalyticsEngine;
+use simplebash_pos_backend::modules::settings::service::ensure_shop_profile;
 use simplebash_pos_backend::modules::tenants::service::{
-    create_tenant, create_tenant_with_key, resolve_shop_code,
+    create_tenant, create_tenant_with_key, ensure_existing_tenants_data, resolve_shop_code,
 };
 use simplebash_pos_backend::modules::users::service::create_user;
-use simplebash_pos_backend::{app, clients};
+use simplebash_pos_backend::{app, clients, seeds};
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -329,6 +333,331 @@ async fn multi_tenant_cors_only_allows_configured_origins() {
         Some("https://app.example.test")
     );
     assert_eq!(allow_origin("https://evil.example.test").await, None);
+
+    raw.drop().await.ok();
+}
+
+async fn send_authed(
+    router: &axum::Router,
+    method: &str,
+    uri: &str,
+    token: &str,
+    body: Option<Value>,
+) -> (StatusCode, Value) {
+    let builder = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(header::AUTHORIZATION, format!("Bearer {token}"));
+    let request = match body {
+        Some(payload) => builder
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&payload).expect("the payload serializes to JSON"),
+            ))
+            .expect("the request is well formed"),
+        None => builder
+            .body(Body::empty())
+            .expect("the request is well formed"),
+    };
+    let response = router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds");
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("the awaited step succeeds");
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
+}
+
+#[tokio::test]
+async fn deny_scope_refuses_initialization_and_writes_zero_deny_docs() {
+    dotenvy::dotenv().ok();
+    let uri = common::mongo_uri();
+    let name = format!("jtdir_{}", &Uuid::new_v4().simple().to_string()[..24]);
+    let raw = connect(&uri, &name).await.expect("connect throwaway db");
+    clients::indexes::ensure_indexes(&raw, TenantMode::Multi).await;
+    let db = Db::Mongo(TenantDatabase::multi_tenant(raw.clone()));
+
+    assert!(
+        ensure_shop_profile(&db, Some("Ghost Shop")).await.is_err(),
+        "ensure_shop_profile must refuse Tenant::Deny"
+    );
+    assert!(
+        ensure_settings(&db).await.is_err(),
+        "ensure_settings must refuse Tenant::Deny"
+    );
+    assert!(
+        ensure_system_categories(&db).await.is_err(),
+        "ensure_system_categories must refuse Tenant::Deny"
+    );
+    assert!(
+        seeds::seed_all(
+            &db,
+            &SeedAdminConfig {
+                name: "Admin".to_string(),
+                password: "password123".to_string(),
+            },
+        )
+        .await
+        .is_err(),
+        "seeds::seed_all must refuse Tenant::Deny"
+    );
+
+    for collection in [
+        "shop_profiles",
+        "cash_settings",
+        "cash_categories",
+        "users",
+        "categories",
+        "products",
+        "customers",
+        "suppliers",
+        "api_keys",
+    ] {
+        let deny_count = raw
+            .collection::<Document>(collection)
+            .count_documents(doc! { "tenant_id": DENY_TENANT })
+            .await
+            .expect("count deny docs");
+        assert_eq!(
+            deny_count, 0,
+            "collection {collection} must contain zero {DENY_TENANT} rows"
+        );
+    }
+
+    raw.drop().await.ok();
+}
+
+#[tokio::test]
+async fn ensure_existing_tenants_data_backfills_missing_profiles_and_unblocks_staff_login() {
+    dotenvy::dotenv().ok();
+    let uri = common::mongo_uri();
+    let name = format!("jtdir_{}", &Uuid::new_v4().simple().to_string()[..24]);
+    let mut overrides = common::mongo_overrides(&uri, &name).to_vec();
+    overrides.push(("TENANT_MODE", "multi"));
+    let config = Arc::new(common::test_config(&overrides));
+    let raw = connect(&uri, &name).await.expect("connect throwaway db");
+    clients::indexes::ensure_indexes(&raw, TenantMode::Multi).await;
+    let db = Db::Mongo(TenantDatabase::multi_tenant(raw.clone()));
+
+    // Tenant 1: pre-existing shop missing `shop_profiles`, `cash_settings`, and `cash_categories`,
+    // with an existing Staff user.
+    let legacy = create_tenant(&db, "shop-legacy", "Legacy Electronics")
+        .await
+        .expect("create legacy tenant");
+    with_tenant(Tenant::id(&legacy.key).expect("valid tenant id"), async {
+        create_user(
+            &db,
+            CreateUserRequest {
+                name: "Legacy Cashier".to_string(),
+                username: "cashier1".to_string(),
+                password: "staff-password-1".to_string(),
+                role: Role::Staff,
+                employee_key: None,
+            },
+        )
+        .await
+        .expect("create staff user")
+    })
+    .await;
+
+    // Tenant 2: pre-existing shop with customized `shop_profiles` that must remain untouched.
+    let custom = create_tenant(&db, "shop-custom", "Custom Directory Name")
+        .await
+        .expect("create custom tenant");
+    with_tenant(Tenant::id(&custom.key).expect("valid tenant id"), async {
+        ensure_shop_profile(&db, None).await?;
+        ensure_system_categories(&db).await?;
+        create_user(
+            &db,
+            CreateUserRequest {
+                name: "Custom Admin".to_string(),
+                username: "admin".to_string(),
+                password: "custom-password-1".to_string(),
+                role: Role::Admin,
+                employee_key: None,
+            },
+        )
+        .await
+    })
+    .await
+    .expect("seed custom shop");
+
+    // Tenant 3: pre-existing shop whose `shop_profiles` exists with blank `trading_name`
+    // and `allow_shared_user_sessions: true`; backfill populates `trading_name` while keeping mode.
+    let blank = create_tenant(&db, "shop-blank", "Blank Profile Name")
+        .await
+        .expect("create blank tenant");
+    with_tenant(Tenant::id(&blank.key).expect("valid tenant id"), async {
+        ensure_shop_profile(&db, None).await?;
+        ensure_system_categories(&db).await?;
+        create_user(
+            &db,
+            CreateUserRequest {
+                name: "Blank Admin".to_string(),
+                username: "admin".to_string(),
+                password: "blank-password-1".to_string(),
+                role: Role::Admin,
+                employee_key: None,
+            },
+        )
+        .await
+    })
+    .await
+    .expect("seed blank shop");
+
+    let router = app::build_router(AppState {
+        config: config.clone(),
+        db: db.clone(),
+        document_server: Arc::new(DocumentServerClient::new(
+            config.document_server_url.clone(),
+            config.document_server_api_key.clone(),
+        )),
+        reports_engine: Arc::new(AnalyticsEngine::new(db.clone())),
+    });
+
+    // Customize shop-custom and shop-blank via the real settings endpoint.
+    let (status, login_custom) = post_login(
+        &router,
+        json!({ "username": "admin", "password": "custom-password-1", "shopCode": "shop-custom" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{login_custom}");
+    let custom_token = login_custom["data"]["token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+    let (status, updated_custom) = send_authed(
+        &router,
+        "PUT",
+        "/api/settings/shop-profile",
+        &custom_token,
+        Some(json!({ "tradingName": "Custom Trading Name", "allowSharedUserSessions": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{updated_custom}");
+
+    let (status, login_blank) = post_login(
+        &router,
+        json!({ "username": "admin", "password": "blank-password-1", "shopCode": "shop-blank" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{login_blank}");
+    let blank_token = login_blank["data"]["token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+    let (status, updated_blank) = send_authed(
+        &router,
+        "PUT",
+        "/api/settings/shop-profile",
+        &blank_token,
+        Some(json!({ "allowSharedUserSessions": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{updated_blank}");
+    assert_eq!(updated_blank["data"]["tradingName"], "");
+
+    // Zero runtime fallback: before backfill, Staff login for legacy shop fails cleanly (500).
+    let (pre_status, _) = post_login(
+        &router,
+        json!({ "username": "cashier1", "password": "staff-password-1", "shopCode": "shop-legacy" }),
+    )
+    .await;
+    assert_eq!(pre_status, StatusCode::INTERNAL_SERVER_ERROR);
+
+    // Run startup backfill (twice to verify idempotency).
+    let first_count = ensure_existing_tenants_data(&db)
+        .await
+        .expect("backfill existing tenants");
+    assert_eq!(first_count, 3);
+    let second_count = ensure_existing_tenants_data(&db)
+        .await
+        .expect("idempotent backfill rerun");
+    assert_eq!(second_count, 3);
+
+    // Staff login on previously-missing legacy shop now succeeds.
+    let (post_status, post_body) = post_login(
+        &router,
+        json!({ "username": "cashier1", "password": "staff-password-1", "shopCode": "shop-legacy" }),
+    )
+    .await;
+    assert_eq!(post_status, StatusCode::OK, "{post_body}");
+    assert_eq!(post_body["data"]["user"]["role"], "staff");
+
+    // Verify backfilled legacy shop profile and drawer defaults.
+    let legacy_profile = raw
+        .collection::<Document>("shop_profiles")
+        .find_one(doc! { "tenant_id": &legacy.key })
+        .await
+        .expect("query legacy shop profile")
+        .expect("legacy shop profile must exist after backfill");
+    assert_eq!(
+        legacy_profile.get_str("trading_name").ok(),
+        Some("Legacy Electronics")
+    );
+    assert_eq!(
+        legacy_profile.get_bool("allow_shared_user_sessions").ok(),
+        Some(false)
+    );
+    assert_eq!(
+        raw.collection::<Document>("cash_settings")
+            .count_documents(doc! { "tenant_id": &legacy.key })
+            .await
+            .expect("count legacy cash settings"),
+        1
+    );
+    assert!(
+        raw.collection::<Document>("cash_categories")
+            .count_documents(doc! { "tenant_id": &legacy.key })
+            .await
+            .expect("count legacy cash categories")
+            > 0
+    );
+
+    // Custom shop profile edits remain completely intact.
+    let (status, fetched_custom) = send_authed(
+        &router,
+        "GET",
+        "/api/settings/shop-profile",
+        &custom_token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{fetched_custom}");
+    assert_eq!(fetched_custom["data"]["tradingName"], "Custom Trading Name");
+    assert_eq!(fetched_custom["data"]["allowSharedUserSessions"], true);
+
+    // Blank profile gets its trading name backfilled without losing shared-shift preference.
+    let (status, fetched_blank) = send_authed(
+        &router,
+        "GET",
+        "/api/settings/shop-profile",
+        &blank_token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{fetched_blank}");
+    assert_eq!(fetched_blank["data"]["tradingName"], "Blank Profile Name");
+    assert_eq!(fetched_blank["data"]["allowSharedUserSessions"], true);
+
+    // Zero "__deny__" documents anywhere after startup backfill.
+    for collection in ["shop_profiles", "cash_settings", "cash_categories"] {
+        let deny_count = raw
+            .collection::<Document>(collection)
+            .count_documents(doc! { "tenant_id": DENY_TENANT })
+            .await
+            .expect("count deny docs");
+        assert_eq!(
+            deny_count, 0,
+            "{collection} must have zero {DENY_TENANT} rows"
+        );
+    }
 
     raw.drop().await.ok();
 }

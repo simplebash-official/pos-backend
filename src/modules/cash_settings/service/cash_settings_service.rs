@@ -37,6 +37,7 @@ pub(super) fn dto(d: &CashSettingsDocument) -> CashSettings {
 /// Creates the shop's drawer rules with the shipped starting values when the row is missing. Never
 /// touches an existing row, so the owner's edits survive a re-run.
 pub async fn ensure_settings(db: &Db) -> AppResult<()> {
+    db.require_active_tenant_scope()?;
     if repository::find(db, CASH_SETTINGS_KEY).await?.is_some() {
         return Ok(());
     }

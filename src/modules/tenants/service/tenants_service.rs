@@ -215,12 +215,9 @@ pub async fn provision_shop(
         }
     };
 
-    // Every shop starts with the drawer's built-in cash categories (idempotent on a replay).
-    with_tenant(Tenant::id(tenant_id)?, async {
-        cash_categories::service::ensure_system_categories(db).await?;
-        crate::modules::settings::service::ensure_shop_profile(db, Some(name.trim())).await
-    })
-    .await?;
+    // Every shop starts with its shop profile, drawer rules, and built-in cash categories
+    // (idempotent on a replay).
+    ensure_tenant_data(db, tenant_id, name).await?;
 
     let admin_created = match owner {
         None => false,
@@ -245,6 +242,31 @@ pub async fn provision_shop(
         tenant_created,
         admin_created,
     })
+}
+
+/// Initializes required shop-scoped reference data (`shop_profiles`, built-in `cash_categories`,
+/// and `cash_settings`) inside `tenant_id`'s scope. Idempotent: existing customized rows and edits
+/// are preserved, while a blank `trading_name` is populated from `shop_name`.
+pub async fn ensure_tenant_data(db: &Db, tenant_id: &str, shop_name: &str) -> AppResult<()> {
+    let trimmed = shop_name.trim();
+    let initial_name = (!trimmed.is_empty()).then_some(trimmed);
+    with_tenant(Tenant::id(tenant_id)?, async {
+        settings::service::ensure_shop_profile(db, initial_name).await?;
+        cash_categories::service::ensure_system_categories(db).await?;
+        Ok(())
+    })
+    .await
+}
+
+/// Ensures every tenant registered in the platform directory has its required starting data
+/// (`shop_profiles`, built-in `cash_categories`, and `cash_settings`) initialized inside its own
+/// tenant scope. Idempotent; returns the number of directory tenants checked.
+pub async fn ensure_existing_tenants_data(db: &Db) -> AppResult<usize> {
+    let tenants = repository::list_all_tenants(db).await?;
+    for tenant in &tenants {
+        ensure_tenant_data(db, &tenant.key, &tenant.name).await?;
+    }
+    Ok(tenants.len())
 }
 
 /// Clears the shop's choices of the given design families, and the option

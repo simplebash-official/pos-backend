@@ -8,6 +8,8 @@ mod tests;
 pub use tenants_service::create_tenant;
 pub use tenants_service::create_tenant_with_key;
 pub use tenants_service::document_selections;
+pub use tenants_service::ensure_existing_tenants_data;
+pub use tenants_service::ensure_tenant_data;
 
 pub use tenants_service::ProvisionOutcome;
 pub use tenants_service::ProvisionOwner;

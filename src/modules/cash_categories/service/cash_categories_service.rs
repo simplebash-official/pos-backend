@@ -225,6 +225,7 @@ const SEEDED_AT_MS: i64 = 1_767_225_600_000;
 
 /// Creates any shipped category this shop is missing. Never touches an existing row, so edits survive.
 pub async fn ensure_system_categories(db: &Db) -> AppResult<CashCategorySeedResult> {
+    db.require_active_tenant_scope()?;
     let mut created = 0;
     let mut existing = 0;
     let mut next_sort: HashMap<&'static str, i64> = HashMap::new();

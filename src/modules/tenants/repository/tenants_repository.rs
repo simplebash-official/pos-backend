@@ -1,6 +1,7 @@
 use crate::clients::db::Db;
 use crate::core::error::{AppError, AppResult};
 use crate::modules::tenants::model::TenantDocument;
+use futures_util::TryStreamExt;
 use mongodb::bson::doc;
 
 /// Marks setup as completed for a tenant.
@@ -38,6 +39,15 @@ pub(super) fn directory(
 /// Finds a tenant by its immutable id (`tnt_...`).
 pub(crate) async fn find_tenant_by_key(db: &Db, key: &str) -> AppResult<Option<TenantDocument>> {
     Ok(directory(db)?.find_one(doc! { "key": key }).await?)
+}
+
+/// Lists every tenant in the platform directory in creation order.
+pub(crate) async fn list_all_tenants(db: &Db) -> AppResult<Vec<TenantDocument>> {
+    let cursor = directory(db)?
+        .find(doc! {})
+        .sort(doc! { "created_at": 1, "key": 1 })
+        .await?;
+    Ok(cursor.try_collect().await?)
 }
 
 /// Finds a tenant by its (already normalised) shop code.

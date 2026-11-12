@@ -5,6 +5,7 @@ use crate::core::error::AppError;
 /// Runs all seeders sequentially to bootstrap a complete, realistic POS environment.
 /// Compatible with both SQLite and MongoDB.
 pub async fn seed_all(db: &Db, admin: &SeedAdminConfig) -> Result<SeedSummary, AppError> {
+    db.require_active_tenant_scope()?;
     let admin_result = super::admin::seed_admin(db, admin).await?;
     let providers = super::providers::seed_providers(db).await?;
     let cash_categories = super::cash_categories::seed_cash_categories(db).await?;
