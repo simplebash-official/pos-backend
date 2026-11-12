@@ -594,11 +594,16 @@ pub(super) async fn apply_records_in_tx(
                 counts.conflicts += 1;
             }
             Decision::KeepLocal { loser } => {
-                counts.conflicts += 1;
-                if let (Some(local), Some(losing)) =
-                    (local_payload(db, spec, &rec.key).await?, &rec.payload)
-                    && is_meaningful_conflict(spec, &local, losing)
+                let local = local_payload(db, spec, &rec.key).await?;
+                if let (Some(local_doc), Some(losing)) = (local.as_ref(), rec.payload.as_ref())
+                    && !is_meaningful_conflict(spec, local_doc, losing)
                 {
+                    // Lost on timestamp/device tiebreak but carried identical content: nothing to review.
+                    counts.duplicates += 1;
+                    continue;
+                }
+                counts.conflicts += 1;
+                if let Some(losing) = rec.payload.as_ref() {
                     conflicts.push(NewConflict {
                         kind: loser,
                         resource: spec.name.to_string(),

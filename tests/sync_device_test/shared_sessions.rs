@@ -726,3 +726,48 @@ async fn sqlite_round_trips_allow_staff_multi_device_sessions_boolean() {
     assert_eq!(b_profile["data"]["allowSharedUserSessions"], false);
     assert_eq!(b_profile["data"]["allowStaffMultiDeviceSessions"], true);
 }
+
+#[tokio::test]
+async fn seeded_shop_profile_tiebreak_counts_as_duplicate_not_conflict() {
+    let a = Device::new().await;
+    let b = Device::new().await;
+
+    // Sender `"dev_a"` sorts before receiver `"dev_b"`, so identical seeded `shop_profiles`
+    // (`SEEDED_AT_MS`, differing only in local storage `id`) hits `Decision::KeepLocal` on `b`.
+    a.sync(
+        "POST",
+        "/api/sync/enable",
+        Some(json!({ "deviceId": "dev_a" })),
+    )
+    .await;
+    b.sync(
+        "POST",
+        "/api/sync/enable",
+        Some(json!({ "deviceId": "dev_b" })),
+    )
+    .await;
+    ack_outbox(&b).await;
+
+    let changes = as_pulled(&a.drain_outbox().await);
+    assert!(
+        changes.iter().any(|c| c["resource"] == "shopProfiles"),
+        "seeded shop_profiles must be in initial outbox: {changes:?}"
+    );
+    ack_outbox(&a).await;
+
+    let applied = b
+        .sync(
+            "POST",
+            "/api/sync/apply",
+            Some(json!({ "mode": "incremental", "changes": changes })),
+        )
+        .await;
+    assert_eq!(applied["conflicts"], 0, "expected 0 conflicts: {applied}");
+    assert!(
+        applied["duplicates"].as_u64().expect("duplicates count") >= 1,
+        "expected tiebreak identical payload to count as duplicate: {applied}"
+    );
+    let open_conflicts = b.sync("GET", "/api/sync/conflicts", None).await;
+    assert_eq!(open_conflicts, json!([]));
+    assert_same_data(&a, &b).await;
+}
