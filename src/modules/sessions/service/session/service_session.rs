@@ -21,6 +21,7 @@ use crate::domain::sessions::SessionStatus;
 use crate::domain::sessions::SubmitBlindCountRequest;
 use crate::domain::sessions::VARIANCE_TOLERANCE_CENTS;
 use crate::domain::settings::ShiftMode;
+use crate::domain::settings::ShiftPolicy;
 use crate::domain::users::Role;
 use crate::modules::cash_categories;
 use crate::modules::sequences;
@@ -63,12 +64,18 @@ fn active_session_conflict_message(
     }
 }
 
+/// Returns the shop's active shift and staff multi-device policy in a single database query.
+pub async fn current_shift_policy<'a>(unit: impl Into<Unit<'a>>) -> AppResult<ShiftPolicy> {
+    let profile = settings::service::get_shop_profile(unit).await?;
+    Ok(ShiftPolicy::from_persisted(
+        profile.allow_shared_user_sessions,
+        profile.allow_staff_multi_device_sessions,
+    ))
+}
+
 /// Returns the shop's active shift mode based on persisted shop profile settings.
 pub async fn current_shift_mode<'a>(unit: impl Into<Unit<'a>>) -> AppResult<ShiftMode> {
-    let profile = settings::service::get_shop_profile(unit).await?;
-    Ok(ShiftMode::from_allow_shared(
-        profile.allow_shared_user_sessions,
-    ))
+    Ok(current_shift_policy(unit).await?.mode)
 }
 
 /// Resolves the `drawer_state.user_key` affected by transactions under the current shift mode.

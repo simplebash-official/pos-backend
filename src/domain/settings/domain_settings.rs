@@ -140,6 +140,8 @@ pub struct ShopProfileResponse {
     pub receipt_footer_text: String,
     #[serde(rename = "allowSharedUserSessions")]
     pub allow_shared_user_sessions: bool,
+    #[serde(rename = "allowStaffMultiDeviceSessions")]
+    pub allow_staff_multi_device_sessions: bool,
 }
 
 /// How active register sessions and cash drawers are scoped within a shop.
@@ -166,6 +168,65 @@ impl ShiftMode {
     #[must_use]
     pub const fn as_allow_shared(self) -> bool {
         matches!(self, Self::SharedShop)
+    }
+}
+
+/// Whether staff with an open Personal shift may sign in from multiple terminals.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StaffDevicePolicy {
+    /// Staff with an open Personal shift are restricted to that shift's terminal.
+    SingleDeviceWhileShiftOpen,
+    /// Staff with an open Personal shift may log in and share that shift from multiple terminals.
+    AllowMultipleDevices,
+}
+
+impl StaffDevicePolicy {
+    /// Converts the persisted `allow_staff_multi_device_sessions` flag into [`StaffDevicePolicy`].
+    #[must_use]
+    pub const fn from_allow_multi_device(allow_staff_multi_device_sessions: bool) -> Self {
+        if allow_staff_multi_device_sessions {
+            Self::AllowMultipleDevices
+        } else {
+            Self::SingleDeviceWhileShiftOpen
+        }
+    }
+
+    /// Converts this policy back into the persisted `allow_staff_multi_device_sessions` flag.
+    #[must_use]
+    pub const fn as_allow_multi_device(self) -> bool {
+        matches!(self, Self::AllowMultipleDevices)
+    }
+}
+
+/// Combined register shift and staff multi-device policy resolved from shop profile settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShiftPolicy {
+    /// How register shifts and cash drawers are scoped.
+    pub mode: ShiftMode,
+    /// Whether staff can sign in on multiple devices while a Personal shift is open.
+    pub staff_device: StaffDevicePolicy,
+}
+
+impl ShiftPolicy {
+    /// Builds a [`ShiftPolicy`] from persisted shop profile flags.
+    #[must_use]
+    pub const fn from_persisted(
+        allow_shared_user_sessions: bool,
+        allow_staff_multi_device_sessions: bool,
+    ) -> Self {
+        Self {
+            mode: ShiftMode::from_allow_shared(allow_shared_user_sessions),
+            staff_device: StaffDevicePolicy::from_allow_multi_device(
+                allow_staff_multi_device_sessions,
+            ),
+        }
+    }
+
+    /// Returns `true` when staff can access an active shift from multiple devices.
+    #[must_use]
+    pub const fn allows_staff_multi_device(self) -> bool {
+        matches!(self.mode, ShiftMode::SharedShop)
+            || matches!(self.staff_device, StaffDevicePolicy::AllowMultipleDevices)
     }
 }
 
@@ -213,4 +274,6 @@ pub struct UpdateShopProfileRequest {
     pub receipt_footer_text: Option<String>,
     #[serde(rename = "allowSharedUserSessions")]
     pub allow_shared_user_sessions: Option<bool>,
+    #[serde(rename = "allowStaffMultiDeviceSessions")]
+    pub allow_staff_multi_device_sessions: Option<bool>,
 }

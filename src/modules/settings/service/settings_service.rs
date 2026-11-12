@@ -86,6 +86,7 @@ pub async fn ensure_shop_profile(db: &Db, initial_trading_name: Option<&str>) ->
         default_footer_text: String::new(),
         receipt_footer_text: String::new(),
         allow_shared_user_sessions: false,
+        allow_staff_multi_device_sessions: false,
         version: 1,
         created_at: seeded_at,
         updated_at: seeded_at,
@@ -239,6 +240,7 @@ pub(crate) async fn update_shop_profile(
             ..existing
         };
         let previous_allow_shared = doc.allow_shared_user_sessions;
+        let previous_allow_staff_multi = doc.allow_staff_multi_device_sessions;
         let mut tenant_name_update: Option<String> = None;
 
         if let Some(legal_name) = req.legal_name {
@@ -323,18 +325,41 @@ pub(crate) async fn update_shop_profile(
             doc.receipt_footer_text = receipt_footer;
         }
 
-        if let Some(new_val) = req.allow_shared_user_sessions
-            && new_val != previous_allow_shared
-        {
+        let next_allow_shared = match req.allow_shared_user_sessions {
+            Some(v) => v,
+            None => previous_allow_shared,
+        };
+        let next_allow_staff_multi = match req.allow_staff_multi_device_sessions {
+            Some(v) => v,
+            None => previous_allow_staff_multi,
+        };
+        let shared_changed = next_allow_shared != previous_allow_shared;
+        let staff_multi_changed = next_allow_staff_multi != previous_allow_staff_multi;
+
+        if next_allow_shared && staff_multi_changed {
+            return Err(AppError::validation(
+                "Staff multi-device setting applies only in Personal Shifts mode.",
+            ));
+        }
+
+        if shared_changed || staff_multi_changed {
             let active_count =
                 crate::modules::sessions::repository::sessions::count_active_sessions(&mut tx)
                     .await?;
             if active_count > 0 {
+                let conflict_msg = if shared_changed {
+                    "Cannot change register shift mode while active register shifts exist. Please close all open, closing, or reopened shifts first."
+                } else {
+                    "Cannot change staff multi-device setting while active register shifts exist. Please close all open, closing, or reopened shifts first."
+                };
                 return Err(AppError::conflict(
                     codes::ACTIVE_SESSIONS_EXIST,
-                    "Cannot change register shift mode while active register shifts exist. Please close all open, closing, or reopened shifts first.",
+                    conflict_msg,
                 ));
             }
+        }
+
+        if shared_changed {
             let drawer_states =
                 crate::modules::sessions::repository::drawer::list_drawer_states(&mut tx).await?;
             let total_balance: i64 = drawer_states.iter().map(|s| s.current_balance_cents).sum();
@@ -346,8 +371,10 @@ pub(crate) async fn update_shop_profile(
                     ),
                 ));
             }
-            doc.allow_shared_user_sessions = new_val;
         }
+
+        doc.allow_shared_user_sessions = next_allow_shared;
+        doc.allow_staff_multi_device_sessions = next_allow_staff_multi;
 
         repository::upsert_shop_profile(&mut tx, &doc).await?;
         tx.commit().await?;

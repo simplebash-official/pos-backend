@@ -371,6 +371,10 @@ async fn shop_profile_drawer_session_and_movement_sync_derived_sqlite_and_late_m
         Value::Bool(true)
     );
     assert_eq!(
+        profile_rec["payload"]["allowStaffMultiDeviceSessions"],
+        Value::Bool(false)
+    );
+    assert_eq!(
         profile_rec["payload"]["addressLines"],
         json!(["No 5, Kings St", "Kandy"])
     );
@@ -668,4 +672,57 @@ async fn offline_dual_open_shared_sessions_records_sqlite_conflict_and_converges
             .to_string();
         assert_eq!(profile_key, SHOP_PROFILE_KEY);
     }
+}
+
+#[tokio::test]
+async fn sqlite_round_trips_allow_staff_multi_device_sessions_boolean() {
+    let a = Device::new().await;
+    let b = Device::new().await;
+    for (dev, id) in [(&a, "dev_multi_a"), (&b, "dev_multi_b")] {
+        dev.sync("POST", "/api/sync/enable", Some(json!({ "deviceId": id })))
+            .await;
+        ack_outbox(dev).await;
+    }
+    for dev in [&a, &b] {
+        ensure_shop_profile(&dev.app.db_handle, Some("Initial Shop"))
+            .await
+            .expect("shop profile initializes");
+        ack_outbox(dev).await;
+    }
+
+    a.api(
+        "PUT",
+        "/api/settings/shop-profile",
+        Some(json!({
+            "allowStaffMultiDeviceSessions": true
+        })),
+    )
+    .await;
+
+    let changes = as_pulled(&a.drain_outbox().await);
+    ack_outbox(&a).await;
+    let profile_rec = changes
+        .iter()
+        .find(|c| c["resource"] == "shopProfiles")
+        .expect("shopProfiles outbox record");
+    assert_eq!(
+        profile_rec["payload"]["allowSharedUserSessions"],
+        Value::Bool(false)
+    );
+    assert_eq!(
+        profile_rec["payload"]["allowStaffMultiDeviceSessions"],
+        Value::Bool(true)
+    );
+
+    b.sync(
+        "POST",
+        "/api/sync/apply",
+        Some(json!({ "mode": "incremental", "changes": changes })),
+    )
+    .await;
+    assert_same_data(&a, &b).await;
+
+    let b_profile = b.api("GET", "/api/settings/shop-profile", None).await;
+    assert_eq!(b_profile["data"]["allowSharedUserSessions"], false);
+    assert_eq!(b_profile["data"]["allowStaffMultiDeviceSessions"], true);
 }

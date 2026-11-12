@@ -464,7 +464,10 @@ async fn shared_shop_sessions_two_offline_devices_and_joining_bootstrap_converge
         .api(
             "PUT",
             "/api/settings/shop-profile",
-            Some(json!({ "allowSharedUserSessions": false })),
+            Some(json!({
+                "allowSharedUserSessions": false,
+                "allowStaffMultiDeviceSessions": true
+            })),
         )
         .await;
     push_all(&cloud, &devices[0]).await;
@@ -495,7 +498,24 @@ async fn shared_shop_sessions_two_offline_devices_and_joining_bootstrap_converge
     }
     assert_all_devices_match(&devices).await;
 
+    // Converged device[1] reflects allowStaffMultiDeviceSessions = true so Staff c1 sees their
+    // Personal shift from another terminal (`term_2`).
+    let c1_tok_dev2 = user_token(&devices[1].app.config, "usr_c1", Role::Staff, "Cashier One");
+    let (cur_status, cur_body) = call(
+        &devices[1].app.router,
+        "GET",
+        "/api/sessions/current?terminal_id=term_2",
+        &c1_tok_dev2,
+        None,
+    )
+    .await;
+    assert_eq!(cur_status, StatusCode::OK, "dev2 current: {cur_body}");
+    assert_eq!(cur_body["data"]["cashierId"], "usr_c1");
+
     for d in &devices {
+        let profile_row = &table_rows(d.pool(), "shop_profiles").await[0];
+        assert_eq!(profile_row["allow_shared_user_sessions"], 0);
+        assert_eq!(profile_row["allow_staff_multi_device_sessions"], 1);
         let drawers = table_rows(d.pool(), "drawer_state").await;
         let shop = drawers
             .iter()
@@ -543,6 +563,12 @@ async fn shared_shop_sessions_two_offline_devices_and_joining_bootstrap_converge
     assert_eq!(
         mongo_profile.get_bool("allow_shared_user_sessions").ok(),
         Some(false)
+    );
+    assert_eq!(
+        mongo_profile
+            .get_bool("allow_staff_multi_device_sessions")
+            .ok(),
+        Some(true)
     );
 
     cloud.mongo().drop().await.ok();

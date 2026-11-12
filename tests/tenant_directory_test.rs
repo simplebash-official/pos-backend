@@ -606,6 +606,12 @@ async fn ensure_existing_tenants_data_backfills_missing_profiles_and_unblocks_st
         Some(false)
     );
     assert_eq!(
+        legacy_profile
+            .get_bool("allow_staff_multi_device_sessions")
+            .ok(),
+        Some(false)
+    );
+    assert_eq!(
         raw.collection::<Document>("cash_settings")
             .count_documents(doc! { "tenant_id": &legacy.key })
             .await
@@ -632,6 +638,10 @@ async fn ensure_existing_tenants_data_backfills_missing_profiles_and_unblocks_st
     assert_eq!(status, StatusCode::OK, "{fetched_custom}");
     assert_eq!(fetched_custom["data"]["tradingName"], "Custom Trading Name");
     assert_eq!(fetched_custom["data"]["allowSharedUserSessions"], true);
+    assert_eq!(
+        fetched_custom["data"]["allowStaffMultiDeviceSessions"],
+        false
+    );
 
     // Blank profile gets its trading name backfilled without losing shared-shift preference.
     let (status, fetched_blank) = send_authed(
@@ -645,6 +655,10 @@ async fn ensure_existing_tenants_data_backfills_missing_profiles_and_unblocks_st
     assert_eq!(status, StatusCode::OK, "{fetched_blank}");
     assert_eq!(fetched_blank["data"]["tradingName"], "Blank Profile Name");
     assert_eq!(fetched_blank["data"]["allowSharedUserSessions"], true);
+    assert_eq!(
+        fetched_blank["data"]["allowStaffMultiDeviceSessions"],
+        false
+    );
 
     // Zero "__deny__" documents anywhere after startup backfill.
     for collection in ["shop_profiles", "cash_settings", "cash_categories"] {

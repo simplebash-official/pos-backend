@@ -133,10 +133,10 @@ pub async fn update_document_templates(
     request_body = UpdateShopProfileRequest,
     responses(
         (status = 200, description = "Shop profile updated successfully", body = ApiResponse<ShopProfileResponse>),
-        (status = 400, description = "Validation error", body = ErrorResponse),
+        (status = 400, description = "Validation error (including changing allowStaffMultiDeviceSessions while in SharedShop mode)", body = ErrorResponse),
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
         (status = 403, description = "Admin role required", body = ErrorResponse),
-        (status = 409, description = "Active shifts exist (ACTIVE_SESSIONS_EXIST) or drawer balance is non-zero (DRAWER_BALANCE_NONZERO)", body = ErrorResponse),
+        (status = 409, description = "Active shifts exist (ACTIVE_SESSIONS_EXIST) or drawer balance is non-zero when toggling allowSharedUserSessions (DRAWER_BALANCE_NONZERO)", body = ErrorResponse),
     ),
     security(("bearerAuth" = []))
 )]

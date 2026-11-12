@@ -169,6 +169,7 @@ pub fn map_sqlite_row_to_document(row: &sqlx::sqlite::SqliteRow) -> mongodb::bso
                         | "is_active"
                         | "has_out_of_stock_items"
                         | "allow_shared_user_sessions"
+                        | "allow_staff_multi_device_sessions"
                         | "has_late_movements"
                         | "recorded_late"
                 ) {

@@ -212,6 +212,7 @@ const BACKFILLABLE: &[(&str, &[&str])] = &[
             "account_number",
             "address_lines",
             "allow_shared_user_sessions",
+            "allow_staff_multi_device_sessions",
             "bank_branch",
             "bank_name",
             "business_reg_no",
@@ -292,6 +293,7 @@ fn backfill_value(field: &str, object: &Document) -> Option<Bson> {
         | "tags" => Bson::Array(Vec::new()),
         "options" | "selections" => Bson::Document(Document::new()),
         "allow_shared_user_sessions"
+        | "allow_staff_multi_device_sessions"
         | "has_late_movements"
         | "has_out_of_stock_items"
         | "is_manager_override"

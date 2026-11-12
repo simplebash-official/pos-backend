@@ -245,4 +245,90 @@ async fn test_shop_profile_errors_when_uninitialized_and_ensure_is_idempotent() 
     let json: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
     assert_eq!(json["data"]["tradingName"], "First Trading Name");
     assert_eq!(json["data"]["allowSharedUserSessions"], false);
+    assert_eq!(json["data"]["allowStaffMultiDeviceSessions"], false);
+}
+
+#[tokio::test]
+async fn sqlite_migration_adds_allow_staff_multi_device_sessions_column() {
+    use simplebash_pos_backend::clients::db::Db;
+    use simplebash_pos_backend::clients::sqlite::migrate_schema;
+    use simplebash_pos_backend::domain::settings::ShiftMode;
+    use simplebash_pos_backend::domain::settings::ShiftPolicy;
+    use simplebash_pos_backend::domain::settings::StaffDevicePolicy;
+    use simplebash_pos_backend::modules::sessions::service::current_shift_policy;
+    use sqlx::Row;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .expect("in-memory sqlite opens");
+    sqlx::raw_sql(
+        r#"
+        CREATE TABLE shop_profiles (
+            key TEXT PRIMARY KEY,
+            id TEXT NOT NULL,
+            legal_name TEXT NOT NULL DEFAULT '',
+            trading_name TEXT NOT NULL DEFAULT '',
+            address_lines TEXT NOT NULL DEFAULT '[]',
+            primary_phone TEXT NOT NULL DEFAULT '',
+            secondary_phone TEXT NOT NULL DEFAULT '',
+            email TEXT NOT NULL DEFAULT '',
+            website TEXT NOT NULL DEFAULT '',
+            business_reg_no TEXT NOT NULL DEFAULT '',
+            logo_base64 TEXT NOT NULL DEFAULT '',
+            bank_name TEXT NOT NULL DEFAULT '',
+            bank_branch TEXT NOT NULL DEFAULT '',
+            account_name TEXT NOT NULL DEFAULT '',
+            account_number TEXT NOT NULL DEFAULT '',
+            default_warranty_text TEXT NOT NULL DEFAULT '',
+            default_footer_text TEXT NOT NULL DEFAULT '',
+            receipt_footer_text TEXT NOT NULL DEFAULT '',
+            allow_shared_user_sessions INTEGER NOT NULL DEFAULT 0,
+            version INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            deleted_at TEXT,
+            updated_by_device TEXT
+        );
+        INSERT INTO shop_profiles (
+            key, id, trading_name, allow_shared_user_sessions, version, created_at, updated_at
+        ) VALUES (
+            'main', '0123456789abcdef01234567', 'Legacy SQLite Shop', 0, 1,
+            '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'
+        );
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect("legacy shop_profiles table created");
+
+    migrate_schema(&pool)
+        .await
+        .expect("first migration succeeds");
+    migrate_schema(&pool)
+        .await
+        .expect("second migration is idempotent");
+
+    let flag_int: i64 = sqlx::query(
+        "SELECT allow_staff_multi_device_sessions FROM shop_profiles WHERE key = 'main'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("migrated column queries")
+    .get("allow_staff_multi_device_sessions");
+    assert_eq!(flag_int, 0);
+
+    let policy = current_shift_policy(&Db::Sqlite(pool))
+        .await
+        .expect("migrated row loads via current_shift_policy");
+    assert_eq!(
+        policy,
+        ShiftPolicy {
+            mode: ShiftMode::Personal,
+            staff_device: StaffDevicePolicy::SingleDeviceWhileShiftOpen,
+        }
+    );
+    assert!(!policy.allows_staff_multi_device());
 }

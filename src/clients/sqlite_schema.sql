@@ -926,6 +926,7 @@ CREATE TABLE IF NOT EXISTS shop_profiles (
     default_footer_text TEXT NOT NULL DEFAULT '',
     receipt_footer_text TEXT NOT NULL DEFAULT '',
     allow_shared_user_sessions INTEGER NOT NULL DEFAULT 0,
+    allow_staff_multi_device_sessions INTEGER NOT NULL DEFAULT 0,
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,

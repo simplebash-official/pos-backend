@@ -71,7 +71,7 @@ fn extract_user_agent(headers: &HeaderMap) -> Option<String> {
         (status = 200, description = "Login successful", body = ApiResponse<LoginResponse>),
         (status = 400, description = "Validation error (including a missing shopCode when TENANT_MODE=multi)", body = ErrorResponse),
         (status = 401, description = "Invalid username or password, or account deactivated (in multi-tenant mode also an unknown shopCode)", body = ErrorResponse),
-        (status = 409, description = "SESSION_OPEN_ON_OTHER_DEVICE: a staff account whose shift is open on another machine (X-Device-Id)", body = ErrorResponse),
+        (status = 409, description = "SESSION_OPEN_ON_OTHER_DEVICE: a staff account whose Personal shift is open on another machine (X-Device-Id) when allowStaffMultiDeviceSessions is false", body = ErrorResponse),
     )
 )]
 pub(super) async fn login(

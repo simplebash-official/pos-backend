@@ -436,3 +436,145 @@ async fn mongo_migration_keeps_newest_row_per_user() {
     assert_eq!(again.machine_rows, 0);
     db.drop().await.expect("the throwaway database is dropped");
 }
+
+/// With `allowStaffMultiDeviceSessions = true` in Personal mode, a Staff member logs in on two
+/// terminals, sees and adds cash to their own shift/personal drawer, cannot open a duplicate shift,
+/// and remains isolated from another Staff member's personal shift and drawer.
+async fn staff_multi_device_personal_shift(app: &TestApp) {
+    let admin_token = mint_token_for(
+        &app.config,
+        "admin",
+        Some(Role::Admin),
+        roles::default_permissions(Role::Admin),
+    );
+    let (status, enabled) = send_authed(
+        &app.router,
+        "PUT",
+        "/api/settings/shop-profile",
+        Some(json!({ "allowStaffMultiDeviceSessions": true })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {enabled}");
+
+    let mut names = Vec::new();
+    for tag in ["stfa", "stfb"] {
+        let username = unique(tag);
+        let (status, body) = send_authed(
+            &app.router,
+            "POST",
+            "/api/users",
+            Some(json!({
+                "name": format!("Staff {tag}"),
+                "username": username,
+                "password": "Password123!",
+                "role": "staff",
+            })),
+            &admin_token,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "Body: {body}");
+        names.push(username);
+    }
+
+    let (machine_a, machine_b) = (unique("posA"), unique("posB"));
+
+    let login_ok = |username: &str, device: &str| {
+        let router = app.router.clone();
+        let body = json!({ "username": username, "password": "Password123!" }).to_string();
+        let device = device.to_string();
+        async move {
+            let request = Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header(CONTENT_TYPE, "application/json")
+                .header("x-device-id", device)
+                .body(Body::from(body))
+                .expect("request builds");
+            let (status, resp) = execute(&router, request).await;
+            assert_eq!(status, StatusCode::OK, "login failed: {resp}");
+            resp["data"]["token"].as_str().expect("token").to_string()
+        }
+    };
+
+    let staff_a_tok_a = login_ok(&names[0], &machine_a).await;
+    let shift_a = open_shift(app, &staff_a_tok_a, &machine_a, 10_000).await;
+    let shift_a_key = shift_a["key"].as_str().expect("shift key").to_string();
+
+    // Staff A logs in on machine B too and sees the same Personal shift.
+    let staff_a_tok_b = login_ok(&names[0], &machine_b).await;
+    let (status, current_a_b) = send_authed_with_device(
+        &app.router,
+        "GET",
+        "/api/sessions/current",
+        None,
+        &staff_a_tok_b,
+        Some(&machine_b),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {current_a_b}");
+    assert_eq!(current_a_b["data"]["key"], shift_a_key.as_str());
+
+    // Opening a second Personal shift for Staff A on machine B is still rejected.
+    let (status, dup_open) = send_authed_with_device(
+        &app.router,
+        "POST",
+        "/api/sessions/open",
+        Some(json!({ "terminalId": machine_b, "openingFloatCents": 1_000 })),
+        &staff_a_tok_b,
+        Some(&machine_b),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "Body: {dup_open}");
+    assert_eq!(dup_open["code"], "SESSION_ALREADY_OPEN");
+
+    // Staff A adds cash on machine B against their open shift -> updates Staff A's personal drawer.
+    let (status, add_res) = send_authed_with_device(
+        &app.router,
+        "POST",
+        "/api/sessions/movements",
+        Some(json!({
+            "movementType": "add_cash",
+            "amountCents": 3_500,
+            "sessionKey": shift_a_key,
+            "terminalId": machine_b,
+            "categoryKey": cat(CashMovementType::AddCash, "Change float top-up"),
+        })),
+        &staff_a_tok_b,
+        Some(&machine_b),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "Body: {add_res}");
+    assert_eq!(drawer_balance(app, &staff_a_tok_a).await, 13_500);
+    assert_eq!(drawer_balance(app, &staff_a_tok_b).await, 13_500);
+
+    // Staff B has their own separate shift & personal drawer even on the same machine B.
+    let staff_b_tok = login_ok(&names[1], &machine_b).await;
+    let (status, current_b) = send_authed_with_device(
+        &app.router,
+        "GET",
+        "/api/sessions/current",
+        None,
+        &staff_b_tok,
+        Some(&machine_b),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {current_b}");
+    assert!(current_b["data"].is_null());
+
+    open_shift(app, &staff_b_tok, &machine_b, 2_000).await;
+    assert_eq!(drawer_balance(app, &staff_b_tok).await, 2_000);
+    assert_eq!(drawer_balance(app, &staff_a_tok_a).await, 13_500);
+}
+
+#[tokio::test]
+async fn staff_multi_device_shares_personal_shift_sqlite() {
+    staff_multi_device_personal_shift(&common::spawn_app_sqlite().await).await;
+}
+
+#[tokio::test]
+async fn staff_multi_device_shares_personal_shift_mongo() {
+    let app = common::spawn_app_isolated().await;
+    staff_multi_device_personal_shift(&app).await;
+    app.mongo().drop().await.ok();
+}

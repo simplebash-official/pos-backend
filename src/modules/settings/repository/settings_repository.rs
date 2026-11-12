@@ -74,7 +74,8 @@ pub(crate) async fn find_shop_profile<'a>(
                  secondary_phone, email, website, business_reg_no, logo_base64, bank_name, \
                  bank_branch, account_name, account_number, default_warranty_text, \
                  default_footer_text, receipt_footer_text, allow_shared_user_sessions, \
-                 version, created_at, updated_at, updated_by_device \
+                 allow_staff_multi_device_sessions, version, created_at, updated_at, \
+                 updated_by_device \
                  FROM shop_profiles WHERE key = ?1 LIMIT 1",
             )
             .bind(key)
@@ -93,6 +94,8 @@ pub(crate) async fn find_shop_profile<'a>(
                 let id_str: String = r.get("id");
                 let allow_shared_user_sessions_int: i64 =
                     r.try_get("allow_shared_user_sessions")?;
+                let allow_staff_multi_device_sessions_int: i64 =
+                    r.try_get("allow_staff_multi_device_sessions")?;
 
                 Ok(ShopProfileDocument {
                     id: ObjectId::parse_str(&id_str).ok(),
@@ -114,6 +117,7 @@ pub(crate) async fn find_shop_profile<'a>(
                     default_footer_text: r.get("default_footer_text"),
                     receipt_footer_text: r.get("receipt_footer_text"),
                     allow_shared_user_sessions: allow_shared_user_sessions_int != 0,
+                    allow_staff_multi_device_sessions: allow_staff_multi_device_sessions_int != 0,
                     version: r.get("version"),
                     created_at: to_bson_datetime(&created_at)?,
                     updated_at: to_bson_datetime(&updated_at)?,
@@ -211,8 +215,9 @@ pub(crate) async fn insert_shop_profile_if_absent(
                     key, id, legal_name, trading_name, address_lines, primary_phone, secondary_phone, \
                     email, website, business_reg_no, logo_base64, bank_name, bank_branch, account_name, \
                     account_number, default_warranty_text, default_footer_text, receipt_footer_text, \
-                    allow_shared_user_sessions, version, created_at, updated_at, updated_by_device \
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23) \
+                    allow_shared_user_sessions, allow_staff_multi_device_sessions, version, created_at, \
+                    updated_at, updated_by_device \
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24) \
                 ON CONFLICT(key) DO NOTHING",
             )
             .bind(&doc.key)
@@ -234,6 +239,11 @@ pub(crate) async fn insert_shop_profile_if_absent(
             .bind(&doc.default_footer_text)
             .bind(&doc.receipt_footer_text)
             .bind(if doc.allow_shared_user_sessions { 1i64 } else { 0i64 })
+            .bind(if doc.allow_staff_multi_device_sessions {
+                1i64
+            } else {
+                0i64
+            })
             .bind(doc.version)
             .bind(&created_at)
             .bind(&updated_at)
@@ -281,8 +291,9 @@ pub(crate) async fn upsert_shop_profile<'a>(
                     key, id, legal_name, trading_name, address_lines, primary_phone, secondary_phone, \
                     email, website, business_reg_no, logo_base64, bank_name, bank_branch, account_name, \
                     account_number, default_warranty_text, default_footer_text, receipt_footer_text, \
-                    allow_shared_user_sessions, version, created_at, updated_at, updated_by_device \
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23) \
+                    allow_shared_user_sessions, allow_staff_multi_device_sessions, version, created_at, \
+                    updated_at, updated_by_device \
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24) \
                 ON CONFLICT(key) DO UPDATE SET \
                     legal_name = excluded.legal_name, \
                     trading_name = excluded.trading_name, \
@@ -301,6 +312,7 @@ pub(crate) async fn upsert_shop_profile<'a>(
                     default_footer_text = excluded.default_footer_text, \
                     receipt_footer_text = excluded.receipt_footer_text, \
                     allow_shared_user_sessions = excluded.allow_shared_user_sessions, \
+                    allow_staff_multi_device_sessions = excluded.allow_staff_multi_device_sessions, \
                     version = excluded.version, \
                     updated_at = excluded.updated_at, \
                     updated_by_device = excluded.updated_by_device",
@@ -324,6 +336,11 @@ pub(crate) async fn upsert_shop_profile<'a>(
             .bind(&doc.default_footer_text)
             .bind(&doc.receipt_footer_text)
             .bind(if doc.allow_shared_user_sessions { 1i64 } else { 0i64 })
+            .bind(if doc.allow_staff_multi_device_sessions {
+                1i64
+            } else {
+                0i64
+            })
             .bind(doc.version)
             .bind(&created_at)
             .bind(&updated_at)
@@ -361,6 +378,7 @@ pub(crate) async fn upsert_shop_profile<'a>(
                 "default_footer_text": &doc.default_footer_text,
                 "receipt_footer_text": &doc.receipt_footer_text,
                 "allow_shared_user_sessions": doc.allow_shared_user_sessions,
+                "allow_staff_multi_device_sessions": doc.allow_staff_multi_device_sessions,
                 "version": doc.version,
                 "updated_at": doc.updated_at,
             };

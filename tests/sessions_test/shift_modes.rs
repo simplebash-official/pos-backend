@@ -49,6 +49,7 @@ async fn shift_follows_its_owner_and_staff_see_it_on_one_machine_sqlite() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(profile_body["data"]["allowSharedUserSessions"], false);
+    assert_eq!(profile_body["data"]["allowStaffMultiDeviceSessions"], false);
 
     let (status, summary_body) = send_authed(
         &app.router,
@@ -978,6 +979,7 @@ async fn shared_shop_cross_user_and_2b_guards_mongo() {
     .await;
     assert_eq!(status, StatusCode::OK, "Profile body: {profile_body}");
     assert_eq!(profile_body["data"]["allowSharedUserSessions"], false);
+    assert_eq!(profile_body["data"]["allowStaffMultiDeviceSessions"], false);
     let profile_doc = app
         .mongo()
         .collection::<mongodb::bson::Document>("shop_profiles")
@@ -1606,4 +1608,307 @@ async fn cancel_close_returns_a_counted_shift_to_open() {
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+async fn run_staff_multi_device_policy_transitions(app: &common::TestApp) {
+    simplebash_pos_backend::seeds::admin::seed_admin(&app.db_handle, &app.config.seed_admin)
+        .await
+        .expect("admin seeds");
+    let admin_token = mint_token_for(
+        &app.config,
+        "admin",
+        Some(Role::Admin),
+        roles::default_permissions(Role::Admin),
+    );
+    let staff_token = mint_token_for(
+        &app.config,
+        "usr_staff_policy",
+        Some(Role::Staff),
+        roles::default_permissions(Role::Staff),
+    );
+
+    // 1. Initial defaults: both flags false.
+    let (status, initial) = send_authed(
+        &app.router,
+        "GET",
+        "/api/settings/shop-profile",
+        None,
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{initial}");
+    assert_eq!(initial["data"]["allowSharedUserSessions"], false);
+    assert_eq!(initial["data"]["allowStaffMultiDeviceSessions"], false);
+
+    // 2. Active shift in open / closing / reopened blocks allowStaffMultiDeviceSessions changes
+    // with 409 ACTIVE_SESSIONS_EXIST.
+    let (status, open_res) = send_authed_with_device(
+        &app.router,
+        "POST",
+        "/api/sessions/open",
+        Some(json!({ "terminalId": "term_pol1", "openingFloatCents": 5_000 })),
+        &staff_token,
+        Some("term_pol1"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{open_res}");
+    let session_key = open_res["data"]["key"]
+        .as_str()
+        .expect("session key")
+        .to_string();
+
+    let (status, open_conflict) = send_authed(
+        &app.router,
+        "PUT",
+        "/api/settings/shop-profile",
+        Some(json!({ "allowStaffMultiDeviceSessions": true })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{open_conflict}");
+    assert_eq!(open_conflict["code"], "ACTIVE_SESSIONS_EXIST");
+
+    let (status, blind_res) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/sessions/{session_key}/blind-count"),
+        Some(json!({ "countedCashCents": 5_000 })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{blind_res}");
+    assert_eq!(blind_res["data"]["status"], "closing");
+
+    let (status, closing_conflict) = send_authed(
+        &app.router,
+        "PUT",
+        "/api/settings/shop-profile",
+        Some(json!({ "allowStaffMultiDeviceSessions": true })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{closing_conflict}");
+    assert_eq!(closing_conflict["code"], "ACTIVE_SESSIONS_EXIST");
+
+    // Close keeping 5,000 cents in drawer, reopen, and check reopened shift blocks toggle too.
+    let (status, close1_res) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/sessions/{session_key}/close"),
+        Some(json!({
+            "countedCashCents": 5_000,
+            "closingFloatCents": 5_000,
+            "cashDropToSafeCents": 0
+        })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{close1_res}");
+
+    let (status, reopen_res) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/sessions/{session_key}/reopen"),
+        Some(json!({ "reason": "Verify reopened guard" })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reopen_res}");
+    assert_eq!(reopen_res["data"]["status"], "reopened");
+
+    let (status, reopened_conflict) = send_authed(
+        &app.router,
+        "PUT",
+        "/api/settings/shop-profile",
+        Some(json!({ "allowStaffMultiDeviceSessions": true })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{reopened_conflict}");
+    assert_eq!(reopened_conflict["code"], "ACTIVE_SESSIONS_EXIST");
+
+    // 3. Re-close keeping 5,000 cents in drawer (shifts = 0, drawer_state total = 5,000):
+    // Option 1 allows toggling allowStaffMultiDeviceSessions BOTH ways inside Personal mode
+    // WITHOUT checking DRAWER_BALANCE_NONZERO, while allowSharedUserSessions still requires 0.
+    let (status, close2_res) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/sessions/{session_key}/close"),
+        Some(json!({
+            "countedCashCents": 5_000,
+            "closingFloatCents": 5_000,
+            "cashDropToSafeCents": 0
+        })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{close2_res}");
+
+    let (status, enable_ok) = send_authed(
+        &app.router,
+        "PUT",
+        "/api/settings/shop-profile",
+        Some(json!({ "allowStaffMultiDeviceSessions": true })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{enable_ok}");
+    assert_eq!(enable_ok["data"]["allowSharedUserSessions"], false);
+    assert_eq!(enable_ok["data"]["allowStaffMultiDeviceSessions"], true);
+
+    let (status, shared_drawer_conflict) = send_authed(
+        &app.router,
+        "PUT",
+        "/api/settings/shop-profile",
+        Some(json!({ "allowSharedUserSessions": true })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{shared_drawer_conflict}");
+    assert_eq!(shared_drawer_conflict["code"], "DRAWER_BALANCE_NONZERO");
+
+    let (status, disable_ok) = send_authed(
+        &app.router,
+        "PUT",
+        "/api/settings/shop-profile",
+        Some(json!({ "allowStaffMultiDeviceSessions": false })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{disable_ok}");
+    assert_eq!(disable_ok["data"]["allowStaffMultiDeviceSessions"], false);
+
+    // 4. Open & close draining drawer to 0, test SharedShop validation rules & atomic transition.
+    let (status, open2_res) = send_authed_with_device(
+        &app.router,
+        "POST",
+        "/api/sessions/open",
+        Some(json!({ "terminalId": "term_pol1", "openingFloatCents": 5_000 })),
+        &staff_token,
+        Some("term_pol1"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{open2_res}");
+    let s2_key = open2_res["data"]["key"]
+        .as_str()
+        .expect("s2 key")
+        .to_string();
+
+    let (status, close3_res) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/sessions/{s2_key}/close"),
+        Some(json!({
+            "countedCashCents": 5_000,
+            "closingFloatCents": 0,
+            "cashDropToSafeCents": 5_000
+        })),
+        &staff_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{close3_res}");
+
+    // Cannot change allowStaffMultiDeviceSessions when transitioning to SharedShop.
+    let (status, bad_enter_shared) = send_authed(
+        &app.router,
+        "PUT",
+        "/api/settings/shop-profile",
+        Some(json!({
+            "allowSharedUserSessions": true,
+            "allowStaffMultiDeviceSessions": true
+        })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{bad_enter_shared}");
+
+    let (status, enter_shared) = send_authed(
+        &app.router,
+        "PUT",
+        "/api/settings/shop-profile",
+        Some(json!({ "allowSharedUserSessions": true })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{enter_shared}");
+    assert_eq!(enter_shared["data"]["allowSharedUserSessions"], true);
+
+    // Reject changing allowStaffMultiDeviceSessions while remaining in SharedShop.
+    let (status, bad_in_shared) = send_authed(
+        &app.router,
+        "PUT",
+        "/api/settings/shop-profile",
+        Some(json!({ "allowStaffMultiDeviceSessions": true })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{bad_in_shared}");
+
+    // Atomic SharedShop -> Personal with both flags in a single PUT succeeds.
+    let (status, atomic_exit) = send_authed(
+        &app.router,
+        "PUT",
+        "/api/settings/shop-profile",
+        Some(json!({
+            "allowSharedUserSessions": false,
+            "allowStaffMultiDeviceSessions": true
+        })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{atomic_exit}");
+    assert_eq!(atomic_exit["data"]["allowSharedUserSessions"], false);
+    assert_eq!(atomic_exit["data"]["allowStaffMultiDeviceSessions"], true);
+
+    // Switch back to SharedShop (leaving allowStaffMultiDeviceSessions unchanged = true), then
+    // atomically switch SharedShop -> Personal setting allowStaffMultiDeviceSessions: false.
+    let (status, reenter_shared) = send_authed(
+        &app.router,
+        "PUT",
+        "/api/settings/shop-profile",
+        Some(json!({ "allowSharedUserSessions": true })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reenter_shared}");
+
+    let (status, bad_in_shared_disable) = send_authed(
+        &app.router,
+        "PUT",
+        "/api/settings/shop-profile",
+        Some(json!({ "allowStaffMultiDeviceSessions": false })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{bad_in_shared_disable}");
+
+    let (status, atomic_exit_false) = send_authed(
+        &app.router,
+        "PUT",
+        "/api/settings/shop-profile",
+        Some(json!({
+            "allowSharedUserSessions": false,
+            "allowStaffMultiDeviceSessions": false
+        })),
+        &admin_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{atomic_exit_false}");
+    assert_eq!(atomic_exit_false["data"]["allowSharedUserSessions"], false);
+    assert_eq!(
+        atomic_exit_false["data"]["allowStaffMultiDeviceSessions"],
+        false
+    );
+}
+
+#[tokio::test]
+async fn staff_multi_device_policy_transitions_sqlite() {
+    run_staff_multi_device_policy_transitions(&common::spawn_app_sqlite().await).await;
+}
+
+#[tokio::test]
+async fn staff_multi_device_policy_transitions_mongo() {
+    let app = common::spawn_app_isolated().await;
+    run_staff_multi_device_policy_transitions(&app).await;
+    app.mongo().drop().await.ok();
 }

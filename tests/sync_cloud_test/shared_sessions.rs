@@ -304,6 +304,12 @@ async fn shop_profile_drawer_session_and_movement_sync_and_web_edits() {
         stored_profile.get_bool("allow_shared_user_sessions").ok(),
         Some(true)
     );
+    assert_eq!(
+        stored_profile
+            .get_bool("allow_staff_multi_device_sessions")
+            .ok(),
+        Some(false)
+    );
 
     let dev2 = device_token(&app, tid, "dev_sc2").await;
     let snapshot = pull_snapshot_items(&app, &dev2).await;
@@ -323,6 +329,10 @@ async fn shop_profile_drawer_session_and_movement_sync_and_web_edits() {
         .find(|c| c["resource"] == "shopProfiles")
         .expect("shopProfiles item");
     assert_eq!(snap_profile["payload"]["allowSharedUserSessions"], true);
+    assert_eq!(
+        snap_profile["payload"]["allowStaffMultiDeviceSessions"],
+        false
+    );
     assert_eq!(
         snap_profile["payload"]["addressLines"],
         json!(["10 Galle Rd", "Colombo 03"])

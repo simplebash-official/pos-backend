@@ -190,6 +190,18 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .execute("ALTER TABLE shop_profiles ADD COLUMN allow_shared_user_sessions INTEGER NOT NULL DEFAULT 0")
             .await?;
     }
+    if !shop_profile_cols.is_empty()
+        && !shop_profile_cols
+            .iter()
+            .any(|n| n == "allow_staff_multi_device_sessions")
+    {
+        tracing::info!(
+            "Migrating 'shop_profiles' table: adding 'allow_staff_multi_device_sessions' column"
+        );
+        pool
+            .execute("ALTER TABLE shop_profiles ADD COLUMN allow_staff_multi_device_sessions INTEGER NOT NULL DEFAULT 0")
+            .await?;
+    }
     if !shop_profile_cols.is_empty() && !shop_profile_cols.iter().any(|n| n == "updated_by_device")
     {
         pool.execute("ALTER TABLE shop_profiles ADD COLUMN updated_by_device TEXT")

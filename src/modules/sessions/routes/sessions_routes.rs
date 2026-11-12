@@ -23,7 +23,6 @@ use crate::domain::sessions::SubmitBlindCountRequest;
 use crate::domain::sessions::ZReportResponse;
 use crate::domain::settings::DocumentDesignChoice;
 use crate::domain::settings::DocumentDesignStatus;
-use crate::domain::settings::ShiftMode;
 use crate::domain::users::Role;
 use crate::modules::sessions::repository::drawer;
 use crate::modules::sessions::service;
@@ -238,7 +237,7 @@ pub(super) async fn get_active_sessions_summary(
         ("terminal_id" = Option<String>, Query, description = "Terminal ID to check active session for")
     ),
     responses(
-        (status = 200, description = "Current active session for user (Personal) or shop (SharedShop)", body = ApiResponse<Option<RegisterSession>>)
+        (status = 200, description = "Current active session for user (Personal) or shop (SharedShop); filtered to opening terminal for Staff when allowStaffMultiDeviceSessions is false in Personal mode", body = ApiResponse<Option<RegisterSession>>)
     ),
     security(("bearerAuth" = [])),
     tag = "Register Sessions"
@@ -252,13 +251,14 @@ pub(super) async fn get_current_session(
     current_user.require_permission(perm::REGISTER_SESSIONS_VIEW)?;
 
     let terminal_id = query.terminal_id.as_deref().or(device_id.0.as_deref());
-    let mode = service::current_shift_mode(&state.db).await?;
+    let policy = service::current_shift_policy(&state.db).await?;
     let session = service::resolve_active_session(&state.db, &current_user.user_id)
         .await?
-        // In Personal mode, Staff work from one machine: their shift is not shown on any other.
-        // In SharedShop mode, Staff see the single shop-wide shift from any terminal.
+        // In Personal mode with `allowStaffMultiDeviceSessions = false`, Staff work from one
+        // machine: their shift is not shown on any other terminal. When multi-device is enabled
+        // or the shop uses SharedShop mode, Staff see their active shift from any terminal.
         .filter(|s| {
-            mode == ShiftMode::SharedShop
+            policy.allows_staff_multi_device()
                 || current_user.role != Some(Role::Staff)
                 || Some(s.terminal_id.as_str()) == terminal_id
         })

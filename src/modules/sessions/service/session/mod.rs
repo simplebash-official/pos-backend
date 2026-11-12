@@ -8,6 +8,7 @@ pub use service_session::cancel_close;
 pub use service_session::close_session;
 pub use service_session::convert_variance;
 pub use service_session::current_shift_mode;
+pub use service_session::current_shift_policy;
 pub(crate) use service_session::expected_opening_float;
 pub use service_session::get_active_session_for_cashier;
 pub use service_session::get_active_sessions_summary;
