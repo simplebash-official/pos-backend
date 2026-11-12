@@ -334,7 +334,6 @@ async fn shared_shop_sessions_two_offline_devices_and_joining_bootstrap_converge
                 "sessionKey": s1_key,
                 "terminalId": "term_2",
                 "payeeName": "Owner",
-                "managerPin": "1234",
                 "categoryKey": category_key(CashMovementType::OwnerWithdrawal, "Personal use")
             })),
         )

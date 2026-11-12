@@ -339,7 +339,6 @@ async fn shop_profile_drawer_session_and_movement_sync_derived_sqlite_and_late_m
             "sessionKey": ses_key,
             "terminalId": "term_a",
             "payeeName": "Owner",
-            "managerPin": "1234",
             "categoryKey": category_key(CashMovementType::OwnerWithdrawal, "Personal use")
         })),
     )

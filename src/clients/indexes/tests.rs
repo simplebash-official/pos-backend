@@ -26,7 +26,7 @@ fn single_tenant_specs_are_the_historical_set() {
     // + warranty_events key/warranty key/sync
     // + warranty_claims key/sync/status/warranty key/invoice key
     // + warranty_condition_templates key/active.
-    assert_eq!(specs.len(), 91);
+    assert_eq!(specs.len(), 93);
     assert!(specs.iter().all(|s| s.keys.get(TENANT_FIELD).is_none()));
     assert!(names(&specs).contains(&"products.sync_updated_at_key".to_string()));
     assert!(names(&specs).contains(&"idempotency_keys.idempotency_ttl".to_string()));
