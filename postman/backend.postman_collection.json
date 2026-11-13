@@ -8852,6 +8852,40 @@
           "response": []
         },
         {
+          "name": "Open Claims Batch",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/warranty-claims/batch",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "warranty-claims",
+                "batch"
+              ]
+            },
+            "description": "Opens one claim per warranty of ONE invoice in one request. Needs `warranty_claims:record`. Every item carries its own `issueDescription` (the server copies nothing between items) and optional `quantity`, `serialNumber`, `voidChecks`, `conditions`. The request is refused as a whole, with nothing written, when `items` is empty or has more than 100, a `warrantyKey` appears twice (400), a warranty is not found (404), the warranties belong to different invoices (400), or `approval` is sent while no warranty has run out (400). Otherwise the answer is always 200 with `results` in the order sent: `{outcome: \"opened\", warrantyKey, claim}` or `{outcome: \"failed\", warrantyKey, error: {status, code, message}}`, plus `openedCount` and `failedCount`; a failed item never undoes an opened one (there is no transaction). A warranty that has run out needs a manager or owner: a signed-in Admin or Manager approves it themselves and must send NO `approval` (400); Staff send one `approval` `{managerPin, reason}` for the whole batch, checked once (401 `INVALID_PIN` refuses the request) and used only for the items that ran out. Staff who send none still open the warranties in force; the ones that ran out come back `failed` with `WARRANTY_EXPIRED`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"warrantyKey\": \"{{warrantyKey}}\",\n      \"issueDescription\": \"Screen flickers after 10 minutes\",\n      \"voidChecks\": {\n        \"screenCracked\": false,\n        \"liquidDamage\": false,\n        \"sealBroken\": false,\n        \"tampered\": false\n      },\n      \"conditions\": [\n        \"Physical damage / cracks\"\n      ]\n    },\n    {\n      \"warrantyKey\": \"wty_second_unit_of_same_invoice\",\n      \"issueDescription\": \"No sound from the speaker\",\n      \"quantity\": 1,\n      \"serialNumber\": null\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
           "name": "Quick Replace",
           "request": {
             "method": "POST",

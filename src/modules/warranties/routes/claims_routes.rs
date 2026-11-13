@@ -10,9 +10,9 @@ use crate::core::middleware::sync_headers::DeviceId;
 use crate::core::response::{ApiResponse, ErrorResponse};
 use crate::domain::warranties::{
     ClaimListQuery, ClaimListResponse, CreateConditionRequest, DecideClaimRequest,
-    InspectClaimRequest, OpenClaimRequest, QuickReplaceRequest, ResolveClaimRequest,
-    SendToSupplierRequest, SupplierReturnRequest, WarrantyClaim, WarrantyCondition,
-    WarrantyConditionsResponse,
+    InspectClaimRequest, OpenClaimRequest, OpenClaimsBatchRequest, OpenClaimsBatchResponse,
+    QuickReplaceRequest, ResolveClaimRequest, SendToSupplierRequest, SupplierReturnRequest,
+    WarrantyClaim, WarrantyCondition, WarrantyConditionsResponse,
 };
 use crate::modules::warranties::service;
 use axum::Json;
@@ -44,6 +44,32 @@ pub(super) async fn open_claim(
     let caller = user.approval_caller(&state.db).await?;
     let claim = service::open_claim(&state.db, body, &actor, &caller, device_id).await?;
     Ok(Json(ApiResponse::success(claim, "Claim opened")))
+}
+
+#[utoipa::path(post, path = "/batch", tag = modules::WARRANTY_CLAIMS,
+    request_body = OpenClaimsBatchRequest,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "One result per item: the claim that was opened, or why that item was not", body = ApiResponse<OpenClaimsBatchResponse>),
+        (status = 400, description = "No items, too many, a warranty twice, warranties of different invoices, or an approval nobody needs", body = ErrorResponse),
+        (status = 401, description = "Missing token, or the PIN is not a manager's or owner's", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+        (status = 404, description = "A warranty was not found", body = ErrorResponse),
+    )
+)]
+/// Opens one claim per warranty of one invoice. An item that cannot be opened is reported in
+/// its result and never stops the others.
+pub(super) async fn open_claims_batch(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    DeviceId(device_id): DeviceId,
+    Json(body): Json<OpenClaimsBatchRequest>,
+) -> AppResult<Json<ApiResponse<OpenClaimsBatchResponse>>> {
+    user.require_permission(perm::WARRANTY_CLAIMS_RECORD)?;
+    let actor = actor(&state, &user).await?;
+    let caller = user.approval_caller(&state.db).await?;
+    let response = service::open_claims_batch(&state.db, body, &actor, &caller, device_id).await?;
+    Ok(Json(ApiResponse::success(response, "Claims processed")))
 }
 
 #[utoipa::path(post, path = "/quick-replace", tag = modules::WARRANTY_CLAIMS,
@@ -395,6 +421,8 @@ pub fn router() -> OpenApiRouter<AppState> {
         // Reads.
         .routes(routes!(open_claim, list_claims))
         .routes(routes!(get_claim))
+        // Several claims of one invoice in one request.
+        .routes(routes!(open_claims_batch))
         // The whole replacement in one request.
         .routes(routes!(quick_replace))
         // Steps, in lifecycle order.

@@ -3,6 +3,7 @@
 //! and the manager-approved void and extend, and claims from the counter to the supplier and back. Other modules reach these through the
 //! `pub(crate)` functions below, never the repository.
 
+mod claim_batch;
 mod claim_outcomes;
 mod claim_quick;
 mod claim_steps;
@@ -15,6 +16,7 @@ mod warranty_lookup;
 mod warranty_report;
 mod warranty_stats;
 
+pub(crate) use claim_batch::open_claims_batch;
 pub(crate) use claim_outcomes::check_claim_refund;
 pub(crate) use claim_outcomes::convert_to_paid_repair;
 pub(crate) use claim_outcomes::finish_claim_refund;

@@ -10,7 +10,7 @@ use crate::core::constants::{codes, prefixes};
 use crate::core::error::{AppError, AppResult};
 use crate::core::id::generate_id;
 use crate::core::utils::shop_day;
-use crate::domain::users::ApprovalCaller;
+use crate::domain::users::{ApprovalCaller, ApprovedBy};
 use crate::domain::warranties::{
     ClaimAction, ClaimDecision, ClaimListQuery, ClaimListResponse, ClaimListStatus, ClaimStatus,
     DecideClaimRequest, InspectClaimRequest, OpenClaimRequest, SendToSupplierRequest,
@@ -188,6 +188,20 @@ pub(crate) async fn open_claim(
     caller: &ApprovalCaller,
     device_id: Option<String>,
 ) -> AppResult<WarrantyClaim> {
+    open_claim_honoured(db, body, None, actor, caller, device_id).await
+}
+
+/// `open_claim` for one claim of a batch: `honoured_by` is the approval that was checked once
+/// for the whole batch, used when this warranty has run out. `body.approval` must then be
+/// `None`.
+pub(super) async fn open_claim_honoured(
+    db: &Db,
+    body: OpenClaimRequest,
+    honoured_by: Option<&ApprovedBy>,
+    actor: &WarrantyActor,
+    caller: &ApprovalCaller,
+    device_id: Option<String>,
+) -> AppResult<WarrantyClaim> {
     crate::core::logging::domain::tracked("warranties.claim_opened", async move {
         let issue = required_text(&body.issue_description, "what the customer says is wrong")?;
         let mut warranty = require(db, &body.warranty_key).await?;
@@ -206,6 +220,7 @@ pub(crate) async fn open_claim(
                     "This item already has an open claim. Carry on with that one.",
                 ));
             }
+            (WarrantyState::Expired, None) if honoured_by.is_some() => honoured_by.cloned(),
             (WarrantyState::Expired, None) if !caller.self_approves() => {
                 return Err(AppError::conflict(
                     codes::WARRANTY_EXPIRED,
