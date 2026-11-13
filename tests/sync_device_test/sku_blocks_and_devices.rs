@@ -125,9 +125,10 @@ async fn ack_all(dev: &Device) {
 #[tokio::test]
 async fn sku_prefixes_lists_the_distinct_local_catalog_prefixes() {
     let dev = Device::new().await;
+    // A fresh device already has the built-in Uncategorized / General category.
     assert_eq!(
         dev.sync("GET", "/api/sync/sku-prefixes", None).await["prefixes"],
-        json!([])
+        json!(["UNC-GEN"])
     );
 
     let mut category_keys = std::collections::HashMap::new();
@@ -170,7 +171,7 @@ async fn sku_prefixes_lists_the_distinct_local_catalog_prefixes() {
             .map(|v| v.as_str().expect("the value is a string").to_string())
             .collect();
     prefixes.sort();
-    assert_eq!(prefixes, vec!["ELE-CAB", "PHO-BAT", "PHO-SCR"]);
+    assert_eq!(prefixes, vec!["ELE-CAB", "PHO-BAT", "PHO-SCR", "UNC-GEN"]);
 }
 
 #[tokio::test]

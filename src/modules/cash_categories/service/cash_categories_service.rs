@@ -273,6 +273,8 @@ pub async fn ensure_system_categories(db: &Db) -> AppResult<CashCategorySeedResu
     // The drawer rules and shop profile are required starting data, and every shop passes through here.
     crate::modules::cash_settings::service::ensure_settings(db).await?;
     crate::modules::settings::service::ensure_shop_profile(db, None).await?;
+    // The billing screen's quick-add form files new items here, so every shop needs it too.
+    crate::modules::inventory::service::category::ensure_uncategorized(db).await?;
     Ok(CashCategorySeedResult { created, existing })
 }
 

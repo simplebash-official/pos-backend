@@ -5,6 +5,7 @@
 //! category/subcategory by its immutable `key`, not its (renameable) name.
 
 mod service_category;
+mod service_uncategorized;
 
 pub use service_category::add_subcategory;
 pub use service_category::create_category;
@@ -15,3 +16,6 @@ pub(crate) use service_category::hydrate_sync_documents;
 pub use service_category::list_categories;
 pub(crate) use service_category::remove_subcategory;
 pub use service_category::update_category;
+pub use service_uncategorized::{
+    UNCATEGORIZED_CATEGORY_KEY, UNCATEGORIZED_SUBCATEGORY_KEY, ensure_uncategorized,
+};
