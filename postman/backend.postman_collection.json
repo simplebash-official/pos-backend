@@ -8886,7 +8886,7 @@
           "response": []
         },
         {
-          "name": "Quick Replace",
+          "name": "Process Claim (Staff, replace)",
           "request": {
             "method": "POST",
             "header": [
@@ -8896,20 +8896,54 @@
               }
             ],
             "url": {
-              "raw": "{{backendBaseUrl}}/api/warranty-claims/quick-replace",
+              "raw": "{{backendBaseUrl}}/api/warranty-claims/process",
               "host": [
                 "{{backendBaseUrl}}"
               ],
               "path": [
                 "api",
                 "warranty-claims",
-                "quick-replace"
+                "process"
               ]
             },
-            "description": "Swaps a faulty unit for a new one in one request: opens the claim, inspects it, decides a replacement, finishes it and hands it back. Needs `warranty_claims:record` and a manager or owner PIN with a reason (a replacement is always a manager's call). Checked before anything is written: the inspection note, the PIN, and that the new unit can be given (a serial in stock, or a price tier with stock). A warranty that is cancelled, already under a claim or run out is refused (409), so a run-out one goes through *Open Claim* with an approval. Each step still saves by itself, so a failure after the claim opened leaves an ordinary claim at the step it reached. Give `replacement` as `{serialNumber}` for a serialized item or `{sellingPriceCents}` for one sold by price tier. A signed-in Admin or Manager approves it themselves: send NO `approval`/`managerPin`/`overrideReason` (400 if sent). Only Staff send a manager or owner PIN (and a reason where the example shows one).",
+            "description": "Takes a claim from the counter to its decision, and as far on as the outcome goes, in ONE request: opens the claim, inspects it, decides it and carries out the outcome. Needs `warranty_claims:record`. `outcome` is tagged by `decision`: `replace` (`replacement` `{serialNumber}` for a serialized item or `{sellingPriceCents}` for one sold by price tier, optional `resolutionNote`; finishes and hands the new unit over), `repair` (`finish` is `{\"when\":\"now\",\"resolutionNote\"?}`, which finishes and hands back, or `{\"when\":\"later\"}`, which stops at *decided*), `refund` (stops at *decided*; the refund is made with a credit note that names the claim) or `reject` (`handBack` is required: true hands the item back, false leaves the claim resolved). Checked before anything is written: the inspection note, the approval, and for a replacement that the new unit can be given. A warranty that is cancelled or already under a claim is refused (409). A warranty that has run out is honoured by the same approval, which is then checked for the opening and the decision. A signed-in Admin or Manager approves it themselves: send NO `approval` (400 if sent). Staff send a manager or owner PIN with a reason. Each step still saves by itself, so a failure after the claim opened leaves an ordinary claim at the step it reached; the error's `details` then carry `claimKey` and `claimNumber`.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"warrantyKey\": \"{{warrantyKey}}\",\n  \"issueDescription\": \"Will not switch on\",\n  \"inspectionNotes\": \"Board is dead, no liquid marks\",\n  \"quantity\": 1,\n  \"replacement\": {\n    \"serialNumber\": \"IMEI-NEW-0001\"\n  },\n  \"resolutionNote\": \"Swapped at the counter\",\n  \"approval\": {\n    \"managerPin\": \"1234\",\n    \"reason\": \"Fault confirmed, no damage\"\n  }\n}",
+              "raw": "{\n  \"warrantyKey\": \"{{warrantyKey}}\",\n  \"issueDescription\": \"Will not switch on\",\n  \"inspectionNotes\": \"Board is dead, no liquid marks\",\n  \"quantity\": 1,\n  \"outcome\": {\n    \"decision\": \"replace\",\n    \"replacement\": {\n      \"serialNumber\": \"IMEI-NEW-0001\"\n    },\n    \"resolutionNote\": \"Swapped at the counter\"\n  },\n  \"approval\": {\n    \"managerPin\": \"1234\",\n    \"reason\": \"Fault confirmed, no damage\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Process Claim (Admin or Manager, repair now)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/warranty-claims/process",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "warranty-claims",
+                "process"
+              ]
+            },
+            "description": "Takes a claim from the counter to its decision, and as far on as the outcome goes, in ONE request: opens the claim, inspects it, decides it and carries out the outcome. Needs `warranty_claims:record`. `outcome` is tagged by `decision`: `replace` (`replacement` `{serialNumber}` for a serialized item or `{sellingPriceCents}` for one sold by price tier, optional `resolutionNote`; finishes and hands the new unit over), `repair` (`finish` is `{\"when\":\"now\",\"resolutionNote\"?}`, which finishes and hands back, or `{\"when\":\"later\"}`, which stops at *decided*), `refund` (stops at *decided*; the refund is made with a credit note that names the claim) or `reject` (`handBack` is required: true hands the item back, false leaves the claim resolved). Checked before anything is written: the inspection note, the approval, and for a replacement that the new unit can be given. A warranty that is cancelled or already under a claim is refused (409). A warranty that has run out is honoured by the same approval, which is then checked for the opening and the decision. A signed-in Admin or Manager approves it themselves: send NO `approval` (400 if sent). Staff send a manager or owner PIN with a reason. Each step still saves by itself, so a failure after the claim opened leaves an ordinary claim at the step it reached; the error's `details` then carry `claimKey` and `claimNumber`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"warrantyKey\": \"{{warrantyKey}}\",\n  \"issueDescription\": \"Does not charge\",\n  \"inspectionNotes\": \"Charging port worn\",\n  \"quantity\": 1,\n  \"outcome\": {\n    \"decision\": \"repair\",\n    \"finish\": {\n      \"when\": \"now\",\n      \"resolutionNote\": \"New charging port\"\n    }\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"

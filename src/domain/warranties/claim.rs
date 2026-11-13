@@ -379,27 +379,57 @@ pub struct ResolveClaimRequest {
     pub replacement: Option<ReplacementRequest>,
 }
 
-/// `POST /warranty-claims/quick-replace`: a faulty unit swapped for a new one at the counter,
-/// recorded as one claim that is opened, inspected, decided as a replacement, finished and
-/// handed over in a single request.
+/// How a repair decided in `POST /warranty-claims/process` ends.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(tag = "when", rename_all = "snake_case")]
+pub enum RepairFinish {
+    /// The item is fixed now: the claim is finished and the item handed back today.
+    #[serde(rename_all = "camelCase")]
+    Now { resolution_note: Option<String> },
+    /// The repair is not finished: the claim stays decided, to be finished from the claim.
+    Later,
+}
+
+/// What a claim processed in one request is decided as, and what is done about it straight away.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(tag = "decision", rename_all = "snake_case")]
+pub enum ProcessOutcome {
+    /// A new unit is given and the faulty one taken back; the item is handed over.
+    #[serde(rename_all = "camelCase")]
+    Replace {
+        replacement: ReplacementRequest,
+        resolution_note: Option<String>,
+    },
+    Repair {
+        finish: RepairFinish,
+    },
+    /// The claim stays decided: the refund is made with a credit note from this claim.
+    Refund,
+    /// Not covered. The item is handed back only when `hand_back` is true.
+    #[serde(rename_all = "camelCase")]
+    Reject {
+        hand_back: bool,
+    },
+}
+
+/// `POST /warranty-claims/process`: a faulty item taken in, inspected and decided, with the
+/// decision's own outcome carried out, recorded as one claim by a single request.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct QuickReplaceRequest {
+pub struct ProcessClaimRequest {
     pub warranty_key: String,
     pub issue_description: String,
-    /// What staff found when they looked at the item.
+    /// What was found when the item was looked at.
     pub inspection_notes: String,
     pub void_checks: Option<VoidChecks>,
     pub conditions: Option<Vec<String>>,
-    /// How many units of this warranty are being swapped.
+    /// How many units of this warranty are being claimed.
     pub quantity: Option<i64>,
-    /// The specific serial number being swapped, if the warranty does not name one.
+    /// The specific serial number being claimed, if the warranty does not name one.
     pub serial_number: Option<String>,
-    /// The new unit given to the customer.
-    pub replacement: ReplacementRequest,
-    pub resolution_note: Option<String>,
-    /// A replacement is always a manager's call: a Staff member sends the deciding manager's or
-    /// owner's PIN and why; a signed-in Admin or Manager sends none.
+    pub outcome: ProcessOutcome,
+    /// A Staff member sends the deciding manager's or owner's PIN and why; a signed-in Admin or
+    /// Manager decides for themselves and sends none.
     pub approval: Option<ManagerApproval>,
 }
 

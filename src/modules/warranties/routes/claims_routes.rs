@@ -11,7 +11,7 @@ use crate::core::response::{ApiResponse, ErrorResponse};
 use crate::domain::warranties::{
     ClaimListQuery, ClaimListResponse, CreateConditionRequest, DecideClaimRequest,
     InspectClaimRequest, OpenClaimRequest, OpenClaimsBatchRequest, OpenClaimsBatchResponse,
-    QuickReplaceRequest, ResolveClaimRequest, SendToSupplierRequest, SupplierReturnRequest,
+    ProcessClaimRequest, ResolveClaimRequest, SendToSupplierRequest, SupplierReturnRequest,
     WarrantyClaim, WarrantyCondition, WarrantyConditionsResponse,
 };
 use crate::modules::warranties::service;
@@ -72,33 +72,31 @@ pub(super) async fn open_claims_batch(
     Ok(Json(ApiResponse::success(response, "Claims processed")))
 }
 
-#[utoipa::path(post, path = "/quick-replace", tag = modules::WARRANTY_CLAIMS,
-    request_body = QuickReplaceRequest,
+#[utoipa::path(post, path = "/process", tag = modules::WARRANTY_CLAIMS,
+    request_body = ProcessClaimRequest,
     security(("bearerAuth" = [])),
     responses(
-        (status = 200, description = "Claim opened, inspected, decided as a replacement, finished and handed back", body = ApiResponse<WarrantyClaim>),
-        (status = 400, description = "Nothing written about what is wrong or what was found, or a quantity below 1", body = ErrorResponse),
+        (status = 200, description = "Claim opened, inspected and decided, with the decision's outcome carried out", body = ApiResponse<WarrantyClaim>),
+        (status = 400, description = "Nothing written about what is wrong or what was found, a quantity below 1, or an approval that is not needed", body = ErrorResponse),
         (status = 401, description = "Missing token, or the PIN is not a manager's or owner's", body = ErrorResponse),
         (status = 403, description = "Permission denied", body = ErrorResponse),
         (status = 404, description = "Warranty or product not found", body = ErrorResponse),
-        (status = 409, description = "Cancelled, run out, already under a claim, or the new unit cannot be given", body = ErrorResponse),
+        (status = 409, description = "Cancelled, already under a claim, or the new unit cannot be given", body = ErrorResponse),
     )
 )]
-/// Swaps a faulty unit for a new one in one request. Needs a manager or owner PIN and a reason.
-pub(super) async fn quick_replace(
+/// Takes a claim from the counter to its decision, and as far on as the outcome goes, in one
+/// request. Staff send a manager or owner PIN and a reason; an Admin or Manager sends none.
+pub(super) async fn process_claim(
     State(state): State<AppState>,
     user: CurrentUser,
     DeviceId(device_id): DeviceId,
-    Json(body): Json<QuickReplaceRequest>,
+    Json(body): Json<ProcessClaimRequest>,
 ) -> AppResult<Json<ApiResponse<WarrantyClaim>>> {
     user.require_permission(perm::WARRANTY_CLAIMS_RECORD)?;
     let actor = actor(&state, &user).await?;
     let caller = user.approval_caller(&state.db).await?;
-    let claim = service::quick_replace(&state.db, body, &actor, &caller, device_id).await?;
-    Ok(Json(ApiResponse::success(
-        claim,
-        "Replaced and handed to the customer",
-    )))
+    let claim = service::process_claim(&state.db, body, &actor, &caller, device_id).await?;
+    Ok(Json(ApiResponse::success(claim, "Claim processed")))
 }
 
 #[utoipa::path(get, path = "/", tag = modules::WARRANTY_CLAIMS,
@@ -423,8 +421,8 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_claim))
         // Several claims of one invoice in one request.
         .routes(routes!(open_claims_batch))
-        // The whole replacement in one request.
-        .routes(routes!(quick_replace))
+        // The whole claim, up to its outcome, in one request.
+        .routes(routes!(process_claim))
         // Steps, in lifecycle order.
         .routes(routes!(inspect_claim))
         .routes(routes!(decide_claim))
