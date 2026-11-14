@@ -134,6 +134,84 @@ async fn test_sqlite_repeated_failed_logins_are_throttled() {
 }
 
 #[tokio::test]
+async fn test_sqlite_repeated_wrong_manager_pins_are_throttled_per_user() {
+    let ctx = setup_sqlite_app().await;
+    let (status, body) = execute(
+        &ctx.router,
+        Request::builder()
+            .method("POST")
+            .uri("/api/system/setup")
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({ "adminPassword": "owner-password-123", "loadSampleData": false })
+                    .to_string(),
+            ))
+            .expect("the request is well formed"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let owner = body["data"]["token"]
+        .as_str()
+        .expect("setup answers with a token")
+        .to_string();
+    let (status, body) = send_authed(
+        &ctx.router,
+        "POST",
+        "/api/auth/set-pin",
+        Some(json!({ "pin": "4821" })),
+        &owner,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // A signed-in cashier with their own subject: the limiter is process-wide and keyed by user.
+    let claims = simplebash_pos_backend::core::middleware::auth::Claims {
+        sub: format!("guesser-{}", Uuid::new_v4().simple()),
+        exp: 9_999_999_999,
+        role: Some(simplebash_pos_backend::domain::users::Role::Staff),
+        permissions: Vec::new(),
+        tid: None,
+        scope: None,
+        did: None,
+        name: Some("Cashier".to_string()),
+    };
+    let cashier = jsonwebtoken::encode(
+        &jsonwebtoken::Header::default(),
+        &claims,
+        &jsonwebtoken::EncodingKey::from_secret(ctx.config.jwt_secret.as_bytes()),
+    )
+    .expect("the token encodes");
+    let guess = |pin: &'static str, token: String| {
+        let router = ctx.router.clone();
+        async move {
+            send_authed(
+                &router,
+                "POST",
+                "/api/auth/verify-pin",
+                Some(json!({ "pin": pin, "requiredRole": "manager" })),
+                &token,
+            )
+            .await
+        }
+    };
+
+    for i in 0..5 {
+        let (status, body) = guess("0000", cashier.clone()).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "attempt {i}: {body}");
+    }
+    // Blocked now, even with the right PIN, and nothing about the PIN's owner is revealed.
+    let (status, body) = guess("4821", cashier.clone()).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{body}");
+    assert_eq!(body["code"], "TOO_MANY_PIN_ATTEMPTS");
+    assert!(body["data"].is_null(), "{body}");
+
+    // Another signed-in user is not affected by the cashier's failures.
+    let (status, body) = guess("4821", owner.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["valid"], true);
+}
+
+#[tokio::test]
 async fn test_sqlite_deactivating_a_user_revokes_their_live_token() {
     let ctx = setup_sqlite_app().await;
     let admin = admin_token(&ctx.config);

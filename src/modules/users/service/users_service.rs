@@ -776,7 +776,7 @@ pub(crate) async fn resolve_approval(
     let approval = approval.ok_or_else(|| {
         AppError::forbidden_with_code("A manager or owner must approve this.", codes::PIN_NOT_SET)
     })?;
-    require_manager_approval(db, approval).await
+    require_manager_approval(db, caller, approval).await
 }
 
 /// Resolves who approves an action whose screen sends a bare PIN. A signed-in Admin or Manager
@@ -801,7 +801,7 @@ pub(crate) async fn pin_approver(
     let Some(pin) = pin else {
         return Ok(None);
     };
-    let approver = verify_user_pin(db, pin, Some("manager"))
+    let approver = verify_user_pin(db, &caller.user_id, pin, Some("manager"))
         .await?
         .ok_or_else(|| {
             AppError::unauthorized_with_code(
@@ -819,7 +819,11 @@ pub(crate) async fn pin_approver(
 /// Checks a Staff member's manager or owner sign-off: a reason must be given (at most 500
 /// characters) and the PIN must belong to an active Admin or Manager. 401 `INVALID_PIN`
 /// otherwise; nothing is written.
-async fn require_manager_approval(db: &Db, approval: &ManagerApproval) -> AppResult<ApprovedBy> {
+async fn require_manager_approval(
+    db: &Db,
+    caller: &ApprovalCaller,
+    approval: &ManagerApproval,
+) -> AppResult<ApprovedBy> {
     let reason = approval.reason.trim();
     if reason.is_empty() {
         return Err(AppError::validation(
@@ -831,14 +835,19 @@ async fn require_manager_approval(db: &Db, approval: &ManagerApproval) -> AppRes
             "The reason can be at most {APPROVAL_REASON_MAX} characters."
         )));
     }
-    let approver = verify_user_pin(db, approval.manager_pin.trim(), Some("manager"))
-        .await?
-        .ok_or_else(|| {
-            AppError::unauthorized_with_code(
-                "That PIN does not belong to a manager or owner.",
-                codes::INVALID_PIN,
-            )
-        })?;
+    let approver = verify_user_pin(
+        db,
+        &caller.user_id,
+        approval.manager_pin.trim(),
+        Some("manager"),
+    )
+    .await?
+    .ok_or_else(|| {
+        AppError::unauthorized_with_code(
+            "That PIN does not belong to a manager or owner.",
+            codes::INVALID_PIN,
+        )
+    })?;
     Ok(ApprovedBy {
         user_id: approver.id,
         name: approver.name,
@@ -848,6 +857,36 @@ async fn require_manager_approval(db: &Db, approval: &ManagerApproval) -> AppRes
 
 /// Verifies a numeric PIN against active users with the required role.
 pub async fn verify_user_pin(
+    db: &Db,
+    caller_id: &str,
+    pin: &str,
+    required_role: Option<&str>,
+) -> AppResult<Option<User>> {
+    // A PIN is 4-8 digits, so guessing must be slowed per signed-in guesser (and shop): checked
+    // before any hash is verified, cleared by a correct PIN.
+    let limiter = &*crate::core::rate_limit::PIN_FAILURES;
+    let limit_key = format!(
+        "{:?}|{caller_id}",
+        crate::core::tenancy::current_tenant_id()
+    );
+    if let Err(retry_after) = limiter.check(&limit_key) {
+        let minutes = retry_after.as_secs().div_ceil(60).max(1);
+        return Err(AppError::custom(
+            axum::http::StatusCode::TOO_MANY_REQUESTS,
+            codes::TOO_MANY_PIN_ATTEMPTS,
+            format!("Too many wrong PINs. Please try again in {minutes} minute(s)."),
+        ));
+    }
+    let matched = find_user_by_pin(db, pin, required_role).await?;
+    match &matched {
+        Some(_) => limiter.reset(&limit_key),
+        None => limiter.record_failure(&limit_key),
+    }
+    Ok(matched)
+}
+
+/// The active user whose PIN is `pin` and whose role satisfies `required_role`, if any.
+async fn find_user_by_pin(
     db: &Db,
     pin: &str,
     required_role: Option<&str>,

@@ -100,6 +100,8 @@ pub const USER_INACTIVE: &str = "USER_INACTIVE";
 /// 429 — too many failed logins for this account; retry after the window.
 pub const RATE_LIMITED: &str = "RATE_LIMITED";
 pub const TOO_MANY_LOGIN_ATTEMPTS: &str = "TOO_MANY_LOGIN_ATTEMPTS";
+/// The signed-in user sent too many wrong manager PINs and must wait.
+pub const TOO_MANY_PIN_ATTEMPTS: &str = "TOO_MANY_PIN_ATTEMPTS";
 /// 401 — the account behind a still-valid token was deactivated, deleted or
 /// had its role changed; the user must sign in again.
 pub const SESSION_REVOKED: &str = "SESSION_REVOKED";

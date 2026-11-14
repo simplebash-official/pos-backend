@@ -258,15 +258,17 @@ pub(super) async fn update_my_preferences(
     responses(
         (status = 200, description = "PIN verification successful", body = ApiResponse<VerifyPinResponse>),
         (status = 401, description = "Invalid PIN or insufficient permissions", body = ErrorResponse),
+        (status = 429, description = "Too many wrong PINs from this user; try again later", body = ErrorResponse),
     )
 )]
 pub(super) async fn verify_pin(
-    _user: CurrentUser,
+    user: CurrentUser,
     State(state): State<AppState>,
     Json(body): Json<VerifyPinRequest>,
 ) -> AppResult<Json<ApiResponse<VerifyPinResponse>>> {
     let verified_user = crate::modules::users::service::verify_user_pin(
         &state.db,
+        &user.user_id,
         &body.pin,
         body.required_role.as_deref(),
     )
