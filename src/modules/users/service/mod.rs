@@ -5,6 +5,8 @@
 
 mod users_service;
 
+pub(crate) use users_service::AccountStatus;
+pub(crate) use users_service::account_status;
 pub use users_service::create_owner_admin_if_absent;
 pub use users_service::create_user;
 pub(crate) use users_service::create_user_for_caller;
@@ -13,6 +15,7 @@ pub use users_service::find_admin_document;
 pub(crate) use users_service::find_user_for_identity;
 pub(crate) use users_service::find_user_summaries_by_employee_keys;
 pub(crate) use users_service::find_user_summary_by_employee_key;
+pub(crate) use users_service::fingerprint_for_login;
 pub(crate) use users_service::get_user;
 pub(crate) use users_service::get_user_for_caller;
 pub use users_service::hash_password;

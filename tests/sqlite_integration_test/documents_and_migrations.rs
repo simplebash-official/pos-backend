@@ -174,6 +174,7 @@ async fn test_sqlite_repeated_wrong_manager_pins_are_throttled_per_user() {
         scope: None,
         did: None,
         name: Some("Cashier".to_string()),
+        pwv: None,
     };
     let cashier = jsonwebtoken::encode(
         &jsonwebtoken::Header::default(),
@@ -265,6 +266,78 @@ async fn test_sqlite_deactivating_a_user_revokes_their_live_token() {
         "after deactivation: {body}"
     );
     assert_eq!(body["code"], "USER_INACTIVE");
+}
+
+#[tokio::test]
+async fn test_sqlite_changing_a_password_revokes_tokens_issued_before_it() {
+    let ctx = setup_sqlite_app().await;
+    let admin = admin_token(&ctx.config);
+    let username = format!("staff-{}", &Uuid::new_v4().simple().to_string()[..12]);
+    let old_password = "Staff-Password-123";
+    let new_password = "Staff-Password-456";
+
+    let (status, body) = send_authed(
+        &ctx.router,
+        "POST",
+        "/api/users",
+        Some(json!({ "name": "Staff Member", "username": username, "password": old_password, "role": "staff" })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let user_id = body["data"]["id"].as_str().expect("user id").to_string();
+
+    let login = |password: &'static str| {
+        Request::builder()
+            .method("POST")
+            .uri("/api/auth/login")
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({ "username": username, "password": password }).to_string(),
+            ))
+            .expect("the request is well formed")
+    };
+    let (status, body) = execute(&ctx.router, login(old_password)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let old_token = body["data"]["token"].as_str().expect("token").to_string();
+
+    // A change that is not the password leaves the session alone.
+    let (status, body) = send_authed(
+        &ctx.router,
+        "PATCH",
+        &format!("/api/users/{user_id}"),
+        Some(json!({ "name": "Renamed Staff" })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = send_authed(&ctx.router, "GET", "/api/customers", None, &old_token).await;
+    assert_eq!(status, StatusCode::OK, "after a rename: {body}");
+
+    let (status, body) = send_authed(
+        &ctx.router,
+        "PATCH",
+        &format!("/api/users/{user_id}"),
+        Some(json!({ "password": new_password })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Whoever holds the old token (a thief included) is signed out at once.
+    let (status, body) = send_authed(&ctx.router, "GET", "/api/customers", None, &old_token).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "after the change: {body}");
+    assert_eq!(body["code"], "SESSION_REVOKED");
+
+    let (status, body) = execute(&ctx.router, login(new_password)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let new_token = body["data"]["token"].as_str().expect("token").to_string();
+    let (status, body) = send_authed(&ctx.router, "GET", "/api/customers", None, &new_token).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "with the new password's token: {body}"
+    );
 }
 
 #[tokio::test]

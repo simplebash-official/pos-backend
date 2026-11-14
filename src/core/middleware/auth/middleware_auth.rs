@@ -4,15 +4,16 @@ use crate::core::error::{AppError, AppResult};
 use crate::core::middleware::platform_jwt;
 use crate::core::tenancy::Tenant;
 use crate::domain::users::Role;
+use crate::modules::users::service::AccountStatus;
 use axum::extract::FromRequestParts;
 use axum::http::HeaderMap;
 use axum::http::request::Parts;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use serde::{Deserialize, Serialize};
 
-/// `(tenant|user_id) -> (Some((is_active, role)) | None if deleted, read at)`.
+/// `(tenant|user_id) -> (the account's status | None if deleted, read at)`.
 pub(super) type AccountStatusCache =
-    std::collections::HashMap<String, (Option<(bool, Role)>, std::time::Instant)>;
+    std::collections::HashMap<String, (Option<AccountStatus>, std::time::Instant)>;
 
 pub(super) static ACCOUNT_STATUS: std::sync::LazyLock<std::sync::Mutex<AccountStatusCache>> =
     std::sync::LazyLock::new(Default::default);
@@ -70,6 +71,11 @@ pub struct Claims {
     /// Display name of the user. Present on local login tokens and identity tokens.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Fingerprint of the password the token was issued for (`users::service::
+    /// password_fingerprint`); the token is refused once the account's password changes. Absent
+    /// only on tokens issued before this claim existed, which run out within `JWT_EXPIRY_HOURS`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pwv: Option<String>,
 }
 
 /// Identifies the caller. Extracting `CurrentUser` from a handler's
@@ -230,8 +236,8 @@ impl FromRequestParts<AppState> for CurrentUser {
 const ACCOUNT_STATUS_TTL: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// A JWT stays valid until it expires, so without this a deactivated,
-/// deleted or demoted user would keep their old access for up to
-/// `JWT_EXPIRY_HOURS`. Applies to ordinary local logins (HS256 tokens whose
+/// deleted or demoted user, or whoever holds a token from before a password
+/// change, would keep the old access for up to `JWT_EXPIRY_HOURS`. Applies to ordinary local logins (HS256 tokens whose
 /// subject is a user id). Device and identity-service tokens carry a `scope`
 /// and are governed by the device registry / identity service instead.
 async fn ensure_account_still_valid(state: &AppState, verified: &VerifiedToken) -> AppResult<()> {
@@ -249,19 +255,15 @@ async fn ensure_account_still_valid(state: &AppState, verified: &VerifiedToken) 
         .expect("account status cache mutex poisoned")
         .get(&cache_key)
         .filter(|(_, read_at)| read_at.elapsed() < ACCOUNT_STATUS_TTL)
-        .map(|(status, _)| *status);
+        .map(|(status, _)| status.clone());
     let status = match cached {
         Some(status) => status,
         None => {
-            let status = match crate::modules::users::service::get_user(&state.db, oid).await {
-                Ok(user) => Some((user.is_active, user.role)),
-                Err(AppError::NotFound { .. }) => None,
-                Err(err) => return Err(err),
-            };
+            let status = crate::modules::users::service::account_status(&state.db, oid).await?;
             ACCOUNT_STATUS
                 .lock()
                 .expect("account status cache mutex poisoned")
-                .insert(cache_key, (status, std::time::Instant::now()));
+                .insert(cache_key, (status.clone(), std::time::Instant::now()));
             status
         }
     };
@@ -271,13 +273,24 @@ async fn ensure_account_still_valid(state: &AppState, verified: &VerifiedToken) 
             "This account no longer exists. Please sign in again.",
             crate::core::constants::codes::SESSION_REVOKED,
         )),
-        Some((false, _)) => Err(AppError::unauthorized_with_code(
+        Some(account) if !account.is_active => Err(AppError::unauthorized_with_code(
             "This account has been deactivated",
             crate::core::constants::codes::USER_INACTIVE,
         )),
-        Some((true, role)) if verified.role.is_some_and(|r| r != role) => {
+        Some(account) if verified.role.is_some_and(|role| role != account.role) => {
             Err(AppError::unauthorized_with_code(
                 "Your access has changed. Please sign in again.",
+                crate::core::constants::codes::SESSION_REVOKED,
+            ))
+        }
+        Some(account)
+            if verified
+                .password_fingerprint
+                .as_ref()
+                .is_some_and(|issued_for| *issued_for != account.password_fingerprint) =>
+        {
+            Err(AppError::unauthorized_with_code(
+                "Your password has changed. Please sign in again.",
                 crate::core::constants::codes::SESSION_REVOKED,
             ))
         }
@@ -358,6 +371,8 @@ pub struct VerifiedToken {
     /// Profile claims of an identity token (`None` for local tokens).
     pub email: Option<String>,
     pub name: Option<String>,
+    /// The `pwv` claim of a local login token (see [`Claims::pwv`]).
+    pub password_fingerprint: Option<String>,
 }
 
 impl VerifiedToken {
@@ -380,6 +395,7 @@ impl VerifiedToken {
             device_id: None,
             email: None,
             name: None,
+            password_fingerprint: None,
         })
     }
 
@@ -450,6 +466,7 @@ pub async fn verify_bearer(headers: &HeaderMap, config: &Config) -> AppResult<Ve
     verified.scope = decoded.claims.scope;
     verified.device_id = decoded.claims.did;
     verified.name = decoded.claims.name;
+    verified.password_fingerprint = decoded.claims.pwv;
     Ok(verified)
 }
 

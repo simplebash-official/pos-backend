@@ -46,6 +46,7 @@ fn user_token(config: &Config, user_id: &str, role: Role, name: &str) -> String 
         scope: None,
         did: None,
         name: Some(name.to_string()),
+        pwv: None,
     };
     encode(
         &Header::default(),

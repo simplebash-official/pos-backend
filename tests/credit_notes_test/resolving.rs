@@ -94,6 +94,7 @@ async fn manager_with_pin(app: &common::TestApp) -> String {
         scope: None,
         did: None,
         name: Some("Manager Mia".to_string()),
+        pwv: None,
     };
     let token = jsonwebtoken::encode(
         &jsonwebtoken::Header::default(),

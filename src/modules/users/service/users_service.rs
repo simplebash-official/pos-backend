@@ -312,6 +312,45 @@ pub(crate) async fn get_user(db: &Db, id: ObjectId) -> AppResult<User> {
     Ok(document.into_user())
 }
 
+/// What every authenticated request re-checks about the account behind a local token.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AccountStatus {
+    pub(crate) is_active: bool,
+    pub(crate) role: Role,
+    /// See [`password_fingerprint`].
+    pub(crate) password_fingerprint: String,
+}
+
+/// The current status of the account `id`, or `None` when it no longer exists.
+pub(crate) async fn account_status(db: &Db, id: ObjectId) -> AppResult<Option<AccountStatus>> {
+    let document = repository::find_user_by_id(db, id).await?;
+    Ok(document.map(|document| AccountStatus {
+        is_active: document.is_active,
+        role: document.role,
+        password_fingerprint: password_fingerprint(&document.password_hash),
+    }))
+}
+
+/// The fingerprint a token minted now for `user` must carry (its `pwv` claim).
+pub(crate) async fn fingerprint_for_login(db: &Db, user: &User) -> AppResult<String> {
+    let id = ObjectId::parse_str(&user.id)
+        .map_err(|err| AppError::internal(format!("the signed-in user's id is invalid: {err}")))?;
+    let status = account_status(db, id)
+        .await?
+        .ok_or_else(|| AppError::internal("the user signing in no longer exists"))?;
+    Ok(status.password_fingerprint)
+}
+
+/// A short digest of the stored password hash, embedded in a login token so the token stops
+/// working once the password changes (a new hash has a new salt, so a new fingerprint). It
+/// reveals nothing useful about the hash and is never a credential.
+#[must_use]
+pub(crate) fn password_fingerprint(password_hash: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(password_hash.as_bytes());
+    digest[..8].iter().map(|b| format!("{b:02x}")).collect()
+}
+
 /// Scoped lookup for `GET /users/{id}` — 404s if `id` resolves to an
 /// account outside `manageable_roles(caller_role)` (see `ensure_manageable`).
 pub(crate) async fn get_user_for_caller(

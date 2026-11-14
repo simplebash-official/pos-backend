@@ -70,6 +70,7 @@ fn token_for(app: &common::TestApp, user: &str, role: Role, name: &str) -> Strin
         scope: None,
         did: None,
         name: Some(name.to_string()),
+        pwv: None,
     };
     jsonwebtoken::encode(
         &jsonwebtoken::Header::default(),

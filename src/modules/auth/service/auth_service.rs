@@ -194,6 +194,7 @@ async fn login_in_scope(
             scope: None,
             did: None,
             name: Some(user.name.clone()),
+            pwv: Some(users_service::fingerprint_for_login(db, &user).await?),
         };
         let token = encode(
             &Header::default(),

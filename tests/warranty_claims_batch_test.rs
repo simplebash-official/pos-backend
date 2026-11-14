@@ -68,6 +68,7 @@ fn token_with(
         scope: None,
         did: None,
         name: Some(name.to_string()),
+        pwv: None,
     };
     jsonwebtoken::encode(
         &jsonwebtoken::Header::default(),

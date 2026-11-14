@@ -1451,6 +1451,7 @@ async fn test_cashier_name_resolved_when_token_lacks_name() {
         scope: None,
         did: None,
         name: None,
+        pwv: None,
     };
     let token = jsonwebtoken::encode(
         &jsonwebtoken::Header::default(),
