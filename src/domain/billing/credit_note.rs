@@ -236,7 +236,8 @@ pub struct CreditNoteItem {
     /// Optional notes or defect details.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
-    /// Source category: `"retail"`, `"repair"`, or `"print"`.
+    /// Source category: `"retail"`, `"repair"`, `"print"`, or `"charge"` (a one-time charge with no
+    /// stock, ticket or cost on record).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_type: Option<String>,
     /// Key of linked repair or print job ticket, if applicable.

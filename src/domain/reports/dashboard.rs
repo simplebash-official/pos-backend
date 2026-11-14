@@ -242,6 +242,8 @@ pub struct ReportsDashboardResponse {
     pub repair_revenue_cents: i64,
     /// Revenue generated from print jobs in cents.
     pub print_revenue_cents: i64,
+    /// Revenue generated from one-time charges in cents.
+    pub charge_revenue_cents: i64,
     /// Count of completed invoices in the period.
     pub total_invoices_count: u64,
     /// Total discount amount granted in cents.

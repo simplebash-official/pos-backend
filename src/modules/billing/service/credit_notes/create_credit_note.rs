@@ -637,6 +637,18 @@ pub async fn create_credit_note(
                     ));
                 }
 
+                // A charge has no physical item to inspect or scrap: its return is only the
+                // refund, so the item is "resalable" with no disposition and moves no stock.
+                if inv_item.source_type == "charge"
+                    && (!matches!(item_req.condition, ItemCondition::Resalable)
+                        || item_req.disposition.is_some())
+                {
+                    return Err(AppError::validation(format!(
+                        "'{}' is a charge, not a physical item: return it as resalable with no disposition",
+                        inv_item.name
+                    )));
+                }
+
                 let unit_price_cents = calculations::returned_unit_price_cents(
                     inv_item.total_cents,
                     inv_item.quantity,

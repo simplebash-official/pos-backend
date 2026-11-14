@@ -40,6 +40,7 @@ pub(crate) async fn get_dashboard_overview(
         retail_revenue_cents: sales.retail_revenue_cents,
         repair_revenue_cents: sales.repair_revenue_cents,
         print_revenue_cents: sales.print_revenue_cents,
+        charge_revenue_cents: sales.charge_revenue_cents,
         total_invoices_count: sales.total_invoices,
         total_discounts_cents: sales.discount_cents,
         estimated_cogs_cents,

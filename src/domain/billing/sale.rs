@@ -54,7 +54,8 @@ pub struct CreateSaleItemRequest {
     pub quantity: i64,
     /// Discount allocated directly to this line item in cents.
     pub discount_cents: i64,
-    /// Line type: `"retail"`, `"repair"`, or `"print"`.
+    /// Line type: `"retail"`, `"repair"`, `"print"`, or `"charge"` (a one-time charge: a name,
+    /// a price and a quantity, with no stock behind it).
     pub source_type: String,
     /// Ticket key if checking out a completed repair or print job.
     pub source_ticket_key: Option<String>,

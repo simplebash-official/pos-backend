@@ -254,6 +254,22 @@ pub(crate) async fn resolve_sale_item(
                 Vec::new(),
             ),
         },
+        // A one-time charge: nothing to look up, no stock, and no cost on record (profit is the
+        // whole price; any cost the shop paid for the service belongs in Expenses).
+        "charge" => (
+            item.name
+                .as_deref()
+                .ok_or_else(|| AppError::validation("A charge must include a name"))?
+                .trim()
+                .to_string(),
+            None,
+            item.unit_price_cents
+                .ok_or_else(|| AppError::validation("A charge must include unitPriceCents"))?,
+            None,
+            None,
+            None,
+            Vec::new(),
+        ),
         other => {
             return Err(AppError::validation(format!(
                 "Invalid item sourceType '{other}'"

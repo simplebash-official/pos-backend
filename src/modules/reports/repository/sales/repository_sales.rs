@@ -26,6 +26,7 @@ fn accumulate_daily_sales_doc(
             total_invoices: 0,
             repair_revenue_cents: 0,
             print_revenue_cents: 0,
+            charge_revenue_cents: 0,
             retail_revenue_cents: 0,
             payment_methods: PaymentMethodBreakdown::default(),
         });
@@ -51,6 +52,7 @@ fn accumulate_daily_sales_doc(
                     "retail" => entry.retail_revenue_cents += item_total,
                     "repair" => entry.repair_revenue_cents += item_total,
                     "print" => entry.print_revenue_cents += item_total,
+                    "charge" => entry.charge_revenue_cents += item_total,
                     _ => {}
                 }
             }
@@ -249,6 +251,7 @@ pub(crate) async fn aggregate_sales_summary(
                                 "retail" => agg.retail_revenue_cents += revenue,
                                 "repair" => agg.repair_revenue_cents += revenue,
                                 "print" => agg.print_revenue_cents += revenue,
+                                "charge" => agg.charge_revenue_cents += revenue,
                                 _ => {}
                             }
                         }
@@ -295,6 +298,7 @@ pub(crate) async fn aggregate_sales_summary(
                                 "retail" => agg.retail_revenue_cents += revenue,
                                 "repair" => agg.repair_revenue_cents += revenue,
                                 "print" => agg.print_revenue_cents += revenue,
+                                "charge" => agg.charge_revenue_cents += revenue,
                                 _ => {}
                             }
                         }
@@ -628,5 +632,6 @@ pub(crate) struct SalesSummaryAggregate {
     pub retail_revenue_cents: i64,
     pub repair_revenue_cents: i64,
     pub print_revenue_cents: i64,
+    pub charge_revenue_cents: i64,
     pub payment_methods: PaymentMethodBreakdown,
 }

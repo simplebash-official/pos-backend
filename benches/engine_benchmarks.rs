@@ -16,6 +16,7 @@ fn generate_mock_timeseries(num_points: usize) -> Vec<TimeSeriesPoint> {
             retail_revenue_cents: 70_000 + ((i * 89) % 30_000) as i64,
             repair_revenue_cents: 20_000 + ((i * 41) % 15_000) as i64,
             print_revenue_cents: 10_000 + ((i * 17) % 5_000) as i64,
+            charge_revenue_cents: 0,
             discount_cents: 5_000,
             cogs_cents: 50_000,
             gross_profit_cents: 45_000,
