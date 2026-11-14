@@ -514,6 +514,7 @@ async fn compute_kpis(
         retail_revenue_cents: invoice.retail_revenue_cents,
         repair_revenue_cents: invoice.repair_revenue_cents,
         print_revenue_cents: invoice.print_revenue_cents,
+        charge_revenue_cents: invoice.charge_revenue_cents,
         invoice_count: invoice.invoice_count,
         items_sold: invoice.retail_items_sold,
         avg_basket_cents: if invoice.invoice_count == 0 {
@@ -692,7 +693,10 @@ pub(crate) async fn get_analytics_timeseries(
         let commission_cents = commission.get(&ms).copied().unwrap_or(0);
 
         let point = if let Some(b) = raw_by_ms.get(&ms) {
-            let revenue = b.retail_revenue_cents + b.repair_revenue_cents + b.print_revenue_cents;
+            let revenue = b.retail_revenue_cents
+                + b.repair_revenue_cents
+                + b.print_revenue_cents
+                + b.charge_revenue_cents;
             let gross_profit = revenue - b.cogs_cents;
             TimeSeriesPoint {
                 period_start: cursor,
@@ -701,6 +705,7 @@ pub(crate) async fn get_analytics_timeseries(
                 retail_revenue_cents: b.retail_revenue_cents,
                 repair_revenue_cents: b.repair_revenue_cents,
                 print_revenue_cents: b.print_revenue_cents,
+                charge_revenue_cents: b.charge_revenue_cents,
                 discount_cents: b.discount_cents,
                 cogs_cents: b.cogs_cents,
                 gross_profit_cents: gross_profit,
@@ -743,6 +748,7 @@ fn fold_totals(points: &[TimeSeriesPoint]) -> TimeSeriesPoint {
         t.retail_revenue_cents += p.retail_revenue_cents;
         t.repair_revenue_cents += p.repair_revenue_cents;
         t.print_revenue_cents += p.print_revenue_cents;
+        t.charge_revenue_cents += p.charge_revenue_cents;
         t.discount_cents += p.discount_cents;
         t.cogs_cents += p.cogs_cents;
         t.gross_profit_cents += p.gross_profit_cents;

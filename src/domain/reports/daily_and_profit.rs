@@ -40,6 +40,7 @@ pub struct DailySalesReportResponse {
     pub total_invoices: u64,
     pub total_repair_revenue_cents: i64,
     pub total_print_revenue_cents: i64,
+    pub total_charge_revenue_cents: i64,
     pub total_retail_revenue_cents: i64,
     pub total_discounts_cents: i64,
     pub payment_methods: PaymentMethodBreakdown,
@@ -63,6 +64,8 @@ pub struct DailySalesReportSummary {
     pub repair_revenue_cents: i64,
     /// Revenue from print jobs in cents.
     pub print_revenue_cents: i64,
+    /// Revenue from one-time charges in cents.
+    pub charge_revenue_cents: i64,
     /// Revenue from retail merchandise in cents.
     pub retail_revenue_cents: i64,
     /// Payment method distributions on this date.
@@ -160,6 +163,7 @@ pub struct MonthlyProfitReportResponse {
     pub retail_revenue_cents: i64,
     pub repair_revenue_cents: i64,
     pub print_revenue_cents: i64,
+    pub charge_revenue_cents: i64,
     pub total_discounts_cents: i64,
     pub cogs_cents: i64,
     pub gross_profit_cents: i64,

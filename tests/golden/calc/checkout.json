@@ -84,7 +84,8 @@
     "sourceBreakdown": {
       "retailCents": 4390,
       "repairsCents": 2500,
-      "printCents": 0
+      "printCents": 0,
+      "chargesCents": 0
     },
     "payment": {
       "effectiveTenderedCents": 5000,

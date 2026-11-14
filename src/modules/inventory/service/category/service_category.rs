@@ -1,3 +1,4 @@
+use super::service_uncategorized::{ensure_category_removable, ensure_subcategory_removable};
 use crate::clients::db::Db;
 use crate::core::constants::{codes, prefixes};
 use crate::core::error::{AppError, AppResult};
@@ -144,6 +145,7 @@ pub async fn create_category(db: &Db, body: CreateCategoryRequest) -> AppResult<
 /// pointing at an orphaned subcategory.
 pub(crate) async fn delete_category(db: &Db, category_key: String) -> AppResult<CategoryInfo> {
     crate::core::logging::domain::tracked("inventory.category_deleted", async move {
+        ensure_category_removable(&category_key)?;
         let products_using_category =
             repository::product::count_products_in_category(db, &category_key).await?;
 
@@ -288,6 +290,7 @@ pub(crate) async fn remove_subcategory(
     subcategory_key: String,
 ) -> AppResult<CategoryInfo> {
     crate::core::logging::domain::tracked("inventory.subcategory_removed", async move {
+        ensure_subcategory_removable(&subcategory_key)?;
         let category = repository::category::find_category_by_key(db, &category_key)
             .await?
             .ok_or_else(|| {

@@ -184,6 +184,7 @@ pub(crate) async fn build_analytics_report_data(
             "retailRevenueCents": ts.iter().map(|p| p.retail_revenue_cents).collect::<Vec<_>>(),
             "repairRevenueCents": ts.iter().map(|p| p.repair_revenue_cents).collect::<Vec<_>>(),
             "printRevenueCents": ts.iter().map(|p| p.print_revenue_cents).collect::<Vec<_>>(),
+            "chargeRevenueCents": ts.iter().map(|p| p.charge_revenue_cents).collect::<Vec<_>>(),
             "cogsCents": ts.iter().map(|p| p.cogs_cents).collect::<Vec<_>>(),
             "grossProfitCents": ts.iter().map(|p| p.gross_profit_cents).collect::<Vec<_>>(),
             "grossMarginBps": ts.iter().map(|p| p.gross_margin_bps).collect::<Vec<_>>(),

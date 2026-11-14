@@ -25,6 +25,7 @@ pub enum CalcSource {
     Retail,
     Repair,
     Print,
+    Charge,
 }
 
 /// How the sale is being paid.
@@ -137,6 +138,7 @@ pub struct CalcSourceBreakdown {
     pub retail_cents: i64,
     pub repairs_cents: i64,
     pub print_cents: i64,
+    pub charges_cents: i64,
 }
 
 /// The payment state of the sale: change, shortfall, split and credit figures.
@@ -246,6 +248,7 @@ pub fn compute_checkout(req: &CalcCheckoutRequest) -> CalcResult<CalcCheckoutRep
                 CalcSource::Retail => LineSource::Retail,
                 CalcSource::Repair => LineSource::Repair,
                 CalcSource::Print => LineSource::Print,
+                CalcSource::Charge => LineSource::Charge,
             },
         })
         .collect();
@@ -296,6 +299,7 @@ pub fn compute_checkout(req: &CalcCheckoutRequest) -> CalcResult<CalcCheckoutRep
             retail_cents: totals.retail_cents,
             repairs_cents: totals.repairs_cents,
             print_cents: totals.print_cents,
+            charges_cents: totals.charges_cents,
         },
         payment: CalcPaymentReply {
             effective_tendered_cents: state.effective_tendered_cents,

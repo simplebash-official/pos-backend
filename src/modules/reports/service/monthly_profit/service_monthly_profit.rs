@@ -102,6 +102,7 @@ pub(crate) async fn get_monthly_profit_report(
         retail_revenue_cents: sales.retail_revenue_cents,
         repair_revenue_cents: sales.repair_revenue_cents,
         print_revenue_cents: sales.print_revenue_cents,
+        charge_revenue_cents: sales.charge_revenue_cents,
         total_discounts_cents: sales.discount_cents,
         cogs_cents,
         gross_profit_cents,

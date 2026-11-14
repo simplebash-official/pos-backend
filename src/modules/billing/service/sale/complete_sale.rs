@@ -5,7 +5,8 @@ use crate::core::constants::prefixes;
 use crate::core::error::{AppError, AppResult};
 use crate::core::id::generate_id;
 use crate::domain::billing::{
-    CompleteSaleResponse, CreateSaleRequest, InvoiceItem, InvoiceStatus, PricingAdjustments,
+    CompleteSaleResponse, CreateSaleItemRequest, CreateSaleRequest, InvoiceItem, InvoiceStatus,
+    PricingAdjustments,
 };
 use crate::domain::inventory::{Product, StockMovementType};
 use crate::domain::sequences::ReserveSequenceRequest;
@@ -18,9 +19,38 @@ use std::collections::HashMap;
 
 const VALID_PAYMENT_METHODS: &[&str] = &["cash", "card", "online", "split", "credit"];
 
-const VALID_SOURCE_TYPES: &[&str] = &["retail", "repair", "print"];
+const VALID_SOURCE_TYPES: &[&str] = &["retail", "repair", "print", "charge"];
 
 const VALID_DISCOUNT_TYPES: &[&str] = &["percentage", "fixed"];
+
+/// A one-time charge is a name, a price and a quantity and nothing else: it has no product,
+/// price tier, ticket, serial number or employee to resolve, so any of those on it is a client
+/// bug and is refused instead of ignored.
+fn validate_charge_item(item: &CreateSaleItemRequest) -> AppResult<()> {
+    if item
+        .name
+        .as_deref()
+        .is_none_or(|name| name.trim().is_empty())
+    {
+        return Err(AppError::validation("A charge must include a name"));
+    }
+    if item.unit_price_cents.is_none_or(|price| price < 1) {
+        return Err(AppError::validation(
+            "A charge must include unitPriceCents greater than 0",
+        ));
+    }
+    if item.product_key.is_some()
+        || item.selling_price_cents.is_some()
+        || item.source_ticket_key.is_some()
+        || item.assigned_employee_name.is_some()
+        || item.serial_numbers.is_some()
+    {
+        return Err(AppError::validation(
+            "A charge cannot carry a product, price tier, ticket, employee or serial numbers",
+        ));
+    }
+    Ok(())
+}
 
 fn validate_sale_request(body: &CreateSaleRequest) -> AppResult<()> {
     if body.items.is_empty() {
@@ -40,6 +70,9 @@ fn validate_sale_request(body: &CreateSaleRequest) -> AppResult<()> {
                 item.source_type,
                 VALID_SOURCE_TYPES.join(", ")
             )));
+        }
+        if item.source_type == "charge" {
+            validate_charge_item(item)?;
         }
         if item.quantity < 1 {
             return Err(AppError::validation(format!(
@@ -332,6 +365,8 @@ async fn apply_line_item_side_effects(
                 item.name
             )),
         },
+        // A one-time charge moves no stock and owns no ticket, serial or warranty.
+        "charge" => None,
         _ => None,
     }
 }

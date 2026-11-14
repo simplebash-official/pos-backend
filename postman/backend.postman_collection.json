@@ -273,6 +273,57 @@
           "response": []
         },
         {
+          "name": "Complete Sale (one-time charge)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const data = pm.response.json().data;",
+                  "    pm.environment.set(\"invoiceKey\", data.invoice.key);",
+                  "    console.log(`invoiceKey (${data.invoice.key}) saved`);",
+                  "}"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"staff\": {\n    \"cashierName\": \"Nimal Perera\"\n  },\n  \"items\": [\n    {\n      \"name\": \"Delivery fee\",\n      \"unitPriceCents\": 150000,\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"sourceType\": \"charge\"\n    }\n  ],\n  \"payment\": {\n    \"paymentMethod\": \"cash\",\n    \"isCredit\": false,\n    \"amountReceivedCents\": 150000\n  },\n  \"shopProfileSnapshot\": {\n    \"tradingName\": \"TechFix Repairs\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/billing/sales",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "billing",
+                "sales"
+              ]
+            },
+            "description": "A one-time charge: a service or fee with no stock behind it. Send `sourceType: \"charge\"` with a `name`, `unitPriceCents` and `quantity` only (no productKey, sellingPriceCents, sourceTicketKey, assignedEmployeeName or serialNumbers). Needs `billing:write`. It records no cost, counts in full as income under the Custom charges revenue stream, and moves no stock."
+          },
+          "response": []
+        },
+        {
           "name": "List Invoices",
           "request": {
             "method": "GET",

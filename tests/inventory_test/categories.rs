@@ -690,3 +690,73 @@ async fn inventory_routes_reject_a_token_signed_with_the_wrong_secret() {
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
+
+/// The shipped "Uncategorized" category is there on a fresh shop, takes a product, and cannot be
+/// deleted or have its only subcategory removed.
+async fn check_uncategorized_is_seeded_usable_and_protected(app: &common::TestApp) {
+    let admin = admin_token(&app.config);
+
+    let (status, valid) = send(app, "GET", "/api/inventory/categories/valid", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let category = valid["data"]["categories"]
+        .as_array()
+        .expect("the value is an array")
+        .iter()
+        .find(|entry| entry["key"] == "cat_uncategorized")
+        .expect("Uncategorized is seeded");
+    assert_eq!(category["name"], "Uncategorized");
+    assert_eq!(
+        category["subcategories"][0]["key"],
+        "subcat_uncategorized_general"
+    );
+    assert_eq!(category["subcategories"][0]["name"], "General");
+
+    let (status, product) = send(
+        app,
+        "POST",
+        "/api/inventory/products",
+        Some(json!({
+            "name": "Counter Quick Add",
+            "categoryKey": "cat_uncategorized",
+            "subcategoryKey": "subcat_uncategorized_general",
+            "warranty": { "coverage": { "kind": "none" } },
+            "openingStock": { "quantity": 3, "unitCostCents": 500, "sellingPriceCents": 900 },
+            "minStockThreshold": 0,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{product}");
+    assert_eq!(product["data"]["category"], "Uncategorized");
+
+    let (status, refused) = send_authed(
+        &app.router,
+        "DELETE",
+        "/api/inventory/categories/cat_uncategorized",
+        None,
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(refused["code"], codes::SYSTEM_CATEGORY_PROTECTED);
+
+    let (status, refused) = send_authed(
+        &app.router,
+        "DELETE",
+        "/api/inventory/categories/cat_uncategorized/subcategories/subcat_uncategorized_general",
+        None,
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(refused["code"], codes::SYSTEM_CATEGORY_PROTECTED);
+}
+
+#[tokio::test]
+async fn uncategorized_is_seeded_usable_and_protected_on_mongo() {
+    check_uncategorized_is_seeded_usable_and_protected(&common::spawn_app().await).await;
+}
+
+#[tokio::test]
+async fn uncategorized_is_seeded_usable_and_protected_on_sqlite() {
+    check_uncategorized_is_seeded_usable_and_protected(&common::spawn_app_sqlite().await).await;
+}

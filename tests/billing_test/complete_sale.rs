@@ -657,3 +657,112 @@ async fn sales_and_invoice_payments_return_session_closing_during_shared_blind_c
 
     let _ = app.mongo().drop().await;
 }
+
+#[tokio::test]
+async fn complete_sale_charge_line_moves_no_stock_and_records_no_cost() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+    let (product_id, product_key, price) = seed_product(&app).await;
+
+    let mut payload = base_sale_payload();
+    payload["items"] = json!([
+        {
+            "productKey": product_key,
+            "sellingPriceCents": price,
+            "quantity": 1,
+            "discountCents": 0,
+            "sourceType": "retail",
+        },
+        {
+            "name": "  Delivery fee ",
+            "unitPriceCents": 1500,
+            "quantity": 2,
+            "discountCents": 0,
+            "sourceType": "charge",
+        },
+    ]);
+    payload["payment"]["amountReceivedCents"] = json!(price + 3000);
+
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/billing/sales",
+        Some(payload),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+
+    let data = &body["data"];
+    assert_eq!(data["warnings"], json!([]));
+    assert_eq!(data["invoice"]["status"], "paid");
+    assert_eq!(data["invoice"]["subtotalCents"], price + 3000);
+    assert_eq!(data["invoice"]["totalCents"], price + 3000);
+
+    let charge = &data["invoice"]["items"][1];
+    assert_eq!(charge["sourceType"], "charge");
+    assert_eq!(charge["name"], "Delivery fee", "the name is stored trimmed");
+    assert_eq!(charge["totalCents"], 3000);
+    assert!(charge["productKey"].is_null(), "a charge has no product");
+    assert!(
+        charge["unitCostCents"].is_null(),
+        "a charge records no cost, never a zero"
+    );
+    assert_eq!(charge["batchAllocations"], json!([]));
+    assert_eq!(charge["serialNumbers"], json!([]));
+
+    let product = get_product(&app, &product_id).await;
+    assert_eq!(
+        product["stockQuantity"], 9,
+        "only the retail line took stock; the charge took none"
+    );
+}
+
+#[tokio::test]
+async fn complete_sale_refuses_a_malformed_charge_line() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+    let (_, product_key, price) = seed_product(&app).await;
+
+    let valid = json!({
+        "name": "Setup fee",
+        "unitPriceCents": 2500,
+        "quantity": 1,
+        "discountCents": 0,
+        "sourceType": "charge",
+    });
+    let cases = [
+        ("no name", json!({ "name": null })),
+        ("blank name", json!({ "name": "   " })),
+        ("no price", json!({ "unitPriceCents": null })),
+        ("zero price", json!({ "unitPriceCents": 0 })),
+        ("zero quantity", json!({ "quantity": 0 })),
+        ("a product", json!({ "productKey": product_key })),
+        ("a price tier", json!({ "sellingPriceCents": price })),
+        ("a ticket", json!({ "sourceTicketKey": "rep_x" })),
+        ("an employee", json!({ "assignedEmployeeName": "Nimal" })),
+        ("serial numbers", json!({ "serialNumbers": ["SN-1"] })),
+    ];
+    for (label, change) in cases {
+        let mut item = valid.clone();
+        for (field, value) in change.as_object().expect("the change is an object") {
+            item[field] = value.clone();
+        }
+        let mut payload = base_sale_payload();
+        payload["items"] = json!([item]);
+        payload["payment"]["amountReceivedCents"] = json!(2500);
+        let (status, body) = send_authed(
+            &app.router,
+            "POST",
+            "/api/billing/sales",
+            Some(payload),
+            &token,
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "a charge with {label} must be refused: {body}"
+        );
+    }
+}

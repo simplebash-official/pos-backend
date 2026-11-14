@@ -665,3 +665,162 @@ async fn analytics_document_returns_a_pdf() {
         .expect("the awaited step succeeds");
     assert!(bytes.starts_with(b"%PDF"), "response body should be a PDF");
 }
+
+/// A paid invoice whose lines are `(source, total, unit cost)`; the invoice discount comes off
+/// the total only, never off the lines.
+fn mixed_source_invoice(
+    created_at: chrono::DateTime<Utc>,
+    lines: &[(&str, i64, Option<i64>)],
+    invoice_discount_cents: i64,
+) -> InvoiceDocument {
+    let mut invoice = analytics_seed_invoice(&generate_id("mixinv"), created_at, 0, 0, 1, 0);
+    invoice.items = lines
+        .iter()
+        .map(|(source, total, cost)| {
+            let mut item = invoice.items[0].clone();
+            item.name = format!("{source} line");
+            item.product_key = (*source == "retail").then(|| format!("prd_{source}"));
+            item.sku = None;
+            item.unit_price_cents = *total;
+            item.total_cents = *total;
+            item.unit_cost_cents = *cost;
+            item.source_type = (*source).to_string();
+            item
+        })
+        .collect();
+    let subtotal: i64 = lines.iter().map(|(_, total, _)| total).sum();
+    invoice.subtotal_cents = subtotal;
+    invoice.discount_cents = invoice_discount_cents;
+    invoice.total_cents = subtotal - invoice_discount_cents;
+    invoice.amount_received_cents = Some(invoice.total_cents);
+    invoice
+}
+
+#[tokio::test]
+async fn one_time_charges_get_their_own_stream_and_every_report_adds_up() {
+    let app = common::spawn_app().await;
+    let admin_token = common::mint_token(
+        &app.config,
+        Some(Role::Admin),
+        roles::default_permissions(Role::Admin),
+    );
+
+    // A quiet past window (see the analytics test above): 10 July 2021, 15:30 in Colombo.
+    let day = NaiveDate::from_ymd_opt(2021, 7, 10)
+        .expect("the date is valid")
+        .and_hms_opt(10, 0, 0)
+        .expect("the date is valid")
+        .and_utc();
+    let window = doc! {
+        "created_at": {
+            "$gte": BsonDateTime::from_chrono(day - Duration::days(2)),
+            "$lte": BsonDateTime::from_chrono(day + Duration::days(2)),
+        }
+    };
+    for coll in ["invoices", "repairs", "print_jobs", "credit_notes"] {
+        app.mongo()
+            .collection::<Document>(coll)
+            .delete_many(window.clone())
+            .await
+            .expect("the window is cleared");
+    }
+
+    // Lines: retail 1000, repair 2500, print 600, charges 300 + 700 = 4400 + 700 = 5100.
+    // Invoice discounts of 400 leave 4700 as the sales total.
+    app.mongo()
+        .collection::<InvoiceDocument>("invoices")
+        .insert_many(vec![
+            mixed_source_invoice(
+                day,
+                &[("retail", 1000, Some(600)), ("charge", 300, None)],
+                0,
+            ),
+            mixed_source_invoice(
+                day,
+                &[
+                    ("repair", 2500, Some(1500)),
+                    ("print", 600, Some(200)),
+                    ("charge", 700, None),
+                ],
+                400,
+            ),
+        ])
+        .await
+        .expect("the invoices are stored");
+
+    let get = |uri: &'static str| {
+        let router = app.router.clone();
+        let token = admin_token.clone();
+        async move {
+            let (status, body) = send_authed(&router, "GET", uri, None, &token).await;
+            assert_eq!(status, StatusCode::OK, "{uri} failed: {body}");
+            body["data"].clone()
+        }
+    };
+
+    let dashboard = get("/api/reports/dashboard?from=2021-07-10&to=2021-07-10").await;
+    assert_eq!(dashboard["totalRevenueCents"], 4700);
+    assert_eq!(dashboard["totalDiscountsCents"], 400);
+    assert_eq!(dashboard["retailRevenueCents"], 1000);
+    assert_eq!(dashboard["repairRevenueCents"], 2500);
+    assert_eq!(dashboard["printRevenueCents"], 600);
+    assert_eq!(dashboard["chargeRevenueCents"], 1000);
+
+    let daily = get("/api/reports/daily-sales?date=2021-07-10").await;
+    assert_eq!(daily["totalSalesCents"], 4700);
+    assert_eq!(daily["totalChargeRevenueCents"], 1000);
+    let day_row = &daily["summaries"][0];
+    let streams: i64 = [
+        "retailRevenueCents",
+        "repairRevenueCents",
+        "printRevenueCents",
+        "chargeRevenueCents",
+    ]
+    .iter()
+    .map(|field| day_row[field].as_i64().expect("the stream is an integer"))
+    .sum();
+    assert_eq!(
+        streams,
+        day_row["grossSalesCents"]
+            .as_i64()
+            .expect("the gross is an integer")
+    );
+
+    let summary =
+        get("/api/reports/analytics/summary?preset=custom&from=2021-07-10&to=2021-07-10").await;
+    let current = &summary["current"];
+    assert_eq!(current["chargeRevenueCents"], 1000);
+    assert_eq!(
+        current["retailCogsCents"], 600,
+        "a charge adds no retail cost"
+    );
+    let streams: i64 = [
+        "retailRevenueCents",
+        "repairRevenueCents",
+        "printRevenueCents",
+        "chargeRevenueCents",
+    ]
+    .iter()
+    .map(|field| current[field].as_i64().expect("the stream is an integer"))
+    .sum();
+    assert_eq!(
+        streams,
+        current["totalRevenueCents"]
+            .as_i64()
+            .expect("the total is an integer")
+            + current["discountCents"]
+                .as_i64()
+                .expect("the discount is an integer")
+    );
+
+    let series = get(
+        "/api/reports/analytics/timeseries?preset=custom&from=2021-07-10&to=2021-07-10&granularity=day",
+    )
+    .await;
+    assert_eq!(series["totals"]["chargeRevenueCents"], 1000);
+    assert_eq!(series["totals"]["revenueCents"], 5100);
+
+    let month = get("/api/reports/monthly-profit?month=2021-07").await;
+    assert_eq!(month["chargeRevenueCents"], 1000);
+    assert_eq!(month["totalRevenueCents"], 4700);
+}
