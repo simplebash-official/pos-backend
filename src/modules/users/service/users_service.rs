@@ -239,6 +239,24 @@ pub(super) fn ensure_manageable(caller_role: Role, target_role: Role) -> AppResu
     }
 }
 
+/// Links an account to the employee profile made for it (the admin's own profile, see
+/// `employees::service::create_owner_profile`). `update_user` cannot do this: the hierarchy
+/// never lets an Admin edit an Admin account. Nothing else may reach this function.
+pub(crate) async fn link_employee(db: &Db, user_id: ObjectId, employee_key: &str) -> AppResult<()> {
+    crate::core::logging::domain::tracked("users.employee_linked", async move {
+        repository::update_user(
+            db,
+            user_id,
+            doc! { "employee_key": employee_key, "updated_at": BsonDateTime::now() },
+        )
+        .await?
+        .ok_or_else(|| AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND))?;
+        // Re-delivers the employee with its `login` filled in on the next sync.
+        employees::service::touch_by_key(db, employee_key).await
+    })
+    .await
+}
+
 /// The shop's single Admin document, if one exists.
 pub async fn find_admin_document(db: &Db) -> AppResult<Option<UserDocument>> {
     Ok(

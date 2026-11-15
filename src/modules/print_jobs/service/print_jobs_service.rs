@@ -11,7 +11,7 @@ use crate::domain::sequences::ReserveSequenceRequest;
 use crate::modules::print_jobs::model::PrintJobDocument;
 use crate::modules::print_jobs::repository;
 use crate::modules::{customers, employees, sequences};
-use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
+use mongodb::bson::{Bson, DateTime as BsonDateTime, Document, doc};
 
 /// Creates the print job.
 pub async fn create_print_job(
@@ -48,8 +48,14 @@ pub async fn create_print_job(
             split_value,
             ..
         } = assignment;
-        let assigned_employee_name =
-            resolve_assignment_employee_name(db, assigned_employee_id.as_deref()).await?;
+        let assigned_employee_name = match assigned_employee_id.as_deref() {
+            Some(key) => Some(
+                employees::service::resolve_assignment(db, key, split_type.as_deref(), split_value)
+                    .await?
+                    .name,
+            ),
+            None => None,
+        };
 
         let reservation = sequences::service::reserve_sequence(
             db,
@@ -237,21 +243,6 @@ pub(crate) async fn mark_delivered(db: &Db, key: &str) -> AppResult<PrintJob> {
     .await
 }
 
-/// See `repairs::service::resolve_assignment_employee_name` — identical
-/// resolve-from-key/server-derives-name/never-trust-client-name rule.
-pub(super) async fn resolve_assignment_employee_name(
-    db: &Db,
-    assigned_employee_id: Option<&str>,
-) -> AppResult<Option<String>> {
-    match assigned_employee_id {
-        Some(key) => {
-            let employee = employees::service::get_employee_by_key(db, key).await?;
-            Ok(Some(employee.name))
-        }
-        None => Ok(None),
-    }
-}
-
 /// When `customer_key` resolves to a real customer, that record is
 /// authoritative for name/phone — a client-typed name/phone alongside a
 /// valid key could otherwise silently diverge from the linked customer.
@@ -359,10 +350,29 @@ pub async fn update_print_job(
             set_doc.insert("material_cost_cents", mc);
         }
         if let Some(assignment) = body.assignment {
-            if let Some(eid) = assignment.assigned_employee_id {
-                let ename = resolve_assignment_employee_name(db, Some(&eid)).await?;
-                set_doc.insert("assigned_employee_id", eid);
-                set_doc.insert("assigned_employee_name", ename);
+            // A split sent with no employee still has to be checked against who the job is
+            // already assigned to.
+            let employee_key = assignment
+                .assigned_employee_id
+                .as_deref()
+                .or(existing.assigned_employee_id.as_deref());
+            if let Some(key) = employee_key {
+                let assignee = employees::service::resolve_assignment(
+                    db,
+                    key,
+                    assignment.split_type.as_deref(),
+                    assignment.split_value,
+                )
+                .await?;
+                if let Some(eid) = &assignment.assigned_employee_id {
+                    set_doc.insert("assigned_employee_id", eid);
+                    set_doc.insert("assigned_employee_name", assignee.name);
+                    if assignee.is_owner {
+                        // Moving a job to the owner drops any commission it carried.
+                        set_doc.insert("split_type", Bson::Null);
+                        set_doc.insert("split_value", Bson::Null);
+                    }
+                }
             }
             if let Some(st) = assignment.split_type {
                 set_doc.insert("split_type", st);

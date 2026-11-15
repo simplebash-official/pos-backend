@@ -7,6 +7,7 @@
 mod employees_service;
 
 pub use employees_service::create_employee;
+pub(crate) use employees_service::create_owner_profile;
 pub(crate) use employees_service::delete_employee;
 pub(crate) use employees_service::delete_employees;
 pub(crate) use employees_service::get_employee;
@@ -14,5 +15,6 @@ pub(crate) use employees_service::get_employee_by_key;
 pub(crate) use employees_service::get_employees_by_keys;
 pub(crate) use employees_service::hydrate_sync_documents;
 pub use employees_service::list_employees;
+pub(crate) use employees_service::resolve_assignment;
 pub(crate) use employees_service::touch_by_key;
 pub(crate) use employees_service::update_employee;

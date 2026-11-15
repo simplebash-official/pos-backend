@@ -14,6 +14,7 @@
 mod domain_employees;
 
 pub use domain_employees::CreateEmployeeRequest;
+pub use domain_employees::CreateOwnerProfileRequest;
 pub use domain_employees::DeleteEmployeesRequest;
 pub use domain_employees::DeleteEmployeesResponse;
 pub use domain_employees::Employee;

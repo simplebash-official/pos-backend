@@ -19,6 +19,7 @@ pub(crate) use users_service::fingerprint_for_login;
 pub(crate) use users_service::get_user;
 pub(crate) use users_service::get_user_for_caller;
 pub use users_service::hash_password;
+pub(crate) use users_service::link_employee;
 pub(crate) use users_service::list_users;
 pub(crate) use users_service::pin_approver;
 pub use users_service::reset_admin_credentials;

@@ -57,7 +57,7 @@ pub struct CreateRepairRequest {
 /// receipts and shown in `ServiceJobPickerModal` on the frontend.
 ///
 /// `assigned_employee_id` is resolved server-side against `modules::employees`
-/// on create/update (`service::resolve_assignment_employee_name`) — an
+/// on create/update (`employees::service::resolve_assignment`) — an
 /// unresolvable id 404s before any write, and `assigned_employee_name` is
 /// always server-derived from it, never trusted from the client.
 /// `split_type`/`split_value` stay opaque display fields; the actual

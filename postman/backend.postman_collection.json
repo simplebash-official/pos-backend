@@ -1885,6 +1885,56 @@
           "response": []
         },
         {
+          "name": "Create My Employee Profile (Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const data = pm.response.json().data;",
+                  "    pm.environment.set(\"employeeId\", data.id);",
+                  "    pm.environment.set(\"employeeKey\", data.key);",
+                  "    console.log(`employeeId (${data.id}) and employeeKey (${data.key}) saved`);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"0771234567\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/employees/me",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "employees",
+                "me"
+              ]
+            },
+            "description": "Admin only. Makes the signed-in Admin's own employee profile (role owner) from their account name, links it to their login, and returns it. 409 OWNER_PROFILE_EXISTS when they already have one. A job assigned to the owner takes no commission: sending a split with it is refused with 422 OWNER_HAS_NO_COMMISSION."
+          },
+          "response": []
+        },
+        {
           "name": "Get Employee",
           "request": {
             "method": "GET",
