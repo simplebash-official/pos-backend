@@ -9233,6 +9233,15 @@
                 "value": "application/json"
               }
             ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerKey\": \"{{customerKey}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
             "url": {
               "raw": "{{backendBaseUrl}}/api/warranty-claims/{{warrantyClaimKey}}/paid-repair",
               "host": [
@@ -9245,7 +9254,7 @@
                 "paid-repair"
               ]
             },
-            "description": "Turns a rejected claim into a paid repair job for the same item, once per claim. Needs `warranty_claims:record` and `repairs:write`."
+            "description": "Turns a rejected claim into a paid repair job for the same item, once per claim. Send `{}`, or `customerKey` of a registered customer for a claim whose sale had no customer (a customer the claim already has always wins; 400 when the repair then has no name or phone). Needs `warranty_claims:record` and `repairs:write`."
           },
           "response": []
         },

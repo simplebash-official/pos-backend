@@ -379,6 +379,15 @@ pub struct ResolveClaimRequest {
     pub replacement: Option<ReplacementRequest>,
 }
 
+/// `POST /warranty-claims/{key}/paid-repair`: the customer, for a claim whose sale had none.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PaidRepairRequest {
+    /// A registered customer to open the repair job for. Used only when the claim has no
+    /// customer of its own; the job takes the name and phone from the customer record.
+    pub customer_key: Option<String>,
+}
+
 /// How a repair decided in `POST /warranty-claims/process` ends.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(tag = "when", rename_all = "snake_case")]

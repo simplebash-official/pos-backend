@@ -965,15 +965,74 @@ async fn scenario(app: &common::TestApp) {
         after["warranty"]["state"], "expired",
         "no longer held by the claim"
     );
-    let (status, paid) = claim_step(app, &staff, &late_key, "paid-repair", None).await;
+    let (status, paid) = claim_step(app, &staff, &late_key, "paid-repair", Some(json!({}))).await;
     assert_eq!(status, StatusCode::OK, "{paid}");
     assert!(
         text(&paid["data"]["paidRepairNumber"]).starts_with("REP-"),
         "{paid}"
     );
-    let (status, body) = claim_step(app, &staff, &late_key, "paid-repair", None).await;
+    let (status, body) = claim_step(app, &staff, &late_key, "paid-repair", Some(json!({}))).await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     ok_step(app, &staff, &late_key, "return", Value::Null).await;
+
+    // ---- A walk-in sale has no customer, so the paid repair is given one ----
+    let mut walk_in = sale(json!([
+        { "productKey": bulk_item, "quantity": 1, "discountCents": 0, "sourceType": "retail",
+          "sellingPriceCents": 1500 },
+    ]));
+    walk_in
+        .as_object_mut()
+        .expect("a sale is an object")
+        .remove("customer");
+    let (status, walk_in_sale) =
+        send(app, "POST", "/api/billing/sales", Some(walk_in), &staff).await;
+    assert_eq!(status, StatusCode::OK, "{walk_in_sale}");
+    let walk_in_invoice = text(&walk_in_sale["data"]["invoice"]["key"]);
+    let walk_in_warranty = text(&warranties_of(app, &staff, &walk_in_invoice).await[0]["key"]);
+    let walk_in_claim = text(&open(app, &staff, &walk_in_warranty).await["key"]);
+    inspect_and_decide(app, &staff, &walk_in_claim, "reject").await;
+    let (status, body) =
+        claim_step(app, &staff, &walk_in_claim, "paid-repair", Some(json!({}))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(
+        text(&body["message"]).contains("Customer name is required"),
+        "{body}"
+    );
+    let (status, customer) = send(
+        app,
+        "POST",
+        "/api/customers",
+        Some(json!({ "name": "Sunil Silva", "primaryPhone": "0777654321" })),
+        &staff,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{customer}");
+    let customer_key = text(&customer["data"]["key"]);
+    let (status, paid) = claim_step(
+        app,
+        &staff,
+        &walk_in_claim,
+        "paid-repair",
+        Some(json!({ "customerKey": customer_key })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{paid}");
+    assert!(
+        text(&paid["data"]["paidRepairNumber"]).starts_with("REP-"),
+        "{paid}"
+    );
+    let (status, repair) = send(
+        app,
+        "GET",
+        &format!("/api/repairs/{}", text(&paid["data"]["paidRepairKey"])),
+        None,
+        &staff,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{repair}");
+    assert_eq!(repair["data"]["customerName"], "Sunil Silva");
+    assert_eq!(repair["data"]["customerPhone"], "0777654321");
+    assert_eq!(repair["data"]["customerKey"], customer_key);
 
     // ---- The queue ----
     let (status, open_now) =

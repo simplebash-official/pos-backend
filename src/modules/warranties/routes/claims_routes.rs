@@ -11,8 +11,8 @@ use crate::core::response::{ApiResponse, ErrorResponse};
 use crate::domain::warranties::{
     ClaimListQuery, ClaimListResponse, CreateConditionRequest, DecideClaimRequest,
     InspectClaimRequest, OpenClaimRequest, OpenClaimsBatchRequest, OpenClaimsBatchResponse,
-    ProcessClaimRequest, ResolveClaimRequest, SendToSupplierRequest, SupplierReturnRequest,
-    WarrantyClaim, WarrantyCondition, WarrantyConditionsResponse,
+    PaidRepairRequest, ProcessClaimRequest, ResolveClaimRequest, SendToSupplierRequest,
+    SupplierReturnRequest, WarrantyClaim, WarrantyCondition, WarrantyConditionsResponse,
 };
 use crate::modules::warranties::service;
 use axum::Json;
@@ -300,6 +300,7 @@ pub(super) async fn return_to_customer(
 }
 
 #[utoipa::path(post, path = "/{key}/paid-repair", tag = modules::WARRANTY_CLAIMS,
+    request_body = PaidRepairRequest,
     params(("key" = String, Path, description = "Claim key (`wcl_…`)")),
     security(("bearerAuth" = [])),
     responses(
@@ -317,11 +318,12 @@ pub(super) async fn convert_to_paid_repair(
     user: CurrentUser,
     DeviceId(device_id): DeviceId,
     Path(key): Path<String>,
+    Json(body): Json<PaidRepairRequest>,
 ) -> AppResult<Json<ApiResponse<WarrantyClaim>>> {
     user.require_permission(perm::WARRANTY_CLAIMS_RECORD)?;
     user.require_permission(perm::REPAIRS_WRITE)?;
     let actor = actor(&state, &user).await?;
-    let claim = service::convert_to_paid_repair(&state.db, &key, &actor, device_id).await?;
+    let claim = service::convert_to_paid_repair(&state.db, &key, &actor, device_id, body).await?;
     Ok(Json(ApiResponse::success(claim, "Paid repair opened")))
 }
 

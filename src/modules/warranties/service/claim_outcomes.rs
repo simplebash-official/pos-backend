@@ -16,8 +16,8 @@ use crate::domain::billing::CreateCreditNoteItemRequest;
 use crate::domain::inventory::{BatchAllocation, StockMovementType};
 use crate::domain::repairs::{CreateRepairRequest, RepairCustomer};
 use crate::domain::warranties::{
-    ClaimAction, ClaimDecision, ClaimStatus, ReplacementRequest, ResolveClaimRequest,
-    WarrantyClaim, WarrantyEventKind, WarrantyStatus,
+    ClaimAction, ClaimDecision, ClaimStatus, PaidRepairRequest, ReplacementRequest,
+    ResolveClaimRequest, WarrantyClaim, WarrantyEventKind, WarrantyStatus,
 };
 use crate::modules::inventory::model::ProductSerialDocument;
 use crate::modules::warranties::model::{WarrantyClaimDocument, WarrantyDocument};
@@ -450,12 +450,14 @@ pub(crate) async fn finish_claim_refund(
 }
 
 /// Opens a paid repair job for an item whose claim was rejected, so the customer can still
-/// have it fixed. Once per claim.
+/// have it fixed. Once per claim. A walk-in sale leaves the claim without a customer, so the
+/// registered customer in `customer` stands in; a customer the claim already has always wins.
 pub(crate) async fn convert_to_paid_repair(
     db: &Db,
     key: &str,
     actor: &WarrantyActor,
     device_id: Option<String>,
+    customer: PaidRepairRequest,
 ) -> AppResult<WarrantyClaim> {
     crate::core::logging::domain::tracked("warranties.claim_paid_repair", async move {
         let mut claim = require_claim(db, key).await?;
@@ -482,7 +484,7 @@ pub(crate) async fn convert_to_paid_repair(
             db,
             CreateRepairRequest {
                 customer: RepairCustomer {
-                    customer_key: claim.customer_key.clone(),
+                    customer_key: claim.customer_key.clone().or(customer.customer_key),
                     customer_name: claim.customer_name.clone(),
                     customer_phone: claim.customer_phone.clone(),
                 },
