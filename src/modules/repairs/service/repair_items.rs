@@ -145,10 +145,10 @@ pub(crate) async fn price_items(
             return Err(AppError::validation(format!("Item {key} appears twice.")));
         }
         let description = trimmed(&input.description, "What is done", DESCRIPTION_MAX)?;
-        not_negative(input.labor_cents, "Labour")?;
+        not_negative(input.labor_cents, "Fee")?;
         if rework && input.labor_cents != 0 {
             return Err(AppError::validation(
-                "A warranty rework is free: its labour must be 0.",
+                "A warranty rework is free: its fees must be 0.",
             ));
         }
         let warranty = input.warranty.validated()?;
