@@ -567,20 +567,33 @@ async fn repair_totals_are_worked_out_on_the_server() {
     );
     let request = json!({ "items": [
         { "laborCents": 250_000, "partCents": 1_200_000, "partCostCents": 850_000 },
-        { "laborCents": 150_000 },
-        { "laborCents": null, "partCents": 30_000, "partCostCents": 12_000 },
+        { "laborCents": 150_000, "discount": { "type": "fixed", "cents": 50_000 } },
+        { "laborCents": null, "partCents": 30_000, "partCostCents": 12_000,
+          "discount": { "type": "percentage", "basisPoints": 1_250 } },
+        { "laborCents": 10_000, "discount": { "type": "fixed", "cents": 20_000 } },
     ] });
     let (status, body) = post(&app, "/api/calc/repair", &request, Some(&staff)).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let data = &body["data"];
-    assert_eq!(data["laborCents"], 400_000);
-    assert_eq!(data["partsCents"], 1_230_000);
-    assert_eq!(data["priceCents"], 1_630_000);
-    assert_eq!(data["costCents"], 862_000);
+    assert_eq!(data["totals"]["laborCents"], 410_000);
+    assert_eq!(data["totals"]["partsCents"], 1_230_000);
+    assert_eq!(data["totals"]["discountCents"], 50_000 + 3_750);
+    assert_eq!(data["totals"]["priceCents"], 1_640_000 - 53_750);
+    assert_eq!(data["totals"]["costCents"], 862_000);
+    assert_eq!(data["itemDiscountsCents"], json!([0, 50_000, 3_750, 0]));
+    assert_eq!(
+        data["blockers"],
+        json!([{ "itemIndex": 3, "code": "discount_more_than_item" }])
+    );
     golden("repair", &request, data);
 
     let negative = json!({ "items": [{ "laborCents": -1 }] });
     let (status, _) = post(&app, "/api/calc/repair", &negative, Some(&staff)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let wild = json!({ "items": [
+        { "laborCents": 5_000, "discount": { "type": "percentage", "basisPoints": 20_000 } },
+    ] });
+    let (status, _) = post(&app, "/api/calc/repair", &wild, Some(&staff)).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 
     let nobody = common::mint_token(&app.config, Some(Role::Staff), &[]);

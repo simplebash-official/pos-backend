@@ -223,7 +223,7 @@ pub(crate) async fn issue_for_repair(
             coverage: item.warranty.coverage,
             warranty_type,
             terms: item.warranty.terms.clone(),
-            unit_price_cents: item.labor_cents + item.part_cents,
+            unit_price_cents: item.net_cents(),
             starts_on: starts_on.to_string(),
             ends_on,
             status: WarrantyStatus::Active,

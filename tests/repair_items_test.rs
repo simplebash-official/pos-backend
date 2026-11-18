@@ -367,8 +367,8 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{totals}");
-    assert_eq!(totals["data"]["priceCents"], 15_000);
-    assert_eq!(totals["data"]["costCents"], 4_000);
+    assert_eq!(totals["data"]["totals"]["priceCents"], 15_000);
+    assert_eq!(totals["data"]["totals"]["costCents"], 4_000);
 
     // ---- Refused items ----
     let device = format!("DEV{}", &tag[..12]);
@@ -686,6 +686,8 @@ async fn scenario(app: &common::TestApp) {
         json!([{ "description": "Refit screen", "laborCents": 0, "warranty": months(1) }]),
         json!([{ "description": "Refit screen", "laborCents": 0, "warranty": no_cover(),
                  "part": { "source": "outside", "name": "Glue", "priceCents": 10, "costCents": 10 } }]),
+        json!([{ "description": "Refit screen", "laborCents": 0, "warranty": no_cover(),
+                 "discount": { "type": "fixed", "cents": 10 } }]),
     ] {
         let (status, body) = send(
             app,

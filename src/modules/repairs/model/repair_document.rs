@@ -39,7 +39,7 @@ pub struct RepairDocument {
     pub kind: RepairKind,
     /// The work on the job, stored in their API shape (camelCase).
     pub items: Vec<RepairItem>,
-    /// Every item's labour and part price, worked out from `items` on every write.
+    /// Every item's labour and part price less its discount, worked out from `items` on every write.
     pub price_cents: i64,
     /// Every item's part cost, worked out the same way.
     pub cost_cents: i64,

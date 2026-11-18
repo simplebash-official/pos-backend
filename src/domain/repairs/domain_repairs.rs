@@ -100,7 +100,7 @@ pub struct Repair {
     pub kind: RepairKind,
     /// The work on the job, in order.
     pub items: Vec<RepairItem>,
-    /// What the customer pays: every item's labour and part price
+    /// What the customer pays: every item's labour and part price, less the item discounts
     /// (`pos_calc_core::repair::repair_totals`). Stored with the items so reports can add it up.
     pub price_cents: i64,
     /// What the parts cost the shop, added up the same way.
@@ -129,6 +129,18 @@ pub struct Repair {
     /// Device identifier that last updated this record.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by_device: Option<String>,
+}
+
+impl Repair {
+    /// All the item discounts together: what was taken off the price the items add up to.
+    #[must_use]
+    pub fn discount_cents(&self) -> i64 {
+        self.items
+            .iter()
+            .filter_map(|item| item.discount.as_ref())
+            .map(|discount| discount.amount_cents)
+            .sum()
+    }
 }
 
 /// The `assignment{}` sub-object of `CreateRepairRequest`/

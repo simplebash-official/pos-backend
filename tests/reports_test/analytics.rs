@@ -297,6 +297,7 @@ async fn employee_commissions_survive_a_rename() {
             }),
             part_cents: 0,
             part_cost_cents: 200000,
+            discount: None,
             warranty: ProductWarranty::none(),
         }],
         price_cents: 500000, // Revenue = 5,000 LKR

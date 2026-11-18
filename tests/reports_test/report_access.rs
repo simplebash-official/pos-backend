@@ -520,6 +520,7 @@ async fn employee_commissions_and_performance_report() {
             }),
             part_cents: 0,
             part_cost_cents: 200000,
+            discount: None,
             warranty: ProductWarranty::none(),
         }],
         price_cents: 500000, // Revenue = 5,000 LKR

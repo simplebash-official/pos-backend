@@ -682,6 +682,7 @@ async fn seed_repair_with_named(
                     part: None,
                     part_cents: 0,
                     part_cost_cents: 0,
+                    discount: None,
                     warranty: ProductWarranty::none(),
                 })
                 .into_iter()

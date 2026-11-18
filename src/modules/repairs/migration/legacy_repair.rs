@@ -52,6 +52,7 @@ pub fn legacy_items(
         labor_cents,
         part_cents: 0,
         part_cost_cents,
+        discount: None,
     }])
     .map_err(|err| AppError::internal(format!("repair {repair_key}: {err}")))?;
     let description = match issue_description.trim() {
@@ -68,6 +69,7 @@ pub fn legacy_items(
             }),
             part_cents: 0,
             part_cost_cents,
+            discount: None,
             warranty: ProductWarranty::none(),
         }],
         price_cents: totals.price_cents,

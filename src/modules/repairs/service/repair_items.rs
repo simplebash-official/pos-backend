@@ -7,11 +7,12 @@ use crate::core::error::{AppError, AppResult};
 use crate::core::id::generate_id;
 use crate::domain::inventory::{BatchAllocation, StockMovementType};
 use crate::domain::repairs::{
-    Repair, RepairItem, RepairItemInput, RepairKind, RepairPart, RepairPartInput,
+    Repair, RepairItem, RepairItemDiscount, RepairItemInput, RepairKind, RepairPart,
+    RepairPartInput,
 };
 use crate::modules::inventory;
 use crate::modules::inventory::model::ProductSerialDocument;
-use pos_calc_core::repair::{RepairItemMoney, repair_totals};
+use pos_calc_core::repair::{RepairItemMoney, item_discount_cents, repair_totals};
 use std::collections::HashSet;
 
 const DESCRIPTION_MAX: usize = 200;
@@ -120,7 +121,7 @@ async fn price_stock_part(
 /// already on the job keeps it; a new one gets a fresh key. A stock part is priced from the
 /// unit or tier it names, which must be in stock now. A warranty rework charges nothing and
 /// gives no new warranty, so its labour and outside-part prices must be 0 and its stock parts
-/// are charged at 0 (their cost still counts).
+/// are charged at 0 (their cost still counts) and it takes no discount.
 pub(crate) async fn price_items(
     db: &Db,
     inputs: Vec<RepairItemInput>,
@@ -196,6 +197,26 @@ pub(crate) async fn price_items(
                 (Some(part), if rework { 0 } else { price }, cost)
             }
         };
+        if rework && input.discount.is_some() {
+            return Err(AppError::validation(
+                "A warranty rework is free: it cannot have a discount.",
+            ));
+        }
+        let discount = match input.discount {
+            Some(typed) => {
+                let amount_cents = item_discount_cents(&RepairItemMoney {
+                    labor_cents: input.labor_cents,
+                    part_cents,
+                    part_cost_cents,
+                    discount: Some(typed),
+                })?;
+                Some(RepairItemDiscount {
+                    typed,
+                    amount_cents,
+                })
+            }
+            None => None,
+        };
         items.push(RepairItem {
             key,
             description,
@@ -203,6 +224,7 @@ pub(crate) async fn price_items(
             part,
             part_cents,
             part_cost_cents,
+            discount,
             warranty,
         });
     }
@@ -212,6 +234,7 @@ pub(crate) async fn price_items(
             labor_cents: item.labor_cents,
             part_cents: item.part_cents,
             part_cost_cents: item.part_cost_cents,
+            discount: item.discount.as_ref().map(|discount| discount.typed),
         })
         .collect();
     let totals = repair_totals(&money)?;
