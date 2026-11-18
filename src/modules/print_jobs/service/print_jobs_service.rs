@@ -1,3 +1,4 @@
+use super::print_job_alerts;
 use crate::clients::db::Db;
 use crate::core::constants::{codes, prefixes};
 use crate::core::error::{AppError, AppResult};
@@ -237,8 +238,12 @@ pub(crate) async fn mark_delivered(db: &Db, key: &str) -> AppResult<PrintJob> {
             .await?
             .ok_or_else(|| {
                 AppError::not_found_with_code("Print job not found", codes::PRINT_JOB_NOT_FOUND)
-            })?;
-        Ok(updated.into_print_job())
+            })?
+            .into_print_job();
+        // The status before the write is gone, so only "delivered" is compared: a job billed
+        // twice raises one notice (the dedupe key holds the status).
+        print_job_alerts::announce_status_change(db, &updated, "").await?;
+        Ok(updated)
     })
     .await
 }
@@ -318,6 +323,7 @@ pub async fn update_print_job(
         let estimated_cost_cents = body
             .estimated_cost_cents
             .unwrap_or(existing.estimated_cost_cents);
+        let previous_status = existing.status.clone();
         let status = body.status.unwrap_or(existing.status);
 
         validate_status(&status)?;
@@ -389,8 +395,10 @@ pub async fn update_print_job(
             .await?
             .ok_or_else(|| {
                 AppError::not_found_with_code("Print job not found", codes::PRINT_JOB_NOT_FOUND)
-            })?;
-        Ok(updated.into_print_job())
+            })?
+            .into_print_job();
+        print_job_alerts::announce_status_change(db, &updated, &previous_status).await?;
+        Ok(updated)
     })
     .await
 }

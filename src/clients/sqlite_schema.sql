@@ -916,6 +916,47 @@ CREATE TABLE IF NOT EXISTS repair_service_templates (
 
 CREATE INDEX IF NOT EXISTS idx_repair_service_templates_sync ON repair_service_templates(updated_at, key);
 
+-- Shop notifications (`modules::notifications`): written once, removed after the retention
+-- window. The audience is `audience_type` ('everyone' | 'permission' | 'user') with the
+-- permission or user key in `audience_value`; a link is `link_path` + `link_label` or neither.
+CREATE TABLE IF NOT EXISTS notifications (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    category TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    link_path TEXT,
+    link_label TEXT,
+    audience_type TEXT NOT NULL,
+    audience_value TEXT,
+    source TEXT NOT NULL,
+    dedupe_key TEXT,
+    raised_by_user_key TEXT,
+    version INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by_device TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at, key);
+CREATE INDEX IF NOT EXISTS idx_notifications_sync ON notifications(updated_at, key);
+
+-- Per-user read marks of notifications; `created_at` is when it was read.
+CREATE TABLE IF NOT EXISTS notification_reads (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    notification_key TEXT NOT NULL,
+    user_key TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by_device TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_reads_user ON notification_reads(notification_key, user_key);
+CREATE INDEX IF NOT EXISTS idx_notification_reads_sync ON notification_reads(updated_at, key);
+
 -- Label print history (`modules::labels`): one row per print or download,
 -- `items` is a JSON array of the sticker groups as printed. Not synced.
 CREATE TABLE IF NOT EXISTS label_print_jobs (

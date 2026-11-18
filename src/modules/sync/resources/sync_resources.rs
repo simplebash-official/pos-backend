@@ -429,4 +429,29 @@ pub const SYNC_RESOURCES: &[ResourceSpec] = &[
         order: 166,
         phase: Phase::P3a,
     },
+    // Shop notifications: written once, never edited. A notification raised with a dedupe key
+    // has a key derived from it, so the same alert raised on two tills converges to one row
+    // (`Lww`, not `AppendOnly`: two bodies differing only in their time are not a conflict).
+    // Each replica removes rows past the retention window itself.
+    ResourceSpec {
+        name: "notifications",
+        table: "notifications",
+        class: MergeClass::Lww,
+        soft_delete: false,
+        derived: &[],
+        local_only: &[],
+        order: 167,
+        phase: Phase::P3a,
+    },
+    // One user has read one notification; the key is derived from both, so it converges.
+    ResourceSpec {
+        name: "notificationReads",
+        table: "notification_reads",
+        class: MergeClass::Lww,
+        soft_delete: false,
+        derived: &[],
+        local_only: &[],
+        order: 168,
+        phase: Phase::P3a,
+    },
 ];

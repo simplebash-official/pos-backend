@@ -3,6 +3,7 @@
 //! domain-specific validation (job type/quantity vs device model/issue
 //! description).
 
+mod print_job_alerts;
 mod print_jobs_service;
 
 pub use print_jobs_service::create_print_job;

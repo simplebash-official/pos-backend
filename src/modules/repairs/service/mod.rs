@@ -3,6 +3,7 @@
 //! `mark_delivered` cross-module hook. Delegates all Mongo access to
 //! `super::repository`.
 
+mod repair_alerts;
 mod repair_items;
 mod repair_reports;
 mod repair_services_service;

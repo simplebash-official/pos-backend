@@ -97,3 +97,46 @@ fn null_fields_are_omitted_not_stored() {
     .unwrap();
     assert!(encoded.fields.get("email").is_none());
 }
+
+#[test]
+fn a_desktop_notification_payload_decodes_into_the_stored_shape() {
+    use crate::modules::notifications::model::{NotificationDocument, NotificationReadDocument};
+    use mongodb::bson::DateTime as BsonDateTime;
+
+    let stored = |resource: &str, payload: serde_json::Value| {
+        let encoded = encode(spec(resource).unwrap(), &payload).unwrap();
+        let mut document = encoded.fields;
+        document.insert("version", encoded.version);
+        document.insert("created_at", encoded.created_at.unwrap());
+        document.insert("updated_at", BsonDateTime::now());
+        document
+    };
+    let notification = stored(
+        "notifications",
+        json!({
+            "id": "65a1b2c3d4e5f60718293a4b", "key": "ntf_1", "category": "print_jobs",
+            "severity": "critical", "title": "Low stock", "body": "Only 1 left",
+            "linkPath": "/inventory", "linkLabel": "Open stock",
+            "audienceType": "permission", "audienceValue": "inventory:read",
+            "source": "shop", "dedupeKey": "low-stock:prd_1:sm_1", "raisedByUserKey": null,
+            "version": 1, "createdAt": "2026-11-01T10:00:00.000Z",
+            "updatedAt": "2026-11-01T10:00:00.000Z", "updatedByDevice": "dev_x"
+        }),
+    );
+    let decoded: NotificationDocument =
+        mongodb::bson::deserialize_from_document(notification).unwrap();
+    let api = decoded.into_notification(false).unwrap();
+    assert_eq!(api.key, "ntf_1");
+    assert_eq!(api.link.unwrap().path, "/inventory");
+
+    let read = stored(
+        "notificationReads",
+        json!({
+            "id": "65a1b2c3d4e5f60718293a4c", "key": "nrd_1", "notificationKey": "ntf_1",
+            "userKey": "usr_1", "version": 1, "createdAt": "2026-11-01T10:05:00.000Z",
+            "updatedAt": "2026-11-01T10:05:00.000Z"
+        }),
+    );
+    let decoded: NotificationReadDocument = mongodb::bson::deserialize_from_document(read).unwrap();
+    assert_eq!(decoded.user_key, "usr_1");
+}

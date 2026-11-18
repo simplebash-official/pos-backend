@@ -53,6 +53,8 @@ async fn main() {
         println!("Resetting SQLite tables...");
         // In SQLite, clear user transaction/catalog tables if in SQLite mode
         let tables = vec![
+            "notification_reads",
+            "notifications",
             "warranty_claims",
             "repair_service_templates",
             "warranty_events",

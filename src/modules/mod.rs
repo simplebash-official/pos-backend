@@ -20,6 +20,7 @@ pub mod imports;
 pub mod incomes;
 pub mod inventory;
 pub mod labels;
+pub mod notifications;
 pub mod payees;
 pub mod print_jobs;
 pub mod purchases;

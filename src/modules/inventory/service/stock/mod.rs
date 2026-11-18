@@ -4,6 +4,7 @@
 //! the product total and the movement are always written together from here,
 //! never independently.
 
+mod low_stock_alert;
 mod service_stock;
 
 pub(crate) use service_stock::adjust_stock;

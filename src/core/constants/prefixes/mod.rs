@@ -24,6 +24,8 @@ pub use constants_prefixes::INVOICE;
 pub use constants_prefixes::LABEL_PRINT_JOB;
 pub use constants_prefixes::LABEL_TEMPLATE;
 pub use constants_prefixes::LOGIN_SESSION;
+pub use constants_prefixes::NOTIFICATION;
+pub use constants_prefixes::NOTIFICATION_READ;
 pub use constants_prefixes::PASSWORD_RESET_TOKEN;
 pub use constants_prefixes::PAYEE;
 pub use constants_prefixes::PAYMENT;

@@ -8264,6 +8264,234 @@
       "description": "System installation, onboarding status check, and initial database setup bootstrap."
     },
     {
+      "name": "Notifications",
+      "item": [
+        {
+          "name": "History",
+          "item": [
+            {
+              "name": "List Notifications",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{backendBaseUrl}}/api/notifications?state=all&limit=20&categories=repairs,inventory&severities=warning,critical&from=2026-11-01T00:00:00Z&to=2026-12-01T00:00:00Z&q=charger&cursor=1763000000000:ntf_xxxxxxxxxxxxxxxx",
+                  "host": [
+                    "{{backendBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "notifications"
+                  ],
+                  "query": [
+                    {
+                      "key": "state",
+                      "value": "all",
+                      "description": "all | unread | read"
+                    },
+                    {
+                      "key": "limit",
+                      "value": "20",
+                      "description": "Page size, 1 to 50"
+                    },
+                    {
+                      "key": "categories",
+                      "value": "repairs,inventory",
+                      "description": "Comma-separated: sales, repairs, print_jobs, inventory, expenses, warranties, cash, system, announcements",
+                      "disabled": true
+                    },
+                    {
+                      "key": "severities",
+                      "value": "warning,critical",
+                      "description": "Comma-separated: info, success, warning, critical",
+                      "disabled": true
+                    },
+                    {
+                      "key": "from",
+                      "value": "2026-11-01T00:00:00Z",
+                      "description": "Raised at or after (RFC 3339)",
+                      "disabled": true
+                    },
+                    {
+                      "key": "to",
+                      "value": "2026-12-01T00:00:00Z",
+                      "description": "Raised before (RFC 3339)",
+                      "disabled": true
+                    },
+                    {
+                      "key": "q",
+                      "value": "charger",
+                      "description": "Text in the title or message, ignoring case",
+                      "disabled": true
+                    },
+                    {
+                      "key": "cursor",
+                      "value": "1763000000000:ntf_xxxxxxxxxxxxxxxx",
+                      "description": "`nextCursor` of the previous page",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "The caller's notification history, newest first, with their own read state. Page with `nextCursor`.\n\n**Requires `notifications:view`** (all roles). Each user only ever sees what is addressed to them."
+              },
+              "response": []
+            },
+            {
+              "name": "Notification Summary",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{backendBaseUrl}}/api/notifications/summary",
+                  "host": [
+                    "{{backendBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "notifications",
+                    "summary"
+                  ]
+                },
+                "description": "What the header bell shows: unread total, unread per category and the newest 30 notifications.\n\n**Requires `notifications:view`** (all roles). Each user only ever sees what is addressed to them."
+              },
+              "response": []
+            },
+            {
+              "name": "Raise Notification",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{backendBaseUrl}}/api/notifications",
+                  "host": [
+                    "{{backendBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "notifications"
+                  ]
+                },
+                "description": "An alert raised by the app. The audience is everyone, a permission the caller holds, or the caller. The same `dedupeKey` returns the notification already raised.\n\n**Requires `notifications:view`** (all roles). Each user only ever sees what is addressed to them.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"category\": \"expenses\",\n  \"severity\": \"warning\",\n  \"title\": \"Electricity is due soon\",\n  \"body\": \"Rs. 12,500.00 due on 25 Nov 2026\",\n  \"link\": {\n    \"path\": \"/expenses?pay=rex_xxxxxxxxxxxxxxxx\",\n    \"label\": \"Pay now\"\n  },\n  \"audience\": {\n    \"type\": \"permission\",\n    \"permission\": \"expenses:view\"\n  },\n  \"dedupeKey\": \"bill:rex_xxxxxxxxxxxxxxxx:2026-11:due_soon\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Read State",
+          "item": [
+            {
+              "name": "Mark Notifications Read",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{backendBaseUrl}}/api/notifications/read",
+                  "host": [
+                    "{{backendBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "notifications",
+                    "read"
+                  ]
+                },
+                "description": "Marks 1 to 100 notifications read for the caller; keys the caller cannot see are ignored.\n\n**Requires `notifications:view`** (all roles). Each user only ever sees what is addressed to them.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"keys\": [\n    \"ntf_xxxxxxxxxxxxxxxx\"\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Mark All Notifications Read",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{backendBaseUrl}}/api/notifications/read-all",
+                  "host": [
+                    "{{backendBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "notifications",
+                    "read-all"
+                  ]
+                },
+                "description": "Marks every unread notification matching the filter read for the caller. Every filter field is optional.\n\n**Requires `notifications:view`** (all roles). Each user only ever sees what is addressed to them.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"categories\": \"repairs\",\n  \"severities\": null,\n  \"from\": null,\n  \"to\": null,\n  \"q\": null\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Live",
+          "item": [
+            {
+              "name": "Notification Events (SSE)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{backendBaseUrl}}/api/notifications/events",
+                  "host": [
+                    "{{backendBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "notifications",
+                    "events"
+                  ]
+                },
+                "description": "Server-sent events: `hello` on connect, then `changed` whenever the shop's notifications or read marks change. Carries no data; reload the summary.\n\n**Requires `notifications:view`** (all roles). Each user only ever sees what is addressed to them."
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Internal",
       "description": "Server-to-server endpoints (identity service and the admin console). Not for browsers: authenticated by a shared secret, and nginx refuses to forward /api/internal/ from the internet.",
       "item": [
@@ -8611,6 +8839,46 @@
               ]
             },
             "description": "Unified chronological business activity feed for the shop (sales, shifts, cash drawer movements, returns, repairs, print jobs). Requires x-provision-secret."
+          },
+          "response": []
+        },
+        {
+          "name": "Send Shop Notification",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-provision-secret",
+                "value": "{{provisionSecret}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/internal/tenants/{{tenantId}}/notifications",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "internal",
+                "tenants",
+                "{{tenantId}}",
+                "notifications"
+              ]
+            },
+            "description": "A trusted internal service sends one shop a notice (everyone, or the holders of one permission). `dedupeKey` is required so a retry cannot notify twice. Requires x-provision-secret; 404 outside a multi-shop deployment.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category\": \"announcements\",\n  \"severity\": \"info\",\n  \"title\": \"Warranty cards are here\",\n  \"body\": \"You can now print a warranty card with every sale.\",\n  \"link\": {\n    \"path\": \"/settings?section=document-designs\",\n    \"label\": \"Have a look\"\n  },\n  \"audience\": {\n    \"type\": \"everyone\"\n  },\n  \"dedupeKey\": \"announcement-2026-11-warranty-cards\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
           },
           "response": []
         }

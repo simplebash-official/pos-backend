@@ -45,6 +45,12 @@ pub const LABEL_TEMPLATE: &str = "ltpl";
 
 pub const LOGIN_SESSION: &str = "lgs";
 
+/// Notification keys are `ntf_<hash of the dedupe key>` when raised with one, so replicas converge.
+pub const NOTIFICATION: &str = "ntf";
+
+/// Read marks use `nrd_<hash of user + notification>`: one per user and notification.
+pub const NOTIFICATION_READ: &str = "nrd";
+
 pub const PASSWORD_RESET_TOKEN: &str = "prt";
 
 /// Key of the batch the migration to stock batches gives every product for the

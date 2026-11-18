@@ -1,3 +1,4 @@
+use super::repair_alerts;
 use super::repair_items::{price_items, use_parts};
 use crate::clients::db::Db;
 use crate::core::constants::{codes, prefixes};
@@ -323,8 +324,12 @@ pub(crate) async fn mark_delivered(db: &Db, key: &str) -> AppResult<Repair> {
             .await?
             .ok_or_else(|| {
                 AppError::not_found_with_code("Repair ticket not found", codes::REPAIR_NOT_FOUND)
-            })?;
-        Ok(updated.into_repair())
+            })?
+            .into_repair();
+        // The status before the write is gone, so only "delivered" is compared: a job billed
+        // twice raises one notice (the dedupe key holds the status).
+        repair_alerts::announce_status_change(db, &updated, "").await?;
+        Ok(updated)
     })
     .await
 }
@@ -402,6 +407,7 @@ pub async fn update_repair(
         let device_model = body.device_model.unwrap_or(existing.device_model);
         let issue_description = body.issue_description.unwrap_or(existing.issue_description);
         let was_delivered = existing.status == "delivered";
+        let previous_status = existing.status.clone();
         let status = body.status.unwrap_or(existing.status);
 
         validate_status(&status)?;
@@ -496,6 +502,7 @@ pub async fn update_repair(
                 AppError::not_found_with_code("Repair ticket not found", codes::REPAIR_NOT_FOUND)
             })?
             .into_repair();
+        repair_alerts::announce_status_change(db, &updated, &previous_status).await?;
         if handing_back && updated.kind.is_rework() {
             // A rework is never billed, so its parts leave stock here, against the job itself.
             use_parts(

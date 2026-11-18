@@ -94,6 +94,8 @@ pub fn build_router(state: AppState) -> Router {
     //   GET  .../document-selections, POST .../document-selections/reset,
     //   GET  .../users, GET .../logins, GET .../activities
     //                                 operator console (suspend a shop, read usage, designs in use, users, logins, activities); same secret
+    //   POST /api/internal/tenants/{tenant_id}/notifications
+    //                                 a trusted internal service sends a shop a notice; same secret
     //   GET  /docs, /api-docs/openapi.json   Swagger UI
     //   GET  /api/{inventory,billing,reports}
     //                                 static module-status stubs
@@ -272,7 +274,15 @@ pub fn build_router(state: AppState) -> Router {
             &format!("/{}", mod_names::DOCUMENT_PACKAGES),
             modules::document_packages::routes::router(),
         )
-        .nest("/internal", modules::tenants::routes::router());
+        .nest(
+            &format!("/{}", mod_names::NOTIFICATIONS),
+            modules::notifications::routes::router(),
+        )
+        .nest(
+            "/internal",
+            modules::tenants::routes::router()
+                .merge(modules::notifications::routes::internal_router()),
+        );
 
     let (router, openapi) = OpenApiRouter::<AppState>::with_openapi(ApiDoc::openapi())
         .nest("/api", api_router)
@@ -296,6 +306,10 @@ pub fn build_router(state: AppState) -> Router {
         // once (a cheap no-op where nobody listens).
         .layer(middleware::from_fn(
             crate::modules::sync::live::local_write_tick,
+        ))
+        // Tells open screens about notification changes once the write that made them succeeded.
+        .layer(middleware::from_fn(
+            crate::modules::notifications::live::announce_after_write,
         ))
         .layer(middleware::from_fn_with_state(
             state.clone(),

@@ -24,6 +24,8 @@ use crate::modules::inventory::model::StockMovementDocument;
 use crate::modules::inventory::model::SubcategoryDocument;
 use crate::modules::labels::model::LabelPrintJobDocument;
 use crate::modules::labels::model::LabelTemplateDocument;
+use crate::modules::notifications::model::NotificationDocument;
+use crate::modules::notifications::model::NotificationReadDocument;
 use crate::modules::payees::model::PayeeDocument;
 use crate::modules::print_jobs::model::PrintJobDocument;
 use crate::modules::purchases::model::PurchaseDocument;
@@ -122,4 +124,6 @@ pub const STORED_COLLECTIONS: &[StoredCollection] = &[
     stored!("warranty_claims", WarrantyClaimDocument),
     stored!("warranty_condition_templates", WarrantyConditionDocument),
     stored!("repair_service_templates", RepairServiceDocument),
+    stored!("notifications", NotificationDocument),
+    stored!("notification_reads", NotificationReadDocument),
 ];
