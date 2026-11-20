@@ -328,12 +328,13 @@ async fn scenario(app: &common::TestApp) {
     assert_eq!(summary(app, &manager).await["unreadTotal"], 1);
 
     // ---- Producer: a repair that becomes ready tells everyone on repairs ----
+    let nimal = common::register_customer(app, "Nimal Perera", "0771234567").await;
     let (status, created) = send(
         app,
         "POST",
         "/api/repairs",
         Some(json!({
-            "customer": { "customerName": "Nimal Perera", "customerPhone": "0771234567" },
+            "customer": { "customerKey": nimal },
             "deviceModel": "Galaxy A55",
             "issueDescription": "Cracked screen",
             "items": [{ "description": "Clean ports", "laborCents": 500,

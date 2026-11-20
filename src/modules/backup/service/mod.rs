@@ -4,6 +4,7 @@ mod backup_service;
 mod repair_items_upgrade;
 #[cfg(test)]
 mod tests;
+mod ticket_customers_upgrade;
 mod warranty_upgrade;
 
 pub(crate) use backup_service::export_backup;

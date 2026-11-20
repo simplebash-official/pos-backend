@@ -41,6 +41,8 @@ pub struct ShopProfileDocument {
     pub default_warranty_text: String,
     pub default_footer_text: String,
     pub receipt_footer_text: String,
+    pub job_receipt_terms_text: String,
+    pub uncollected_after_days: Option<i64>,
     pub allow_shared_user_sessions: bool,
     pub allow_staff_multi_device_sessions: bool,
     pub version: i64,
@@ -76,6 +78,8 @@ impl ShopProfileDocument {
             default_warranty_text: self.default_warranty_text,
             default_footer_text: self.default_footer_text,
             receipt_footer_text: self.receipt_footer_text,
+            job_receipt_terms_text: self.job_receipt_terms_text,
+            uncollected_after_days: self.uncollected_after_days,
             allow_shared_user_sessions: self.allow_shared_user_sessions,
             allow_staff_multi_device_sessions: self.allow_staff_multi_device_sessions,
         }

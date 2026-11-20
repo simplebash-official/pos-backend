@@ -15,10 +15,9 @@ pub struct RepairDocument {
     pub key: String,
     /// Sequential ticket number (e.g. REP-000001).
     pub ticket_number: String,
-    /// Key of registered customer if linked.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub customer_key: Option<String>,
-    /// Customer name snapshot or walk-in name.
+    /// Key of the registered customer the ticket is for.
+    pub customer_key: String,
+    /// Customer name, read from the customer's record when the ticket is saved.
     pub customer_name: String,
     /// Customer phone number.
     pub customer_phone: String,

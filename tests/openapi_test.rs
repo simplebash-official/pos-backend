@@ -110,6 +110,8 @@ async fn openapi_json_lists_all_module_paths() {
         "/api/warranties/{key}/void",
         "/api/warranties/{key}/extend",
         "/api/warranties/{key}/documents/warranty-card",
+        "/api/repairs/{id}/documents/job-receipt",
+        "/api/print-jobs/{id}/documents/job-receipt",
         "/api/warranty-claims",
         "/api/warranty-claims/{key}",
         "/api/warranty-claims/{key}/inspect",

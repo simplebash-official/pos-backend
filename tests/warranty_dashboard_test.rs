@@ -332,6 +332,7 @@ async fn scenario(app: &common::TestApp) {
     let charger_w = key_of(None);
 
     // ---- A repair by a technician, billed, so its screen work carries a warranty ----
+    let repair_customer = common::register_customer(app, "Nimal Perera", "0771234567").await;
     let technician = ok(
         app,
         "POST",
@@ -349,7 +350,7 @@ async fn scenario(app: &common::TestApp) {
         "POST",
         "/api/repairs",
         Some(json!({
-            "customer": { "customerName": "Nimal Perera", "customerPhone": "0771234567" },
+            "customer": { "customerKey": repair_customer },
             "deviceModel": "Galaxy A55",
             "serialNumber": format!("DEV{}", &tag[..8]),
             "issueDescription": "Cracked screen",

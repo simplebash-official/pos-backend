@@ -27,20 +27,10 @@ pub async fn create_repair(
         validate_status(&status)?;
         validate_promised_ready_at(body.promised_ready_at.as_deref())?;
 
-        let (customer_name, customer_phone) = resolve_customer_info(
-            db,
-            body.customer.customer_key.as_deref(),
-            body.customer.customer_name,
-            body.customer.customer_phone,
-        )
-        .await?;
+        let customer =
+            customers::service::get_customer_by_key(db, &body.customer.customer_key).await?;
 
-        validate_required_fields(
-            &customer_name,
-            &customer_phone,
-            &body.device_model,
-            &body.issue_description,
-        )?;
+        validate_required_fields(&body.device_model, &body.issue_description)?;
         let kind = RepairKind::Standard;
         let priced = price_items(db, body.items, &[], &kind).await?;
         validate_price_required_for_status(&status, &kind, &priced.items)?;
@@ -71,9 +61,9 @@ pub async fn create_repair(
             id: None,
             key: generate_id(prefixes::REPAIR),
             ticket_number,
-            customer_key: body.customer.customer_key,
-            customer_name: customer_name.trim().to_string(),
-            customer_phone: customer_phone.trim().to_string(),
+            customer_key: customer.key,
+            customer_name: customer.name,
+            customer_phone: customer.primary_phone,
             device_model: body.device_model,
             serial_number: body.serial_number,
             issue_description: body.issue_description,
@@ -334,34 +324,6 @@ pub(crate) async fn mark_delivered(db: &Db, key: &str) -> AppResult<Repair> {
     .await
 }
 
-/// When `customer_key` resolves to a real customer, that record is
-/// authoritative for name/phone — a client-typed name/phone alongside a
-/// valid key could otherwise silently diverge from the linked customer.
-/// Resolves from the client-supplied name/phone when there's no key
-/// (a walk-in with no linked account).
-pub(super) async fn resolve_customer_info(
-    db: &Db,
-    customer_key: Option<&str>,
-    input_name: Option<String>,
-    input_phone: Option<String>,
-) -> AppResult<(String, String)> {
-    match customer_key {
-        Some(key) => {
-            let customer = customers::service::get_customer_by_key(db, key).await?;
-            Ok((customer.name, customer.primary_phone))
-        }
-        None => {
-            let name = input_name
-                .filter(|n| !n.trim().is_empty())
-                .ok_or_else(|| AppError::validation("Customer name is required"))?;
-            let phone = input_phone
-                .filter(|p| !p.trim().is_empty())
-                .ok_or_else(|| AppError::validation("Customer phone cannot be empty"))?;
-            Ok((name, phone))
-        }
-    }
-}
-
 /// Updates the repair.
 pub async fn update_repair(
     db: &Db,
@@ -379,31 +341,11 @@ pub async fn update_repair(
             .id
             .expect("persisted repair document must have an _id");
 
-        let effective_customer_key = body
-            .customer
-            .as_ref()
-            .and_then(|c| c.customer_key.clone())
-            .or_else(|| existing.customer_key.clone());
-
-        let (customer_name, customer_phone) = match effective_customer_key.as_deref() {
-            Some(key) => {
-                let customer = customers::service::get_customer_by_key(db, key).await?;
-                (customer.name, customer.primary_phone)
-            }
-            None => {
-                let name = body
-                    .customer
-                    .as_ref()
-                    .and_then(|c| c.customer_name.clone())
-                    .unwrap_or(existing.customer_name);
-                let phone = body
-                    .customer
-                    .as_ref()
-                    .and_then(|c| c.customer_phone.clone())
-                    .unwrap_or(existing.customer_phone);
-                (name, phone)
-            }
+        let customer_key = match &body.customer {
+            Some(customer) => customer.customer_key.as_str(),
+            None => existing.customer_key.as_str(),
         };
+        let customer = customers::service::get_customer_by_key(db, customer_key).await?;
         let device_model = body.device_model.unwrap_or(existing.device_model);
         let issue_description = body.issue_description.unwrap_or(existing.issue_description);
         let was_delivered = existing.status == "delivered";
@@ -412,12 +354,7 @@ pub async fn update_repair(
 
         validate_status(&status)?;
         validate_promised_ready_at(body.promised_ready_at.as_deref())?;
-        validate_required_fields(
-            &customer_name,
-            &customer_phone,
-            &device_model,
-            &issue_description,
-        )?;
+        validate_required_fields(&device_model, &issue_description)?;
         let priced = match body.items {
             Some(_) if was_delivered => {
                 return Err(AppError::conflict(
@@ -439,8 +376,9 @@ pub async fn update_repair(
         }
 
         let mut set_doc = doc! {
-            "customer_name": &customer_name,
-            "customer_phone": &customer_phone,
+            "customer_key": &customer.key,
+            "customer_name": &customer.name,
+            "customer_phone": &customer.primary_phone,
             "device_model": &device_model,
             "issue_description": &issue_description,
             "status": &status,
@@ -450,9 +388,6 @@ pub async fn update_repair(
             set_doc.insert("items", mongodb::bson::serialize_to_bson(&priced.items)?);
             set_doc.insert("price_cents", priced.price_cents);
             set_doc.insert("cost_cents", priced.cost_cents);
-        }
-        if let Some(key) = effective_customer_key {
-            set_doc.insert("customer_key", key);
         }
         if let Some(sn) = body.serial_number {
             set_doc.insert("serial_number", sn);
@@ -569,34 +504,10 @@ pub(super) fn validate_promised_ready_at(promised_ready_at: Option<&str>) -> App
     }
 }
 
-fn validate_phone_number(phone: &str, field_name: &str) -> AppResult<()> {
-    let trimmed = phone.trim();
-    if trimmed.is_empty() {
-        return Err(AppError::validation(format!(
-            "{field_name} cannot be empty"
-        )));
-    }
-    if !trimmed
-        .chars()
-        .all(|c| c.is_ascii_digit() || matches!(c, ' ' | '-' | '+'))
-    {
-        return Err(AppError::validation(format!(
-            "{field_name} may only contain digits, spaces, dashes, and a plus sign"
-        )));
-    }
-    Ok(())
-}
-
 pub(super) fn validate_required_fields(
-    customer_name: &str,
-    customer_phone: &str,
     device_model: &str,
     issue_description: &str,
 ) -> AppResult<()> {
-    if customer_name.trim().is_empty() {
-        return Err(AppError::validation("Customer name is required"));
-    }
-    validate_phone_number(customer_phone, "Customer phone")?;
     if device_model.trim().is_empty() {
         return Err(AppError::validation("Device model is required"));
     }

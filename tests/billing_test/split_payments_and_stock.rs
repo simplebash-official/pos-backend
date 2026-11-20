@@ -16,15 +16,13 @@ use crate::helpers::{
 
 async fn seed_repair(app: &common::TestApp) -> String {
     let token = staff_token(&app.config);
+    let customer_key = common::register_customer(app, "Kasun Silva", "0771234567").await;
     let (status, body) = send_authed(
         &app.router,
         "POST",
         "/api/repairs",
         Some(json!({
-            "customer": {
-                "customerName": "Kasun Silva",
-                "customerPhone": "0771234567",
-            },
+            "customer": { "customerKey": customer_key },
             "deviceModel": "iPhone 14",
             "issueDescription": "Cracked screen",
             "items": [{ "description": "Repair work", "laborCents": 850000, "warranty": { "coverage": { "kind": "none" } } }],
@@ -41,15 +39,13 @@ async fn seed_repair(app: &common::TestApp) -> String {
 
 async fn seed_repair_without_price(app: &common::TestApp) -> String {
     let token = staff_token(&app.config);
+    let customer_key = common::register_customer(app, "Kasun Silva", "0771234599").await;
     let (status, body) = send_authed(
         &app.router,
         "POST",
         "/api/repairs",
         Some(json!({
-            "customer": {
-                "customerName": "Kasun Silva",
-                "customerPhone": "0771234599",
-            },
+            "customer": { "customerKey": customer_key },
             "deviceModel": "iPhone 14",
             "issueDescription": "Cracked screen",
             "items": [],

@@ -19,6 +19,7 @@ pub mod finance_reports;
 pub mod imports;
 pub mod incomes;
 pub mod inventory;
+pub mod job_receipts;
 pub mod labels;
 pub mod notifications;
 pub mod payees;

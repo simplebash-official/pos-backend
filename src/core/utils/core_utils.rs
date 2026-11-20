@@ -64,13 +64,18 @@ pub fn regex_escape(input: &str) -> String {
     escaped
 }
 
-/// The shop-local calendar day that `at` falls on.
+/// `at` as the shop's wall clock reads it.
 #[must_use]
-pub fn shop_day(at: DateTime<Utc>) -> chrono::NaiveDate {
+pub fn shop_local(at: DateTime<Utc>) -> DateTime<chrono::FixedOffset> {
     at.with_timezone(
         &chrono::FixedOffset::east_opt(SHOP_TZ_OFFSET_SECS).expect("valid fixed offset"),
     )
-    .date_naive()
+}
+
+/// The shop-local calendar day that `at` falls on.
+#[must_use]
+pub fn shop_day(at: DateTime<Utc>) -> chrono::NaiveDate {
+    shop_local(at).date_naive()
 }
 
 /// The UTC instant at which the shop-local `day` begins.

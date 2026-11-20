@@ -84,9 +84,9 @@ fn months(value: u32) -> Value {
     json!({ "coverage": { "kind": "limited", "value": value, "unit": "months" }, "warrantyType": "shop" })
 }
 
-fn job(items: Value) -> Value {
+fn job(customer_key: &str, items: Value) -> Value {
     json!({
-        "customer": { "customerName": "Nimal Perera", "customerPhone": "0771234567" },
+        "customer": { "customerKey": customer_key },
         "deviceModel": "Galaxy A55",
         "serialNumber": format!("DEV{}", &uuid::Uuid::new_v4().simple().to_string()[..12]),
         "issueDescription": "Cracked screen",
@@ -109,6 +109,7 @@ async fn scenario(app: &common::TestApp) {
         .await
         .expect("the admin is seeded");
     let admin = admin_token(app);
+    let customer = common::register_customer(app, "Nimal Perera", "0771234567").await;
 
     // A screen in stock at one price tier (cost 4,000, sold at 12,000).
     let (status, category) = send(
@@ -201,7 +202,14 @@ async fn scenario(app: &common::TestApp) {
             "an item with both a fee and a part",
         ),
     ] {
-        let (status, body) = send(app, "POST", "/api/repairs", Some(job(items)), &admin).await;
+        let (status, body) = send(
+            app,
+            "POST",
+            "/api/repairs",
+            Some(job(&customer, items)),
+            &admin,
+        )
+        .await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{what}: {body}");
     }
 
@@ -210,12 +218,15 @@ async fn scenario(app: &common::TestApp) {
         app,
         "POST",
         "/api/repairs",
-        Some(job(json!([
-            { "description": "Replace screen", "laborCents": 0, "warranty": no_cover(),
-              "part": screen_part, "discount": { "type": "percentage", "basisPoints": 1_250 } },
-            { "description": "Fit and test", "laborCents": 5_000, "warranty": months(3),
-              "discount": { "type": "fixed", "cents": 500 } },
-        ]))),
+        Some(job(
+            &customer,
+            json!([
+                { "description": "Replace screen", "laborCents": 0, "warranty": no_cover(),
+                  "part": screen_part, "discount": { "type": "percentage", "basisPoints": 1_250 } },
+                { "description": "Fit and test", "laborCents": 5_000, "warranty": months(3),
+                  "discount": { "type": "fixed", "cents": 500 } },
+            ]),
+        )),
         &admin,
     )
     .await;

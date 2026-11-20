@@ -480,14 +480,15 @@ pub(crate) async fn convert_to_paid_repair(
             Some(reason) => format!("not covered: {reason}"),
             None => "not covered".to_string(),
         };
+        let customer_key = claim
+            .customer_key
+            .clone()
+            .or(customer.customer_key)
+            .ok_or_else(|| AppError::validation("Choose the customer for this repair job."))?;
         let repair = repairs::service::create_repair(
             db,
             CreateRepairRequest {
-                customer: RepairCustomer {
-                    customer_key: claim.customer_key.clone().or(customer.customer_key),
-                    customer_name: claim.customer_name.clone(),
-                    customer_phone: claim.customer_phone.clone(),
-                },
+                customer: RepairCustomer { customer_key },
                 device_model: claim.item_name.clone(),
                 serial_number: claim.serial_number.clone(),
                 issue_description: format!(

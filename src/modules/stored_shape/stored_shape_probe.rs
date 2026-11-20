@@ -223,6 +223,7 @@ const BACKFILLABLE: &[(&str, &[&str])] = &[
             "legal_name",
             "logo_base64",
             "primary_phone",
+            "job_receipt_terms_text",
             "receipt_footer_text",
             "secondary_phone",
             "trading_name",
@@ -312,6 +313,7 @@ fn backfill_value(field: &str, object: &Document) -> Option<Bson> {
         | "default_footer_text"
         | "default_warranty_text"
         | "email"
+        | "job_receipt_terms_text"
         | "legal_name"
         | "logo_base64"
         | "name"

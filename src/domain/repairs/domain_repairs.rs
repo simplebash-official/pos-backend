@@ -72,9 +72,8 @@ pub struct Repair {
     pub key: String,
     /// Human-friendly ticket number (e.g. REP-000001).
     pub ticket_number: String,
-    /// Key of linked customer, if any.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub customer_key: Option<String>,
+    /// Key of the customer the ticket is for.
+    pub customer_key: String,
     /// Customer name.
     pub customer_name: String,
     /// Customer phone number.
@@ -160,25 +159,14 @@ pub struct RepairAssignment {
     pub split_value: Option<f64>,
 }
 
-/// The `customer{}` sub-object of `CreateRepairRequest`/`UpdateRepairRequest`.
-/// `customerName`/`customerPhone` are only used as-is when `customerKey` is
-/// absent (a walk-in with no linked account); when `customerKey` resolves
-/// to a real customer, `service::create_repair`/`update_repair` overrides
-/// both from that record instead of trusting the payload. `customerName`/
-/// `customerPhone` are typed `Option` here (rather than required strings)
-/// so the same struct serves both create and update — `service::
-/// create_repair`'s `validate_required_fields` is what actually enforces
-/// they're non-empty on create when there's no `customerKey` to resolve
-/// from instead.
-#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+/// The `customer{}` sub-object of `CreateRepairRequest`/`UpdateRepairRequest`: the registered
+/// customer the ticket is for. The ticket's customer name and phone are always read from that
+/// customer's record (`service::create_repair`/`update_repair`), never from the request.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RepairCustomer {
-    /// Key of registered customer.
-    pub customer_key: Option<String>,
-    /// Walk-in customer name.
-    pub customer_name: Option<String>,
-    /// Walk-in customer phone number.
-    pub customer_phone: Option<String>,
+    /// Key of the registered customer.
+    pub customer_key: String,
 }
 
 /// Query params for `GET /repairs`. `search` matches ticket number,

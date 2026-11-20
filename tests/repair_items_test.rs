@@ -272,9 +272,9 @@ fn items_of(body: &Value) -> Vec<Value> {
         .clone()
 }
 
-fn job(device_serial: &str, items: Value) -> Value {
+fn job(customer_key: &str, device_serial: &str, items: Value) -> Value {
     json!({
-        "customer": { "customerName": "Nimal Perera", "customerPhone": "0771234567" },
+        "customer": { "customerKey": customer_key },
         "deviceModel": "Galaxy A55",
         "serialNumber": device_serial,
         "issueDescription": "Cracked screen and weak battery",
@@ -287,6 +287,7 @@ async fn scenario(app: &common::TestApp) {
         .await
         .expect("the admin is seeded");
     let admin = token_for(app, "admin", Role::Admin, "Owner Olivia");
+    let customer = common::register_customer(app, "Nimal Perera", "0771234567").await;
     let manager = user_with_pin(app, &admin, "mgr", (Role::Manager, "manager"), MANAGER_PIN).await;
     let staff = user_with_pin(app, &admin, "kamal", (Role::Staff, "staff"), "2468").await;
 
@@ -405,7 +406,7 @@ async fn scenario(app: &common::TestApp) {
             app,
             "POST",
             "/api/repairs",
-            Some(job(&device, items)),
+            Some(job(&customer, &device, items)),
             &staff,
         )
         .await;
@@ -419,6 +420,7 @@ async fn scenario(app: &common::TestApp) {
         "POST",
         "/api/repairs",
         Some(job(
+            &customer,
             &device,
             json!([
                 { "description": "Replace screen", "laborCents": 2_500, "warranty": months(3),
@@ -928,7 +930,8 @@ async fn an_old_mongo_database_moves_to_repair_items() {
         ("rep_old_b", None, None),
     ] {
         let mut row = doc! {
-            "key": key, "ticket_number": format!("REP-{key}"), "customer_name": "Ama",
+            "key": key, "ticket_number": format!("REP-{key}"), "customer_key": "cust_ama",
+            "customer_name": "Ama",
             "customer_phone": "0771234567", "device_model": "iPhone 12",
             "issue_description": "Broken port", "status": "received", "version": 1_i64,
             "created_at": now, "updated_at": now,

@@ -9,5 +9,6 @@ pub use core_utils::module_status_response;
 pub use core_utils::parse_object_id;
 pub use core_utils::regex_escape;
 pub use core_utils::shop_day;
+pub use core_utils::shop_local;
 pub use core_utils::shop_midnight;
 pub use core_utils::shop_today_range;

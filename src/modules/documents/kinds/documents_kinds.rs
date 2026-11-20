@@ -42,4 +42,8 @@ pub(crate) const SELECTABLE_KINDS: &[DocumentKind] = &[
         slug: "warranty-card",
         label: "Warranty Card",
     },
+    DocumentKind {
+        slug: "job-receipt",
+        label: "Job Receipt",
+    },
 ];

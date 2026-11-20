@@ -965,7 +965,16 @@ async fn scenario(app: &common::TestApp) {
         after["warranty"]["state"], "expired",
         "no longer held by the claim"
     );
-    let (status, paid) = claim_step(app, &staff, &late_key, "paid-repair", Some(json!({}))).await;
+    // The sale named its customer only by typing, so the repair job needs a registered one.
+    let nimal = common::register_customer(app, "Nimal Perera", "0771234567").await;
+    let (status, paid) = claim_step(
+        app,
+        &staff,
+        &late_key,
+        "paid-repair",
+        Some(json!({ "customerKey": nimal })),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{paid}");
     assert!(
         text(&paid["data"]["paidRepairNumber"]).starts_with("REP-"),
@@ -995,7 +1004,7 @@ async fn scenario(app: &common::TestApp) {
         claim_step(app, &staff, &walk_in_claim, "paid-repair", Some(json!({}))).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert!(
-        text(&body["message"]).contains("Customer name is required"),
+        text(&body["message"]).contains("Choose the customer for this repair job."),
         "{body}"
     );
     let (status, customer) = send(

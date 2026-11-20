@@ -135,7 +135,8 @@ async fn lists_each_kind_with_its_designs_standard_design_first() {
             "credit-note",
             "quotation",
             "z-report",
-            "warranty-card"
+            "warranty-card",
+            "job-receipt"
         ]
     );
 

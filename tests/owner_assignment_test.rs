@@ -53,9 +53,9 @@ fn token(app: &common::TestApp, role: Role) -> String {
     common::mint_token(&app.config, Some(role), roles::default_permissions(role))
 }
 
-fn repair(phone_suffix: &str, assignment: Value) -> Value {
+fn repair(customer_key: &str, assignment: Value) -> Value {
     json!({
-        "customer": { "customerName": "Kasun Silva", "customerPhone": format!("077{phone_suffix}") },
+        "customer": { "customerKey": customer_key },
         "deviceModel": "iPhone 14",
         "issueDescription": "Cracked screen",
         "items": [],
@@ -66,6 +66,7 @@ fn repair(phone_suffix: &str, assignment: Value) -> Value {
 #[tokio::test]
 async fn the_owner_makes_their_own_profile_once_and_takes_no_commission() {
     let app = common::spawn_app_sqlite().await;
+    let customer = common::register_customer(&app, "Kasun Silva", "0771000000").await;
     users::service::create_user(
         &app.db_handle,
         CreateUserRequest {
@@ -148,7 +149,7 @@ async fn the_owner_makes_their_own_profile_once_and_takes_no_commission() {
         "POST",
         "/api/repairs",
         Some(repair(
-            "1000001",
+            &customer,
             json!({ "assignedEmployeeId": owner_key, "splitType": "percentage", "splitValue": 20.0 }),
         )),
         &admin,
@@ -163,7 +164,7 @@ async fn the_owner_makes_their_own_profile_once_and_takes_no_commission() {
         "POST",
         "/api/repairs",
         Some(repair(
-            "1000002",
+            &customer,
             json!({ "assignedEmployeeId": owner_key }),
         )),
         &admin,
@@ -191,7 +192,7 @@ async fn the_owner_makes_their_own_profile_once_and_takes_no_commission() {
         "POST",
         "/api/repairs",
         Some(repair(
-            "1000003",
+            &customer,
             json!({
                 "assignedEmployeeId": technician["data"]["key"],
                 "splitType": "percentage", "splitValue": 20.0,
@@ -229,9 +230,10 @@ async fn the_owner_makes_their_own_profile_once_and_takes_no_commission() {
     assert_eq!(body["code"], "OWNER_HAS_NO_COMMISSION");
 
     // Print jobs follow the same rule.
+    let print_customer = common::register_customer(&app, "Nadeesha Perera", "0711234567").await;
     let print_job = |assignment: Value| {
         json!({
-            "customer": { "customerName": "Nadeesha Perera", "customerPhone": "0711234567" },
+            "customer": { "customerKey": print_customer },
             "jobType": "t-shirt",
             "quantity": 12,
             "estimatedCostCents": 240000,

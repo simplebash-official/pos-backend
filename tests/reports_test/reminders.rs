@@ -159,12 +159,13 @@ async fn reminders_include_overdue_and_due_soon_repair_and_print_jobs() {
     let app = common::spawn_app().await;
     let token = full_access_token(&app.config);
 
+    let job_customer = common::register_customer(&app, "Job Reminder", "0755200002").await;
     let (status, repair_body) = send_authed(
         &app.router,
         "POST",
         "/api/repairs",
         Some(json!({
-            "customer": { "customerName": "Job Reminder", "customerPhone": "0755200002" },
+            "customer": { "customerKey": job_customer },
             "deviceModel": "Pixel 7",
             "issueDescription": "No power",
             "items": [{ "description": "Repair work", "laborCents": 400_000, "warranty": { "coverage": { "kind": "none" } } }],
@@ -179,12 +180,13 @@ async fn reminders_include_overdue_and_due_soon_repair_and_print_jobs() {
         .expect("the value is a string")
         .to_string();
 
+    let print_customer = common::register_customer(&app, "Print Reminder", "0755200003").await;
     let (status, print_body) = send_authed(
         &app.router,
         "POST",
         "/api/print-jobs",
         Some(json!({
-            "customer": { "customerName": "Print Reminder", "customerPhone": "0755200003" },
+            "customer": { "customerKey": print_customer },
             "jobType": "banner",
             "quantity": 2,
             "estimatedCostCents": 90_000,
@@ -223,12 +225,13 @@ async fn reminders_payment_overdues_sort_before_job_overdues() {
     let token = full_access_token(&app.config);
 
     // Seed a job overdue by 10 days
+    let overdue_customer = common::register_customer(&app, "Overdue Repair", "0755999999").await;
     let (status, repair_body) = send_authed(
         &app.router,
         "POST",
         "/api/repairs",
         Some(json!({
-            "customer": { "customerName": "Overdue Repair", "customerPhone": "0755999999" },
+            "customer": { "customerKey": overdue_customer },
             "deviceModel": "Pixel 7",
             "issueDescription": "No power",
             "items": [{ "description": "Repair work", "laborCents": 400_000, "warranty": { "coverage": { "kind": "none" } } }],

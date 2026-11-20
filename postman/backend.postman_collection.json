@@ -5265,7 +5265,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"customer\": {\n    \"customerName\": \"Nadeesha Perera\",\n    \"customerPhone\": \"0711234567\"\n  },\n  \"jobType\": \"mug\",\n  \"quantity\": 25,\n  \"estimatedCostCents\": 500000,\n  \"materialCostCents\": 200000,\n  \"promisedReadyAt\": \"2026-09-15\"\n}",
+              "raw": "{\n  \"customer\": {\n    \"customerKey\": \"{{customerKey}}\"\n  },\n  \"jobType\": \"mug\",\n  \"quantity\": 25,\n  \"estimatedCostCents\": 500000,\n  \"materialCostCents\": 200000,\n  \"promisedReadyAt\": \"2026-09-15\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5282,7 +5282,7 @@
                 "print-jobs"
               ]
             },
-            "description": "Create a print job ticket. `ticketNumber` is never client-supplied — reserved server-side on create. `jobType` must be one of `mug | t-shirt | handbill | banner | custom`; `status` defaults to `received` if omitted. The request nests customer identity into `customer{customerKey, customerName, customerPhone}` and technician assignment into `assignment{assignedEmployeeId, assignedEmployeeName, splitType, splitValue}` (both optional groups). If `customer.customerKey` is set, `customer.customerName`/`customerPhone` in this request are ignored and resolved server-side from the linked `Customer` record instead — only used as typed when there's no `customerKey` (a walk-in with no linked account).\n\n**Requires the `print_jobs:write` permission** in the token's `permissions` claim — granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role."
+            "description": "Create a print job ticket. `ticketNumber` is never client-supplied — reserved server-side on create. `jobType` must be one of `mug | t-shirt | handbill | banner | custom`; `status` defaults to `received` if omitted. The request nests the customer into the required `customer{customerKey}` (a registered customer: 404 `CUSTOMER_NOT_FOUND` for an unknown key, 422 when `customer` or its key is missing; there are no walk-in print jobs) and technician assignment into `assignment{assignedEmployeeId, assignedEmployeeName, splitType, splitValue}` (optional). The ticket's customer name and phone are read from that customer's record.\n\n**Requires the `print_jobs:write` permission** in the token's `permissions` claim — granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role."
           },
           "response": []
         },
@@ -5336,7 +5336,7 @@
                 "{{printJobKey}}"
               ]
             },
-            "description": "Partially update a print job — omit any field to leave it unchanged. The request nests customer identity into `customer{customerKey, customerName, customerPhone}` and technician assignment into `assignment{assignedEmployeeId, assignedEmployeeName, splitType, splitValue}` (both optional groups). If `customer.customerKey` is set, `customer.customerName`/`customerPhone` in this request are ignored and resolved server-side from the linked `Customer` record instead — only used as typed when there's no `customerKey` (a walk-in with no linked account).\n\n**Requires the `print_jobs:write` permission** in the token's `permissions` claim — granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role."
+            "description": "Partially update a print job — omit any field to leave it unchanged. The request nests the customer into `customer{customerKey}` (omit it to keep the job's customer; a key changes it, 404 `CUSTOMER_NOT_FOUND` when unknown) and technician assignment into `assignment{assignedEmployeeId, assignedEmployeeName, splitType, splitValue}` (optional). The job's customer name and phone are always read from the customer's record.\n\n**Requires the `print_jobs:write` permission** in the token's `permissions` claim — granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role."
           },
           "response": []
         },
@@ -5357,6 +5357,41 @@
               ]
             },
             "description": "Soft-deletes a print job (sets `deletedAt` so it can still appear as a sync tombstone).\n\n**Requires the `print_jobs:write` permission** in the token's `permissions` claim — granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role."
+          },
+          "response": []
+        },
+        {
+          "name": "Print Print Job Receipt",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "The receipt a customer gets when the shop receives a print job, as a PDF with the design in force now (`application/pdf`). It always shows the job and the shop's terms as they stand today, so there is no `design=original`. Needs `print_jobs:write`.",
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/print-jobs/{{printJobKey}}/documents/job-receipt?paper=a5&template=doc_temp_JobRcpt0V1Std000",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "print-jobs",
+                "{{printJobKey}}",
+                "documents",
+                "job-receipt"
+              ],
+              "query": [
+                {
+                  "key": "paper",
+                  "value": "a5",
+                  "description": "Required: `a5` (office printer), `thermal-58` or `thermal-80` (receipt roll)."
+                },
+                {
+                  "key": "template",
+                  "value": "doc_temp_JobRcpt0V1Std000",
+                  "description": "A design family for this print only; defaults to the shop's choice for job receipts.",
+                  "disabled": true
+                }
+              ]
+            }
           },
           "response": []
         }
@@ -5663,7 +5698,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"customer\": {\n    \"customerName\": \"Kasun Silva\",\n    \"customerPhone\": \"0771234567\"\n  },\n  \"deviceModel\": \"iPhone 14\",\n  \"serialNumber\": \"C02XG2AVJHD3\",\n  \"issueDescription\": \"Cracked screen, touch unresponsive in top corner\",\n  \"promisedReadyAt\": \"2026-09-15\",\n  \"items\": [\n    {\n      \"description\": \"Replace screen\",\n      \"laborCents\": 250000,\n      \"warranty\": {\n        \"coverage\": {\n          \"kind\": \"limited\",\n          \"value\": 3,\n          \"unit\": \"months\"\n        },\n        \"warrantyType\": \"shop\",\n        \"terms\": \"Covers the screen fitted; not new cracks.\"\n      },\n      \"part\": {\n        \"source\": \"stock\",\n        \"productKey\": \"{{productKey}}\",\n        \"sellingPriceCents\": 1200000\n      }\n    },\n    {\n      \"description\": \"Clean charging port\",\n      \"laborCents\": 50000,\n      \"warranty\": {\n        \"coverage\": {\n          \"kind\": \"none\"\n        }\n      },\n      \"part\": {\n        \"source\": \"outside\",\n        \"name\": \"Contact cleaner\",\n        \"priceCents\": 10000,\n        \"costCents\": 4000\n      }\n    },\n    {\n      \"description\": \"Service fee\",\n      \"laborCents\": 100000,\n      \"warranty\": {\n        \"coverage\": {\n          \"kind\": \"none\"\n        }\n      },\n      \"discount\": {\n        \"type\": \"fixed\",\n        \"cents\": 20000\n      }\n    }\n  ]\n}",
+              "raw": "{\n  \"customer\": {\n    \"customerKey\": \"{{customerKey}}\"\n  },\n  \"deviceModel\": \"iPhone 14\",\n  \"serialNumber\": \"C02XG2AVJHD3\",\n  \"issueDescription\": \"Cracked screen, touch unresponsive in top corner\",\n  \"promisedReadyAt\": \"2026-09-15\",\n  \"items\": [\n    {\n      \"description\": \"Replace screen\",\n      \"laborCents\": 250000,\n      \"warranty\": {\n        \"coverage\": {\n          \"kind\": \"limited\",\n          \"value\": 3,\n          \"unit\": \"months\"\n        },\n        \"warrantyType\": \"shop\",\n        \"terms\": \"Covers the screen fitted; not new cracks.\"\n      },\n      \"part\": {\n        \"source\": \"stock\",\n        \"productKey\": \"{{productKey}}\",\n        \"sellingPriceCents\": 1200000\n      }\n    },\n    {\n      \"description\": \"Clean charging port\",\n      \"laborCents\": 50000,\n      \"warranty\": {\n        \"coverage\": {\n          \"kind\": \"none\"\n        }\n      },\n      \"part\": {\n        \"source\": \"outside\",\n        \"name\": \"Contact cleaner\",\n        \"priceCents\": 10000,\n        \"costCents\": 4000\n      }\n    },\n    {\n      \"description\": \"Service fee\",\n      \"laborCents\": 100000,\n      \"warranty\": {\n        \"coverage\": {\n          \"kind\": \"none\"\n        }\n      },\n      \"discount\": {\n        \"type\": \"fixed\",\n        \"cents\": 20000\n      }\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5680,7 +5715,7 @@
                 "repairs"
               ]
             },
-            "description": "Opens a repair job (`REP-000001`). `items` is the work: each has a description, `laborCents`, a `warranty` (`{coverage}` and, when covered, `warrantyType`/`terms`) and at most one `part`: `{source: stock, productKey, serialNumber}` for a serialized product or `{source: stock, productKey, sellingPriceCents}` (one of its current price tiers), priced and costed by the server, or `{source: outside, name, priceCents, costCents}`. `items` may be empty while the device is being looked at; `ready`/`delivered` need at least one (400 `REPAIR_PRICE_REQUIRED`). A job with a stock part is handed back by billing it (400 `REPAIR_PART_INVALID` for `delivered` by hand). An item may carry one `discount` (`{type: percentage, basisPoints}` or `{type: fixed, cents}`), off its own fee or part price: the server works out `discount.amountCents`, refuses one that is more than the item, on an item with both a fee and a part, or on a warranty rework (400). The reply carries `priceCents` (labour and part prices less the discounts: what the customer pays) and `costCents` (part costs). Needs `repairs:write`."
+            "description": "Opens a repair job (`REP-000001`) for a registered customer: `customer{customerKey}` is required (404 `CUSTOMER_NOT_FOUND` for an unknown key, 422 when `customer` or its key is missing; there are no walk-in repairs) and the job's customer name and phone are read from that customer's record. `items` is the work: each has a description, `laborCents`, a `warranty` (`{coverage}` and, when covered, `warrantyType`/`terms`) and at most one `part`: `{source: stock, productKey, serialNumber}` for a serialized product or `{source: stock, productKey, sellingPriceCents}` (one of its current price tiers), priced and costed by the server, or `{source: outside, name, priceCents, costCents}`. `items` may be empty while the device is being looked at; `ready`/`delivered` need at least one (400 `REPAIR_PRICE_REQUIRED`). A job with a stock part is handed back by billing it (400 `REPAIR_PART_INVALID` for `delivered` by hand). An item may carry one `discount` (`{type: percentage, basisPoints}` or `{type: fixed, cents}`), off its own fee or part price: the server works out `discount.amountCents`, refuses one that is more than the item, on an item with both a fee and a part, or on a warranty rework (400). The reply carries `priceCents` (labour and part prices less the discounts: what the customer pays) and `costCents` (part costs). Needs `repairs:write`."
           },
           "response": []
         },
@@ -5734,7 +5769,7 @@
                 "{{repairKey}}"
               ]
             },
-            "description": "Changes what is sent. `items` replaces the whole list: an item sent with the `key` of one already on the job keeps it (400 for a key not on the job); an item's `discount` is kept only when sent again (omit it to remove the discount); omit `items` to leave them. A handed-back job's items cannot change (409 `REPAIR_ITEMS_LOCKED`). Setting a warranty rework to `delivered` takes its stock parts out of stock (`warranty_rework_part_consumption`). Needs `repairs:write`."
+            "description": "Changes what is sent. `customer{customerKey}` changes the job's customer (omit it to keep the current one; 404 `CUSTOMER_NOT_FOUND` for an unknown key); the customer name and phone are always read from the customer's record. `items` replaces the whole list: an item sent with the `key` of one already on the job keeps it (400 for a key not on the job); an item's `discount` is kept only when sent again (omit it to remove the discount); omit `items` to leave them. A handed-back job's items cannot change (409 `REPAIR_ITEMS_LOCKED`). Setting a warranty rework to `delivered` takes its stock parts out of stock (`warranty_rework_part_consumption`). Needs `repairs:write`."
           },
           "response": []
         },
@@ -5755,6 +5790,41 @@
               ]
             },
             "description": "Soft-deletes a repair ticket (sets `deletedAt` so it can still appear as a sync tombstone).\n\n**Requires the `repairs:write` permission** in the token's `permissions` claim — granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role."
+          },
+          "response": []
+        },
+        {
+          "name": "Print Repair Receipt",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "The receipt a customer gets when the shop receives a repair, as a PDF with the design in force now (`application/pdf`). It always shows the job and the shop's terms as they stand today, so there is no `design=original`. Needs `repairs:write`.",
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/repairs/{{repairKey}}/documents/job-receipt?paper=a5&template=doc_temp_JobRcpt0V1Std000",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "repairs",
+                "{{repairKey}}",
+                "documents",
+                "job-receipt"
+              ],
+              "query": [
+                {
+                  "key": "paper",
+                  "value": "a5",
+                  "description": "Required: `a5` (office printer), `thermal-58` or `thermal-80` (receipt roll)."
+                },
+                {
+                  "key": "template",
+                  "value": "doc_temp_JobRcpt0V1Std000",
+                  "description": "A design family for this print only; defaults to the shop's choice for job receipts.",
+                  "disabled": true
+                }
+              ]
+            }
           },
           "response": []
         }

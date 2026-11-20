@@ -73,7 +73,8 @@ pub(crate) async fn find_shop_profile<'a>(
                 "SELECT key, id, legal_name, trading_name, address_lines, primary_phone, \
                  secondary_phone, email, website, business_reg_no, logo_base64, bank_name, \
                  bank_branch, account_name, account_number, default_warranty_text, \
-                 default_footer_text, receipt_footer_text, allow_shared_user_sessions, \
+                 default_footer_text, receipt_footer_text, job_receipt_terms_text, \
+                 uncollected_after_days, allow_shared_user_sessions, \
                  allow_staff_multi_device_sessions, version, created_at, updated_at, \
                  updated_by_device \
                  FROM shop_profiles WHERE key = ?1 LIMIT 1",
@@ -116,6 +117,8 @@ pub(crate) async fn find_shop_profile<'a>(
                     default_warranty_text: r.get("default_warranty_text"),
                     default_footer_text: r.get("default_footer_text"),
                     receipt_footer_text: r.get("receipt_footer_text"),
+                    job_receipt_terms_text: r.get("job_receipt_terms_text"),
+                    uncollected_after_days: r.get("uncollected_after_days"),
                     allow_shared_user_sessions: allow_shared_user_sessions_int != 0,
                     allow_staff_multi_device_sessions: allow_staff_multi_device_sessions_int != 0,
                     version: r.get("version"),
@@ -215,9 +218,10 @@ pub(crate) async fn insert_shop_profile_if_absent(
                     key, id, legal_name, trading_name, address_lines, primary_phone, secondary_phone, \
                     email, website, business_reg_no, logo_base64, bank_name, bank_branch, account_name, \
                     account_number, default_warranty_text, default_footer_text, receipt_footer_text, \
+                    job_receipt_terms_text, uncollected_after_days, \
                     allow_shared_user_sessions, allow_staff_multi_device_sessions, version, created_at, \
                     updated_at, updated_by_device \
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24) \
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26) \
                 ON CONFLICT(key) DO NOTHING",
             )
             .bind(&doc.key)
@@ -238,6 +242,8 @@ pub(crate) async fn insert_shop_profile_if_absent(
             .bind(&doc.default_warranty_text)
             .bind(&doc.default_footer_text)
             .bind(&doc.receipt_footer_text)
+            .bind(&doc.job_receipt_terms_text)
+            .bind(doc.uncollected_after_days)
             .bind(if doc.allow_shared_user_sessions { 1i64 } else { 0i64 })
             .bind(if doc.allow_staff_multi_device_sessions {
                 1i64
@@ -291,9 +297,10 @@ pub(crate) async fn upsert_shop_profile<'a>(
                     key, id, legal_name, trading_name, address_lines, primary_phone, secondary_phone, \
                     email, website, business_reg_no, logo_base64, bank_name, bank_branch, account_name, \
                     account_number, default_warranty_text, default_footer_text, receipt_footer_text, \
+                    job_receipt_terms_text, uncollected_after_days, \
                     allow_shared_user_sessions, allow_staff_multi_device_sessions, version, created_at, \
                     updated_at, updated_by_device \
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24) \
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26) \
                 ON CONFLICT(key) DO UPDATE SET \
                     legal_name = excluded.legal_name, \
                     trading_name = excluded.trading_name, \
@@ -311,6 +318,8 @@ pub(crate) async fn upsert_shop_profile<'a>(
                     default_warranty_text = excluded.default_warranty_text, \
                     default_footer_text = excluded.default_footer_text, \
                     receipt_footer_text = excluded.receipt_footer_text, \
+                    job_receipt_terms_text = excluded.job_receipt_terms_text, \
+                    uncollected_after_days = excluded.uncollected_after_days, \
                     allow_shared_user_sessions = excluded.allow_shared_user_sessions, \
                     allow_staff_multi_device_sessions = excluded.allow_staff_multi_device_sessions, \
                     version = excluded.version, \
@@ -335,6 +344,8 @@ pub(crate) async fn upsert_shop_profile<'a>(
             .bind(&doc.default_warranty_text)
             .bind(&doc.default_footer_text)
             .bind(&doc.receipt_footer_text)
+            .bind(&doc.job_receipt_terms_text)
+            .bind(doc.uncollected_after_days)
             .bind(if doc.allow_shared_user_sessions { 1i64 } else { 0i64 })
             .bind(if doc.allow_staff_multi_device_sessions {
                 1i64
@@ -377,6 +388,8 @@ pub(crate) async fn upsert_shop_profile<'a>(
                 "default_warranty_text": &doc.default_warranty_text,
                 "default_footer_text": &doc.default_footer_text,
                 "receipt_footer_text": &doc.receipt_footer_text,
+                "job_receipt_terms_text": &doc.job_receipt_terms_text,
+                "uncollected_after_days": doc.uncollected_after_days,
                 "allow_shared_user_sessions": doc.allow_shared_user_sessions,
                 "allow_staff_multi_device_sessions": doc.allow_staff_multi_device_sessions,
                 "version": doc.version,
