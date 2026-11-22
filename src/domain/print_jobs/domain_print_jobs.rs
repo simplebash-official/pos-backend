@@ -57,7 +57,7 @@ pub struct PrintJob {
     /// Derived flag: promised-ready date has passed and the job is still open
     /// (not delivered/cancelled). Computed on every read, never stored.
     pub is_overdue: bool,
-    /// Status ("received", "in_progress", "completed", "delivered", "cancelled").
+    /// Status ("received", "in_repair" (in production), "ready", "delivered", "cancelled").
     pub status: String,
     /// Quoted or estimated price in cents.
     pub estimated_cost_cents: i64,

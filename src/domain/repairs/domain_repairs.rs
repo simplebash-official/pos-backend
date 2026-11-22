@@ -93,7 +93,8 @@ pub struct Repair {
     /// open (not delivered/cancelled). Computed fresh on every read, never
     /// stored — mirrors `billing::Invoice.is_overdue`.
     pub is_overdue: bool,
-    /// Lifecycle status ("received", "in_progress", "completed", "delivered", "cancelled").
+    /// Lifecycle status ("received", "diagnosing", "in_repair", "ready", "delivered",
+    /// "cancelled").
     pub status: String,
     /// Ordinary paid work, or free work redoing an earlier job under its warranty.
     pub kind: RepairKind,

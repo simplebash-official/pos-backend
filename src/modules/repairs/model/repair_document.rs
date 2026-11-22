@@ -32,7 +32,8 @@ pub struct RepairDocument {
     /// hand-back date was agreed. Absent means no date was agreed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub promised_ready_at: Option<String>,
-    /// Lifecycle status ("received", "in_progress", "completed", "delivered", "cancelled").
+    /// Lifecycle status ("received", "diagnosing", "in_repair", "ready", "delivered",
+    /// "cancelled").
     pub status: String,
     /// Ordinary paid work, or a warranty rework of an earlier job.
     pub kind: RepairKind,

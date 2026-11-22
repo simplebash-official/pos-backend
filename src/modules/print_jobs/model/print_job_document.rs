@@ -29,7 +29,8 @@ pub struct PrintJobDocument {
     /// Date the job was promised ready (YYYY-MM-DD), if agreed. Absent means none was agreed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub promised_ready_at: Option<String>,
-    /// Job lifecycle status ("received", "in_progress", "completed", "delivered", "cancelled").
+    /// Job lifecycle status ("received", "in_repair" (in production), "ready", "delivered",
+    /// "cancelled").
     pub status: String,
     /// Estimated charge to customer in cents.
     pub estimated_cost_cents: i64,

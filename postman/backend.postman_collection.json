@@ -5193,7 +5193,7 @@
                 {
                   "key": "status",
                   "value": "received",
-                  "description": "One exact status: received | diagnosing | in_repair | ready | delivered | cancelled",
+                  "description": "One exact status: received | in_repair (in production) | ready | delivered | cancelled",
                   "disabled": true
                 },
                 {

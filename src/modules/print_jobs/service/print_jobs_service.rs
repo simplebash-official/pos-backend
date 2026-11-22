@@ -380,7 +380,7 @@ pub(super) fn validate_required_fields(
     Ok(())
 }
 
-const VALID_STATUSES: &[&str] = &["received", "in_progress", "ready", "delivered", "cancelled"];
+const VALID_STATUSES: &[&str] = &["received", "in_repair", "ready", "delivered", "cancelled"];
 
 pub(super) fn validate_status(status: &str) -> AppResult<()> {
     if VALID_STATUSES.contains(&status) {

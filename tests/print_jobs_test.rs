@@ -322,6 +322,65 @@ async fn get_print_job_by_id_and_key_and_update_status() {
 }
 
 #[tokio::test]
+async fn a_print_job_goes_received_in_production_ready_delivered_and_no_other_way() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let payload = sample_print_job_payload(&app).await;
+    let (status, created) = send_authed(
+        &app.router,
+        "POST",
+        "/api/print-jobs",
+        Some(payload),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {created}");
+    let key = created["data"]["key"].as_str().expect("the job has a key");
+
+    // "In production" is stored as in_repair, the value the dashboard already counts.
+    for next in ["in_repair", "ready", "delivered"] {
+        let (status, updated) = send_authed(
+            &app.router,
+            "PATCH",
+            &format!("/api/print-jobs/{key}"),
+            Some(json!({ "status": next })),
+            &token,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{next}: {updated}");
+        assert_eq!(updated["data"]["status"], next);
+    }
+
+    // `diagnosing` belongs to repairs and `in_progress` was never a print job status.
+    for refused in ["diagnosing", "in_progress"] {
+        let (status, body) = send_authed(
+            &app.router,
+            "PATCH",
+            &format!("/api/print-jobs/{key}"),
+            Some(json!({ "status": refused })),
+            &token,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}: {body}");
+        assert_eq!(body["code"], "INVALID_JOB_STATUS", "{refused}");
+
+        let mut payload = sample_print_job_payload(&app).await;
+        payload["status"] = json!(refused);
+        let (status, body) = send_authed(
+            &app.router,
+            "POST",
+            "/api/print-jobs",
+            Some(payload),
+            &token,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "create {refused}: {body}");
+        assert_eq!(body["code"], "INVALID_JOB_STATUS", "create {refused}");
+    }
+}
+
+#[tokio::test]
 async fn list_print_jobs_filters_by_search_and_status() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);
@@ -638,7 +697,7 @@ async fn print_jobs_stats_endpoint_returns_today_job_count_revenue_pending_count
     seed_print_job_with(&db, "delivered", 3000, now).await;
     // Backdated open job — must NOT count toward today's job
     // count/revenue, but DOES count toward the all-time pending count.
-    seed_print_job_with(&db, "diagnosing", 2000, yesterday).await;
+    seed_print_job_with(&db, "ready", 2000, yesterday).await;
     // Backdated cancelled job — excluded from pending entirely.
     seed_print_job_with(&db, "cancelled", 1000, yesterday).await;
 
@@ -652,7 +711,7 @@ async fn print_jobs_stats_endpoint_returns_today_job_count_revenue_pending_count
     assert_eq!(stats.today_job_count, 3);
     assert_eq!(stats.today_revenue_cents, 5000 + 4000 + 3000);
     // pending_job_count = all non-delivered/cancelled jobs, any date:
-    // "received" + "in_repair" (today) + "diagnosing" (yesterday) = 3.
+    // "received" + "in_repair" (today) + "ready" (yesterday) = 3.
     assert_eq!(stats.pending_job_count, 3);
     assert_eq!(stats.avg_job_value_cents, (5000 + 4000 + 3000) / 3);
 
