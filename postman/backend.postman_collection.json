@@ -411,6 +411,12 @@
                   "disabled": true
                 },
                 {
+                  "key": "ticketKey",
+                  "value": "rep_xxxxxxxxxxxxxxxx",
+                  "description": "Only invoices with a line billed from this repair or print-job ticket key.",
+                  "disabled": true
+                },
+                {
                   "key": "paymentStatus",
                   "value": "credit",
                   "description": "paid | credit — paid means status==paid AND not on credit; credit means isCredit OR status==pending",

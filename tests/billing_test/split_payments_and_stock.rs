@@ -168,6 +168,56 @@ async fn complete_sale_with_repair_line_marks_ticket_delivered() {
 }
 
 #[tokio::test]
+async fn invoices_can_be_listed_by_the_ticket_they_billed() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+    let billed_key = seed_repair(&app).await;
+    let unbilled_key = seed_repair(&app).await;
+
+    let mut payload = base_sale_payload();
+    payload["items"] = json!([{
+        "name": "Screen Replacement",
+        "quantity": 1,
+        "discountCents": 0,
+        "sourceType": "repair",
+        "sourceTicketKey": billed_key,
+    }]);
+    let (status, sale) = send_authed(
+        &app.router,
+        "POST",
+        "/api/billing/sales",
+        Some(payload),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {sale}");
+    let invoice_key = sale["data"]["invoice"]["key"].clone();
+
+    let (status, billed) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/billing/invoices?ticketKey={billed_key}"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {billed}");
+    assert_eq!(billed["data"]["invoices"].as_array().map(Vec::len), Some(1));
+    assert_eq!(billed["data"]["invoices"][0]["key"], invoice_key);
+
+    let (status, unbilled) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/billing/invoices?ticketKey={unbilled_key}"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {unbilled}");
+    assert_eq!(unbilled["data"]["invoices"], json!([]));
+}
+
+#[tokio::test]
 async fn complete_sale_with_priceless_repair_line_is_rejected() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);

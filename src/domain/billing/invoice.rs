@@ -261,6 +261,9 @@ pub struct InvoiceListQuery {
     pub status: Option<String>,
     /// Filter by customer key.
     pub customer_key: Option<String>,
+    /// Filter by the key of the repair or print-job ticket a line was billed
+    /// from, so a ticket can find the invoice that billed it.
+    pub ticket_key: Option<String>,
     /// `"paid"` (status == "paid" AND NOT credit) or `"credit"` (is_credit
     /// OR status in (pending, partially_paid)) — the same compound rule
     /// `BillingStats.outstandingCreditCents` uses, exposed here so the

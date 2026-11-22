@@ -115,6 +115,9 @@ pub async fn list_invoices(db: &Db, query: InvoiceListQuery) -> AppResult<Invoic
     if let Some(customer_key) = query.customer_key.filter(|s| !s.trim().is_empty()) {
         and_clauses.push(doc! { "customer_key": customer_key.trim() });
     }
+    if let Some(ticket_key) = query.ticket_key.filter(|s| !s.trim().is_empty()) {
+        and_clauses.push(doc! { "items.sourceTicketKey": ticket_key.trim() });
+    }
     if let Some(payment_status) = query.payment_status.filter(|s| !s.trim().is_empty()) {
         match payment_status.trim() {
             "paid" => and_clauses.push(doc! { "status": "paid", "is_credit": false }),

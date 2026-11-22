@@ -175,6 +175,15 @@ pub(super) fn build_invoice_where_clause(filter: &Document) -> SqlFilter {
             conditions.push("customer_key = ?".to_string());
             bindings.push(customer_key.to_string());
         }
+        if let Ok(ticket_key) = doc.get_str("items.sourceTicketKey") {
+            // Lines are stored as JSON text; the Mongo filter reads the same field by path.
+            conditions.push(
+                "EXISTS (SELECT 1 FROM json_each(invoices.items) \
+                 WHERE json_extract(json_each.value, '$.sourceTicketKey') = ?)"
+                    .to_string(),
+            );
+            bindings.push(ticket_key.to_string());
+        }
         if let Ok(status) = doc.get_str("status") {
             conditions.push("status = ?".to_string());
             bindings.push(status.to_string());
