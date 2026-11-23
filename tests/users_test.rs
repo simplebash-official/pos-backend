@@ -349,6 +349,7 @@ async fn single_admin_invariant_and_admin_invisible_via_users_api() {
             password: "Password123!".to_string(),
             role: Role::Admin,
             employee_key: None,
+            email: None,
         },
     )
     .await;
@@ -362,6 +363,7 @@ async fn single_admin_invariant_and_admin_invisible_via_users_api() {
             password: "Password123!".to_string(),
             role: Role::Admin,
             employee_key: None,
+            email: None,
         },
     )
     .await;

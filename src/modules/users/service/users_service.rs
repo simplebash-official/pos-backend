@@ -4,7 +4,7 @@ use crate::core::error::{AppError, AppResult};
 use crate::core::id::generate_id;
 use crate::domain::employees::EmployeeLoginSummary;
 use crate::domain::users::{
-    ApprovedBy, CATALOG_SORT_IDS, CreateUserRequest, ManagerApproval, Role,
+    ApprovalCaller, ApprovedBy, CATALOG_SORT_IDS, CreateUserRequest, ManagerApproval, Role,
     UpdateMyPreferencesRequest, UpdateUserRequest, User, UserListQuery, UsersResponse,
 };
 use crate::modules::employees;
@@ -67,6 +67,7 @@ pub async fn create_owner_admin_if_absent(
         role: Role::Admin,
         is_active: true,
         employee_key: None,
+        email: None,
         preferences: None,
         pin_hash: None,
         created_at: now,
@@ -147,6 +148,12 @@ pub async fn create_user(db: &Db, body: CreateUserRequest) -> AppResult<User> {
         role: body.role,
         is_active: true,
         employee_key: employee_key.clone(),
+        email: body
+            .email
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
         preferences: None,
         pin_hash: None,
         created_at: now,
@@ -232,8 +239,26 @@ pub(super) fn ensure_manageable(caller_role: Role, target_role: Role) -> AppResu
     }
 }
 
+/// Links an account to the employee profile made for it (the admin's own profile, see
+/// `employees::service::create_owner_profile`). `update_user` cannot do this: the hierarchy
+/// never lets an Admin edit an Admin account. Nothing else may reach this function.
+pub(crate) async fn link_employee(db: &Db, user_id: ObjectId, employee_key: &str) -> AppResult<()> {
+    crate::core::logging::domain::tracked("users.employee_linked", async move {
+        repository::update_user(
+            db,
+            user_id,
+            doc! { "employee_key": employee_key, "updated_at": BsonDateTime::now() },
+        )
+        .await?
+        .ok_or_else(|| AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND))?;
+        // Re-delivers the employee with its `login` filled in on the next sync.
+        employees::service::touch_by_key(db, employee_key).await
+    })
+    .await
+}
+
 /// The shop's single Admin document, if one exists.
-pub(super) async fn find_admin_document(db: &Db) -> AppResult<Option<UserDocument>> {
+pub async fn find_admin_document(db: &Db) -> AppResult<Option<UserDocument>> {
     Ok(
         repository::list_users(db, doc! { "role": Role::Admin.as_str() })
             .await?
@@ -305,6 +330,45 @@ pub(crate) async fn get_user(db: &Db, id: ObjectId) -> AppResult<User> {
     Ok(document.into_user())
 }
 
+/// What every authenticated request re-checks about the account behind a local token.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AccountStatus {
+    pub(crate) is_active: bool,
+    pub(crate) role: Role,
+    /// See [`password_fingerprint`].
+    pub(crate) password_fingerprint: String,
+}
+
+/// The current status of the account `id`, or `None` when it no longer exists.
+pub(crate) async fn account_status(db: &Db, id: ObjectId) -> AppResult<Option<AccountStatus>> {
+    let document = repository::find_user_by_id(db, id).await?;
+    Ok(document.map(|document| AccountStatus {
+        is_active: document.is_active,
+        role: document.role,
+        password_fingerprint: password_fingerprint(&document.password_hash),
+    }))
+}
+
+/// The fingerprint a token minted now for `user` must carry (its `pwv` claim).
+pub(crate) async fn fingerprint_for_login(db: &Db, user: &User) -> AppResult<String> {
+    let id = ObjectId::parse_str(&user.id)
+        .map_err(|err| AppError::internal(format!("the signed-in user's id is invalid: {err}")))?;
+    let status = account_status(db, id)
+        .await?
+        .ok_or_else(|| AppError::internal("the user signing in no longer exists"))?;
+    Ok(status.password_fingerprint)
+}
+
+/// A short digest of the stored password hash, embedded in a login token so the token stops
+/// working once the password changes (a new hash has a new salt, so a new fingerprint). It
+/// reveals nothing useful about the hash and is never a credential.
+#[must_use]
+pub(crate) fn password_fingerprint(password_hash: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(password_hash.as_bytes());
+    digest[..8].iter().map(|b| format!("{b:02x}")).collect()
+}
+
 /// Scoped lookup for `GET /users/{id}` — 404s if `id` resolves to an
 /// account outside `manageable_roles(caller_role)` (see `ensure_manageable`).
 pub(crate) async fn get_user_for_caller(
@@ -320,7 +384,8 @@ pub(crate) async fn get_user_for_caller(
     Ok(document.into_user())
 }
 
-pub(super) fn hash_password(password: &str) -> AppResult<String> {
+/// Hashes a plaintext password string using Argon2id.
+pub fn hash_password(password: &str) -> AppResult<String> {
     let salt = SaltString::generate(&mut OsRng);
     Argon2::default()
         .hash_password(password.as_bytes(), &salt)
@@ -425,6 +490,20 @@ pub async fn reset_admin_credentials(db: &Db, password: &str) -> AppResult<User>
 
     let user = updated.into_user();
     // Existing tokens for this account must be re-checked on their next use.
+    crate::core::middleware::auth::invalidate_account_status(&user.id);
+    Ok(user)
+}
+
+/// Updates the Admin account's password hash and increments version atomically.
+pub async fn update_admin_password_and_bump_version(
+    db: &Db,
+    admin_id: ObjectId,
+    password_hash: &str,
+) -> AppResult<User> {
+    let updated = repository::update_password_and_bump_version(db, admin_id, password_hash)
+        .await?
+        .ok_or_else(|| AppError::not_found_with_code("User not found", codes::USER_NOT_FOUND))?;
+    let user = updated.into_user();
     crate::core::middleware::auth::invalidate_account_status(&user.id);
     Ok(user)
 }
@@ -648,7 +727,8 @@ pub fn validate_owner_login(name: &str, username: &str, password_hash: &str) -> 
     Ok(())
 }
 
-pub(super) fn validate_password_strength(password: &str) -> AppResult<()> {
+/// Validates that password meets minimum complexity requirements (at least 8 characters).
+pub fn validate_password_strength(password: &str) -> AppResult<()> {
     if password.chars().count() < 8 {
         return Err(AppError::validation(
             "Password must be at least 8 characters",
@@ -728,11 +808,77 @@ pub(super) fn verify_password(password: &str, hash: &str) -> AppResult<bool> {
 /// The longest reason an approval may carry.
 const APPROVAL_REASON_MAX: usize = 500;
 
-/// Checks a manager or owner sign-off: a reason must be given (at most 500 characters) and the
-/// PIN must belong to an active Admin or Manager. 401 `INVALID_PIN` otherwise; nothing is
-/// written.
-pub async fn require_manager_approval(
+/// What a signed-in Admin or Manager is told when their request carries a PIN.
+const SELF_APPROVAL_NO_PIN: &str =
+    "A signed-in manager or owner approves this themselves, so no PIN or reason is sent.";
+
+/// Resolves who approves an action. A signed-in Admin or Manager approves it themselves and must
+/// send no approval (400 otherwise). Anyone else must send one (403 `PIN_NOT_SET` if missing),
+/// checked by [`require_manager_approval`].
+pub(crate) async fn resolve_approval(
     db: &Db,
+    caller: &ApprovalCaller,
+    approval: Option<&ManagerApproval>,
+) -> AppResult<ApprovedBy> {
+    if caller.self_approves() {
+        if approval.is_some() {
+            return Err(AppError::validation(SELF_APPROVAL_NO_PIN));
+        }
+        return Ok(ApprovedBy {
+            user_id: caller.user_id.clone(),
+            name: caller.name.clone(),
+            reason: None,
+        });
+    }
+    let approval = approval.ok_or_else(|| {
+        AppError::forbidden_with_code("A manager or owner must approve this.", codes::PIN_NOT_SET)
+    })?;
+    require_manager_approval(db, caller, approval).await
+}
+
+/// Resolves who approves an action whose screen sends a bare PIN. A signed-in Admin or Manager
+/// approves it themselves and must send none (400 otherwise). For anyone else the PIN must
+/// belong to an active Admin or Manager (401 `INVALID_PIN`); `Ok(None)` means no PIN was sent,
+/// so the caller raises the error that fits its screen.
+pub(crate) async fn pin_approver(
+    db: &Db,
+    caller: &ApprovalCaller,
+    pin: Option<&str>,
+) -> AppResult<Option<ApprovedBy>> {
+    if caller.self_approves() {
+        if pin.is_some() {
+            return Err(AppError::validation(SELF_APPROVAL_NO_PIN));
+        }
+        return Ok(Some(ApprovedBy {
+            user_id: caller.user_id.clone(),
+            name: caller.name.clone(),
+            reason: None,
+        }));
+    }
+    let Some(pin) = pin else {
+        return Ok(None);
+    };
+    let approver = verify_user_pin(db, &caller.user_id, pin, Some("manager"))
+        .await?
+        .ok_or_else(|| {
+            AppError::unauthorized_with_code(
+                "That PIN does not belong to a manager or owner.",
+                codes::INVALID_PIN,
+            )
+        })?;
+    Ok(Some(ApprovedBy {
+        user_id: approver.id,
+        name: approver.name,
+        reason: None,
+    }))
+}
+
+/// Checks a Staff member's manager or owner sign-off: a reason must be given (at most 500
+/// characters) and the PIN must belong to an active Admin or Manager. 401 `INVALID_PIN`
+/// otherwise; nothing is written.
+async fn require_manager_approval(
+    db: &Db,
+    caller: &ApprovalCaller,
     approval: &ManagerApproval,
 ) -> AppResult<ApprovedBy> {
     let reason = approval.reason.trim();
@@ -746,23 +892,58 @@ pub async fn require_manager_approval(
             "The reason can be at most {APPROVAL_REASON_MAX} characters."
         )));
     }
-    let approver = verify_user_pin(db, approval.manager_pin.trim(), Some("manager"))
-        .await?
-        .ok_or_else(|| {
-            AppError::unauthorized_with_code(
-                "That PIN does not belong to a manager or owner.",
-                codes::INVALID_PIN,
-            )
-        })?;
+    let approver = verify_user_pin(
+        db,
+        &caller.user_id,
+        approval.manager_pin.trim(),
+        Some("manager"),
+    )
+    .await?
+    .ok_or_else(|| {
+        AppError::unauthorized_with_code(
+            "That PIN does not belong to a manager or owner.",
+            codes::INVALID_PIN,
+        )
+    })?;
     Ok(ApprovedBy {
         user_id: approver.id,
         name: approver.name,
-        reason: reason.to_string(),
+        reason: Some(reason.to_string()),
     })
 }
 
 /// Verifies a numeric PIN against active users with the required role.
 pub async fn verify_user_pin(
+    db: &Db,
+    caller_id: &str,
+    pin: &str,
+    required_role: Option<&str>,
+) -> AppResult<Option<User>> {
+    // A PIN is 4-8 digits, so guessing must be slowed per signed-in guesser (and shop): checked
+    // before any hash is verified, cleared by a correct PIN.
+    let limiter = &*crate::core::rate_limit::PIN_FAILURES;
+    let limit_key = format!(
+        "{:?}|{caller_id}",
+        crate::core::tenancy::current_tenant_id()
+    );
+    if let Err(retry_after) = limiter.check(&limit_key) {
+        let minutes = retry_after.as_secs().div_ceil(60).max(1);
+        return Err(AppError::custom(
+            axum::http::StatusCode::TOO_MANY_REQUESTS,
+            codes::TOO_MANY_PIN_ATTEMPTS,
+            format!("Too many wrong PINs. Please try again in {minutes} minute(s)."),
+        ));
+    }
+    let matched = find_user_by_pin(db, pin, required_role).await?;
+    match &matched {
+        Some(_) => limiter.reset(&limit_key),
+        None => limiter.record_failure(&limit_key),
+    }
+    Ok(matched)
+}
+
+/// The active user whose PIN is `pin` and whose role satisfies `required_role`, if any.
+async fn find_user_by_pin(
     db: &Db,
     pin: &str,
     required_role: Option<&str>,

@@ -273,7 +273,7 @@ pub struct CloseSessionRequest {
 pub struct ConvertVarianceRequest {
     pub reason: String,
     pub recipient: String,
-    pub manager_pin: String,
+    pub manager_pin: Option<String>,
 }
 
 /// Body for `POST /billing/cash-movements`.

@@ -3,6 +3,7 @@ use crate::core::constants::{modules, permissions as perm};
 use crate::core::error::AppResult;
 use crate::core::middleware::auth::{AdminUser, CurrentUser};
 use crate::core::response::{ApiResponse, ErrorResponse};
+use crate::domain::users::Role;
 use crate::modules::calc::cash::{
     CalcCashCountReply, CalcCashCountRequest, CalcCashMovementReply, CalcCashMovementRequest,
     CalcShiftCountReply, CalcShiftCountRequest, MovementContext,
@@ -15,7 +16,7 @@ use crate::modules::calc::earnings::{CalcEarningsReply, CalcEarningsRequest};
 use crate::modules::calc::invoice_balance::{CalcInvoiceBalanceReply, CalcInvoiceBalanceRequest};
 use crate::modules::calc::quotation::{CalcQuotationReply, CalcQuotationRequest};
 use crate::modules::calc::receipt::{CalcReceiptReply, CalcReceiptRequest};
-use crate::modules::calc::repair::{CalcRepairRequest, RepairTotals};
+use crate::modules::calc::repair::{CalcRepairRequest, RepairPreview};
 use crate::modules::calc::settlement::{CalcSettlementReply, CalcSettlementRequest, OpenBill};
 use crate::modules::calc::shares::{CalcSharesReply, CalcSharesRequest};
 use crate::modules::calc::shift_totals::{
@@ -112,6 +113,7 @@ pub(super) async fn calc_cash_movement(
             category_limit_cents,
             shop_limit_cents,
             period_already_paid,
+            caller_approves: user.role.is_some_and(Role::self_approves),
         },
     )?;
     Ok(Json(ApiResponse::success(reply, "Calculated")))
@@ -367,7 +369,12 @@ pub(super) async fn calc_shift_count(
             ));
         }
     };
-    let reply = cash::compute_shift_count(&body, expected, opening_float)?;
+    let reply = cash::compute_shift_count(
+        &body,
+        expected,
+        opening_float,
+        user.role.is_some_and(Role::self_approves),
+    )?;
     Ok(Json(ApiResponse::success(reply, "Calculated")))
 }
 
@@ -434,8 +441,8 @@ pub(super) async fn calc_warranty(
 #[utoipa::path(post, path = "/repair", tag = modules::CALC, request_body = CalcRepairRequest,
     security(("bearerAuth" = [])),
     responses(
-        (status = 200, description = "What the repair job charges and costs", body = ApiResponse<RepairTotals>),
-        (status = 400, description = "An amount is negative or too large, or there are too many items", body = ErrorResponse),
+        (status = 200, description = "What the repair job charges and costs", body = ApiResponse<RepairPreview>),
+        (status = 400, description = "An amount is negative or too large, a discount is out of range, or there are too many items", body = ErrorResponse),
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
         (status = 403, description = "Permission denied", body = ErrorResponse),
     )
@@ -444,7 +451,7 @@ pub(super) async fn calc_warranty(
 pub(super) async fn calc_repair(
     user: CurrentUser,
     Json(body): Json<CalcRepairRequest>,
-) -> AppResult<Json<ApiResponse<RepairTotals>>> {
+) -> AppResult<Json<ApiResponse<RepairPreview>>> {
     user.require_permission(perm::REPAIRS_WRITE)?;
     let reply = repair::compute(&body)?;
     Ok(Json(ApiResponse::success(reply, "Calculated")))

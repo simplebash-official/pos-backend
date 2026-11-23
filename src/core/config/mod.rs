@@ -5,6 +5,7 @@
 mod env;
 
 pub use env::{
-    AppEnvironment, Config, ConfigError, Database, IdentityAuth, LogFormat, LoggingConfig,
-    Provisioning, RateLimitBucket, RateLimits, SeedAdminConfig, TenantMode, Variables,
+    AppEnvironment, Config, ConfigError, Database, EmailService, IdentityAuth, LogFormat,
+    LoggingConfig, Provisioning, RateLimitBucket, RateLimits, SeedAdminConfig, TenantMode,
+    Variables,
 };

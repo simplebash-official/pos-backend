@@ -509,6 +509,51 @@ pub fn index_specs(tenant_mode: TenantMode) -> Vec<IndexSpec> {
         doc! { "updated_at": 1, "key": 1 },
         false,
     );
+    // Notifications: the history and bell read newest first; read marks are looked up per
+    // notification (and unique per user).
+    for (name, keys, unique) in [
+        ("notifications_key_unique", doc! { "key": 1 }, true),
+        (
+            "notifications_created",
+            doc! { "created_at": -1, "key": -1 },
+            false,
+        ),
+        (
+            "notifications_sync",
+            doc! { "updated_at": 1, "key": 1 },
+            false,
+        ),
+    ] {
+        specs.add("notifications", name, keys, unique);
+    }
+    for (name, keys, unique) in [
+        ("notification_reads_key_unique", doc! { "key": 1 }, true),
+        (
+            "notification_reads_user",
+            doc! { "notification_key": 1, "user_key": 1 },
+            true,
+        ),
+        (
+            "notification_reads_sync",
+            doc! { "updated_at": 1, "key": 1 },
+            false,
+        ),
+    ] {
+        specs.add("notification_reads", name, keys, unique);
+    }
+    // Warranty condition templates: condition checklist options per shop.
+    specs.add(
+        "warranty_condition_templates",
+        "warranty_condition_templates_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    specs.add(
+        "warranty_condition_templates",
+        "warranty_condition_templates_active",
+        doc! { "active": 1, "name": 1 },
+        false,
+    );
 
     // Platform directory (`modules::tenants`): shop codes are globally unique
     // and the collection is not tenant-owned, so it is never tenant-prefixed.

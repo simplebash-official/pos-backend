@@ -286,9 +286,8 @@ pub(crate) async fn hydrate(
         // the stored fields in camelCase.
         "expenses" | "expensePayments" | "expense_payments" | "shopProfiles" | "shop_profiles"
         | "drawerState" | "drawer_state" | "registerSessions" | "register_sessions"
-        | "cashMovements" | "cash_movements" => {
-            documents.into_iter().map(stored_fields_to_json).collect()
-        }
+        | "cashMovements" | "cash_movements" | "notifications" | "notificationReads"
+        | "notification_reads" => documents.into_iter().map(stored_fields_to_json).collect(),
         "stockMovements" | "stock_movements" => {
             to_values(inventory_stock::hydrate_sync_documents(documents)?)?
         }

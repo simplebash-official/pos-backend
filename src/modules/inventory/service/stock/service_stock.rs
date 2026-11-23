@@ -186,11 +186,12 @@ pub(crate) async fn apply_stock_delta(
     };
 
     let now = BsonDateTime::now();
+    let movement_key = generate_id(prefixes::STOCK_MOVEMENT);
     repository::stock::insert_stock_movement(
         &mut unit,
         StockMovementDocument {
             id: None,
-            key: generate_id(prefixes::STOCK_MOVEMENT),
+            key: movement_key.clone(),
             product_id: id,
             batch_key: batch_key.map(str::to_string),
             quantity_delta: delta,
@@ -206,7 +207,23 @@ pub(crate) async fn apply_stock_delta(
     )
     .await?;
 
+    if crossed_into_low_stock(
+        previous_stock_quantity,
+        updated.stock_quantity,
+        updated.min_stock_threshold,
+    ) {
+        super::low_stock_alert::announce(&mut unit, &updated, &movement_key).await?;
+    }
+
     Ok((previous_stock_quantity, updated))
+}
+
+/// True only for the movement that takes stock from above the product's alert level to at or
+/// below it, or that empties it: a product already low does not raise again on every sale, but
+/// running out always does.
+#[must_use]
+fn crossed_into_low_stock(previous: i64, current: i64, threshold: i64) -> bool {
+    (previous > threshold && current <= threshold) || (previous > 0 && current <= 0)
 }
 
 fn insufficient_stock(
@@ -337,4 +354,23 @@ pub(crate) async fn product_movements(db: &Db, id: ObjectId) -> AppResult<StockM
         .collect();
 
     Ok(StockMovementsResponse { movements })
+}
+
+#[cfg(test)]
+mod low_stock_tests {
+    use super::crossed_into_low_stock;
+
+    #[test]
+    fn only_the_crossing_movement_raises() {
+        assert!(crossed_into_low_stock(6, 5, 5), "reaching the level counts");
+        assert!(crossed_into_low_stock(3, 0, 1));
+        assert!(!crossed_into_low_stock(5, 4, 5), "already low before");
+        assert!(crossed_into_low_stock(1, 0, 2), "running out always raises");
+        assert!(
+            !crossed_into_low_stock(0, 0, 2),
+            "an empty product stays quiet"
+        );
+        assert!(!crossed_into_low_stock(9, 7, 5), "still above");
+        assert!(!crossed_into_low_stock(4, 9, 5), "a restock never raises");
+    }
 }

@@ -13,4 +13,5 @@ pub(crate) use users_repository::find_user_by_username;
 pub(crate) use users_repository::find_users_by_employee_keys;
 pub(crate) use users_repository::insert_user;
 pub(crate) use users_repository::list_users;
+pub(crate) use users_repository::update_password_and_bump_version;
 pub(crate) use users_repository::update_user;

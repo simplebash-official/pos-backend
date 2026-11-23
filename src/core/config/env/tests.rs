@@ -1,6 +1,6 @@
 use super::{
-    AppEnvironment, Config, ConfigError, Database, IdentityAuth, Provisioning, TenantMode,
-    Variables,
+    AppEnvironment, Config, ConfigError, Database, EmailService, IdentityAuth, Provisioning,
+    TenantMode, Variables,
 };
 use std::collections::HashMap;
 
@@ -21,6 +21,7 @@ fn valid() -> HashMap<&'static str, &'static str> {
         ("CORS_ALLOWED_ORIGINS", ""),
         ("IDENTITY_AUTH", "disabled"),
         ("PROVISIONING", "disabled"),
+        ("EMAIL_SERVICE", "disabled"),
         ("APP_ENV", "production"),
         ("RATE_LIMIT_BURST", "200"),
         ("RATE_LIMIT_REFILL_PER_SEC", "50"),
@@ -209,4 +210,32 @@ fn the_debug_output_hides_every_secret() {
     variables.insert("SEED_ADMIN_PASSWORD", "super-secret-password");
     let shown = format!("{:?}", parse(&variables).expect("valid"));
     assert!(!shown.contains("super-secret"), "{shown}");
+}
+
+#[test]
+fn email_service_disabled_and_brevo_variants() {
+    let mut variables = valid();
+    variables.insert("EMAIL_SERVICE", "disabled");
+    let cfg = parse(&variables).expect("valid");
+    assert_eq!(cfg.email_service, EmailService::Disabled);
+
+    variables.insert("EMAIL_SERVICE", "brevo");
+    assert!(error_of(&variables).contains("BREVO_API_KEY"));
+
+    variables.insert("BREVO_API_KEY", "brevo-key-1234");
+    variables.insert("BREVO_BASE_URL", "https://api.brevo.com");
+    variables.insert("BREVO_RESET_TEMPLATE_ID", "42");
+    variables.insert("RESET_LINK_BASE_URL", "https://example.com/reset");
+    let cfg = parse(&variables).expect("valid brevo");
+    assert!(matches!(
+        cfg.email_service,
+        EmailService::Brevo {
+            reset_template_id: 42,
+            ..
+        }
+    ));
+
+    // Verify debug hides brevo key
+    let shown = format!("{:?}", cfg.email_service);
+    assert!(!shown.contains("brevo-key-1234"), "{shown}");
 }

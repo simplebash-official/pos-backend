@@ -159,20 +159,21 @@ pub struct ReminderEntry {
     pub kind: ReminderKind,
     /// Mongo hex id of the underlying invoice / job.
     pub id: String,
-    /// Prefixed key (`inv_…` / `rep_…` / `prj_…`) of the underlying record.
+    /// Prefixed key (`inv_…` / `rep_…` / `prj_…` / `wcl_…`) of the underlying record.
     pub key: String,
-    /// Human-facing number: invoice number or ticket number.
+    /// Human-facing number: invoice, ticket or claim number.
     pub reference_number: String,
     /// Short label — customer name for a credit reminder, device/job
-    /// description for a job reminder.
+    /// description for a job reminder, the item for a claim.
     pub title: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub customer_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub customer_phone: Option<String>,
-    /// Credit: the balance still owed. Job: the estimated cost (0 if unquoted).
+    /// Credit: the balance still owed. Job: the estimated cost (0 if unquoted). Claim: 0.
     pub amount_cents: i64,
-    /// The due / promised date (YYYY-MM-DD) — always present.
+    /// The due / promised date (YYYY-MM-DD) — always present. For a slow claim, the day it
+    /// had waited a week; for a late supplier, the day they said it would be back.
     pub due_date: String,
     /// Signed day delta: positive = overdue by N days, negative = due in N
     /// days, 0 = due today.
@@ -194,6 +195,10 @@ pub enum ReminderKind {
     JobOverdue,
     /// A repair or print job promised ready within the "due soon" window.
     JobDueSoon,
+    /// A warranty claim open longer than a week.
+    ClaimSlow,
+    /// A warranty claim with a supplier past the day they said it would be back.
+    ClaimSupplierLate,
 }
 
 /// Query parameters for the dashboard reminders feed (`GET /reports/reminders`).
@@ -223,6 +228,8 @@ pub struct RemindersResponse {
     pub credit_due_soon_amount_cents: i64,
     pub jobs_overdue_count: u64,
     pub jobs_due_soon_count: u64,
+    /// Warranty claims waiting too long (slow, or a supplier late).
+    pub claims_late_count: u64,
     pub due_within_days: u32,
     pub total: u64,
     pub page: u64,

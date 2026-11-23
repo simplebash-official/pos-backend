@@ -223,6 +223,7 @@ const BACKFILLABLE: &[(&str, &[&str])] = &[
             "legal_name",
             "logo_base64",
             "primary_phone",
+            "job_receipt_terms_text",
             "receipt_footer_text",
             "secondary_phone",
             "trading_name",
@@ -253,6 +254,7 @@ const BACKFILLABLE: &[(&str, &[&str])] = &[
         ],
     ),
     ("users", &["created_at", "is_active", "updated_at"]),
+    ("warranty_claims", &["conditions"]),
 ];
 
 /// Whether `field` of `collection` may be backfilled.
@@ -284,6 +286,7 @@ fn backfill_value(field: &str, object: &Document) -> Option<Bson> {
         "discount_value" => Bson::Double(0.0),
         "address_lines"
         | "batch_allocations"
+        | "conditions"
         | "contact_persons"
         | "errors"
         | "exchange_items"
@@ -310,6 +313,7 @@ fn backfill_value(field: &str, object: &Document) -> Option<Bson> {
         | "default_footer_text"
         | "default_warranty_text"
         | "email"
+        | "job_receipt_terms_text"
         | "legal_name"
         | "logo_base64"
         | "name"

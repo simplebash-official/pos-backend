@@ -4,8 +4,8 @@ use crate::core::error::{AppError, AppResult};
 use crate::core::id::generate_id;
 use crate::core::utils::build_bson_regex;
 use crate::domain::employees::{
-    CreateEmployeeRequest, Employee, EmployeeListQuery, EmployeeStatus, EmployeesResponse,
-    UpdateEmployeeRequest,
+    CreateEmployeeRequest, CreateOwnerProfileRequest, Employee, EmployeeListQuery, EmployeeRole,
+    EmployeeStatus, EmployeesResponse, SplitType, UpdateEmployeeRequest,
 };
 use crate::modules::employees::model::EmployeeDocument;
 use crate::modules::employees::repository;
@@ -41,6 +41,84 @@ pub async fn create_employee(db: &Db, body: CreateEmployeeRequest) -> AppResult<
         Ok(inserted.into_employee(None))
     })
     .await
+}
+
+/// Gives the shop's Admin their own employee profile (role Owner) so they can be chosen as the
+/// person who does a repair or print job, and links it to their login.
+///
+/// There is one Admin per shop, so no user id is needed. 409 `OWNER_PROFILE_EXISTS` when the
+/// Admin already has a profile. The profile schema requires a default split, so one is stored
+/// (percentage, 0), but it is never read: an owner's jobs carry no commission
+/// (`resolve_assignment` refuses one). If linking fails after the profile was made, the profile
+/// stays unlinked and the next attempt makes a new one.
+pub(crate) async fn create_owner_profile(
+    db: &Db,
+    body: CreateOwnerProfileRequest,
+) -> AppResult<Employee> {
+    crate::core::logging::domain::tracked("employees.owner_profile_created", async move {
+        let admin = users::service::find_admin_document(db)
+            .await?
+            .ok_or_else(|| AppError::internal("the shop has no Admin account"))?;
+        if admin.employee_key.is_some() {
+            return Err(AppError::conflict(
+                codes::OWNER_PROFILE_EXISTS,
+                "You already have an employee profile.",
+            ));
+        }
+        let admin_id = admin
+            .id
+            .ok_or_else(|| AppError::internal("the Admin document has no id"))?;
+
+        let created = create_employee(
+            db,
+            CreateEmployeeRequest {
+                name: admin.name,
+                phone: body.phone,
+                nic_or_id: None,
+                role: EmployeeRole::Owner,
+                default_split_type: SplitType::Percentage,
+                default_split_value: 0.0,
+                status: None,
+                notes: None,
+            },
+        )
+        .await?;
+        users::service::link_employee(db, admin_id, &created.key).await?;
+        get_employee_by_key(db, &created.key).await
+    })
+    .await
+}
+
+/// Who a repair or print job is assigned to, as the job stores it.
+#[derive(Debug, Clone)]
+pub(crate) struct ResolvedAssignee {
+    /// The employee's name, taken from their profile (never a client-sent copy).
+    pub(crate) name: String,
+    /// Owners take no commission, so their jobs carry no split.
+    pub(crate) is_owner: bool,
+}
+
+/// Looks the employee up by key (404 `EMPLOYEE_NOT_FOUND`) and refuses a commission split for
+/// an owner (422 `OWNER_HAS_NO_COMMISSION`). Called by repairs and print jobs on every create and
+/// update that names an employee or a split.
+pub(crate) async fn resolve_assignment(
+    db: &Db,
+    employee_key: &str,
+    split_type: Option<&str>,
+    split_value: Option<f64>,
+) -> AppResult<ResolvedAssignee> {
+    let employee = get_employee_by_key(db, employee_key).await?;
+    let is_owner = employee.role == EmployeeRole::Owner;
+    if is_owner && (split_type.is_some() || split_value.is_some()) {
+        return Err(AppError::unprocessable_entity(
+            codes::OWNER_HAS_NO_COMMISSION,
+            "The owner does not take a commission.",
+        ));
+    }
+    Ok(ResolvedAssignee {
+        name: employee.name,
+        is_owner,
+    })
 }
 
 /// Refuses to delete (409 `EMPLOYEE_HAS_LOGIN`) while this employee still

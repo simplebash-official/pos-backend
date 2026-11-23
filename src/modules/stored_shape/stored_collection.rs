@@ -24,6 +24,8 @@ use crate::modules::inventory::model::StockMovementDocument;
 use crate::modules::inventory::model::SubcategoryDocument;
 use crate::modules::labels::model::LabelPrintJobDocument;
 use crate::modules::labels::model::LabelTemplateDocument;
+use crate::modules::notifications::model::NotificationDocument;
+use crate::modules::notifications::model::NotificationReadDocument;
 use crate::modules::payees::model::PayeeDocument;
 use crate::modules::print_jobs::model::PrintJobDocument;
 use crate::modules::purchases::model::PurchaseDocument;
@@ -46,6 +48,7 @@ use crate::modules::suppliers::model::SupplierDocument;
 use crate::modules::tenants::model::TenantDocument;
 use crate::modules::users::model::UserDocument;
 use crate::modules::warranties::model::WarrantyClaimDocument;
+use crate::modules::warranties::model::WarrantyConditionDocument;
 use crate::modules::warranties::model::WarrantyDocument;
 use crate::modules::warranties::model::WarrantyEventDocument;
 use mongodb::bson::Document;
@@ -119,5 +122,8 @@ pub const STORED_COLLECTIONS: &[StoredCollection] = &[
     stored!("warranties", WarrantyDocument),
     stored!("warranty_events", WarrantyEventDocument),
     stored!("warranty_claims", WarrantyClaimDocument),
+    stored!("warranty_condition_templates", WarrantyConditionDocument),
     stored!("repair_service_templates", RepairServiceDocument),
+    stored!("notifications", NotificationDocument),
+    stored!("notification_reads", NotificationReadDocument),
 ];

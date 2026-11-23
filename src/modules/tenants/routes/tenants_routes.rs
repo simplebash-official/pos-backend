@@ -27,7 +27,7 @@ const PROVISION_SECRET_HEADER: &str = "x-provision-secret";
 
 /// The endpoint only exists in a multi-tenant deployment that configured a
 /// secret; anywhere else it answers 404 as if it were not routed at all.
-pub(super) fn authorize(state: &AppState, headers: &HeaderMap) -> AppResult<()> {
+pub(crate) fn authorize(state: &AppState, headers: &HeaderMap) -> AppResult<()> {
     let Provisioning::Enabled { secret: expected } = &state.config.provisioning else {
         return Err(AppError::not_found("Not found"));
     };

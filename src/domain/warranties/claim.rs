@@ -155,10 +155,35 @@ pub fn next_status(
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct VoidChecks {
-    pub screen_cracked: bool,
+    #[serde(default)]
+    pub physical_damage: bool,
     pub liquid_damage: bool,
     pub seal_broken: bool,
     pub tampered: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub screen_cracked: Option<bool>,
+}
+
+impl VoidChecks {
+    pub const fn empty() -> Self {
+        Self {
+            physical_damage: false,
+            liquid_damage: false,
+            seal_broken: false,
+            tampered: false,
+            screen_cracked: None,
+        }
+    }
+
+    /// Whether any void flag is set (accounting for backwards-compatible `screen_cracked`).
+    #[must_use]
+    pub fn any_flagged(&self) -> bool {
+        self.physical_damage
+            || self.liquid_damage
+            || self.seal_broken
+            || self.tampered
+            || self.screen_cracked.unwrap_or(false)
+    }
 }
 
 /// What the supplier did with an item sent to them.
@@ -209,6 +234,8 @@ pub struct WarrantyClaim {
     pub item_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub serial_number: Option<String>,
+    /// Units claimed on this claim (default 1).
+    pub quantity: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub product_key: Option<String>,
     pub invoice_key: String,
@@ -222,6 +249,7 @@ pub struct WarrantyClaim {
     /// What the customer says is wrong.
     pub issue_description: String,
     pub void_checks: VoidChecks,
+    pub conditions: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assigned_employee_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -283,7 +311,12 @@ pub struct WarrantyClaim {
 pub struct OpenClaimRequest {
     pub warranty_key: String,
     pub issue_description: String,
-    pub void_checks: VoidChecks,
+    pub void_checks: Option<VoidChecks>,
+    pub conditions: Option<Vec<String>>,
+    /// How many units of this warranty are being claimed (default 1).
+    pub quantity: Option<i64>,
+    /// The specific serial number being claimed, if serialized.
+    pub serial_number: Option<String>,
     /// The technician who will look at it.
     pub assigned_employee_key: Option<String>,
     /// Needed only when the warranty has already run out: a manager or owner honours it.
@@ -304,8 +337,9 @@ pub struct InspectClaimRequest {
 #[serde(rename_all = "camelCase")]
 pub struct DecideClaimRequest {
     pub decision: ClaimDecision,
-    /// The deciding manager's or owner's PIN and why.
-    pub approval: ManagerApproval,
+    /// A Staff member sends the deciding manager's or owner's PIN and why; a signed-in Admin or
+    /// Manager decides for themselves and sends none.
+    pub approval: Option<ManagerApproval>,
 }
 
 /// `POST /warranty-claims/{key}/supplier/send`.
@@ -343,6 +377,69 @@ pub struct ResolveClaimRequest {
     pub resolution_note: Option<String>,
     /// Required for a replace, refused otherwise.
     pub replacement: Option<ReplacementRequest>,
+}
+
+/// `POST /warranty-claims/{key}/paid-repair`: the customer, for a claim whose sale had none.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PaidRepairRequest {
+    /// A registered customer to open the repair job for. Used only when the claim has no
+    /// customer of its own; the job takes the name and phone from the customer record.
+    pub customer_key: Option<String>,
+}
+
+/// How a repair decided in `POST /warranty-claims/process` ends.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(tag = "when", rename_all = "snake_case")]
+pub enum RepairFinish {
+    /// The item is fixed now: the claim is finished and the item handed back today.
+    #[serde(rename_all = "camelCase")]
+    Now { resolution_note: Option<String> },
+    /// The repair is not finished: the claim stays decided, to be finished from the claim.
+    Later,
+}
+
+/// What a claim processed in one request is decided as, and what is done about it straight away.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(tag = "decision", rename_all = "snake_case")]
+pub enum ProcessOutcome {
+    /// A new unit is given and the faulty one taken back; the item is handed over.
+    #[serde(rename_all = "camelCase")]
+    Replace {
+        replacement: ReplacementRequest,
+        resolution_note: Option<String>,
+    },
+    Repair {
+        finish: RepairFinish,
+    },
+    /// The claim stays decided: the refund is made with a credit note from this claim.
+    Refund,
+    /// Not covered. The item is handed back only when `hand_back` is true.
+    #[serde(rename_all = "camelCase")]
+    Reject {
+        hand_back: bool,
+    },
+}
+
+/// `POST /warranty-claims/process`: a faulty item taken in, inspected and decided, with the
+/// decision's own outcome carried out, recorded as one claim by a single request.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcessClaimRequest {
+    pub warranty_key: String,
+    pub issue_description: String,
+    /// What was found when the item was looked at.
+    pub inspection_notes: String,
+    pub void_checks: Option<VoidChecks>,
+    pub conditions: Option<Vec<String>>,
+    /// How many units of this warranty are being claimed.
+    pub quantity: Option<i64>,
+    /// The specific serial number being claimed, if the warranty does not name one.
+    pub serial_number: Option<String>,
+    pub outcome: ProcessOutcome,
+    /// A Staff member sends the deciding manager's or owner's PIN and why; a signed-in Admin or
+    /// Manager decides for themselves and sends none.
+    pub approval: Option<ManagerApproval>,
 }
 
 /// Which claims a list wants.

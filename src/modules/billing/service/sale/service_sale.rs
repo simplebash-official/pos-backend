@@ -75,6 +75,7 @@ pub(crate) async fn resolve_sale_item(
         assigned_employee_name,
         unit_cost_cents,
         batch_allocations,
+        included_discount_cents,
     ) = match item.source_type.as_str() {
         "retail" => match &item.product_key {
             Some(product_key) => {
@@ -147,6 +148,7 @@ pub(crate) async fn resolve_sale_item(
                         &allocations,
                     )),
                     allocations,
+                    0,
                 )
             }
             None => (
@@ -161,6 +163,7 @@ pub(crate) async fn resolve_sale_item(
                 None,
                 None,
                 Vec::new(),
+                0,
             ),
         },
         "repair" => match &item.source_ticket_key {
@@ -195,16 +198,32 @@ pub(crate) async fn resolve_sale_item(
                 }
                 // A part sold in the meantime stops the sale before anything is written.
                 repairs::service::check_parts_in_stock(db, &ticket).await?;
+                // The ticket's own discount is part of the line; the quantity and the cashier's
+                // extra discount are checked against the ticket, never silently capped.
+                if item.quantity != 1 {
+                    return Err(AppError::validation(format!(
+                        "Repair ticket {} is billed once: its quantity must be 1",
+                        ticket.ticket_number
+                    )));
+                }
+                if item.discount_cents > ticket.price_cents {
+                    return Err(AppError::validation(format!(
+                        "The discount on repair ticket {} cannot be more than what the customer pays for it",
+                        ticket.ticket_number
+                    )));
+                }
+                let ticket_discount_cents = ticket.discount_cents();
                 (
                     item.name
                         .clone()
                         .unwrap_or_else(|| ticket.device_model.clone()),
                     None,
-                    ticket.price_cents,
+                    ticket.price_cents + ticket_discount_cents,
                     Some(ticket.ticket_number),
                     ticket.assigned_employee_name,
                     Some(ticket.cost_cents / item.quantity.max(1)),
                     Vec::new(),
+                    ticket_discount_cents,
                 )
             }
             None => (
@@ -223,6 +242,7 @@ pub(crate) async fn resolve_sale_item(
                 item.assigned_employee_name.clone(),
                 None,
                 Vec::new(),
+                0,
             ),
         },
         "print" => match &item.source_ticket_key {
@@ -236,6 +256,7 @@ pub(crate) async fn resolve_sale_item(
                     ticket.assigned_employee_name,
                     Some(ticket.material_cost_cents.unwrap_or(0) / item.quantity.max(1)),
                     Vec::new(),
+                    0,
                 )
             }
             None => (
@@ -252,6 +273,7 @@ pub(crate) async fn resolve_sale_item(
                 item.assigned_employee_name.clone(),
                 None,
                 Vec::new(),
+                0,
             ),
         },
         // A one-time charge: nothing to look up, no stock, and no cost on record (profit is the
@@ -277,8 +299,10 @@ pub(crate) async fn resolve_sale_item(
         }
     };
 
+    // A repair ticket's own discount and the cashier's extra both come off its price.
+    let discount_cents = item.discount_cents + included_discount_cents;
     let total_cents =
-        calculations::compute_line_total(unit_price_cents, item.quantity, item.discount_cents);
+        calculations::compute_line_total(unit_price_cents, item.quantity, discount_cents);
 
     Ok(InvoiceItem {
         product_key: item.product_key.clone(),
@@ -286,7 +310,7 @@ pub(crate) async fn resolve_sale_item(
         sku,
         unit_price_cents,
         quantity: item.quantity,
-        discount_cents: item.discount_cents,
+        discount_cents,
         total_cents,
         unit_cost_cents,
         source_type: item.source_type.clone(),
@@ -466,6 +490,18 @@ pub async fn void_invoice(
                     ));
                 }
             }
+        }
+
+        if let Err(err) = warranties::service::undo_replacements_for_invoice(
+            db,
+            &existing.key,
+            &existing.invoice_number,
+        )
+        .await
+        {
+            warnings.push(format!(
+                "Units given as warranty replacements could not be put back in stock: {err}"
+            ));
         }
 
         let actor = warranties::service::WarrantyActor {

@@ -57,7 +57,7 @@ pub struct CreateRepairRequest {
 /// receipts and shown in `ServiceJobPickerModal` on the frontend.
 ///
 /// `assigned_employee_id` is resolved server-side against `modules::employees`
-/// on create/update (`service::resolve_assignment_employee_name`) — an
+/// on create/update (`employees::service::resolve_assignment`) — an
 /// unresolvable id 404s before any write, and `assigned_employee_name` is
 /// always server-derived from it, never trusted from the client.
 /// `split_type`/`split_value` stay opaque display fields; the actual
@@ -72,9 +72,8 @@ pub struct Repair {
     pub key: String,
     /// Human-friendly ticket number (e.g. REP-000001).
     pub ticket_number: String,
-    /// Key of linked customer, if any.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub customer_key: Option<String>,
+    /// Key of the customer the ticket is for.
+    pub customer_key: String,
     /// Customer name.
     pub customer_name: String,
     /// Customer phone number.
@@ -94,13 +93,14 @@ pub struct Repair {
     /// open (not delivered/cancelled). Computed fresh on every read, never
     /// stored — mirrors `billing::Invoice.is_overdue`.
     pub is_overdue: bool,
-    /// Lifecycle status ("received", "in_progress", "completed", "delivered", "cancelled").
+    /// Lifecycle status ("received", "diagnosing", "in_repair", "ready", "delivered",
+    /// "cancelled").
     pub status: String,
     /// Ordinary paid work, or free work redoing an earlier job under its warranty.
     pub kind: RepairKind,
     /// The work on the job, in order.
     pub items: Vec<RepairItem>,
-    /// What the customer pays: every item's labour and part price
+    /// What the customer pays: every item's labour and part price, less the item discounts
     /// (`pos_calc_core::repair::repair_totals`). Stored with the items so reports can add it up.
     pub price_cents: i64,
     /// What the parts cost the shop, added up the same way.
@@ -131,6 +131,18 @@ pub struct Repair {
     pub updated_by_device: Option<String>,
 }
 
+impl Repair {
+    /// All the item discounts together: what was taken off the price the items add up to.
+    #[must_use]
+    pub fn discount_cents(&self) -> i64 {
+        self.items
+            .iter()
+            .filter_map(|item| item.discount.as_ref())
+            .map(|discount| discount.amount_cents)
+            .sum()
+    }
+}
+
 /// The `assignment{}` sub-object of `CreateRepairRequest`/
 /// `UpdateRepairRequest` — every field is optional, so the whole object is
 /// typically omitted entirely on an unassigned ticket. See `Repair`'s doc
@@ -148,25 +160,14 @@ pub struct RepairAssignment {
     pub split_value: Option<f64>,
 }
 
-/// The `customer{}` sub-object of `CreateRepairRequest`/`UpdateRepairRequest`.
-/// `customerName`/`customerPhone` are only used as-is when `customerKey` is
-/// absent (a walk-in with no linked account); when `customerKey` resolves
-/// to a real customer, `service::create_repair`/`update_repair` overrides
-/// both from that record instead of trusting the payload. `customerName`/
-/// `customerPhone` are typed `Option` here (rather than required strings)
-/// so the same struct serves both create and update — `service::
-/// create_repair`'s `validate_required_fields` is what actually enforces
-/// they're non-empty on create when there's no `customerKey` to resolve
-/// from instead.
-#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+/// The `customer{}` sub-object of `CreateRepairRequest`/`UpdateRepairRequest`: the registered
+/// customer the ticket is for. The ticket's customer name and phone are always read from that
+/// customer's record (`service::create_repair`/`update_repair`), never from the request.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RepairCustomer {
-    /// Key of registered customer.
-    pub customer_key: Option<String>,
-    /// Walk-in customer name.
-    pub customer_name: Option<String>,
-    /// Walk-in customer phone number.
-    pub customer_phone: Option<String>,
+    /// Key of the registered customer.
+    pub customer_key: String,
 }
 
 /// Query params for `GET /repairs`. `search` matches ticket number,

@@ -10,6 +10,7 @@ use crate::core::constants::{codes, prefixes};
 use crate::core::error::{AppError, AppResult};
 use crate::core::id::generate_id;
 use crate::core::utils::shop_day;
+use crate::domain::users::{ApprovalCaller, ApprovedBy};
 use crate::domain::warranties::{
     ClaimAction, ClaimDecision, ClaimListQuery, ClaimListResponse, ClaimListStatus, ClaimStatus,
     DecideClaimRequest, InspectClaimRequest, OpenClaimRequest, SendToSupplierRequest,
@@ -47,7 +48,7 @@ fn warranty_conflict() -> AppError {
 }
 
 /// Text that must be filled in, trimmed.
-fn required_text(value: &str, what: &str) -> AppResult<String> {
+pub(super) fn required_text(value: &str, what: &str) -> AppResult<String> {
     let text = value.trim();
     if text.is_empty() {
         return Err(AppError::validation(format!("Write {what}.")));
@@ -138,11 +139,18 @@ pub(super) async fn release_warranty(
     actor: &WarrantyActor,
 ) -> AppResult<()> {
     let mut warranty = require(db, &claim.warranty_key).await?;
-    if warranty.status != WarrantyStatus::UnderClaim {
-        return Ok(());
-    }
+    let claim_qty = claim.quantity.unwrap_or(1);
+    warranty.claimed_quantity = Some(
+        warranty
+            .claimed_quantity
+            .unwrap_or(claim_qty)
+            .saturating_sub(claim_qty),
+    );
     let expected = warranty.version;
-    warranty.status = WarrantyStatus::Active;
+    let from_status = warranty.status;
+    if warranty.status == WarrantyStatus::UnderClaim {
+        warranty.status = WarrantyStatus::Active;
+    }
     save_warranty(db, &mut warranty, expected).await?;
     warranty_events::record(
         db,
@@ -150,8 +158,8 @@ pub(super) async fn release_warranty(
             warranty_key: &warranty.key,
             claim_key: Some(&claim.key),
             kind: WarrantyEventKind::ClaimAdvanced,
-            from_status: Some(WarrantyStatus::UnderClaim.as_str()),
-            to_status: Some(WarrantyStatus::Active.as_str()),
+            from_status: Some(from_status.as_str()),
+            to_status: Some(warranty.status.as_str()),
             note: Some(format!("Back in force after {}", claim.claim_number)),
             actor,
             approved_by: None,
@@ -177,6 +185,21 @@ pub(crate) async fn open_claim(
     db: &Db,
     body: OpenClaimRequest,
     actor: &WarrantyActor,
+    caller: &ApprovalCaller,
+    device_id: Option<String>,
+) -> AppResult<WarrantyClaim> {
+    open_claim_honoured(db, body, None, actor, caller, device_id).await
+}
+
+/// `open_claim` for one claim of a batch: `honoured_by` is the approval that was checked once
+/// for the whole batch, used when this warranty has run out. `body.approval` must then be
+/// `None`.
+pub(super) async fn open_claim_honoured(
+    db: &Db,
+    body: OpenClaimRequest,
+    honoured_by: Option<&ApprovedBy>,
+    actor: &WarrantyActor,
+    caller: &ApprovalCaller,
     device_id: Option<String>,
 ) -> AppResult<WarrantyClaim> {
     crate::core::logging::domain::tracked("warranties.claim_opened", async move {
@@ -197,14 +220,15 @@ pub(crate) async fn open_claim(
                     "This item already has an open claim. Carry on with that one.",
                 ));
             }
-            (WarrantyState::Expired, None) => {
+            (WarrantyState::Expired, None) if honoured_by.is_some() => honoured_by.cloned(),
+            (WarrantyState::Expired, None) if !caller.self_approves() => {
                 return Err(AppError::conflict(
                     codes::WARRANTY_EXPIRED,
                     "This warranty has run out. A manager or the owner can still honour it.",
                 ));
             }
-            (WarrantyState::Expired, Some(approval)) => {
-                Some(users::service::require_manager_approval(db, approval).await?)
+            (WarrantyState::Expired, approval) => {
+                Some(users::service::resolve_approval(db, caller, approval.as_ref()).await?)
             }
             (WarrantyState::Active | WarrantyState::ExpiringSoon, Some(_)) => {
                 return Err(AppError::validation(
@@ -213,6 +237,26 @@ pub(crate) async fn open_claim(
             }
             (WarrantyState::Active | WarrantyState::ExpiringSoon, None) => None,
         };
+        let claimed_already = warranty.claimed_quantity.unwrap_or(0);
+        let available_units = (warranty.quantity - claimed_already).max(0);
+        if available_units <= 0 {
+            return Err(AppError::conflict(
+                codes::CLAIM_ALREADY_OPEN,
+                "All units of this warranty already have open or resolved claims.",
+            ));
+        }
+
+        let claim_qty = body.quantity.unwrap_or(1);
+        if claim_qty <= 0 {
+            return Err(AppError::validation("Claim quantity must be at least 1."));
+        }
+        if claim_qty > available_units {
+            return Err(AppError::validation(format!(
+                "Only {available_units} of {} units remain available to claim.",
+                warranty.quantity
+            )));
+        }
+
         let assigned_employee_name = match &body.assigned_employee_key {
             Some(key) => Some(employee_name(db, key).await?),
             None => None,
@@ -221,11 +265,50 @@ pub(crate) async fn open_claim(
         // Reserved first, so a failed reservation never leaves the warranty held.
         let claim_number = next_number(db, "warranty_claim", device_id).await?;
         let expected = warranty.version;
-        warranty.status = WarrantyStatus::UnderClaim;
+        let new_claimed = claimed_already + claim_qty;
+        warranty.claimed_quantity = Some(new_claimed);
         warranty.claim_count += 1;
+        if new_claimed >= warranty.quantity {
+            warranty.status = WarrantyStatus::UnderClaim;
+        }
         save_warranty(db, &mut warranty, expected).await?;
 
         let now = BsonDateTime::now();
+        let serial = body.serial_number.or(warranty.serial_number.clone());
+
+        let raw_conditions = body.conditions.unwrap_or_default();
+        let mut conditions = Vec::new();
+        for c in raw_conditions {
+            let trimmed = c.trim();
+            if !trimmed.is_empty() && !conditions.contains(&trimmed.to_string()) {
+                conditions.push(trimmed.to_string());
+                let _ = super::warranty_conditions::record_condition_if_new(db, trimmed).await;
+            }
+        }
+        let void_checks = match body.void_checks {
+            Some(vc) => vc,
+            None => crate::domain::warranties::VoidChecks {
+                physical_damage: conditions.iter().any(|c| {
+                    c.eq_ignore_ascii_case("Physical damage / cracks")
+                        || c.to_lowercase().contains("physical")
+                        || c.to_lowercase().contains("crack")
+                }),
+                liquid_damage: conditions.iter().any(|c| {
+                    c.eq_ignore_ascii_case("Liquid damage")
+                        || c.to_lowercase().contains("liquid")
+                        || c.to_lowercase().contains("water")
+                }),
+                seal_broken: conditions.iter().any(|c| {
+                    c.eq_ignore_ascii_case("Seal broken") || c.to_lowercase().contains("seal")
+                }),
+                tampered: conditions.iter().any(|c| {
+                    c.eq_ignore_ascii_case("Opened or tampered with")
+                        || c.to_lowercase().contains("tamper")
+                }),
+                screen_cracked: None,
+            },
+        };
+
         let claim = repository::insert_claim(
             db,
             WarrantyClaimDocument {
@@ -235,7 +318,8 @@ pub(crate) async fn open_claim(
                 warranty_key: warranty.key.clone(),
                 warranty_number: warranty.warranty_number.clone(),
                 item_name: warranty.item_name.clone(),
-                serial_number: warranty.serial_number.clone(),
+                serial_number: serial,
+                quantity: Some(claim_qty),
                 product_key: warranty.product_key.clone(),
                 invoice_key: warranty.invoice_key.clone(),
                 invoice_number: warranty.invoice_number.clone(),
@@ -243,7 +327,8 @@ pub(crate) async fn open_claim(
                 customer_name: warranty.customer_name.clone(),
                 customer_phone: warranty.customer_phone.clone(),
                 issue_description: issue.clone(),
-                void_checks: body.void_checks,
+                void_checks,
+                conditions,
                 assigned_employee_key: body.assigned_employee_key,
                 assigned_employee_name,
                 status: ClaimStatus::Received,
@@ -278,7 +363,10 @@ pub(crate) async fn open_claim(
                 &claim,
                 WarrantyEventKind::ExpiredOverride,
                 None,
-                Some(format!("Honoured after it ran out. {}", approver.reason)),
+                Some(match &approver.reason {
+                    Some(reason) => format!("Honoured after it ran out. {reason}"),
+                    None => "Honoured after it ran out.".to_string(),
+                }),
                 actor,
                 Some(approver),
             )
@@ -341,16 +429,17 @@ pub(crate) async fn decide_claim(
     key: &str,
     body: DecideClaimRequest,
     actor: &WarrantyActor,
+    caller: &ApprovalCaller,
 ) -> AppResult<WarrantyClaim> {
     crate::core::logging::domain::tracked("warranties.claim_decided", async move {
         let mut claim = require_claim(db, key).await?;
         let to = step(&claim, ClaimAction::Decide(body.decision))?;
-        let approver = users::service::require_manager_approval(db, &body.approval).await?;
+        let approver = users::service::resolve_approval(db, caller, body.approval.as_ref()).await?;
         let from = claim.status;
         let expected = claim.version;
         claim.status = to;
         claim.decision = Some(body.decision);
-        claim.decision_reason = Some(approver.reason.clone());
+        claim.decision_reason = approver.reason.clone();
         claim.decided_by_user_id = Some(approver.user_id.clone());
         claim.decided_by_name = Some(approver.name.clone());
         if to == ClaimStatus::Resolved {
@@ -362,7 +451,10 @@ pub(crate) async fn decide_claim(
             &claim,
             WarrantyEventKind::ClaimDecided,
             Some(from),
-            Some(format!("{}: {}", body.decision.as_str(), approver.reason)),
+            Some(match &approver.reason {
+                Some(reason) => format!("{}: {reason}", body.decision.as_str()),
+                None => body.decision.as_str().to_string(),
+            }),
             actor,
             Some(&approver),
         )

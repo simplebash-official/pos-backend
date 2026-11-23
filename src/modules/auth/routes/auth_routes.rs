@@ -5,7 +5,8 @@ use crate::core::middleware::auth::CurrentUser;
 use crate::core::middleware::sync_headers::DeviceId;
 use crate::core::response::{ApiResponse, ErrorResponse};
 use crate::domain::auth::{
-    LoginRequest, LoginResponse, LoginSessionListQuery, LoginSessionsResponse, ShopLookupResponse,
+    ForgotPasswordRequest, LoginRequest, LoginResponse, LoginSessionListQuery,
+    LoginSessionsResponse, ResetPasswordRequest, ShopLookupResponse, VerifyResetTokenQuery,
 };
 use crate::domain::sessions::{SetPinRequest, VerifyPinRequest, VerifyPinResponse};
 use crate::domain::users::{Role, UpdateMyPreferencesRequest, User};
@@ -140,11 +141,62 @@ pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(login))
         .routes(routes!(lookup_shop))
+        .routes(routes!(forgot_password))
+        .routes(routes!(verify_reset_token))
+        .routes(routes!(reset_password))
         .routes(routes!(me))
         .routes(routes!(update_my_preferences))
         .routes(routes!(list_sessions))
         .routes(routes!(verify_pin))
         .routes(routes!(set_pin))
+}
+
+#[utoipa::path(post, path = "/forgot-password", tag = modules::AUTH, request_body = ForgotPasswordRequest,
+    responses(
+        (status = 200, description = "Password reset request accepted", body = ApiResponse<bool>),
+        (status = 400, description = "Validation error", body = ErrorResponse),
+    )
+)]
+pub(super) async fn forgot_password(
+    State(state): State<AppState>,
+    Json(body): Json<ForgotPasswordRequest>,
+) -> AppResult<Json<ApiResponse<bool>>> {
+    service::forgot_password(&state.db, &state.config, body).await?;
+    Ok(Json(ApiResponse::success(
+        true,
+        "If an administrator account matches this identifier, a password reset link has been sent.",
+    )))
+}
+
+#[utoipa::path(get, path = "/verify-reset-token", tag = modules::AUTH, params(VerifyResetTokenQuery),
+    responses(
+        (status = 200, description = "Reset token is valid", body = ApiResponse<bool>),
+        (status = 400, description = "Invalid or expired reset token", body = ErrorResponse),
+    )
+)]
+pub(super) async fn verify_reset_token(
+    State(state): State<AppState>,
+    Query(query): Query<VerifyResetTokenQuery>,
+) -> AppResult<Json<ApiResponse<bool>>> {
+    service::verify_reset_token(&state.db, &query.token).await?;
+    Ok(Json(ApiResponse::success(true, "Reset token is valid")))
+}
+
+#[utoipa::path(post, path = "/reset-password", tag = modules::AUTH, request_body = ResetPasswordRequest,
+    responses(
+        (status = 200, description = "Password reset successful", body = ApiResponse<bool>),
+        (status = 400, description = "Invalid or expired reset token, or password too weak", body = ErrorResponse),
+    )
+)]
+pub(super) async fn reset_password(
+    State(state): State<AppState>,
+    Json(body): Json<ResetPasswordRequest>,
+) -> AppResult<Json<ApiResponse<bool>>> {
+    service::reset_password(&state.db, &body.token, &body.new_password).await?;
+    Ok(Json(ApiResponse::success(
+        true,
+        "Password has been successfully reset",
+    )))
 }
 
 #[utoipa::path(post, path = "/set-pin", tag = modules::AUTH, request_body = SetPinRequest,
@@ -206,15 +258,17 @@ pub(super) async fn update_my_preferences(
     responses(
         (status = 200, description = "PIN verification successful", body = ApiResponse<VerifyPinResponse>),
         (status = 401, description = "Invalid PIN or insufficient permissions", body = ErrorResponse),
+        (status = 429, description = "Too many wrong PINs from this user; try again later", body = ErrorResponse),
     )
 )]
 pub(super) async fn verify_pin(
-    _user: CurrentUser,
+    user: CurrentUser,
     State(state): State<AppState>,
     Json(body): Json<VerifyPinRequest>,
 ) -> AppResult<Json<ApiResponse<VerifyPinResponse>>> {
     let verified_user = crate::modules::users::service::verify_user_pin(
         &state.db,
+        &user.user_id,
         &body.pin,
         body.required_role.as_deref(),
     )

@@ -2,6 +2,7 @@ use crate::clients::db::Db;
 use crate::clients::sqlite::{SqlFilter, bson_to_iso, generate_id_hex, now_utc_iso};
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use crate::core::error::AppResult;
+use crate::domain::billing::CreditNoteResolution;
 use crate::modules::billing::model::CreditNoteDocument;
 use crate::modules::billing::repository::credit_note_from_sqlite_row;
 use futures_util::TryStreamExt;
@@ -256,6 +257,11 @@ pub(crate) async fn insert_credit_note(
             let created_at_iso = bson_to_iso(&document.created_at);
             let updated_at_iso = bson_to_iso(&document.updated_at);
             let voided_at_iso = document.voided_at.as_ref().map(bson_to_iso);
+            let resolution_json = document
+                .resolution
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?;
 
             sqlx::query(
                 r#"
@@ -266,9 +272,9 @@ pub(crate) async fn insert_credit_note(
                     exchange_subtotal_cents, net_refund_cents, refund_cash_cents,
                     balance_reduction_cents, refund_breakdown, refund_payment_keys, status,
                     is_manager_override, override_approved_by, override_reason, notes,
-                    session_key, voided_at, voided_by, voided_reason, version, created_at, updated_at
+                    session_key, voided_at, voided_by, voided_reason, resolution, version, created_at, updated_at
                 ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 "#,
             )
@@ -301,6 +307,7 @@ pub(crate) async fn insert_credit_note(
             .bind(&voided_at_iso)
             .bind(&document.voided_by)
             .bind(&document.voided_reason)
+            .bind(&resolution_json)
             .bind(document.version)
             .bind(&created_at_iso)
             .bind(&updated_at_iso)
@@ -430,6 +437,58 @@ pub(crate) async fn update_credit_note_status(
                 return Ok(None);
             }
 
+            find_credit_note_by_id(db, id).await
+        }
+    }
+}
+
+/// Moves a credit note from `awaiting_resolution` to `resolved` and records the inspection
+/// outcome. Guarded on the version the caller read and on the status, so a lost race (or a
+/// repeat) matches nothing and returns `None`.
+pub(crate) async fn resolve_credit_note(
+    db: &Db,
+    id: ObjectId,
+    expected_version: i64,
+    resolution: &CreditNoteResolution,
+) -> AppResult<Option<CreditNoteDocument>> {
+    match db {
+        Db::Mongo(db) => {
+            let resolution_bson = mongodb::bson::serialize_to_bson(resolution)?;
+            Ok(credit_notes_collection(db)
+                .find_one_and_update(
+                    doc! {
+                        "_id": id,
+                        "version": expected_version,
+                        "status": "awaiting_resolution",
+                    },
+                    doc! {
+                        "$set": {
+                            "status": "resolved",
+                            "resolution": resolution_bson,
+                            "updated_at": mongodb::bson::DateTime::now(),
+                        },
+                        "$inc": { "version": 1 },
+                    },
+                )
+                .return_document(mongodb::options::ReturnDocument::After)
+                .await?)
+        }
+        Db::Sqlite(pool) => {
+            let resolution_json = serde_json::to_string(resolution)?;
+            let res = sqlx::query(
+                "UPDATE credit_notes SET status = 'resolved', resolution = ?, \
+                 version = version + 1, updated_at = ? \
+                 WHERE id = ? AND version = ? AND status = 'awaiting_resolution'",
+            )
+            .bind(&resolution_json)
+            .bind(now_utc_iso())
+            .bind(id.to_hex())
+            .bind(expected_version)
+            .execute(pool)
+            .await?;
+            if res.rows_affected() == 0 {
+                return Ok(None);
+            }
             find_credit_note_by_id(db, id).await
         }
     }

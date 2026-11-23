@@ -134,6 +134,13 @@ fn catalog() -> Vec<TemplateInfo> {
             "warranty-card",
             true,
         ),
+        template(
+            "doc_temp_job_receipt",
+            "doc_temp_job_receipt",
+            "Job Receipt",
+            "job-receipt",
+            true,
+        ),
     ]
 }
 

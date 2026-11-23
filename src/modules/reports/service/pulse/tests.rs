@@ -18,7 +18,7 @@ fn from<T: serde::de::DeserializeOwned>(value: Value) -> T {
 
 fn repair(id: &str, status: &str, tech: Option<&str>, created: &str, cost: i64) -> Repair {
     from(json!({
-        "id": id, "key": id, "ticketNumber": format!("REP-{id}"), "customerName": "Asha",
+        "id": id, "key": id, "ticketNumber": format!("REP-{id}"), "customerKey": "cus_asha", "customerName": "Asha",
         "customerPhone": "0771234567", "deviceModel": "Phone", "issueDescription": "x",
         "isOverdue": false, "status": status, "kind": { "kind": "standard" },
         "items": [{

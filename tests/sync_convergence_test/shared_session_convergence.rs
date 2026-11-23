@@ -46,6 +46,7 @@ fn user_token(config: &Config, user_id: &str, role: Role, name: &str) -> String 
         scope: None,
         did: None,
         name: Some(name.to_string()),
+        pwv: None,
     };
     encode(
         &Header::default(),
@@ -334,7 +335,6 @@ async fn shared_shop_sessions_two_offline_devices_and_joining_bootstrap_converge
                 "sessionKey": s1_key,
                 "terminalId": "term_2",
                 "payeeName": "Owner",
-                "managerPin": "1234",
                 "categoryKey": category_key(CashMovementType::OwnerWithdrawal, "Personal use")
             })),
         )

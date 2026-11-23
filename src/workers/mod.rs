@@ -1,1 +1,5 @@
-//! Background jobs (e.g. scheduled reports, print queue processing) land here.
+//! Background jobs that run for the life of the process.
+
+mod notification_retention;
+
+pub use notification_retention::run_notification_retention;

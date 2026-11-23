@@ -18,6 +18,12 @@ use mongodb::bson::DateTime as BsonDateTime;
 
 pub(super) const DOCUMENT_TEMPLATE_SETTINGS_KEY: &str = "main";
 
+/// Longest terms text a shop may print on its job receipts.
+const JOB_RECEIPT_TERMS_MAX_CHARS: usize = 600;
+
+/// Longest pickup warning, in days, a shop may print on its job receipts.
+const UNCOLLECTED_AFTER_DAYS_MAX: i64 = 365;
+
 /// The shop's stored designs: the family chosen per document kind and the
 /// option values saved per design (both empty when the shop never changed
 /// anything). Printing reads this to decide which design to render.
@@ -85,6 +91,8 @@ pub async fn ensure_shop_profile(db: &Db, initial_trading_name: Option<&str>) ->
         default_warranty_text: String::new(),
         default_footer_text: String::new(),
         receipt_footer_text: String::new(),
+        job_receipt_terms_text: String::new(),
+        uncollected_after_days: None,
         allow_shared_user_sessions: false,
         allow_staff_multi_device_sessions: false,
         version: 1,
@@ -323,6 +331,28 @@ pub(crate) async fn update_shop_profile(
 
         if let Some(receipt_footer) = req.receipt_footer_text {
             doc.receipt_footer_text = receipt_footer;
+        }
+
+        if let Some(terms) = req.job_receipt_terms_text {
+            let terms = terms.trim();
+            if terms.chars().count() > JOB_RECEIPT_TERMS_MAX_CHARS {
+                return Err(AppError::validation(format!(
+                    "The job receipt terms can be at most {JOB_RECEIPT_TERMS_MAX_CHARS} characters"
+                )));
+            }
+            doc.job_receipt_terms_text = terms.to_string();
+        }
+
+        if let Some(days) = req.uncollected_after_days {
+            doc.uncollected_after_days = match days {
+                0 => None,
+                1..=UNCOLLECTED_AFTER_DAYS_MAX => Some(days),
+                _ => {
+                    return Err(AppError::validation(format!(
+                        "Uncollected-item days must be between 1 and {UNCOLLECTED_AFTER_DAYS_MAX}"
+                    )));
+                }
+            };
         }
 
         let next_allow_shared = match req.allow_shared_user_sessions {

@@ -124,6 +124,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(list_repairs, create_repair))
         .routes(routes!(get_repair_stats))
         .routes(routes!(get_repair, update_repair, delete_repair))
+        .merge(super::job_receipt_routes::router())
 }
 
 #[utoipa::path(patch, path = "/{id}", tag = modules::REPAIRS,

@@ -22,6 +22,8 @@ pub struct WarrantyClaimDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub serial_number: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub quantity: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub product_key: Option<String>,
     pub invoice_key: String,
     pub invoice_number: String,
@@ -33,6 +35,7 @@ pub struct WarrantyClaimDocument {
     pub customer_phone: Option<String>,
     pub issue_description: String,
     pub void_checks: VoidChecks,
+    pub conditions: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assigned_employee_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -96,6 +99,25 @@ impl WarrantyClaimDocument {
             }
             _ => false,
         };
+        let conditions = if self.conditions.is_empty() {
+            let mut derived = Vec::new();
+            if self.void_checks.physical_damage || self.void_checks.screen_cracked.unwrap_or(false)
+            {
+                derived.push("Physical damage / cracks".to_string());
+            }
+            if self.void_checks.liquid_damage {
+                derived.push("Liquid damage".to_string());
+            }
+            if self.void_checks.seal_broken {
+                derived.push("Seal broken".to_string());
+            }
+            if self.void_checks.tampered {
+                derived.push("Opened or tampered with".to_string());
+            }
+            derived
+        } else {
+            self.conditions
+        };
         Ok(WarrantyClaim {
             id: self
                 .id
@@ -107,6 +129,7 @@ impl WarrantyClaimDocument {
             warranty_number: self.warranty_number,
             item_name: self.item_name,
             serial_number: self.serial_number,
+            quantity: self.quantity.unwrap_or(1),
             product_key: self.product_key,
             invoice_key: self.invoice_key,
             invoice_number: self.invoice_number,
@@ -115,6 +138,7 @@ impl WarrantyClaimDocument {
             customer_phone: self.customer_phone,
             issue_description: self.issue_description,
             void_checks: self.void_checks,
+            conditions,
             assigned_employee_key: self.assigned_employee_key,
             assigned_employee_name: self.assigned_employee_name,
             status: self.status,

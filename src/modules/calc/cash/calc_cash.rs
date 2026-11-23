@@ -144,12 +144,13 @@ pub fn compute_movement(
     let kind = request.movement_type;
     let amount = request.amount_cents;
     let over_drawer = kind.is_over_drawer(amount, context.cash_in_drawer_cents);
-    let pin_required = kind.needs_manager_pin(
-        amount,
-        context.category_limit_cents,
-        context.shop_limit_cents,
-        over_drawer,
-    );
+    let pin_required = !context.caller_approves
+        && kind.needs_manager_pin(
+            amount,
+            context.category_limit_cents,
+            context.shop_limit_cents,
+            over_drawer,
+        );
     let rent_paid = kind == T::RentAndBills && context.period_already_paid;
 
     let mut blockers = Vec::new();
@@ -197,7 +198,7 @@ pub fn compute_movement(
             blockers.push(B::PinNotVerified);
         }
     }
-    if over_drawer && !request.override_reason_entered {
+    if over_drawer && !context.caller_approves && !request.override_reason_entered {
         blockers.push(B::OverrideReasonMissing);
     }
     if rent_paid && !request.confirm_duplicate {
@@ -222,6 +223,7 @@ pub fn compute_shift_count(
     request: &CalcShiftCountRequest,
     expected_cents: i64,
     opening_float_cents: Option<i64>,
+    caller_approves: bool,
 ) -> AppResult<CalcShiftCountReply> {
     check_cents("The count", request.counted_cents)?;
     let counted = request.counted_cents;
@@ -249,11 +251,12 @@ pub fn compute_shift_count(
         expected_cents,
         variance_cents,
         reason_required: variance_cents != 0,
-        pin_required: if opening_float_cents.is_some() {
-            variance_cents.abs() > VARIANCE_TOLERANCE_CENTS
-        } else {
-            variance_cents != 0
-        },
+        pin_required: !caller_approves
+            && if opening_float_cents.is_some() {
+                variance_cents.abs() > VARIANCE_TOLERANCE_CENTS
+            } else {
+                variance_cents != 0
+            },
         variance_tolerance_cents: VARIANCE_TOLERANCE_CENTS,
         closing_float_cents,
         keep_opening_float_cents,
@@ -268,4 +271,7 @@ pub struct MovementContext {
     pub category_limit_cents: Option<i64>,
     pub shop_limit_cents: Option<i64>,
     pub period_already_paid: bool,
+    /// The caller is a signed-in Admin or Manager, who approves their own payments: no PIN and no
+    /// reason are asked of them.
+    pub caller_approves: bool,
 }

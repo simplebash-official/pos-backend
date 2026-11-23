@@ -25,6 +25,7 @@ pub async fn seed_admin(db: &Db, admin: &SeedAdminConfig) -> Result<AdminSeedRes
             password: admin.password.clone(),
             role: Role::Admin,
             employee_key: None,
+            email: None,
         },
     )
     .await;

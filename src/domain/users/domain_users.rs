@@ -36,6 +36,8 @@ pub struct CreateUserRequest {
     /// every login created through the Employee "Create Login" action
     /// supplies it — see `service::create_user`'s validation.
     pub employee_key: Option<String>,
+    /// Optional contact/notification email.
+    pub email: Option<String>,
 }
 
 /// The three fixed roles this system supports. Each maps to a hardcoded
@@ -53,6 +55,13 @@ pub enum Role {
 }
 
 impl Role {
+    /// Whether a signed-in user with this role approves their own actions: the owner (Admin) and
+    /// a Manager. Staff need a manager's PIN.
+    #[must_use]
+    pub fn self_approves(self) -> bool {
+        matches!(self, Role::Admin | Role::Manager)
+    }
+
     #[must_use]
     /// The name this value has on the wire and in storage.
     pub fn as_str(&self) -> &'static str {
@@ -111,6 +120,8 @@ pub struct UpdateUserRequest {
     pub is_active: Option<bool>,
     /// Updated linked employee key.
     pub employee_key: Option<String>,
+    /// Updated email address.
+    pub email: Option<String>,
 }
 
 /// A user account as returned to API clients. `id` (the Mongo `ObjectId` as
@@ -156,6 +167,9 @@ pub struct User {
     /// `modules::users::service::find_user_summary_by_employee_key`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub employee_key: Option<String>,
+    /// Contact/notification email for the user account.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
     /// Timestamp when user was created.
     pub created_at: DateTime<Utc>,
     /// Timestamp when user was last updated.

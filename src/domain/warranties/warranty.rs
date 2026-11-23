@@ -106,6 +106,8 @@ pub struct Warranty {
     pub serial_number: Option<String>,
     /// Units covered: 1 for a serial, the line's quantity otherwise.
     pub quantity: i64,
+    /// Units currently claimed (in an open claim or resolved).
+    pub claimed_quantity: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub customer_key: Option<String>,
     /// The customer's name when the warranty began.
@@ -326,10 +328,20 @@ pub struct WarrantyListQuery {
     pub invoice_key: Option<String>,
     /// Only the warranties of this repair job's items.
     pub repair_key: Option<String>,
+    /// Only warranties in this state; the list is then ordered by end day, soonest first.
+    pub state: Option<WarrantyListState>,
     /// Page number (1-indexed).
     pub page: Option<u64>,
     /// Items per page (at most 200).
     pub limit: Option<u64>,
+}
+
+/// A state `GET /warranties` can list by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WarrantyListState {
+    /// In force and in its last week.
+    ExpiringSoon,
 }
 
 /// The paper a warranty card is printed on.
@@ -384,8 +396,9 @@ pub struct WarrantyListResponse {
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct VoidWarrantyRequest {
-    /// A manager or owner PIN, and why the warranty is cancelled.
-    pub approval: ManagerApproval,
+    /// A Staff member sends a manager or owner PIN, and why the warranty is cancelled; a
+    /// signed-in Admin or Manager sends none.
+    pub approval: Option<ManagerApproval>,
 }
 
 /// `POST /warranties/{key}/extend`.
@@ -394,6 +407,7 @@ pub struct VoidWarrantyRequest {
 pub struct ExtendWarrantyRequest {
     /// The new coverage, counted from the original first day; it must end later than now.
     pub coverage: WarrantyCoverage,
-    /// A manager or owner PIN, and why it is extended.
-    pub approval: ManagerApproval,
+    /// A Staff member sends a manager or owner PIN, and why it is extended; a signed-in Admin
+    /// or Manager sends none.
+    pub approval: Option<ManagerApproval>,
 }

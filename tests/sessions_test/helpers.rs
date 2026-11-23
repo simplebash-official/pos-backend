@@ -100,6 +100,7 @@ pub(crate) fn mint_token_for(
         scope: None,
         did: None,
         name: Some("Test Cashier".to_string()),
+        pwv: None,
     };
     jsonwebtoken::encode(
         &jsonwebtoken::Header::default(),

@@ -2,9 +2,12 @@
 //! miss-as-an-error convention as every other repository in this codebase —
 //! `service` decides what a missing row means.
 
+mod repair_reports_repository;
 pub(crate) mod repair_services_repository;
 mod repairs_repository;
 
+pub(crate) use repair_reports_repository::find_by_keys;
+pub(crate) use repair_reports_repository::rework_jobs_between;
 pub(crate) use repairs_repository::aggregate_stats;
 pub(crate) use repairs_repository::delete;
 

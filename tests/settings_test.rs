@@ -77,7 +77,60 @@ async fn test_shop_profile_initial_defaults_are_empty_in_sqlite() {
     assert_eq!(data["secondaryPhone"], "");
     assert_eq!(data["email"], "");
     assert_eq!(data["website"], "");
+    assert_eq!(data["jobReceiptTermsText"], "");
+    assert!(data["uncollectedAfterDays"].is_null());
     assert_eq!(data["version"], 1);
+}
+
+#[tokio::test]
+async fn the_job_receipt_terms_and_pickup_days_save_validate_and_clear() {
+    let app = common::spawn_app_sqlite().await;
+    let admin = common::mint_token(&app.config, Some(Role::Admin), &[]);
+    let put = |body: serde_json::Value| {
+        let router = app.router.clone();
+        let admin = admin.clone();
+        async move {
+            send_request(
+                &router,
+                "PUT",
+                "/api/settings/shop-profile",
+                Some(&admin),
+                Some(body),
+            )
+            .await
+        }
+    };
+
+    let (status, res) = put(json!({
+        "jobReceiptTermsText": "  Keep this slip.  ",
+        "uncollectedAfterDays": 30
+    }))
+    .await;
+    assert_eq!(status, StatusCode::OK, "{res}");
+    assert_eq!(res["data"]["jobReceiptTermsText"], "Keep this slip.");
+    assert_eq!(res["data"]["uncollectedAfterDays"], 30);
+
+    // Leaving a field out keeps it.
+    let (status, res) = put(json!({ "tradingName": "Shop 55" })).await;
+    assert_eq!(status, StatusCode::OK, "{res}");
+    assert_eq!(res["data"]["jobReceiptTermsText"], "Keep this slip.");
+    assert_eq!(res["data"]["uncollectedAfterDays"], 30);
+
+    // Too long and out of range are refused and change nothing.
+    let (status, _) = put(json!({ "jobReceiptTermsText": "x".repeat(601) })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    for days in [-1, 366] {
+        let (status, _) = put(json!({ "uncollectedAfterDays": days })).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{days}");
+    }
+    let (status, res) = put(json!({ "jobReceiptTermsText": "x".repeat(600) })).await;
+    assert_eq!(status, StatusCode::OK, "{res}");
+
+    // An empty text and 0 days remove them.
+    let (status, res) = put(json!({ "jobReceiptTermsText": "", "uncollectedAfterDays": 0 })).await;
+    assert_eq!(status, StatusCode::OK, "{res}");
+    assert_eq!(res["data"]["jobReceiptTermsText"], "");
+    assert!(res["data"]["uncollectedAfterDays"].is_null());
 }
 
 #[tokio::test]

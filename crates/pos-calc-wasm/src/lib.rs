@@ -30,7 +30,10 @@ pub use pos_calc_core::receipt::{
     CalcReceiptSummary, ChargeKind, CostMode, PaymentMode, PaymentSource, PricingMode,
 };
 
-pub use pos_calc_core::repair::{CalcRepairItem, CalcRepairRequest, RepairTotals};
+pub use pos_calc_core::repair::{
+    CalcRepairItem, CalcRepairRequest, ItemDiscount, RepairBlocker, RepairBlockerCode,
+    RepairPreview, RepairTotals,
+};
 
 pub use pos_calc_core::shares::{CalcSharesReply, CalcSharesRequest, ShareLine, SharePart};
 
@@ -116,8 +119,9 @@ pub fn calc_warranty(request: CalcWarrantyRequest) -> Result<CalcWarrantyReply, 
     pos_calc_core::warranty::compute(&request).map_err(to_js_err)
 }
 
-/// Works out what a repair job charges and costs from its items.
+/// Works out what a repair job charges and costs from its items, each item's discount, and
+/// what stops it being saved.
 #[wasm_bindgen]
-pub fn calc_repair(request: CalcRepairRequest) -> Result<RepairTotals, JsValue> {
+pub fn calc_repair(request: CalcRepairRequest) -> Result<RepairPreview, JsValue> {
     pos_calc_core::repair::compute(&request).map_err(to_js_err)
 }

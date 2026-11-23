@@ -300,7 +300,7 @@ CREATE TABLE IF NOT EXISTS repairs (
     key TEXT PRIMARY KEY,
     id TEXT NOT NULL,
     ticket_number TEXT NOT NULL UNIQUE,
-    customer_key TEXT,
+    customer_key TEXT NOT NULL,
     customer_name TEXT NOT NULL,
     customer_phone TEXT NOT NULL,
     device_model TEXT NOT NULL,
@@ -331,7 +331,7 @@ CREATE TABLE IF NOT EXISTS print_jobs (
     key TEXT PRIMARY KEY,
     id TEXT NOT NULL,
     ticket_number TEXT NOT NULL UNIQUE,
-    customer_key TEXT,
+    customer_key TEXT NOT NULL,
     customer_name TEXT NOT NULL,
     customer_phone TEXT NOT NULL,
     job_type TEXT NOT NULL,
@@ -459,6 +459,7 @@ CREATE TABLE IF NOT EXISTS credit_notes (
     voided_at TEXT,
     voided_by TEXT,
     voided_reason TEXT,
+    resolution JSON,
     session_key TEXT,
     version INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
@@ -498,6 +499,7 @@ CREATE TABLE IF NOT EXISTS users (
     pin_hash TEXT,
     role TEXT NOT NULL,
     employee_key TEXT,
+    email TEXT,
     preferences_json TEXT,
     is_active INTEGER NOT NULL DEFAULT 1,
     version INTEGER NOT NULL DEFAULT 1,
@@ -519,6 +521,20 @@ CREATE TABLE IF NOT EXISTS login_sessions (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    user_key TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at TEXT NOT NULL,
+    used_at TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(user_key) REFERENCES users(key) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_token_hash ON password_reset_tokens(token_hash);
+CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_key ON password_reset_tokens(user_key);
 
 CREATE TABLE IF NOT EXISTS sku_counters (
     prefix TEXT PRIMARY KEY,
@@ -763,6 +779,7 @@ CREATE TABLE IF NOT EXISTS warranties (
     item_name TEXT NOT NULL,
     serial_number TEXT,
     quantity INTEGER NOT NULL,
+    claimed_quantity INTEGER NOT NULL DEFAULT 0,
     customer_key TEXT,
     customer_name TEXT,
     customer_phone TEXT,
@@ -826,6 +843,7 @@ CREATE TABLE IF NOT EXISTS warranty_claims (
     warranty_number TEXT NOT NULL,
     item_name TEXT NOT NULL,
     serial_number TEXT,
+    quantity INTEGER NOT NULL DEFAULT 1,
     product_key TEXT,
     invoice_key TEXT NOT NULL,
     invoice_number TEXT NOT NULL,
@@ -834,6 +852,7 @@ CREATE TABLE IF NOT EXISTS warranty_claims (
     customer_phone TEXT,
     issue_description TEXT NOT NULL,
     void_checks TEXT NOT NULL,
+    conditions TEXT NOT NULL DEFAULT '[]',
     assigned_employee_key TEXT,
     assigned_employee_name TEXT,
     status TEXT NOT NULL,
@@ -866,6 +885,20 @@ CREATE INDEX IF NOT EXISTS idx_warranty_claims_warranty ON warranty_claims(warra
 CREATE INDEX IF NOT EXISTS idx_warranty_claims_invoice ON warranty_claims(invoice_key);
 CREATE INDEX IF NOT EXISTS idx_warranty_claims_sync ON warranty_claims(updated_at, key);
 
+-- Shop warranty condition checklist templates (`modules::warranties`): condition tags maintained
+-- per shop for intake checks. The key is derived from the normalized name.
+CREATE TABLE IF NOT EXISTS warranty_condition_templates (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_warranty_condition_templates_name ON warranty_condition_templates(name COLLATE NOCASE);
+
 -- Ready-made repair services (`modules::repairs`): the key is derived from the name, so the
 -- same service added on two tills is one row. Never deleted; hidden with `active = 0`.
 CREATE TABLE IF NOT EXISTS repair_service_templates (
@@ -882,6 +915,47 @@ CREATE TABLE IF NOT EXISTS repair_service_templates (
 );
 
 CREATE INDEX IF NOT EXISTS idx_repair_service_templates_sync ON repair_service_templates(updated_at, key);
+
+-- Shop notifications (`modules::notifications`): written once, removed after the retention
+-- window. The audience is `audience_type` ('everyone' | 'permission' | 'user') with the
+-- permission or user key in `audience_value`; a link is `link_path` + `link_label` or neither.
+CREATE TABLE IF NOT EXISTS notifications (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    category TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    link_path TEXT,
+    link_label TEXT,
+    audience_type TEXT NOT NULL,
+    audience_value TEXT,
+    source TEXT NOT NULL,
+    dedupe_key TEXT,
+    raised_by_user_key TEXT,
+    version INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by_device TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at, key);
+CREATE INDEX IF NOT EXISTS idx_notifications_sync ON notifications(updated_at, key);
+
+-- Per-user read marks of notifications; `created_at` is when it was read.
+CREATE TABLE IF NOT EXISTS notification_reads (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    notification_key TEXT NOT NULL,
+    user_key TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by_device TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_reads_user ON notification_reads(notification_key, user_key);
+CREATE INDEX IF NOT EXISTS idx_notification_reads_sync ON notification_reads(updated_at, key);
 
 -- Label print history (`modules::labels`): one row per print or download,
 -- `items` is a JSON array of the sticker groups as printed. Not synced.
@@ -925,6 +999,8 @@ CREATE TABLE IF NOT EXISTS shop_profiles (
     default_warranty_text TEXT NOT NULL DEFAULT '',
     default_footer_text TEXT NOT NULL DEFAULT '',
     receipt_footer_text TEXT NOT NULL DEFAULT '',
+    job_receipt_terms_text TEXT NOT NULL DEFAULT '',
+    uncollected_after_days INTEGER,
     allow_shared_user_sessions INTEGER NOT NULL DEFAULT 0,
     allow_staff_multi_device_sessions INTEGER NOT NULL DEFAULT 0,
     version INTEGER NOT NULL DEFAULT 1,

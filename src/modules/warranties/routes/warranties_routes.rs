@@ -5,7 +5,7 @@ use crate::core::middleware::auth::CurrentUser;
 use crate::core::response::{ApiResponse, ErrorResponse};
 use crate::domain::warranties::{
     ExtendWarrantyRequest, VoidWarrantyRequest, WarrantyDetail, WarrantyListQuery,
-    WarrantyListResponse, WarrantyLookupQuery, WarrantyLookupResponse,
+    WarrantyListResponse, WarrantyLookupQuery, WarrantyLookupResponse, WarrantyStats,
 };
 use crate::modules::warranties::service::{self, WarrantyActor};
 use axum::Json;
@@ -42,17 +42,38 @@ pub(super) async fn lookup_warranties(
     Ok(Json(ApiResponse::success(found, "Warranties found")))
 }
 
-#[utoipa::path(get, path = "/", tag = modules::WARRANTIES,
-    params(WarrantyListQuery),
+#[utoipa::path(get, path = "/stats", tag = modules::WARRANTIES,
     security(("bearerAuth" = [])),
     responses(
-        (status = 200, description = "A page of warranties, newest first", body = ApiResponse<WarrantyListResponse>),
-        (status = 400, description = "Both a customer and an invoice were given", body = ErrorResponse),
+        (status = 200, description = "The warranty desk at a glance: in force, ending this week, open and late claims, this month's rework cost", body = ApiResponse<WarrantyStats>),
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
         (status = 403, description = "Permission denied", body = ErrorResponse),
     )
 )]
-/// Lists warranties, for a customer's or an invoice's page.
+/// The headline numbers for the Warranties page and the dashboard.
+pub(super) async fn get_warranty_stats(
+    State(state): State<AppState>,
+    user: CurrentUser,
+) -> AppResult<Json<ApiResponse<WarrantyStats>>> {
+    user.require_permission(perm::WARRANTIES_VIEW)?;
+    let stats = service::stats(&state.db).await?;
+    Ok(Json(ApiResponse::success(
+        stats,
+        "Warranty stats retrieved",
+    )))
+}
+
+#[utoipa::path(get, path = "/", tag = modules::WARRANTIES,
+    params(WarrantyListQuery),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "A page of warranties, newest first (ending soonest first for `state=expiring_soon`)", body = ApiResponse<WarrantyListResponse>),
+        (status = 400, description = "More than one of customer, invoice, repair job and state was given", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+    )
+)]
+/// Lists warranties, for a customer's, an invoice's or a job's page, or those ending this week.
 pub(super) async fn list_warranties(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -106,7 +127,8 @@ pub(super) async fn void_warranty(
 ) -> AppResult<Json<ApiResponse<WarrantyDetail>>> {
     user.require_permission(perm::WARRANTY_CLAIMS_RECORD)?;
     let actor = actor(&state, &user).await?;
-    let detail = service::void(&state.db, &key, body, &actor).await?;
+    let caller = user.approval_caller(&state.db).await?;
+    let detail = service::void(&state.db, &key, body, &actor, &caller).await?;
     Ok(Json(ApiResponse::success(detail, "Warranty cancelled")))
 }
 
@@ -133,15 +155,17 @@ pub(super) async fn extend_warranty(
 ) -> AppResult<Json<ApiResponse<WarrantyDetail>>> {
     user.require_permission(perm::WARRANTY_CLAIMS_RECORD)?;
     let actor = actor(&state, &user).await?;
-    let detail = service::extend(&state.db, &key, body, &actor).await?;
+    let caller = user.approval_caller(&state.db).await?;
+    let detail = service::extend(&state.db, &key, body, &actor, &caller).await?;
     Ok(Json(ApiResponse::success(detail, "Warranty extended")))
 }
 
 /// Routes of the warranties module.
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
-        // Reads: the lookup is static so it never collides with `/{key}`.
+        // Reads: the lookup and the stats are static so they never collide with `/{key}`.
         .routes(routes!(lookup_warranties))
+        .routes(routes!(get_warranty_stats))
         .routes(routes!(list_warranties))
         .routes(routes!(get_warranty))
         // Manager-approved changes.

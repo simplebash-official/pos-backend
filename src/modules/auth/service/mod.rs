@@ -6,8 +6,11 @@
 
 mod auth_service;
 
+pub(crate) use auth_service::forgot_password;
 pub(crate) use auth_service::list_sessions;
 pub(crate) use auth_service::login;
 pub(crate) use auth_service::lookup_shop;
 pub(crate) use auth_service::me;
+pub(crate) use auth_service::reset_password;
 pub(crate) use auth_service::update_my_preferences;
+pub(crate) use auth_service::verify_reset_token;

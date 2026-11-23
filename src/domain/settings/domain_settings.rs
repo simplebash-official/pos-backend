@@ -138,6 +138,10 @@ pub struct ShopProfileResponse {
     pub default_warranty_text: String,
     pub default_footer_text: String,
     pub receipt_footer_text: String,
+    /// Terms printed on the receipt given when a repair or print job is received; empty prints none.
+    pub job_receipt_terms_text: String,
+    /// Days after which the shop is no longer responsible for an uncollected job; none prints no warning.
+    pub uncollected_after_days: Option<i64>,
     #[serde(rename = "allowSharedUserSessions")]
     pub allow_shared_user_sessions: bool,
     #[serde(rename = "allowStaffMultiDeviceSessions")]
@@ -272,6 +276,10 @@ pub struct UpdateShopProfileRequest {
     pub default_warranty_text: Option<String>,
     pub default_footer_text: Option<String>,
     pub receipt_footer_text: Option<String>,
+    /// Terms for the job receipt; an empty string removes them.
+    pub job_receipt_terms_text: Option<String>,
+    /// Days for the job receipt's pickup warning (1 to 365); 0 removes the warning.
+    pub uncollected_after_days: Option<i64>,
     #[serde(rename = "allowSharedUserSessions")]
     pub allow_shared_user_sessions: Option<bool>,
     #[serde(rename = "allowStaffMultiDeviceSessions")]

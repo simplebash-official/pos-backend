@@ -134,6 +134,85 @@ async fn test_sqlite_repeated_failed_logins_are_throttled() {
 }
 
 #[tokio::test]
+async fn test_sqlite_repeated_wrong_manager_pins_are_throttled_per_user() {
+    let ctx = setup_sqlite_app().await;
+    let (status, body) = execute(
+        &ctx.router,
+        Request::builder()
+            .method("POST")
+            .uri("/api/system/setup")
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({ "adminPassword": "owner-password-123", "loadSampleData": false })
+                    .to_string(),
+            ))
+            .expect("the request is well formed"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let owner = body["data"]["token"]
+        .as_str()
+        .expect("setup answers with a token")
+        .to_string();
+    let (status, body) = send_authed(
+        &ctx.router,
+        "POST",
+        "/api/auth/set-pin",
+        Some(json!({ "pin": "4821" })),
+        &owner,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // A signed-in cashier with their own subject: the limiter is process-wide and keyed by user.
+    let claims = simplebash_pos_backend::core::middleware::auth::Claims {
+        sub: format!("guesser-{}", Uuid::new_v4().simple()),
+        exp: 9_999_999_999,
+        role: Some(simplebash_pos_backend::domain::users::Role::Staff),
+        permissions: Vec::new(),
+        tid: None,
+        scope: None,
+        did: None,
+        name: Some("Cashier".to_string()),
+        pwv: None,
+    };
+    let cashier = jsonwebtoken::encode(
+        &jsonwebtoken::Header::default(),
+        &claims,
+        &jsonwebtoken::EncodingKey::from_secret(ctx.config.jwt_secret.as_bytes()),
+    )
+    .expect("the token encodes");
+    let guess = |pin: &'static str, token: String| {
+        let router = ctx.router.clone();
+        async move {
+            send_authed(
+                &router,
+                "POST",
+                "/api/auth/verify-pin",
+                Some(json!({ "pin": pin, "requiredRole": "manager" })),
+                &token,
+            )
+            .await
+        }
+    };
+
+    for i in 0..5 {
+        let (status, body) = guess("0000", cashier.clone()).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "attempt {i}: {body}");
+    }
+    // Blocked now, even with the right PIN, and nothing about the PIN's owner is revealed.
+    let (status, body) = guess("4821", cashier.clone()).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{body}");
+    assert_eq!(body["code"], "TOO_MANY_PIN_ATTEMPTS");
+    assert!(body["data"].is_null(), "{body}");
+
+    // Another signed-in user is not affected by the cashier's failures.
+    let (status, body) = guess("4821", owner.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["valid"], true);
+}
+
+#[tokio::test]
 async fn test_sqlite_deactivating_a_user_revokes_their_live_token() {
     let ctx = setup_sqlite_app().await;
     let admin = admin_token(&ctx.config);
@@ -187,6 +266,78 @@ async fn test_sqlite_deactivating_a_user_revokes_their_live_token() {
         "after deactivation: {body}"
     );
     assert_eq!(body["code"], "USER_INACTIVE");
+}
+
+#[tokio::test]
+async fn test_sqlite_changing_a_password_revokes_tokens_issued_before_it() {
+    let ctx = setup_sqlite_app().await;
+    let admin = admin_token(&ctx.config);
+    let username = format!("staff-{}", &Uuid::new_v4().simple().to_string()[..12]);
+    let old_password = "Staff-Password-123";
+    let new_password = "Staff-Password-456";
+
+    let (status, body) = send_authed(
+        &ctx.router,
+        "POST",
+        "/api/users",
+        Some(json!({ "name": "Staff Member", "username": username, "password": old_password, "role": "staff" })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let user_id = body["data"]["id"].as_str().expect("user id").to_string();
+
+    let login = |password: &'static str| {
+        Request::builder()
+            .method("POST")
+            .uri("/api/auth/login")
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({ "username": username, "password": password }).to_string(),
+            ))
+            .expect("the request is well formed")
+    };
+    let (status, body) = execute(&ctx.router, login(old_password)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let old_token = body["data"]["token"].as_str().expect("token").to_string();
+
+    // A change that is not the password leaves the session alone.
+    let (status, body) = send_authed(
+        &ctx.router,
+        "PATCH",
+        &format!("/api/users/{user_id}"),
+        Some(json!({ "name": "Renamed Staff" })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = send_authed(&ctx.router, "GET", "/api/customers", None, &old_token).await;
+    assert_eq!(status, StatusCode::OK, "after a rename: {body}");
+
+    let (status, body) = send_authed(
+        &ctx.router,
+        "PATCH",
+        &format!("/api/users/{user_id}"),
+        Some(json!({ "password": new_password })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Whoever holds the old token (a thief included) is signed out at once.
+    let (status, body) = send_authed(&ctx.router, "GET", "/api/customers", None, &old_token).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "after the change: {body}");
+    assert_eq!(body["code"], "SESSION_REVOKED");
+
+    let (status, body) = execute(&ctx.router, login(new_password)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let new_token = body["data"]["token"].as_str().expect("token").to_string();
+    let (status, body) = send_authed(&ctx.router, "GET", "/api/customers", None, &new_token).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "with the new password's token: {body}"
+    );
 }
 
 #[tokio::test]

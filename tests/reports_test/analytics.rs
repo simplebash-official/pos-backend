@@ -279,7 +279,7 @@ async fn employee_commissions_survive_a_rename() {
         id: None,
         key: generate_id("rep"),
         ticket_number: format!("REP-{key_suffix}"),
-        customer_key: None,
+        customer_key: generate_id("cus"),
         customer_name: name.to_string(),
         customer_phone: "0770000000".to_string(),
         device_model: "iPhone 13".to_string(),
@@ -297,6 +297,7 @@ async fn employee_commissions_survive_a_rename() {
             }),
             part_cents: 0,
             part_cost_cents: 200000,
+            discount: None,
             warranty: ProductWarranty::none(),
         }],
         price_cents: 500000, // Revenue = 5,000 LKR

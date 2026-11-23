@@ -401,6 +401,39 @@ fn credit_note_status_ranks_and_immutable_body() {
     );
 }
 
+#[test]
+fn a_resolution_travels_with_the_resolved_status() {
+    let held = json!({
+        "key": "cn_1", "refundCashCents": 100, "status": "awaiting_resolution",
+        "returnedItems": [{ "name": "Shirt", "condition": "pending_inspection" }]
+    });
+    let resolved = json!({
+        "key": "cn_1", "refundCashCents": 100, "status": "resolved",
+        "returnedItems": [{ "name": "Shirt", "condition": "pending_inspection" }],
+        "resolution": { "lines": [{ "lineIndex": 0, "condition": "resalable" }] }
+    });
+    let merged = merge_lifecycle("creditNotes", &held, &resolved);
+    assert_eq!(merged.rejected, None);
+    assert_eq!(merged.merged["status"], "resolved");
+    assert_eq!(
+        merged.merged["resolution"]["lines"][0]["condition"],
+        "resalable"
+    );
+    // A stale copy still waiting for inspection never takes the resolution back.
+    let back = merge_lifecycle("creditNotes", &resolved, &held);
+    assert_eq!(back.merged["status"], "resolved");
+    assert_eq!(back.merged["resolution"], resolved["resolution"]);
+    // Rewriting the stored line is still refused.
+    let rewritten = json!({
+        "key": "cn_1", "refundCashCents": 100, "status": "resolved",
+        "returnedItems": [{ "name": "Shirt", "condition": "resalable" }]
+    });
+    assert_eq!(
+        merge_lifecycle("creditNotes", &held, &rewritten).rejected,
+        Some("IMMUTABLE_MISMATCH")
+    );
+}
+
 fn quotation(status: &str, total_cents: i64) -> Value {
     json!({
         "key": "quo_1", "quotationNumber": "QUO-0001", "status": status,

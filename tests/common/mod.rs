@@ -1,11 +1,14 @@
 //! Shared integration-test harness: config, app spawning, the mock document server and tokens.
 
+mod customers;
 mod mock_document_server;
 mod spawn_app;
 mod test_app;
 mod test_config;
 mod tokens;
 
+#[allow(unused_imports)]
+pub use customers::register_customer;
 #[allow(unused_imports)]
 pub use mock_document_server::*;
 #[allow(unused_imports)]

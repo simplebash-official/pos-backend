@@ -1,6 +1,5 @@
 use super::service_receipt::CHARGE_DESCRIPTION_MAX;
 use super::service_receipt::REFERENCE_MAX;
-use super::service_receipt::RecordedBy;
 use super::service_receipt::assemble;
 use crate::clients::db::Db;
 use crate::core::constants::{codes, prefixes};
@@ -13,6 +12,7 @@ use crate::domain::purchase_receipts::{
     BilledBy, ChargeKind, ChargesPayment, CreateReceiptRequest, PaymentKind, PaymentSource,
     PurchaseReceipt, ReceiptApproval, ReceiptChargeRequest, ReceiptPayment,
 };
+use crate::domain::users::ApprovalCaller;
 
 use crate::domain::sequences::ReserveSequenceRequest;
 use crate::domain::sessions::{CashMovementType, CreateCashMovementRequest};
@@ -80,7 +80,7 @@ pub(super) struct Outlay {
 /// (a negative number), so the drawer limit is checked against what will really be there.
 async fn prepare_outlay(
     db: &Db,
-    by: &RecordedBy,
+    by: &ApprovalCaller,
     receipt_key: &str,
     approval: Option<&ReceiptApproval>,
     cash_offset_cents: i64,
@@ -102,8 +102,7 @@ async fn prepare_outlay(
                 Some(
                     movement_service::prepare_movement(
                         db,
-                        by.user_id.clone(),
-                        by.name.clone(),
+                        by,
                         CreateCashMovementRequest {
                             movement_type: CashMovementType::AddCash,
                             amount_cents: outlay.amount_cents,
@@ -138,8 +137,7 @@ async fn prepare_outlay(
             };
             let paid = movement_service::prepare_movement(
                 db,
-                by.user_id.clone(),
-                by.name.clone(),
+                by,
                 CreateCashMovementRequest {
                     movement_type: outlay.movement_type,
                     amount_cents: outlay.amount_cents,
@@ -333,7 +331,7 @@ fn spread_charges(
 /// line together with the stock each one brings in.
 pub async fn record_receipt(
     db: &Db,
-    recorded_by: Option<RecordedBy>,
+    recorded_by: Option<ApprovalCaller>,
     body: CreateReceiptRequest,
     device_id: Option<String>,
 ) -> AppResult<PurchaseReceipt> {

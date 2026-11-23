@@ -1,3 +1,4 @@
+use super::print_job_alerts;
 use crate::clients::db::Db;
 use crate::core::constants::{codes, prefixes};
 use crate::core::error::{AppError, AppResult};
@@ -11,7 +12,7 @@ use crate::domain::sequences::ReserveSequenceRequest;
 use crate::modules::print_jobs::model::PrintJobDocument;
 use crate::modules::print_jobs::repository;
 use crate::modules::{customers, employees, sequences};
-use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
+use mongodb::bson::{Bson, DateTime as BsonDateTime, Document, doc};
 
 /// Creates the print job.
 pub async fn create_print_job(
@@ -25,21 +26,10 @@ pub async fn create_print_job(
         validate_job_type(&body.job_type)?;
         validate_promised_ready_at(body.promised_ready_at.as_deref())?;
 
-        let (customer_name, customer_phone) = resolve_customer_info(
-            db,
-            body.customer.customer_key.as_deref(),
-            body.customer.customer_name,
-            body.customer.customer_phone,
-        )
-        .await?;
+        let customer =
+            customers::service::get_customer_by_key(db, &body.customer.customer_key).await?;
 
-        validate_required_fields(
-            &customer_name,
-            &customer_phone,
-            &body.job_type,
-            body.quantity,
-            body.estimated_cost_cents,
-        )?;
+        validate_required_fields(&body.job_type, body.quantity, body.estimated_cost_cents)?;
 
         let assignment = body.assignment.unwrap_or_default();
         let PrintJobAssignment {
@@ -48,8 +38,14 @@ pub async fn create_print_job(
             split_value,
             ..
         } = assignment;
-        let assigned_employee_name =
-            resolve_assignment_employee_name(db, assigned_employee_id.as_deref()).await?;
+        let assigned_employee_name = match assigned_employee_id.as_deref() {
+            Some(key) => Some(
+                employees::service::resolve_assignment(db, key, split_type.as_deref(), split_value)
+                    .await?
+                    .name,
+            ),
+            None => None,
+        };
 
         let reservation = sequences::service::reserve_sequence(
             db,
@@ -72,9 +68,9 @@ pub async fn create_print_job(
             id: None,
             key: generate_id(prefixes::PRINT_JOB),
             ticket_number,
-            customer_key: body.customer.customer_key,
-            customer_name: customer_name.trim().to_string(),
-            customer_phone: customer_phone.trim().to_string(),
+            customer_key: customer.key,
+            customer_name: customer.name,
+            customer_phone: customer.primary_phone,
             job_type: body.job_type,
             quantity: body.quantity,
             promised_ready_at: body.promised_ready_at,
@@ -231,53 +227,14 @@ pub(crate) async fn mark_delivered(db: &Db, key: &str) -> AppResult<PrintJob> {
             .await?
             .ok_or_else(|| {
                 AppError::not_found_with_code("Print job not found", codes::PRINT_JOB_NOT_FOUND)
-            })?;
-        Ok(updated.into_print_job())
+            })?
+            .into_print_job();
+        // The status before the write is gone, so only "delivered" is compared: a job billed
+        // twice raises one notice (the dedupe key holds the status).
+        print_job_alerts::announce_status_change(db, &updated, "").await?;
+        Ok(updated)
     })
     .await
-}
-
-/// See `repairs::service::resolve_assignment_employee_name` — identical
-/// resolve-from-key/server-derives-name/never-trust-client-name rule.
-pub(super) async fn resolve_assignment_employee_name(
-    db: &Db,
-    assigned_employee_id: Option<&str>,
-) -> AppResult<Option<String>> {
-    match assigned_employee_id {
-        Some(key) => {
-            let employee = employees::service::get_employee_by_key(db, key).await?;
-            Ok(Some(employee.name))
-        }
-        None => Ok(None),
-    }
-}
-
-/// When `customer_key` resolves to a real customer, that record is
-/// authoritative for name/phone — a client-typed name/phone alongside a
-/// valid key could otherwise silently diverge from the linked customer.
-/// Resolves from the client-supplied name/phone when there's no key
-/// (a walk-in with no linked account).
-pub(super) async fn resolve_customer_info(
-    db: &Db,
-    customer_key: Option<&str>,
-    input_name: Option<String>,
-    input_phone: Option<String>,
-) -> AppResult<(String, String)> {
-    match customer_key {
-        Some(key) => {
-            let customer = customers::service::get_customer_by_key(db, key).await?;
-            Ok((customer.name, customer.primary_phone))
-        }
-        None => {
-            let name = input_name
-                .filter(|n| !n.trim().is_empty())
-                .ok_or_else(|| AppError::validation("Customer name is required"))?;
-            let phone = input_phone
-                .filter(|p| !p.trim().is_empty())
-                .ok_or_else(|| AppError::validation("Customer phone cannot be empty"))?;
-            Ok((name, phone))
-        }
-    }
 }
 
 /// Updates the print job.
@@ -297,61 +254,34 @@ pub async fn update_print_job(
             .id
             .expect("persisted print job document must have an _id");
 
-        let effective_customer_key = body
-            .customer
-            .as_ref()
-            .and_then(|c| c.customer_key.clone())
-            .or_else(|| existing.customer_key.clone());
-
-        let (customer_name, customer_phone) = match effective_customer_key.as_deref() {
-            Some(key) => {
-                let customer = customers::service::get_customer_by_key(db, key).await?;
-                (customer.name, customer.primary_phone)
-            }
-            None => {
-                let name = body
-                    .customer
-                    .as_ref()
-                    .and_then(|c| c.customer_name.clone())
-                    .unwrap_or(existing.customer_name);
-                let phone = body
-                    .customer
-                    .as_ref()
-                    .and_then(|c| c.customer_phone.clone())
-                    .unwrap_or(existing.customer_phone);
-                (name, phone)
-            }
+        let customer_key = match &body.customer {
+            Some(customer) => customer.customer_key.as_str(),
+            None => existing.customer_key.as_str(),
         };
+        let customer = customers::service::get_customer_by_key(db, customer_key).await?;
         let job_type = body.job_type.unwrap_or(existing.job_type);
         let quantity = body.quantity.unwrap_or(existing.quantity);
         let estimated_cost_cents = body
             .estimated_cost_cents
             .unwrap_or(existing.estimated_cost_cents);
+        let previous_status = existing.status.clone();
         let status = body.status.unwrap_or(existing.status);
 
         validate_status(&status)?;
         validate_job_type(&job_type)?;
         validate_promised_ready_at(body.promised_ready_at.as_deref())?;
-        validate_required_fields(
-            &customer_name,
-            &customer_phone,
-            &job_type,
-            quantity,
-            estimated_cost_cents,
-        )?;
+        validate_required_fields(&job_type, quantity, estimated_cost_cents)?;
 
         let mut set_doc = doc! {
-            "customer_name": &customer_name,
-            "customer_phone": &customer_phone,
+            "customer_key": &customer.key,
+            "customer_name": &customer.name,
+            "customer_phone": &customer.primary_phone,
             "job_type": &job_type,
             "quantity": quantity,
             "estimated_cost_cents": estimated_cost_cents,
             "status": &status,
             "updated_at": BsonDateTime::now(),
         };
-        if let Some(key) = effective_customer_key {
-            set_doc.insert("customer_key", key);
-        }
         if let Some(promised) = body.promised_ready_at {
             set_doc.insert("promised_ready_at", promised);
         }
@@ -359,10 +289,29 @@ pub async fn update_print_job(
             set_doc.insert("material_cost_cents", mc);
         }
         if let Some(assignment) = body.assignment {
-            if let Some(eid) = assignment.assigned_employee_id {
-                let ename = resolve_assignment_employee_name(db, Some(&eid)).await?;
-                set_doc.insert("assigned_employee_id", eid);
-                set_doc.insert("assigned_employee_name", ename);
+            // A split sent with no employee still has to be checked against who the job is
+            // already assigned to.
+            let employee_key = assignment
+                .assigned_employee_id
+                .as_deref()
+                .or(existing.assigned_employee_id.as_deref());
+            if let Some(key) = employee_key {
+                let assignee = employees::service::resolve_assignment(
+                    db,
+                    key,
+                    assignment.split_type.as_deref(),
+                    assignment.split_value,
+                )
+                .await?;
+                if let Some(eid) = &assignment.assigned_employee_id {
+                    set_doc.insert("assigned_employee_id", eid);
+                    set_doc.insert("assigned_employee_name", assignee.name);
+                    if assignee.is_owner {
+                        // Moving a job to the owner drops any commission it carried.
+                        set_doc.insert("split_type", Bson::Null);
+                        set_doc.insert("split_value", Bson::Null);
+                    }
+                }
             }
             if let Some(st) = assignment.split_type {
                 set_doc.insert("split_type", st);
@@ -379,8 +328,10 @@ pub async fn update_print_job(
             .await?
             .ok_or_else(|| {
                 AppError::not_found_with_code("Print job not found", codes::PRINT_JOB_NOT_FOUND)
-            })?;
-        Ok(updated.into_print_job())
+            })?
+            .into_print_job();
+        print_job_alerts::announce_status_change(db, &updated, &previous_status).await?;
+        Ok(updated)
     })
     .await
 }
@@ -412,35 +363,11 @@ pub(super) fn validate_promised_ready_at(promised_ready_at: Option<&str>) -> App
     }
 }
 
-fn validate_phone_number(phone: &str, field_name: &str) -> AppResult<()> {
-    let trimmed = phone.trim();
-    if trimmed.is_empty() {
-        return Err(AppError::validation(format!(
-            "{field_name} cannot be empty"
-        )));
-    }
-    if !trimmed
-        .chars()
-        .all(|c| c.is_ascii_digit() || matches!(c, ' ' | '-' | '+'))
-    {
-        return Err(AppError::validation(format!(
-            "{field_name} may only contain digits, spaces, dashes, and a plus sign"
-        )));
-    }
-    Ok(())
-}
-
 pub(super) fn validate_required_fields(
-    customer_name: &str,
-    customer_phone: &str,
     job_type: &str,
     quantity: i32,
     estimated_cost_cents: i64,
 ) -> AppResult<()> {
-    if customer_name.trim().is_empty() {
-        return Err(AppError::validation("Customer name is required"));
-    }
-    validate_phone_number(customer_phone, "Customer phone")?;
     if job_type.trim().is_empty() {
         return Err(AppError::validation("Job type is required"));
     }
@@ -453,7 +380,7 @@ pub(super) fn validate_required_fields(
     Ok(())
 }
 
-const VALID_STATUSES: &[&str] = &["received", "in_progress", "ready", "delivered", "cancelled"];
+const VALID_STATUSES: &[&str] = &["received", "in_repair", "ready", "delivered", "cancelled"];
 
 pub(super) fn validate_status(status: &str) -> AppResult<()> {
     if VALID_STATUSES.contains(&status) {

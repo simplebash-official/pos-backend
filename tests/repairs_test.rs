@@ -71,6 +71,24 @@ async fn send_authed(
     execute(router, request).await
 }
 
+/// The status of a request whose body the server refuses before any handler runs: that answer is
+/// plain text, not the JSON envelope the other helpers parse.
+async fn post_status(app: &common::TestApp, uri: &str, body: Value, token: &str) -> StatusCode {
+    let request = Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header(CONTENT_TYPE, "application/json")
+        .header(AUTHORIZATION, format!("Bearer {token}"))
+        .body(Body::from(body.to_string()))
+        .expect("the request is well formed");
+    app.router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds")
+        .status()
+}
+
 fn staff_token(config: &simplebash_pos_backend::core::config::Config) -> String {
     common::mint_token(
         config,
@@ -83,24 +101,24 @@ fn unprivileged_token(config: &simplebash_pos_backend::core::config::Config) -> 
     common::mint_token(config, Some(Role::Staff), &[])
 }
 
-fn sample_repair_payload(phone_suffix: &str) -> Value {
+/// A repair request for a customer registered just for it (named "Kasun Silva", phone
+/// `077{phone_suffix}`).
+async fn sample_repair_payload(app: &common::TestApp, phone_suffix: &str) -> Value {
+    let customer_key =
+        common::register_customer(app, "Kasun Silva", &format!("077{phone_suffix}")).await;
     json!({
-        "customer": {
-            "customerName": "Kasun Silva",
-            "customerPhone": format!("077{phone_suffix}"),
-        },
+        "customer": { "customerKey": customer_key },
         "deviceModel": "iPhone 14",
         "issueDescription": "Cracked screen",
         "items": [{ "description": "Replace screen", "laborCents": 850000, "warranty": { "coverage": { "kind": "none" } } }],
     })
 }
 
-fn sample_repair_payload_without_price(phone_suffix: &str) -> Value {
+async fn sample_repair_payload_without_price(app: &common::TestApp, phone_suffix: &str) -> Value {
+    let customer_key =
+        common::register_customer(app, "Kasun Silva", &format!("077{phone_suffix}")).await;
     json!({
-        "customer": {
-            "customerName": "Kasun Silva",
-            "customerPhone": format!("077{phone_suffix}"),
-        },
+        "customer": { "customerKey": customer_key },
         "deviceModel": "iPhone 14",
         "issueDescription": "Cracked screen",
         "items": [],
@@ -118,7 +136,7 @@ async fn unauthenticated_requests_are_rejected() {
         &app.router,
         "POST",
         "/api/repairs",
-        Some(sample_repair_payload("1234567")),
+        Some(sample_repair_payload(&app, "1234567").await),
     )
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
@@ -133,7 +151,7 @@ async fn create_without_repairs_write_permission_is_rejected() {
         &app.router,
         "POST",
         "/api/repairs",
-        Some(sample_repair_payload("1111111")),
+        Some(sample_repair_payload(&app, "1111111").await),
         &token,
     )
     .await;
@@ -150,7 +168,7 @@ async fn create_repair_reserves_ticket_number_and_defaults_status_to_received() 
         &app.router,
         "POST",
         "/api/repairs",
-        Some(sample_repair_payload("2222222")),
+        Some(sample_repair_payload(&app, "2222222").await),
         &token,
     )
     .await;
@@ -196,7 +214,7 @@ async fn repair_promised_ready_at_round_trips_and_drives_is_overdue() {
     let token = staff_token(&app.config);
 
     // Create with a past promised date → job is open, so it reads overdue.
-    let mut payload = sample_repair_payload("2424242");
+    let mut payload = sample_repair_payload(&app, "2424242").await;
     payload["promisedReadyAt"] = json!("2000-01-01");
     let (status, body) =
         send_authed(&app.router, "POST", "/api/repairs", Some(payload), &token).await;
@@ -238,7 +256,7 @@ async fn repair_rejects_malformed_promised_ready_at() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);
 
-    let mut payload = sample_repair_payload("2525252");
+    let mut payload = sample_repair_payload(&app, "2525252").await;
     payload["promisedReadyAt"] = json!("next tuesday");
     let (status, _) = send_authed(&app.router, "POST", "/api/repairs", Some(payload), &token).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -249,14 +267,14 @@ async fn create_repair_rejects_invalid_status_and_negative_cost() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);
 
-    let mut payload = sample_repair_payload("3333333");
+    let mut payload = sample_repair_payload(&app, "3333333").await;
     payload["status"] = json!("not-a-real-status");
     let (status, body) =
         send_authed(&app.router, "POST", "/api/repairs", Some(payload), &token).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "Body: {body}");
     assert_eq!(body["code"], "INVALID_JOB_STATUS");
 
-    let mut payload = sample_repair_payload("4444444");
+    let mut payload = sample_repair_payload(&app, "4444444").await;
     payload["items"][0]["laborCents"] = json!(-100);
     let (status, body) =
         send_authed(&app.router, "POST", "/api/repairs", Some(payload), &token).await;
@@ -272,7 +290,7 @@ async fn create_repair_without_price_succeeds_while_received_or_diagnosing() {
         &app.router,
         "POST",
         "/api/repairs",
-        Some(sample_repair_payload_without_price("9111111")),
+        Some(sample_repair_payload_without_price(&app, "9111111").await),
         &token,
     )
     .await;
@@ -282,7 +300,7 @@ async fn create_repair_without_price_succeeds_while_received_or_diagnosing() {
     assert_eq!(data["items"], json!([]), "Body: {body}");
     assert_eq!(data["priceCents"], 0);
 
-    let mut payload = sample_repair_payload_without_price("9111112");
+    let mut payload = sample_repair_payload_without_price(&app, "9111112").await;
     payload["status"] = json!("diagnosing");
     let (status, body) =
         send_authed(&app.router, "POST", "/api/repairs", Some(payload), &token).await;
@@ -295,14 +313,14 @@ async fn create_repair_without_price_rejects_advanced_status() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);
 
-    let mut payload = sample_repair_payload_without_price("9111113");
+    let mut payload = sample_repair_payload_without_price(&app, "9111113").await;
     payload["status"] = json!("ready");
     let (status, body) =
         send_authed(&app.router, "POST", "/api/repairs", Some(payload), &token).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "Body: {body}");
     assert_eq!(body["code"], "REPAIR_PRICE_REQUIRED");
 
-    let mut payload = sample_repair_payload_without_price("9111114");
+    let mut payload = sample_repair_payload_without_price(&app, "9111114").await;
     payload["status"] = json!("delivered");
     let (status, body) =
         send_authed(&app.router, "POST", "/api/repairs", Some(payload), &token).await;
@@ -319,7 +337,7 @@ async fn update_repair_rejects_status_transition_to_ready_without_price() {
         &app.router,
         "POST",
         "/api/repairs",
-        Some(sample_repair_payload_without_price("9111115")),
+        Some(sample_repair_payload_without_price(&app, "9111115").await),
         &token,
     )
     .await;
@@ -360,7 +378,7 @@ async fn get_repair_by_id_and_key_and_update_status() {
         &app.router,
         "POST",
         "/api/repairs",
-        Some(sample_repair_payload("5555555")),
+        Some(sample_repair_payload(&app, "5555555").await),
         &token,
     )
     .await;
@@ -409,14 +427,29 @@ async fn get_repair_by_id_and_key_and_update_status() {
     );
 }
 
+/// A unique tag with no digits: the repair search also reads any digits in the query as a
+/// ticket number (`REP-000012`), which would match other tests' repairs in a shared database.
+fn letters_only_tag() -> String {
+    uuid::Uuid::new_v4()
+        .simple()
+        .to_string()
+        .chars()
+        .take(12)
+        .map(|c| {
+            char::from(b'a' + u8::try_from(c.to_digit(16).expect("a hex digit")).expect("below 16"))
+        })
+        .collect()
+}
+
 #[tokio::test]
 async fn list_repairs_filters_by_search_and_status() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);
 
-    let unique = uuid::Uuid::new_v4().to_string()[..8].to_string();
-    let mut payload = sample_repair_payload("6666666");
-    payload["customer"]["customerName"] = json!(format!("Findable-{unique}"));
+    let unique = letters_only_tag();
+    let mut payload = sample_repair_payload(&app, "6666666").await;
+    payload["customer"]["customerKey"] =
+        json!(common::register_customer(&app, &format!("Findable-{unique}"), "0776666666").await);
     send_authed(&app.router, "POST", "/api/repairs", Some(payload), &token).await;
 
     let (status, body) = send_authed(
@@ -456,7 +489,7 @@ async fn list_repairs_filters_by_date_preset() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);
 
-    let unique = uuid::Uuid::new_v4().to_string()[..8].to_string();
+    let unique = letters_only_tag();
     let name = format!("DatePreset-{unique}");
     let now = BsonDateTime::now();
     let yesterday = BsonDateTime::from_chrono(now.to_chrono() - chrono::Duration::days(1));
@@ -507,7 +540,7 @@ async fn delete_repair_soft_deletes_and_excludes_from_lists() {
         &app.router,
         "POST",
         "/api/repairs",
-        Some(sample_repair_payload("7777777")),
+        Some(sample_repair_payload(&app, "7777777").await),
         &token,
     )
     .await;
@@ -564,13 +597,12 @@ async fn seed_customer(app: &common::TestApp, phone_suffix: &str) -> (String, St
 }
 
 #[tokio::test]
-async fn create_repair_with_customer_key_resolves_name_and_phone_from_customer_record() {
+async fn create_repair_takes_name_and_phone_from_the_customer_record() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);
     let (customer_key, customer_phone) = seed_customer(&app, "8888881").await;
 
-    // customerName/customerPhone here are deliberately wrong — a valid
-    // customerKey must override both from the linked customer record.
+    // The request names only the customer; the ticket carries that record's name and phone.
     let (status, body) = send_authed(
         &app.router,
         "POST",
@@ -578,8 +610,6 @@ async fn create_repair_with_customer_key_resolves_name_and_phone_from_customer_r
         Some(json!({
             "customer": {
                 "customerKey": customer_key,
-                "customerName": "Wrong Name",
-                "customerPhone": "0009999999",
             },
             "deviceModel": "iPhone 14",
             "issueDescription": "Cracked screen",
@@ -596,14 +626,14 @@ async fn create_repair_with_customer_key_resolves_name_and_phone_from_customer_r
 }
 
 #[tokio::test]
-async fn update_repair_with_customer_key_resolves_name_and_phone_from_customer_record() {
+async fn update_repair_to_another_customer_takes_that_customers_name_and_phone() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);
     let (_, created) = send_authed(
         &app.router,
         "POST",
         "/api/repairs",
-        Some(sample_repair_payload("8888882")),
+        Some(sample_repair_payload(&app, "8888882").await),
         &token,
     )
     .await;
@@ -620,8 +650,6 @@ async fn update_repair_with_customer_key_resolves_name_and_phone_from_customer_r
         Some(json!({
             "customer": {
                 "customerKey": customer_key,
-                "customerName": "Wrong Name",
-                "customerPhone": "0009999999",
             },
         })),
         &token,
@@ -651,7 +679,7 @@ async fn seed_repair_with_named(
             id: None,
             key: key.clone(),
             ticket_number: format!("REP-{}", &key[4..]),
-            customer_key: None,
+            customer_key: generate_id("cus"),
             customer_name: customer_name.to_string(),
             customer_phone: "0770000000".to_string(),
             device_model: "Test Device".to_string(),
@@ -668,6 +696,7 @@ async fn seed_repair_with_named(
                     part: None,
                     part_cents: 0,
                     part_cost_cents: 0,
+                    discount: None,
                     warranty: ProductWarranty::none(),
                 })
                 .into_iter()
@@ -793,7 +822,7 @@ async fn create_repair_with_valid_assigned_employee_id_resolves_name() {
     let employee = create_employee_via_api(&app.router, &admin).await;
     let employee_key = employee["key"].as_str().expect("the value is a string");
 
-    let mut payload = sample_repair_payload("9990001");
+    let mut payload = sample_repair_payload(&app, "9990001").await;
     payload["assignment"] = json!({
         "assignedEmployeeId": employee_key,
         // A client-sent name must never be trusted once the id resolves.
@@ -814,7 +843,7 @@ async fn create_repair_with_unknown_assigned_employee_id_is_not_found() {
     let app = common::spawn_app().await;
     let admin = admin_token(&app.config);
 
-    let mut payload = sample_repair_payload("9990002");
+    let mut payload = sample_repair_payload(&app, "9990002").await;
     payload["assignment"] = json!({ "assignedEmployeeId": "emp_does_not_exist" });
 
     let (status, body) =
@@ -824,30 +853,43 @@ async fn create_repair_with_unknown_assigned_employee_id_is_not_found() {
 }
 
 #[tokio::test]
-async fn create_repair_without_customer_phone_is_rejected() {
+async fn create_repair_without_a_customer_is_rejected() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);
 
-    let mut payload = sample_repair_payload("9990003");
-    payload["customer"] = json!({ "customerName": "Kasun Silva" });
-    let (status, body) =
-        send_authed(&app.router, "POST", "/api/repairs", Some(payload), &token).await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "Body: {body}");
+    let mut payload = sample_repair_payload(&app, "9990003").await;
+    payload
+        .as_object_mut()
+        .expect("the payload is an object")
+        .remove("customer");
+    let status = post_status(&app, "/api/repairs", payload, &token).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }
 
 #[tokio::test]
-async fn create_repair_with_invalid_phone_is_rejected() {
+async fn create_repair_with_typed_name_and_phone_instead_of_a_customer_key_is_rejected() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);
 
-    let mut payload = sample_repair_payload("9990004");
+    let mut payload = sample_repair_payload(&app, "9990004").await;
     payload["customer"] = json!({
         "customerName": "Kasun Silva",
-        "customerPhone": "invalid-phone-abc"
+        "customerPhone": "0779990004"
     });
+    let status = post_status(&app, "/api/repairs", payload, &token).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn create_repair_for_an_unknown_customer_is_not_found() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let mut payload = sample_repair_payload(&app, "9990006").await;
+    payload["customer"] = json!({ "customerKey": generate_id("cus") });
     let (status, body) =
         send_authed(&app.router, "POST", "/api/repairs", Some(payload), &token).await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "Body: {body}");
+    assert_eq!(status, StatusCode::NOT_FOUND, "Body: {body}");
 }
 
 #[tokio::test]
@@ -856,10 +898,9 @@ async fn search_repairs_by_customer_phone() {
     let token = staff_token(&app.config);
 
     let unique_phone = "0719876543";
-    let mut payload = sample_repair_payload("9990005");
+    let mut payload = sample_repair_payload(&app, "9990005").await;
     payload["customer"] = json!({
-        "customerName": "Phone Search Target",
-        "customerPhone": unique_phone
+        "customerKey": common::register_customer(&app, "Phone Search Target", unique_phone).await
     });
     let (status, created) =
         send_authed(&app.router, "POST", "/api/repairs", Some(payload), &token).await;

@@ -17,6 +17,14 @@ pub struct CreateEmployeeRequest {
     pub notes: Option<String>,
 }
 
+/// Body for `POST /employees/me`: the signed-in admin's own employee profile. The name comes
+/// from their account; only the phone has to be asked for.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateOwnerProfileRequest {
+    pub phone: String,
+}
+
 /// Body for `DELETE /employees/batch`. Ids that fail to delete (invalid
 /// `ObjectId`, not found, or blocked by the `EMPLOYEE_HAS_LOGIN` guard) are
 /// silently skipped rather than failing the whole request — see
@@ -147,6 +155,8 @@ pub struct EmployeeLoginSummary {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum EmployeeRole {
+    /// The shop owner working on jobs; takes no commission (they keep the whole profit).
+    Owner,
     Technician,
     Printer,
     Sales,
@@ -158,6 +168,7 @@ impl EmployeeRole {
     /// The name this value has on the wire and in storage.
     pub fn as_str(&self) -> &'static str {
         match self {
+            EmployeeRole::Owner => "owner",
             EmployeeRole::Technician => "technician",
             EmployeeRole::Printer => "printer",
             EmployeeRole::Sales => "sales",
@@ -170,6 +181,7 @@ impl std::str::FromStr for EmployeeRole {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
+            "owner" => Ok(EmployeeRole::Owner),
             "technician" => Ok(EmployeeRole::Technician),
             "printer" => Ok(EmployeeRole::Printer),
             "sales" => Ok(EmployeeRole::Sales),

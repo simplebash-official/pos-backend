@@ -474,6 +474,74 @@ async fn test_sqlite_complete_pos_lifecycle() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(prod_after_return["data"]["stockQuantity"], 29);
 
+    // 9b. The second unit is returned for inspection: nothing goes back on the shelf until the
+    // credit note is resolved, and then the real condition decides (SQLite storage of the
+    // resolution, the version-guarded write and the restock).
+    let (status, held) = send_authed(
+        &ctx.router,
+        "POST",
+        "/api/billing/credit-notes",
+        Some(json!({
+            "invoiceKey": invoice_key,
+            "returnedItems": [{
+                "productKey": product_key,
+                "quantity": 1,
+                "condition": "pending_inspection",
+                "reason": "defective"
+            }],
+            "paymentMethod": "cash"
+        })),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "pending credit note failed: {held}");
+    assert_eq!(held["data"]["status"], "awaiting_resolution");
+    let held_key = held["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
+    let (_, still) = send_authed(
+        &ctx.router,
+        "GET",
+        &format!("/api/inventory/products/{product_id}"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(still["data"]["stockQuantity"], 29);
+    let (status, resolved) = send_authed(
+        &ctx.router,
+        "POST",
+        &format!("/api/billing/credit-notes/{held_key}/resolve"),
+        Some(json!({ "lines": [{ "lineIndex": 0, "condition": "resalable" }] })),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "resolve failed: {resolved}");
+    assert_eq!(resolved["data"]["status"], "resolved");
+    assert_eq!(
+        resolved["data"]["resolution"]["lines"][0]["condition"],
+        "resalable"
+    );
+    let (_, restocked) = send_authed(
+        &ctx.router,
+        "GET",
+        &format!("/api/inventory/products/{product_id}"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(restocked["data"]["stockQuantity"], 30);
+    let (status, again) = send_authed(
+        &ctx.router,
+        "POST",
+        &format!("/api/billing/credit-notes/{held_key}/resolve"),
+        Some(json!({ "lines": [{ "lineIndex": 0, "condition": "resalable" }] })),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{again}");
+
     // 10. Document Generation & Caching (Invoice & Credit Note)
     // 10a. Render A4 Invoice by invoice_key
     let (status, headers, a4_bytes) = send_authed_raw(

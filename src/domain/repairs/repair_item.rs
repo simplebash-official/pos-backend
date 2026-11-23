@@ -6,6 +6,7 @@
 //! names are also the stored names (the same rule as `ProductWarranty` and `InvoiceItem`).
 
 use crate::domain::warranties::ProductWarranty;
+use pos_calc_core::repair::ItemDiscount;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -34,6 +35,17 @@ pub enum RepairPart {
     },
 }
 
+/// The discount on one item: as typed (so it can be edited again) and what the server worked it
+/// out to, stored together like `part_cents` and `part_cost_cents`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RepairItemDiscount {
+    #[serde(flatten)]
+    pub typed: ItemDiscount,
+    /// What the discount comes to, in cents (`pos_calc_core::repair::item_discount_cents`).
+    pub amount_cents: i64,
+}
+
 /// One piece of work on a job, as stored and returned.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -50,8 +62,23 @@ pub struct RepairItem {
     pub part_cents: i64,
     /// What the part costs the shop; 0 without one. Worked out by the server for a stock part.
     pub part_cost_cents: i64,
+    /// The discount off this item; absent for none. Never on a warranty rework.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub discount: Option<RepairItemDiscount>,
     /// The cover this work comes with once the job is handed back.
     pub warranty: ProductWarranty,
+}
+
+impl RepairItem {
+    /// What the customer pays for this item: the fee and the part, less its discount.
+    #[must_use]
+    pub fn net_cents(&self) -> i64 {
+        let discount_cents = match &self.discount {
+            Some(discount) => discount.amount_cents,
+            None => 0,
+        };
+        self.labor_cents + self.part_cents - discount_cents
+    }
 }
 
 /// Which part an item uses, as the repair form sends it.
@@ -85,6 +112,8 @@ pub struct RepairItemInput {
     pub description: String,
     pub labor_cents: i64,
     pub part: Option<RepairPartInput>,
+    /// The discount typed on this item; absent for none. The server works out the amount.
+    pub discount: Option<ItemDiscount>,
     pub warranty: ProductWarranty,
 }
 

@@ -151,6 +151,11 @@ async fn main() {
         ));
     }
 
+    // Every deployment: notifications past the retention window are removed on each replica.
+    tokio::spawn(simplebash_pos_backend::workers::run_notification_retention(
+        db.clone(),
+    ));
+
     let state = AppState {
         config: Arc::new(config),
         db,

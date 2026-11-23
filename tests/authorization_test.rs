@@ -55,6 +55,9 @@ const PUBLIC_ROUTES: &[(&str, &str)] = &[
     ("GET", "/api/health"),
     ("POST", "/api/auth/login"),
     ("GET", "/api/auth/shop/{code}"),
+    ("POST", "/api/auth/forgot-password"),
+    ("GET", "/api/auth/verify-reset-token"),
+    ("POST", "/api/auth/reset-password"),
     ("GET", "/api/billing"),
     ("GET", "/api/inventory"),
     ("GET", "/api/reports"),
@@ -78,6 +81,8 @@ const PUBLIC_ROUTES: &[(&str, &str)] = &[
     ("GET", "/api/internal/tenants/{tenant_id}/users"),
     ("GET", "/api/internal/tenants/{tenant_id}/logins"),
     ("GET", "/api/internal/tenants/{tenant_id}/activities"),
+    // A trusted internal service sends a shop a notice; same secret.
+    ("POST", "/api/internal/tenants/{tenant_id}/notifications"),
 ];
 
 async fn build_test_app() -> axum::Router {

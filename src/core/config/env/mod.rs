@@ -8,6 +8,7 @@ pub use config_env::AppEnvironment;
 pub use config_env::Config;
 pub use config_env::ConfigError;
 pub use config_env::Database;
+pub use config_env::EmailService;
 pub use config_env::IdentityAuth;
 pub use config_env::LogFormat;
 pub use config_env::LoggingConfig;

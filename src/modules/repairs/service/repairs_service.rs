@@ -1,3 +1,4 @@
+use super::repair_alerts;
 use super::repair_items::{price_items, use_parts};
 use crate::clients::db::Db;
 use crate::core::constants::{codes, prefixes};
@@ -13,7 +14,7 @@ use crate::domain::sequences::ReserveSequenceRequest;
 use crate::modules::repairs::model::RepairDocument;
 use crate::modules::repairs::repository;
 use crate::modules::{customers, employees, sequences};
-use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
+use mongodb::bson::{Bson, DateTime as BsonDateTime, Document, doc};
 
 /// Creates the repair.
 pub async fn create_repair(
@@ -26,20 +27,10 @@ pub async fn create_repair(
         validate_status(&status)?;
         validate_promised_ready_at(body.promised_ready_at.as_deref())?;
 
-        let (customer_name, customer_phone) = resolve_customer_info(
-            db,
-            body.customer.customer_key.as_deref(),
-            body.customer.customer_name,
-            body.customer.customer_phone,
-        )
-        .await?;
+        let customer =
+            customers::service::get_customer_by_key(db, &body.customer.customer_key).await?;
 
-        validate_required_fields(
-            &customer_name,
-            &customer_phone,
-            &body.device_model,
-            &body.issue_description,
-        )?;
+        validate_required_fields(&body.device_model, &body.issue_description)?;
         let kind = RepairKind::Standard;
         let priced = price_items(db, body.items, &[], &kind).await?;
         validate_price_required_for_status(&status, &kind, &priced.items)?;
@@ -54,8 +45,14 @@ pub async fn create_repair(
             split_value,
             ..
         } = assignment;
-        let assigned_employee_name =
-            resolve_assignment_employee_name(db, assigned_employee_id.as_deref()).await?;
+        let assigned_employee_name = match assigned_employee_id.as_deref() {
+            Some(key) => Some(
+                employees::service::resolve_assignment(db, key, split_type.as_deref(), split_value)
+                    .await?
+                    .name,
+            ),
+            None => None,
+        };
 
         let ticket_number = next_ticket_number(db, device_id.clone()).await?;
 
@@ -64,9 +61,9 @@ pub async fn create_repair(
             id: None,
             key: generate_id(prefixes::REPAIR),
             ticket_number,
-            customer_key: body.customer.customer_key,
-            customer_name: customer_name.trim().to_string(),
-            customer_phone: customer_phone.trim().to_string(),
+            customer_key: customer.key,
+            customer_name: customer.name,
+            customer_phone: customer.primary_phone,
             device_model: body.device_model,
             serial_number: body.serial_number,
             issue_description: body.issue_description,
@@ -134,8 +131,14 @@ pub(crate) async fn create_rework(db: &Db, rework: NewRework<'_>) -> AppResult<R
             .ok_or_else(|| {
                 AppError::not_found_with_code("Repair ticket not found", codes::REPAIR_NOT_FOUND)
             })?;
-        let assigned_employee_name =
-            resolve_assignment_employee_name(db, rework.assigned_employee_key).await?;
+        let assigned_employee_name = match rework.assigned_employee_key {
+            Some(key) => Some(
+                employees::service::resolve_assignment(db, key, None, None)
+                    .await?
+                    .name,
+            ),
+            None => None,
+        };
         let ticket_number = next_ticket_number(db, rework.device_id.clone()).await?;
         let now = BsonDateTime::now();
         let document = RepairDocument {
@@ -311,59 +314,14 @@ pub(crate) async fn mark_delivered(db: &Db, key: &str) -> AppResult<Repair> {
             .await?
             .ok_or_else(|| {
                 AppError::not_found_with_code("Repair ticket not found", codes::REPAIR_NOT_FOUND)
-            })?;
-        Ok(updated.into_repair())
+            })?
+            .into_repair();
+        // The status before the write is gone, so only "delivered" is compared: a job billed
+        // twice raises one notice (the dedupe key holds the status).
+        repair_alerts::announce_status_change(db, &updated, "").await?;
+        Ok(updated)
     })
     .await
-}
-
-/// When `assigned_employee_id` is present, it's resolved against the
-/// `employees` collection and the display name is server-derived from that
-/// record — a client-sent `assigned_employee_name` is never trusted once a
-/// valid id is given, same "resolved from a key, don't trust a client-sent
-/// duplicate" rule `billing::service::sale` applies to a sale item's
-/// `productKey`/`assignedEmployeeName`. An unresolvable id 404s
-/// (`EMPLOYEE_NOT_FOUND`) before any write. Absent `assigned_employee_id`
-/// leaves the ticket unassigned — no employee module lookup happens.
-pub(super) async fn resolve_assignment_employee_name(
-    db: &Db,
-    assigned_employee_id: Option<&str>,
-) -> AppResult<Option<String>> {
-    match assigned_employee_id {
-        Some(key) => {
-            let employee = employees::service::get_employee_by_key(db, key).await?;
-            Ok(Some(employee.name))
-        }
-        None => Ok(None),
-    }
-}
-
-/// When `customer_key` resolves to a real customer, that record is
-/// authoritative for name/phone — a client-typed name/phone alongside a
-/// valid key could otherwise silently diverge from the linked customer.
-/// Resolves from the client-supplied name/phone when there's no key
-/// (a walk-in with no linked account).
-pub(super) async fn resolve_customer_info(
-    db: &Db,
-    customer_key: Option<&str>,
-    input_name: Option<String>,
-    input_phone: Option<String>,
-) -> AppResult<(String, String)> {
-    match customer_key {
-        Some(key) => {
-            let customer = customers::service::get_customer_by_key(db, key).await?;
-            Ok((customer.name, customer.primary_phone))
-        }
-        None => {
-            let name = input_name
-                .filter(|n| !n.trim().is_empty())
-                .ok_or_else(|| AppError::validation("Customer name is required"))?;
-            let phone = input_phone
-                .filter(|p| !p.trim().is_empty())
-                .ok_or_else(|| AppError::validation("Customer phone cannot be empty"))?;
-            Ok((name, phone))
-        }
-    }
 }
 
 /// Updates the repair.
@@ -383,44 +341,20 @@ pub async fn update_repair(
             .id
             .expect("persisted repair document must have an _id");
 
-        let effective_customer_key = body
-            .customer
-            .as_ref()
-            .and_then(|c| c.customer_key.clone())
-            .or_else(|| existing.customer_key.clone());
-
-        let (customer_name, customer_phone) = match effective_customer_key.as_deref() {
-            Some(key) => {
-                let customer = customers::service::get_customer_by_key(db, key).await?;
-                (customer.name, customer.primary_phone)
-            }
-            None => {
-                let name = body
-                    .customer
-                    .as_ref()
-                    .and_then(|c| c.customer_name.clone())
-                    .unwrap_or(existing.customer_name);
-                let phone = body
-                    .customer
-                    .as_ref()
-                    .and_then(|c| c.customer_phone.clone())
-                    .unwrap_or(existing.customer_phone);
-                (name, phone)
-            }
+        let customer_key = match &body.customer {
+            Some(customer) => customer.customer_key.as_str(),
+            None => existing.customer_key.as_str(),
         };
+        let customer = customers::service::get_customer_by_key(db, customer_key).await?;
         let device_model = body.device_model.unwrap_or(existing.device_model);
         let issue_description = body.issue_description.unwrap_or(existing.issue_description);
         let was_delivered = existing.status == "delivered";
+        let previous_status = existing.status.clone();
         let status = body.status.unwrap_or(existing.status);
 
         validate_status(&status)?;
         validate_promised_ready_at(body.promised_ready_at.as_deref())?;
-        validate_required_fields(
-            &customer_name,
-            &customer_phone,
-            &device_model,
-            &issue_description,
-        )?;
+        validate_required_fields(&device_model, &issue_description)?;
         let priced = match body.items {
             Some(_) if was_delivered => {
                 return Err(AppError::conflict(
@@ -442,8 +376,9 @@ pub async fn update_repair(
         }
 
         let mut set_doc = doc! {
-            "customer_name": &customer_name,
-            "customer_phone": &customer_phone,
+            "customer_key": &customer.key,
+            "customer_name": &customer.name,
+            "customer_phone": &customer.primary_phone,
             "device_model": &device_model,
             "issue_description": &issue_description,
             "status": &status,
@@ -454,9 +389,6 @@ pub async fn update_repair(
             set_doc.insert("price_cents", priced.price_cents);
             set_doc.insert("cost_cents", priced.cost_cents);
         }
-        if let Some(key) = effective_customer_key {
-            set_doc.insert("customer_key", key);
-        }
         if let Some(sn) = body.serial_number {
             set_doc.insert("serial_number", sn);
         }
@@ -464,10 +396,29 @@ pub async fn update_repair(
             set_doc.insert("promised_ready_at", promised);
         }
         if let Some(assignment) = body.assignment {
-            if let Some(eid) = assignment.assigned_employee_id {
-                let ename = resolve_assignment_employee_name(db, Some(&eid)).await?;
-                set_doc.insert("assigned_employee_id", eid);
-                set_doc.insert("assigned_employee_name", ename);
+            // A split sent with no employee still has to be checked against who the job is
+            // already assigned to.
+            let employee_key = assignment
+                .assigned_employee_id
+                .as_deref()
+                .or(existing.assigned_employee_id.as_deref());
+            if let Some(key) = employee_key {
+                let assignee = employees::service::resolve_assignment(
+                    db,
+                    key,
+                    assignment.split_type.as_deref(),
+                    assignment.split_value,
+                )
+                .await?;
+                if let Some(eid) = &assignment.assigned_employee_id {
+                    set_doc.insert("assigned_employee_id", eid);
+                    set_doc.insert("assigned_employee_name", assignee.name);
+                    if assignee.is_owner {
+                        // Moving a job to the owner drops any commission it carried.
+                        set_doc.insert("split_type", Bson::Null);
+                        set_doc.insert("split_value", Bson::Null);
+                    }
+                }
             }
             if let Some(st) = assignment.split_type {
                 set_doc.insert("split_type", st);
@@ -486,6 +437,7 @@ pub async fn update_repair(
                 AppError::not_found_with_code("Repair ticket not found", codes::REPAIR_NOT_FOUND)
             })?
             .into_repair();
+        repair_alerts::announce_status_change(db, &updated, &previous_status).await?;
         if handing_back && updated.kind.is_rework() {
             // A rework is never billed, so its parts leave stock here, against the job itself.
             use_parts(
@@ -552,34 +504,10 @@ pub(super) fn validate_promised_ready_at(promised_ready_at: Option<&str>) -> App
     }
 }
 
-fn validate_phone_number(phone: &str, field_name: &str) -> AppResult<()> {
-    let trimmed = phone.trim();
-    if trimmed.is_empty() {
-        return Err(AppError::validation(format!(
-            "{field_name} cannot be empty"
-        )));
-    }
-    if !trimmed
-        .chars()
-        .all(|c| c.is_ascii_digit() || matches!(c, ' ' | '-' | '+'))
-    {
-        return Err(AppError::validation(format!(
-            "{field_name} may only contain digits, spaces, dashes, and a plus sign"
-        )));
-    }
-    Ok(())
-}
-
 pub(super) fn validate_required_fields(
-    customer_name: &str,
-    customer_phone: &str,
     device_model: &str,
     issue_description: &str,
 ) -> AppResult<()> {
-    if customer_name.trim().is_empty() {
-        return Err(AppError::validation("Customer name is required"));
-    }
-    validate_phone_number(customer_phone, "Customer phone")?;
     if device_model.trim().is_empty() {
         return Err(AppError::validation("Device model is required"));
     }

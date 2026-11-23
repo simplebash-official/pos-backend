@@ -1,5 +1,6 @@
 //! Customers: records, balances and statistics.
 
+pub mod migration;
 pub mod model;
 mod repository;
 pub mod routes;

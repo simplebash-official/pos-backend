@@ -723,4 +723,26 @@ async fn credit_note_pending_inspection_serial_transitions_to_returned_faulty() 
     let faulty = list_serials(&app, &prod_key, Some("returned_faulty")).await;
     assert_eq!(faulty.len(), 1);
     assert_eq!(faulty[0]["serialNumber"], serial);
+
+    // The inspection finds it sellable: resolving the credit note puts the serial back.
+    let credit_note_key = body["data"]["key"].as_str().expect("a credit note key");
+    let admin = admin_token(&app.config);
+    let (status, resolved) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/billing/credit-notes/{credit_note_key}/resolve"),
+        Some(json!({ "lines": [{ "lineIndex": 0, "condition": "resalable" }] })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {resolved}");
+    assert_eq!(
+        list_serials(&app, &prod_key, Some("returned_faulty"))
+            .await
+            .len(),
+        0
+    );
+    let resalable = list_serials(&app, &prod_key, Some("returned_resalable")).await;
+    assert_eq!(resalable.len(), 1);
+    assert_eq!(resalable[0]["serialNumber"], serial);
 }

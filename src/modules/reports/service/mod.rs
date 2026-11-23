@@ -12,6 +12,7 @@ pub(crate) mod outstanding;
 pub(crate) mod pulse;
 pub(crate) mod reminders;
 pub(crate) mod report_payload;
+mod warranty_report;
 
 pub(crate) use analytics::{
     get_analytics_cashier_performance, get_analytics_discounts, get_analytics_payment_methods,
@@ -28,3 +29,4 @@ pub(crate) use monthly_profit::get_monthly_profit_report;
 pub(crate) use outstanding::get_outstanding_report;
 pub(crate) use reminders::get_reminders;
 pub(crate) use report_payload::build_analytics_report_data;
+pub(crate) use warranty_report::get_warranty_report;

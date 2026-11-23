@@ -27,4 +27,5 @@ pub use tenants_routes::ShopLoginsQuery;
 pub use tenants_routes::ShopLoginsResponse;
 pub use tenants_routes::ShopUserResponse;
 pub use tenants_routes::StatusResponse;
+pub(crate) use tenants_routes::authorize as authorize_internal;
 pub use tenants_routes::router;

@@ -149,6 +149,7 @@ async fn tenant_directory_and_multi_tenant_login_roundtrip() {
                         password: password.to_string(),
                         role: Role::Admin,
                         employee_key: None,
+                        email: None,
                     },
                 )
                 .await
@@ -459,6 +460,7 @@ async fn ensure_existing_tenants_data_backfills_missing_profiles_and_unblocks_st
                 password: "staff-password-1".to_string(),
                 role: Role::Staff,
                 employee_key: None,
+                email: None,
             },
         )
         .await
@@ -481,6 +483,7 @@ async fn ensure_existing_tenants_data_backfills_missing_profiles_and_unblocks_st
                 password: "custom-password-1".to_string(),
                 role: Role::Admin,
                 employee_key: None,
+                email: None,
             },
         )
         .await
@@ -504,6 +507,7 @@ async fn ensure_existing_tenants_data_backfills_missing_profiles_and_unblocks_st
                 password: "blank-password-1".to_string(),
                 role: Role::Admin,
                 employee_key: None,
+                email: None,
             },
         )
         .await

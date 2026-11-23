@@ -70,6 +70,7 @@ fn token_for(app: &common::TestApp, user: &str, role: Role, name: &str) -> Strin
         scope: None,
         did: None,
         name: Some(name.to_string()),
+        pwv: None,
     };
     jsonwebtoken::encode(
         &jsonwebtoken::Header::default(),
@@ -444,6 +445,51 @@ async fn scenario(app: &common::TestApp) {
     )
     .await;
     assert_eq!(body["data"]["totalPayOutCents"], 1_500);
+
+    // A signed-in manager approves their own payout: no PIN and no reason, and sending either is
+    // refused. The entry names them as the approver, with no reason.
+    let before = expected(app).await;
+    for extra in [
+        json!({ "managerPin": "5555" }),
+        json!({ "overrideReason": "Supplier waiting" }),
+        json!({ "managerPin": "5555", "overrideReason": "Supplier waiting" }),
+    ] {
+        let (status, body) = send(
+            app,
+            "POST",
+            "/api/sessions/movements",
+            Some(expense(before + 5_000, extra)),
+            &manager,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    }
+    assert_eq!(expected(app).await, before, "a refusal records nothing");
+    let (status, body) = send(
+        app,
+        "POST",
+        "/api/sessions/movements",
+        Some(expense(before + 5_000, json!({}))),
+        &manager,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["data"]["approvedByNameSnapshot"], "Manager Mia");
+    assert_eq!(body["data"]["approvedByUserId"], manager_id.as_str());
+    assert!(body["data"]["approvalReason"].is_null(), "{body}");
+    let (status, _) = send(
+        app,
+        "POST",
+        "/api/sessions/movements",
+        Some(expense(before + 5_000, json!({}))),
+        &alice,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "Staff are still stopped without a manager's PIN"
+    );
 }
 
 #[tokio::test]

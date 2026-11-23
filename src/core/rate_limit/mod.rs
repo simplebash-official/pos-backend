@@ -13,5 +13,6 @@ mod tests;
 
 pub use core_rate_limit::FailureLimiter;
 pub use core_rate_limit::LOGIN_FAILURES;
+pub use core_rate_limit::PIN_FAILURES;
 pub use core_rate_limit::RequestLimits;
 pub use core_rate_limit::limit_requests;

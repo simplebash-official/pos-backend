@@ -30,6 +30,9 @@ pub struct UserDocument {
     /// if any — see `domain::users::User`'s doc comment.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub employee_key: Option<String>,
+    /// Contact/notification email for the user account.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
     /// Per-login UI preferences; absent on legacy documents.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preferences: Option<UserPreferences>,
@@ -63,6 +66,7 @@ impl UserDocument {
             has_pin: self.pin_hash.is_some(),
             preferences: self.preferences.unwrap_or_default(),
             employee_key: self.employee_key,
+            email: self.email,
             created_at: self.created_at.to_chrono(),
             updated_at: self.updated_at.to_chrono(),
         }

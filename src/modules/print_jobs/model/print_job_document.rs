@@ -16,10 +16,9 @@ pub struct PrintJobDocument {
     pub key: String,
     /// Sequential ticket number (e.g. PRN-000001).
     pub ticket_number: String,
-    /// Key of registered customer if linked.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub customer_key: Option<String>,
-    /// Customer name snapshot or walk-in name.
+    /// Key of the registered customer the job is for.
+    pub customer_key: String,
+    /// Customer name, read from the customer's record when the job is saved.
     pub customer_name: String,
     /// Customer phone number snapshot.
     pub customer_phone: String,
@@ -30,7 +29,8 @@ pub struct PrintJobDocument {
     /// Date the job was promised ready (YYYY-MM-DD), if agreed. Absent means none was agreed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub promised_ready_at: Option<String>,
-    /// Job lifecycle status ("received", "in_progress", "completed", "delivered", "cancelled").
+    /// Job lifecycle status ("received", "in_repair" (in production), "ready", "delivered",
+    /// "cancelled").
     pub status: String,
     /// Estimated charge to customer in cents.
     pub estimated_cost_cents: i64,

@@ -1,12 +1,12 @@
 use crate::app::AppState;
 use crate::core::constants::{modules, permissions as perm};
 use crate::core::error::AppResult;
-use crate::core::middleware::auth::CurrentUser;
+use crate::core::middleware::auth::{AdminUser, CurrentUser};
 use crate::core::response::{ApiResponse, ErrorResponse};
 use crate::core::utils::parse_object_id as parse_mongo_id;
 use crate::domain::employees::{
-    CreateEmployeeRequest, DeleteEmployeesRequest, DeleteEmployeesResponse, Employee,
-    EmployeeListQuery, EmployeesResponse, UpdateEmployeeRequest,
+    CreateEmployeeRequest, CreateOwnerProfileRequest, DeleteEmployeesRequest,
+    DeleteEmployeesResponse, Employee, EmployeeListQuery, EmployeesResponse, UpdateEmployeeRequest,
 };
 use crate::modules::employees::service;
 use axum::Json;
@@ -38,6 +38,32 @@ pub(super) async fn create_employee(
         Json(ApiResponse::success(
             employee,
             "Employee created successfully",
+        )),
+    ))
+}
+
+#[utoipa::path(post, path = "/me", tag = modules::EMPLOYEES, request_body = CreateOwnerProfileRequest,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 201, description = "The admin's own employee profile", body = ApiResponse<Employee>),
+        (status = 400, description = "Validation error", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Admin access required", body = ErrorResponse),
+        (status = 409, description = "The admin already has an employee profile", body = ErrorResponse),
+    )
+)]
+pub(super) async fn create_owner_profile(
+    _admin: AdminUser,
+    State(state): State<AppState>,
+    Json(body): Json<CreateOwnerProfileRequest>,
+) -> AppResult<(StatusCode, Json<ApiResponse<Employee>>)> {
+    let employee = service::create_owner_profile(&state.db, body).await?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(ApiResponse::success(
+            employee,
+            "Your employee profile was created",
         )),
     ))
 }
@@ -152,6 +178,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(list_employees, create_employee))
         .routes(routes!(get_employee, update_employee, delete_employee))
         .routes(routes!(delete_employees_batch))
+        .routes(routes!(create_owner_profile))
 }
 
 #[utoipa::path(patch, path = "/{id}", tag = modules::EMPLOYEES,

@@ -2,13 +2,21 @@
 //! Nothing here decides anything: the rules live in `service`.
 
 mod claims_repository;
+mod condition_repository;
 mod warranties_repository;
+mod warranty_stats_repository;
 
 pub(crate) use claims_repository::ClaimFilter;
+pub(crate) use claims_repository::all_claims;
 pub(crate) use claims_repository::find_claim;
 pub(crate) use claims_repository::insert_claim;
 pub(crate) use claims_repository::list_claims;
 pub(crate) use claims_repository::replace_claim;
+pub(crate) use claims_repository::sent_to_supplier_between;
+pub(crate) use condition_repository::find_by_key as find_condition_by_key;
+pub(crate) use condition_repository::insert as insert_condition;
+pub(crate) use condition_repository::list_active as list_active_conditions;
+pub(crate) use condition_repository::replace as replace_condition;
 pub(crate) use warranties_repository::WarrantyFilter;
 pub(crate) use warranties_repository::find_by_key;
 pub(crate) use warranties_repository::insert_event;
@@ -16,3 +24,5 @@ pub(crate) use warranties_repository::insert_warranty;
 pub(crate) use warranties_repository::list;
 pub(crate) use warranties_repository::list_events;
 pub(crate) use warranties_repository::replace_warranty;
+pub(crate) use warranty_stats_repository::count_in_force;
+pub(crate) use warranty_stats_repository::issued_between;

@@ -4,7 +4,8 @@ use crate::clients::sqlite::{SqlFilter, bson_to_iso, to_bson_datetime};
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use crate::core::error::{AppError, AppResult};
 use crate::domain::billing::{
-    CreditNoteStatus, InvoiceItem, InvoiceStatus, RefundBreakdownLeg, SplitPayment,
+    CreditNoteResolution, CreditNoteStatus, InvoiceItem, InvoiceStatus, RefundBreakdownLeg,
+    SplitPayment,
 };
 use crate::modules::billing::model::{
     CreditNoteDocument, CreditNoteItemDocument, InvoiceDocument, PaymentDocument,
@@ -43,6 +44,10 @@ pub(crate) fn credit_note_from_sqlite_row(
             AppError::internal(format!("stored credit note status is invalid: {err}"))
         })?;
     let is_manager_override_int: i64 = row.get("is_manager_override");
+    let resolution_str: Option<String> = row.get("resolution");
+    let resolution: Option<CreditNoteResolution> = resolution_str
+        .map(|text| decode_json("resolution", &text))
+        .transpose()?;
 
     let voided_at_str: Option<String> = row.get("voided_at");
     let created_at_str: String = row.get("created_at");
@@ -78,6 +83,7 @@ pub(crate) fn credit_note_from_sqlite_row(
         voided_at: voided_at_str.map(|s| to_bson_datetime(&s)).transpose()?,
         voided_by: row.get("voided_by"),
         voided_reason: row.get("voided_reason"),
+        resolution,
         version: row.get("version"),
         created_at: to_bson_datetime(&created_at_str)?,
         updated_at: to_bson_datetime(&updated_at_str)?,
@@ -168,6 +174,15 @@ pub(super) fn build_invoice_where_clause(filter: &Document) -> SqlFilter {
         if let Ok(customer_key) = doc.get_str("customer_key") {
             conditions.push("customer_key = ?".to_string());
             bindings.push(customer_key.to_string());
+        }
+        if let Ok(ticket_key) = doc.get_str("items.sourceTicketKey") {
+            // Lines are stored as JSON text; the Mongo filter reads the same field by path.
+            conditions.push(
+                "EXISTS (SELECT 1 FROM json_each(invoices.items) \
+                 WHERE json_extract(json_each.value, '$.sourceTicketKey') = ?)"
+                    .to_string(),
+            );
+            bindings.push(ticket_key.to_string());
         }
         if let Ok(status) = doc.get_str("status") {
             conditions.push("status = ?".to_string());

@@ -45,6 +45,36 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         pool.execute("ALTER TABLE categories ADD COLUMN warranty_template TEXT")
             .await?;
     }
+    // `warranties.claimed_quantity` arrived with partial warranty claims.
+    let warranty_cols = table_columns(pool, "warranties").await?;
+    if !warranty_cols.is_empty() && !warranty_cols.iter().any(|c| c == "claimed_quantity") {
+        tracing::info!("Migrating 'warranties' table: adding 'claimed_quantity' column");
+        pool.execute(
+            "ALTER TABLE warranties ADD COLUMN claimed_quantity INTEGER NOT NULL DEFAULT 0",
+        )
+        .await?;
+    }
+    // `warranty_claims.quantity` arrived with partial warranty claims.
+    let claim_cols = table_columns(pool, "warranty_claims").await?;
+    if !claim_cols.is_empty() && !claim_cols.iter().any(|c| c == "quantity") {
+        tracing::info!("Migrating 'warranty_claims' table: adding 'quantity' column");
+        pool.execute("ALTER TABLE warranty_claims ADD COLUMN quantity INTEGER NOT NULL DEFAULT 1")
+            .await?;
+    }
+    if !claim_cols.is_empty() && !claim_cols.iter().any(|c| c == "conditions") {
+        tracing::info!("Migrating 'warranty_claims' table: adding 'conditions' column");
+        pool.execute(
+            "ALTER TABLE warranty_claims ADD COLUMN conditions TEXT NOT NULL DEFAULT '[]'",
+        )
+        .await?;
+    }
+    // `credit_notes.resolution` arrived with resolving a credit note held for inspection.
+    let credit_note_cols = table_columns(pool, "credit_notes").await?;
+    if !credit_note_cols.is_empty() && !credit_note_cols.iter().any(|c| c == "resolution") {
+        tracing::info!("Migrating 'credit_notes' table: adding 'resolution' column");
+        pool.execute("ALTER TABLE credit_notes ADD COLUMN resolution JSON")
+            .await?;
+    }
     // `cash_movements.receipt_key` arrived with supplier receipts too.
     let movement_cols = table_columns(pool, "cash_movements").await?;
     if !movement_cols.is_empty() && !movement_cols.iter().any(|c| c == "receipt_key") {
@@ -67,6 +97,29 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         pool.execute("ALTER TABLE receipt_charges ADD COLUMN description TEXT")
             .await?;
     }
+    // `users.email` arrived with admin password reset support.
+    let user_cols = table_columns(pool, "users").await?;
+    if !user_cols.is_empty() && !user_cols.iter().any(|c| c == "email") {
+        tracing::info!("Migrating 'users' table: adding 'email' column");
+        pool.execute("ALTER TABLE users ADD COLUMN email TEXT")
+            .await?;
+    }
+    // `password_reset_tokens` table for admin password reset.
+    pool.execute(
+        r#"CREATE TABLE IF NOT EXISTS password_reset_tokens (
+            key TEXT PRIMARY KEY,
+            id TEXT NOT NULL,
+            user_key TEXT NOT NULL,
+            token_hash TEXT NOT NULL UNIQUE,
+            expires_at TEXT NOT NULL,
+            used_at TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(user_key) REFERENCES users(key) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_token_hash ON password_reset_tokens(token_hash);
+        CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_key ON password_reset_tokens(user_key);"#,
+    )
+    .await?;
     // A purchase line is priced by its total (`line_total_cents`, the supplier's lot price) with
     // its share of the receipt's extra charges beside it; the per-unit `unit_cost_cents` is gone,
     // so the line has one source of truth. Existing lines get quantity x unit cost and no share.
@@ -200,6 +253,26 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         );
         pool
             .execute("ALTER TABLE shop_profiles ADD COLUMN allow_staff_multi_device_sessions INTEGER NOT NULL DEFAULT 0")
+            .await?;
+    }
+    if !shop_profile_cols.is_empty()
+        && !shop_profile_cols
+            .iter()
+            .any(|n| n == "job_receipt_terms_text")
+    {
+        tracing::info!("Migrating 'shop_profiles' table: adding 'job_receipt_terms_text' column");
+        pool.execute(
+            "ALTER TABLE shop_profiles ADD COLUMN job_receipt_terms_text TEXT NOT NULL DEFAULT ''",
+        )
+        .await?;
+    }
+    if !shop_profile_cols.is_empty()
+        && !shop_profile_cols
+            .iter()
+            .any(|n| n == "uncollected_after_days")
+    {
+        tracing::info!("Migrating 'shop_profiles' table: adding 'uncollected_after_days' column");
+        pool.execute("ALTER TABLE shop_profiles ADD COLUMN uncollected_after_days INTEGER")
             .await?;
     }
     if !shop_profile_cols.is_empty() && !shop_profile_cols.iter().any(|n| n == "updated_by_device")
@@ -469,7 +542,7 @@ async fn migrate_users_to_usernames(pool: &SqlitePool) -> Result<(), sqlx::Error
         sqlx::query_as("SELECT cid, name FROM pragma_table_info('users')")
             .fetch_all(pool)
             .await?;
-    if !cols.iter().any(|(_, n)| n == "email") {
+    if cols.iter().any(|(_, n)| n == "username") || !cols.iter().any(|(_, n)| n == "email") {
         return Ok(());
     }
     tracing::info!("Migrating 'users' table: replacing 'email' with 'username'");

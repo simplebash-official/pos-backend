@@ -16,15 +16,13 @@ use crate::helpers::{
 
 async fn seed_repair(app: &common::TestApp) -> String {
     let token = staff_token(&app.config);
+    let customer_key = common::register_customer(app, "Kasun Silva", "0771234567").await;
     let (status, body) = send_authed(
         &app.router,
         "POST",
         "/api/repairs",
         Some(json!({
-            "customer": {
-                "customerName": "Kasun Silva",
-                "customerPhone": "0771234567",
-            },
+            "customer": { "customerKey": customer_key },
             "deviceModel": "iPhone 14",
             "issueDescription": "Cracked screen",
             "items": [{ "description": "Repair work", "laborCents": 850000, "warranty": { "coverage": { "kind": "none" } } }],
@@ -41,15 +39,13 @@ async fn seed_repair(app: &common::TestApp) -> String {
 
 async fn seed_repair_without_price(app: &common::TestApp) -> String {
     let token = staff_token(&app.config);
+    let customer_key = common::register_customer(app, "Kasun Silva", "0771234599").await;
     let (status, body) = send_authed(
         &app.router,
         "POST",
         "/api/repairs",
         Some(json!({
-            "customer": {
-                "customerName": "Kasun Silva",
-                "customerPhone": "0771234599",
-            },
+            "customer": { "customerKey": customer_key },
             "deviceModel": "iPhone 14",
             "issueDescription": "Cracked screen",
             "items": [],
@@ -169,6 +165,56 @@ async fn complete_sale_with_repair_line_marks_ticket_delivered() {
         item["sourceTicketNumber"],
         repair_body["data"]["ticketNumber"]
     );
+}
+
+#[tokio::test]
+async fn invoices_can_be_listed_by_the_ticket_they_billed() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+    let billed_key = seed_repair(&app).await;
+    let unbilled_key = seed_repair(&app).await;
+
+    let mut payload = base_sale_payload();
+    payload["items"] = json!([{
+        "name": "Screen Replacement",
+        "quantity": 1,
+        "discountCents": 0,
+        "sourceType": "repair",
+        "sourceTicketKey": billed_key,
+    }]);
+    let (status, sale) = send_authed(
+        &app.router,
+        "POST",
+        "/api/billing/sales",
+        Some(payload),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {sale}");
+    let invoice_key = sale["data"]["invoice"]["key"].clone();
+
+    let (status, billed) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/billing/invoices?ticketKey={billed_key}"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {billed}");
+    assert_eq!(billed["data"]["invoices"].as_array().map(Vec::len), Some(1));
+    assert_eq!(billed["data"]["invoices"][0]["key"], invoice_key);
+
+    let (status, unbilled) = send_authed(
+        &app.router,
+        "GET",
+        &format!("/api/billing/invoices?ticketKey={unbilled_key}"),
+        None,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {unbilled}");
+    assert_eq!(unbilled["data"]["invoices"], json!([]));
 }
 
 #[tokio::test]

@@ -17,6 +17,22 @@ use crate::helpers::{base_sale_payload, send_anon, send_authed, staff_token};
 use tower::ServiceExt;
 use uuid::Uuid;
 
+/// A random search term with no digits. The invoice search also reads the digits of a term as an
+/// invoice number (`INV-000123`), so a term with digits can match another test's invoice in the
+/// shared database and make a count flaky.
+fn digit_free_unique() -> String {
+    Uuid::new_v4()
+        .simple()
+        .to_string()
+        .chars()
+        .take(8)
+        .map(|c| match c.to_digit(10) {
+            Some(d) => char::from(b'g' + d as u8),
+            None => c,
+        })
+        .collect()
+}
+
 /// Inserts a minimal `InvoiceDocument` directly, bypassing `complete_sale`,
 /// with full control over the fields the list-filter tests need. Returns
 /// `(key, invoiceNumber)` — `invoiceNumber` is uuid-suffixed and unique per
@@ -230,7 +246,7 @@ async fn list_invoices_filters_by_payment_status_and_payment_method() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);
 
-    let unique = uuid::Uuid::new_v4().to_string()[..8].to_string();
+    let unique = digit_free_unique();
     let name = format!("PayFilter-{unique}");
     let now = BsonDateTime::now();
 
@@ -321,7 +337,7 @@ async fn list_invoices_filters_by_date_preset() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);
 
-    let unique = uuid::Uuid::new_v4().to_string()[..8].to_string();
+    let unique = digit_free_unique();
     let name = format!("DatePreset-{unique}");
     let now = BsonDateTime::now();
     let yesterday = BsonDateTime::from_chrono(now.to_chrono() - chrono::Duration::days(1));

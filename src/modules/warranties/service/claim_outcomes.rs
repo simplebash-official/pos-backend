@@ -12,11 +12,12 @@ use crate::clients::db::Db;
 use crate::core::constants::{codes, prefixes};
 use crate::core::error::{AppError, AppResult};
 use crate::core::id::generate_id;
+use crate::domain::billing::CreateCreditNoteItemRequest;
 use crate::domain::inventory::{BatchAllocation, StockMovementType};
 use crate::domain::repairs::{CreateRepairRequest, RepairCustomer};
 use crate::domain::warranties::{
-    ClaimAction, ClaimDecision, ClaimStatus, ReplacementRequest, ResolveClaimRequest,
-    WarrantyClaim, WarrantyEventKind, WarrantyStatus,
+    ClaimAction, ClaimDecision, ClaimStatus, PaidRepairRequest, ReplacementRequest,
+    ResolveClaimRequest, WarrantyClaim, WarrantyEventKind, WarrantyStatus,
 };
 use crate::modules::inventory::model::ProductSerialDocument;
 use crate::modules::warranties::model::{WarrantyClaimDocument, WarrantyDocument};
@@ -30,25 +31,27 @@ fn replacement_invalid(message: impl Into<String>) -> AppError {
 
 /// The new unit, checked and its stock planned, before anything is written.
 #[derive(Debug)]
-struct PlannedReplacement {
+pub(super) struct PlannedReplacement {
     product_key: String,
     /// The faulty unit coming back and the in-stock unit going out, for a serialized item.
     serials: Option<(ProductSerialDocument, ProductSerialDocument)>,
     allocations: Vec<BatchAllocation>,
 }
 
-async fn plan_replacement(
+pub(super) async fn plan_replacement(
     db: &Db,
-    claim: &WarrantyClaimDocument,
+    product_key: Option<&str>,
+    old_serial: Option<&str>,
+    invoice_key: &str,
     replacement: &ReplacementRequest,
 ) -> AppResult<PlannedReplacement> {
-    let Some(product_key) = claim.product_key.clone() else {
+    let Some(product_key) = product_key.map(str::to_string) else {
         return Err(replacement_invalid(
             "Only an item sold from stock can be replaced from stock.",
         ));
     };
     let product = inventory::service::product::get_product_by_key(db, &product_key).await?;
-    match (&claim.serial_number, replacement) {
+    match (old_serial, replacement) {
         (
             Some(old_serial),
             ReplacementRequest {
@@ -71,7 +74,7 @@ async fn plan_replacement(
                 db,
                 &product_key,
                 old_serial,
-                &claim.invoice_key,
+                invoice_key,
             )
             .await?;
             let (_, allocations) = inventory::service::stock_batch::allocations_for_serials(
@@ -137,10 +140,18 @@ async fn give_up_unit(
     }
     let from = warranty.status;
     let expected = warranty.version;
-    if warranty.quantity > 1 {
-        warranty.quantity -= 1;
+    let claim_qty = claim.quantity.unwrap_or(1);
+    warranty.claimed_quantity = Some(
+        warranty
+            .claimed_quantity
+            .unwrap_or(claim_qty)
+            .saturating_sub(claim_qty),
+    );
+    if warranty.quantity > claim_qty {
+        warranty.quantity -= claim_qty;
         warranty.status = WarrantyStatus::Active;
     } else {
+        warranty.quantity = 0;
         warranty.status = WarrantyStatus::Void;
         warranty.void_reason = Some(reason.to_string());
     }
@@ -183,6 +194,7 @@ fn replacement_warranty(
         warranty_number: number,
         serial_number,
         quantity: 1,
+        claimed_quantity: Some(0),
         starts_on: today().to_string(),
         status: WarrantyStatus::Active,
         void_reason: None,
@@ -225,9 +237,16 @@ pub(crate) async fn resolve_claim(
                     "A repaired item keeps its own unit; leave the replacement out.",
                 ));
             }
-            (ClaimDecision::Replace, Some(replacement)) => {
-                Some(plan_replacement(db, &claim, replacement).await?)
-            }
+            (ClaimDecision::Replace, Some(replacement)) => Some(
+                plan_replacement(
+                    db,
+                    claim.product_key.as_deref(),
+                    claim.serial_number.as_deref(),
+                    &claim.invoice_key,
+                    replacement,
+                )
+                .await?,
+            ),
             (ClaimDecision::Replace, None) => {
                 return Err(replacement_invalid("Choose the new unit to give."));
             }
@@ -339,13 +358,13 @@ pub(crate) async fn resolve_claim(
 }
 
 /// Checks, before a credit note is written, that it may finish this claim: the claim was
-/// decided as a refund, it is on the same invoice, and a serialized item is among what comes
-/// back.
+/// decided as a refund, it is on the same invoice, and the returned items contain only
+/// the single claimed item with the exact claimed quantity (or serialized unit).
 pub(crate) async fn check_claim_refund(
     db: &Db,
     claim_key: &str,
     invoice_key: &str,
-    returned_serials: &[&str],
+    returned_items: &[CreateCreditNoteItemRequest],
 ) -> AppResult<()> {
     let claim = require_claim(db, claim_key).await?;
     step(&claim, ClaimAction::Refunded)?;
@@ -355,12 +374,43 @@ pub(crate) async fn check_claim_refund(
             claim.claim_number, claim.invoice_number
         )));
     }
-    if let Some(serial) = &claim.serial_number
-        && !returned_serials.contains(&serial.as_str())
-    {
+    if returned_items.len() != 1 {
         return Err(AppError::validation(format!(
-            "Return the claimed unit ({serial}) on this credit note."
+            "Warranty claim refund on {} can only return the single claimed item line.",
+            claim.claim_number
         )));
+    }
+    let returned = &returned_items[0];
+
+    if let Some(serial) = &claim.serial_number {
+        if returned.serial_number.as_deref() != Some(serial.as_str()) {
+            return Err(AppError::validation(format!(
+                "Return the claimed unit ({serial}) on this credit note."
+            )));
+        }
+        if returned.quantity != 1 {
+            return Err(AppError::validation(format!(
+                "Serialized warranty claim {} must return exactly 1 unit.",
+                claim.claim_number
+            )));
+        }
+    } else {
+        let expected_qty = claim.quantity.unwrap_or(1);
+        if returned.quantity != expected_qty {
+            return Err(AppError::validation(format!(
+                "Warranty claim {} is for {} unit(s); return quantity must be exactly {}.",
+                claim.claim_number, expected_qty, expected_qty
+            )));
+        }
+        if let Some(expected_prod) = &claim.product_key
+            && let Some(returned_prod) = &returned.product_key
+            && expected_prod != returned_prod
+        {
+            return Err(AppError::validation(format!(
+                "Returned item does not match claimed item '{}'.",
+                claim.item_name
+            )));
+        }
     }
     Ok(())
 }
@@ -400,12 +450,14 @@ pub(crate) async fn finish_claim_refund(
 }
 
 /// Opens a paid repair job for an item whose claim was rejected, so the customer can still
-/// have it fixed. Once per claim.
+/// have it fixed. Once per claim. A walk-in sale leaves the claim without a customer, so the
+/// registered customer in `customer` stands in; a customer the claim already has always wins.
 pub(crate) async fn convert_to_paid_repair(
     db: &Db,
     key: &str,
     actor: &WarrantyActor,
     device_id: Option<String>,
+    customer: PaidRepairRequest,
 ) -> AppResult<WarrantyClaim> {
     crate::core::logging::domain::tracked("warranties.claim_paid_repair", async move {
         let mut claim = require_claim(db, key).await?;
@@ -423,22 +475,24 @@ pub(crate) async fn convert_to_paid_repair(
                 format!("This claim already has repair job {number}."),
             ));
         }
-        let reason = claim
-            .decision_reason
+        // A decision a signed-in manager made themselves carries no written reason.
+        let not_covered = match &claim.decision_reason {
+            Some(reason) => format!("not covered: {reason}"),
+            None => "not covered".to_string(),
+        };
+        let customer_key = claim
+            .customer_key
             .clone()
-            .ok_or_else(|| AppError::internal("a decided claim records why it was decided"))?;
+            .or(customer.customer_key)
+            .ok_or_else(|| AppError::validation("Choose the customer for this repair job."))?;
         let repair = repairs::service::create_repair(
             db,
             CreateRepairRequest {
-                customer: RepairCustomer {
-                    customer_key: claim.customer_key.clone(),
-                    customer_name: claim.customer_name.clone(),
-                    customer_phone: claim.customer_phone.clone(),
-                },
+                customer: RepairCustomer { customer_key },
                 device_model: claim.item_name.clone(),
                 serial_number: claim.serial_number.clone(),
                 issue_description: format!(
-                    "{} (warranty claim {} not covered: {reason})",
+                    "{} (warranty claim {} {not_covered})",
                     claim.issue_description, claim.claim_number
                 ),
                 promised_ready_at: None,

@@ -104,3 +104,33 @@ pub struct ShopLookupResponse {
     /// Display name of the shop.
     pub name: String,
 }
+
+/// Body for `POST /auth/forgot-password`. Initiates an Admin password reset.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ForgotPasswordRequest {
+    /// Admin username or email address.
+    pub identifier: String,
+    /// Shop (tenant) the account belongs to in multi-tenant deployments.
+    #[serde(alias = "shop_code")]
+    pub shop_code: Option<String>,
+}
+
+/// Query params for `GET /auth/verify-reset-token`.
+#[derive(Debug, Clone, Deserialize, IntoParams)]
+#[serde(rename_all = "camelCase")]
+#[into_params(parameter_in = Query)]
+pub struct VerifyResetTokenQuery {
+    /// Raw password reset token to verify.
+    pub token: String,
+}
+
+/// Body for `POST /auth/reset-password`.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetPasswordRequest {
+    /// Raw reset token received via email.
+    pub token: String,
+    /// New password for the Admin account.
+    pub new_password: String,
+}

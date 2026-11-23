@@ -45,6 +45,14 @@ pub const LABEL_TEMPLATE: &str = "ltpl";
 
 pub const LOGIN_SESSION: &str = "lgs";
 
+/// Notification keys are `ntf_<hash of the dedupe key>` when raised with one, so replicas converge.
+pub const NOTIFICATION: &str = "ntf";
+
+/// Read marks use `nrd_<hash of user + notification>`: one per user and notification.
+pub const NOTIFICATION_READ: &str = "nrd";
+
+pub const PASSWORD_RESET_TOKEN: &str = "prt";
+
 /// Key of the batch the migration to stock batches gives every product for the
 /// stock (and price) it held before batches existed. Deterministic, so the
 /// desktop's SQLite migration and the cloud's Mongo migration create the same
@@ -108,3 +116,5 @@ pub const WARRANTY: &str = "wty";
 pub const WARRANTY_EVENT: &str = "wev";
 
 pub const WARRANTY_CLAIM: &str = "wcl";
+
+pub const WARRANTY_CONDITION: &str = "wcon";

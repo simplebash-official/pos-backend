@@ -77,16 +77,33 @@ fn staff_token(config: &simplebash_pos_backend::core::config::Config) -> String 
     )
 }
 
+/// The status of a request whose body the server refuses before any handler runs: that answer is
+/// plain text, not the JSON envelope the other helpers parse.
+async fn post_status(app: &common::TestApp, uri: &str, body: Value, token: &str) -> StatusCode {
+    let request = Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header(CONTENT_TYPE, "application/json")
+        .header(AUTHORIZATION, format!("Bearer {token}"))
+        .body(Body::from(body.to_string()))
+        .expect("the request is well formed");
+    app.router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("the awaited step succeeds")
+        .status()
+}
+
 fn unprivileged_token(config: &simplebash_pos_backend::core::config::Config) -> String {
     common::mint_token(config, Some(Role::Staff), &[])
 }
 
-fn sample_print_job_payload() -> Value {
+/// A print job request for a customer registered just for it ("Nadeesha Perera", 0711234567).
+async fn sample_print_job_payload(app: &common::TestApp) -> Value {
+    let customer_key = common::register_customer(app, "Nadeesha Perera", "0711234567").await;
     json!({
-        "customer": {
-            "customerName": "Nadeesha Perera",
-            "customerPhone": "0711234567"
-        },
+        "customer": { "customerKey": customer_key },
         "jobType": "t-shirt",
         "quantity": 12,
         "estimatedCostCents": 240000,
@@ -104,7 +121,7 @@ async fn unauthenticated_requests_are_rejected() {
         &app.router,
         "POST",
         "/api/print-jobs",
-        Some(sample_print_job_payload()),
+        Some(sample_print_job_payload(&app).await),
     )
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
@@ -119,7 +136,7 @@ async fn create_without_print_jobs_write_permission_is_rejected() {
         &app.router,
         "POST",
         "/api/print-jobs",
-        Some(sample_print_job_payload()),
+        Some(sample_print_job_payload(&app).await),
         &token,
     )
     .await;
@@ -136,7 +153,7 @@ async fn create_print_job_reserves_ticket_number_and_defaults_status_to_received
         &app.router,
         "POST",
         "/api/print-jobs",
-        Some(sample_print_job_payload()),
+        Some(sample_print_job_payload(&app).await),
         &token,
     )
     .await;
@@ -168,7 +185,7 @@ async fn print_job_promised_ready_at_round_trips_and_drives_is_overdue() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);
 
-    let mut payload = sample_print_job_payload();
+    let mut payload = sample_print_job_payload(&app).await;
     payload["promisedReadyAt"] = json!("2000-01-01");
     let (status, body) = send_authed(
         &app.router,
@@ -202,7 +219,7 @@ async fn print_job_rejects_malformed_promised_ready_at() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);
 
-    let mut payload = sample_print_job_payload();
+    let mut payload = sample_print_job_payload(&app).await;
     payload["promisedReadyAt"] = json!("2026/09/15");
     let (status, _) = send_authed(
         &app.router,
@@ -220,7 +237,7 @@ async fn create_print_job_rejects_invalid_job_type_and_zero_quantity() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);
 
-    let mut payload = sample_print_job_payload();
+    let mut payload = sample_print_job_payload(&app).await;
     payload["jobType"] = json!("not-a-real-type");
     let (status, body) = send_authed(
         &app.router,
@@ -233,7 +250,7 @@ async fn create_print_job_rejects_invalid_job_type_and_zero_quantity() {
     assert_eq!(status, StatusCode::BAD_REQUEST, "Body: {body}");
     assert_eq!(body["code"], "INVALID_JOB_TYPE");
 
-    let mut payload = sample_print_job_payload();
+    let mut payload = sample_print_job_payload(&app).await;
     payload["quantity"] = json!(0);
     let (status, body) = send_authed(
         &app.router,
@@ -255,7 +272,7 @@ async fn get_print_job_by_id_and_key_and_update_status() {
         &app.router,
         "POST",
         "/api/print-jobs",
-        Some(sample_print_job_payload()),
+        Some(sample_print_job_payload(&app).await),
         &token,
     )
     .await;
@@ -305,13 +322,73 @@ async fn get_print_job_by_id_and_key_and_update_status() {
 }
 
 #[tokio::test]
+async fn a_print_job_goes_received_in_production_ready_delivered_and_no_other_way() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let payload = sample_print_job_payload(&app).await;
+    let (status, created) = send_authed(
+        &app.router,
+        "POST",
+        "/api/print-jobs",
+        Some(payload),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {created}");
+    let key = created["data"]["key"].as_str().expect("the job has a key");
+
+    // "In production" is stored as in_repair, the value the dashboard already counts.
+    for next in ["in_repair", "ready", "delivered"] {
+        let (status, updated) = send_authed(
+            &app.router,
+            "PATCH",
+            &format!("/api/print-jobs/{key}"),
+            Some(json!({ "status": next })),
+            &token,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{next}: {updated}");
+        assert_eq!(updated["data"]["status"], next);
+    }
+
+    // `diagnosing` belongs to repairs and `in_progress` was never a print job status.
+    for refused in ["diagnosing", "in_progress"] {
+        let (status, body) = send_authed(
+            &app.router,
+            "PATCH",
+            &format!("/api/print-jobs/{key}"),
+            Some(json!({ "status": refused })),
+            &token,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}: {body}");
+        assert_eq!(body["code"], "INVALID_JOB_STATUS", "{refused}");
+
+        let mut payload = sample_print_job_payload(&app).await;
+        payload["status"] = json!(refused);
+        let (status, body) = send_authed(
+            &app.router,
+            "POST",
+            "/api/print-jobs",
+            Some(payload),
+            &token,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "create {refused}: {body}");
+        assert_eq!(body["code"], "INVALID_JOB_STATUS", "create {refused}");
+    }
+}
+
+#[tokio::test]
 async fn list_print_jobs_filters_by_search_and_status() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);
 
     let unique = uuid::Uuid::new_v4().to_string()[..8].to_string();
-    let mut payload = sample_print_job_payload();
-    payload["customer"]["customerName"] = json!(format!("Findable-{unique}"));
+    let mut payload = sample_print_job_payload(&app).await;
+    payload["customer"]["customerKey"] =
+        json!(common::register_customer(&app, &format!("Findable-{unique}"), "0776666667").await);
     send_authed(
         &app.router,
         "POST",
@@ -409,7 +486,7 @@ async fn delete_print_job_soft_deletes_and_excludes_from_lists() {
         &app.router,
         "POST",
         "/api/print-jobs",
-        Some(sample_print_job_payload()),
+        Some(sample_print_job_payload(&app).await),
         &token,
     )
     .await;
@@ -466,13 +543,12 @@ async fn seed_customer(app: &common::TestApp, phone_suffix: &str) -> (String, St
 }
 
 #[tokio::test]
-async fn create_print_job_with_customer_key_resolves_name_and_phone_from_customer_record() {
+async fn create_print_job_takes_name_and_phone_from_the_customer_record() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);
     let (customer_key, customer_phone) = seed_customer(&app, "9998881").await;
 
-    // customerName/customerPhone here are deliberately wrong — a valid
-    // customerKey must override both from the linked customer record.
+    // The request names only the customer; the job carries that record's name and phone.
     let (status, body) = send_authed(
         &app.router,
         "POST",
@@ -480,8 +556,6 @@ async fn create_print_job_with_customer_key_resolves_name_and_phone_from_custome
         Some(json!({
             "customer": {
                 "customerKey": customer_key,
-                "customerName": "Wrong Name",
-                "customerPhone": "0009999999",
             },
             "jobType": "t-shirt",
             "quantity": 12,
@@ -498,14 +572,14 @@ async fn create_print_job_with_customer_key_resolves_name_and_phone_from_custome
 }
 
 #[tokio::test]
-async fn update_print_job_with_customer_key_resolves_name_and_phone_from_customer_record() {
+async fn update_print_job_to_another_customer_takes_that_customers_name_and_phone() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);
     let (_, created) = send_authed(
         &app.router,
         "POST",
         "/api/print-jobs",
-        Some(sample_print_job_payload()),
+        Some(sample_print_job_payload(&app).await),
         &token,
     )
     .await;
@@ -522,8 +596,6 @@ async fn update_print_job_with_customer_key_resolves_name_and_phone_from_custome
         Some(json!({
             "customer": {
                 "customerKey": customer_key,
-                "customerName": "Wrong Name",
-                "customerPhone": "0009999999",
             },
         })),
         &token,
@@ -551,7 +623,7 @@ async fn seed_print_job_with_named(
             id: None,
             key: key.clone(),
             ticket_number: format!("PRN-{}", &key[4..]),
-            customer_key: None,
+            customer_key: generate_id("cus"),
             customer_name: customer_name.to_string(),
             customer_phone: "0770000000".to_string(),
             job_type: "mug".to_string(),
@@ -625,7 +697,7 @@ async fn print_jobs_stats_endpoint_returns_today_job_count_revenue_pending_count
     seed_print_job_with(&db, "delivered", 3000, now).await;
     // Backdated open job — must NOT count toward today's job
     // count/revenue, but DOES count toward the all-time pending count.
-    seed_print_job_with(&db, "diagnosing", 2000, yesterday).await;
+    seed_print_job_with(&db, "ready", 2000, yesterday).await;
     // Backdated cancelled job — excluded from pending entirely.
     seed_print_job_with(&db, "cancelled", 1000, yesterday).await;
 
@@ -639,7 +711,7 @@ async fn print_jobs_stats_endpoint_returns_today_job_count_revenue_pending_count
     assert_eq!(stats.today_job_count, 3);
     assert_eq!(stats.today_revenue_cents, 5000 + 4000 + 3000);
     // pending_job_count = all non-delivered/cancelled jobs, any date:
-    // "received" + "in_repair" (today) + "diagnosing" (yesterday) = 3.
+    // "received" + "in_repair" (today) + "ready" (yesterday) = 3.
     assert_eq!(stats.pending_job_count, 3);
     assert_eq!(stats.avg_job_value_cents, (5000 + 4000 + 3000) / 3);
 
@@ -684,7 +756,7 @@ async fn create_print_job_with_valid_assigned_employee_id_resolves_name() {
     let employee = create_employee_via_api(&app.router, &admin).await;
     let employee_key = employee["key"].as_str().expect("the value is a string");
 
-    let mut payload = sample_print_job_payload();
+    let mut payload = sample_print_job_payload(&app).await;
     payload["assignment"] = json!({
         "assignedEmployeeId": employee_key,
         "assignedEmployeeName": "Someone Else Entirely",
@@ -710,7 +782,7 @@ async fn create_print_job_with_unknown_assigned_employee_id_is_not_found() {
     let app = common::spawn_app().await;
     let admin = admin_token(&app.config);
 
-    let mut payload = sample_print_job_payload();
+    let mut payload = sample_print_job_payload(&app).await;
     payload["assignment"] = json!({ "assignedEmployeeId": "emp_does_not_exist" });
 
     let (status, body) = send_authed(
@@ -726,33 +798,40 @@ async fn create_print_job_with_unknown_assigned_employee_id_is_not_found() {
 }
 
 #[tokio::test]
-async fn create_print_job_without_customer_phone_is_rejected() {
+async fn create_print_job_without_a_customer_is_rejected() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);
 
-    let mut payload = sample_print_job_payload();
-    payload["customer"] = json!({ "customerName": "Nadeesha Perera" });
-    let (status, body) = send_authed(
-        &app.router,
-        "POST",
-        "/api/print-jobs",
-        Some(payload),
-        &token,
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "Body: {body}");
+    let mut payload = sample_print_job_payload(&app).await;
+    payload
+        .as_object_mut()
+        .expect("the payload is an object")
+        .remove("customer");
+    let status = post_status(&app, "/api/print-jobs", payload, &token).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }
 
 #[tokio::test]
-async fn create_print_job_with_invalid_phone_is_rejected() {
+async fn create_print_job_with_typed_name_and_phone_instead_of_a_customer_key_is_rejected() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);
 
-    let mut payload = sample_print_job_payload();
+    let mut payload = sample_print_job_payload(&app).await;
     payload["customer"] = json!({
         "customerName": "Nadeesha Perera",
-        "customerPhone": "invalid-phone-xyz"
+        "customerPhone": "0711234567"
     });
+    let status = post_status(&app, "/api/print-jobs", payload, &token).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn create_print_job_for_an_unknown_customer_is_not_found() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let mut payload = sample_print_job_payload(&app).await;
+    payload["customer"] = json!({ "customerKey": generate_id("cus") });
     let (status, body) = send_authed(
         &app.router,
         "POST",
@@ -761,7 +840,7 @@ async fn create_print_job_with_invalid_phone_is_rejected() {
         &token,
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "Body: {body}");
+    assert_eq!(status, StatusCode::NOT_FOUND, "Body: {body}");
 }
 
 #[tokio::test]
@@ -770,10 +849,9 @@ async fn search_print_jobs_by_customer_phone() {
     let token = staff_token(&app.config);
 
     let unique_phone = "0729876543";
-    let mut payload = sample_print_job_payload();
+    let mut payload = sample_print_job_payload(&app).await;
     payload["customer"] = json!({
-        "customerName": "Print Search Target",
-        "customerPhone": unique_phone
+        "customerKey": common::register_customer(&app, "Print Search Target", unique_phone).await
     });
     let (status, created) = send_authed(
         &app.router,

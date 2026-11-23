@@ -100,6 +100,11 @@ pub async fn limit_requests(
 pub static LOGIN_FAILURES: LazyLock<FailureLimiter> =
     LazyLock::new(|| FailureLimiter::new(10, Duration::from_secs(15 * 60)));
 
+/// Wrong manager PINs per shop + signed-in user: 5 within 15 minutes blocks that user's PIN
+/// checks for the rest of the window (a PIN is only 4-8 digits).
+pub static PIN_FAILURES: LazyLock<FailureLimiter> =
+    LazyLock::new(|| FailureLimiter::new(5, Duration::from_secs(15 * 60)));
+
 /// Per-client request limits for the whole API: a generous `general` bucket on
 /// every route, and a tight `sensitive` one on the unauthenticated entry points
 /// (`/api/auth`, `/api/system`, `/api/internal`) that a login-failure counter

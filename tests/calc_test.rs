@@ -355,16 +355,34 @@ async fn a_cash_payment_and_a_shift_count_are_checked_against_the_real_drawer() 
 
     let mut over = request.clone();
     over["amountCents"] = json!(250_000);
-    let (_, body) = post(&app, "/api/calc/cash-movement", &over, Some(&admin)).await;
+    // Staff need a manager's PIN and a reason to go over the drawer.
+    let staff = common::mint_token(
+        &app.config,
+        Some(Role::Staff),
+        roles::default_permissions(Role::Staff),
+    );
+    let (_, body) = post(&app, "/api/calc/cash-movement", &over, Some(&staff)).await;
     assert_eq!(body["data"]["overDrawer"], true);
     assert_eq!(body["data"]["pinRequired"], true);
     assert_eq!(
         body["data"]["blockers"],
         json!(["pin_missing", "override_reason_missing"])
     );
+    // A signed-in manager or owner approves it themselves: no PIN, no reason, nothing stops it.
+    let manager = common::mint_token(
+        &app.config,
+        Some(Role::Manager),
+        roles::default_permissions(Role::Manager),
+    );
+    for token in [&admin, &manager] {
+        let (_, body) = post(&app, "/api/calc/cash-movement", &over, Some(token)).await;
+        assert_eq!(body["data"]["overDrawer"], true);
+        assert_eq!(body["data"]["pinRequired"], false);
+        assert_eq!(body["data"]["blockers"], json!([]));
+    }
 
     let close = json!({ "sessionKey": session_key, "terminalId": null, "countedCents": 199_000, "closingFloatCents": 100_000 });
-    let (status, body) = post(&app, "/api/calc/shift-count", &close, Some(&admin)).await;
+    let (status, body) = post(&app, "/api/calc/shift-count", &close, Some(&staff)).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let data = &body["data"];
     assert_eq!(data["expectedCents"], 200_000);
@@ -378,6 +396,14 @@ async fn a_cash_payment_and_a_shift_count_are_checked_against_the_real_drawer() 
     let mut recorded = close.clone();
     recorded["sessionKey"] = json!("ses_golden");
     golden("shift-count", &recorded, data);
+    for token in [&admin, &manager] {
+        let (_, body) = post(&app, "/api/calc/shift-count", &close, Some(token)).await;
+        assert_eq!(
+            body["data"]["reasonRequired"], true,
+            "the explanation stays"
+        );
+        assert_eq!(body["data"]["pinRequired"], false);
+    }
 
     let both = json!({ "sessionKey": session_key, "terminalId": "term_calc", "countedCents": 1, "closingFloatCents": null });
     let (status, _) = post(&app, "/api/calc/shift-count", &both, Some(&admin)).await;
@@ -541,20 +567,33 @@ async fn repair_totals_are_worked_out_on_the_server() {
     );
     let request = json!({ "items": [
         { "laborCents": 250_000, "partCents": 1_200_000, "partCostCents": 850_000 },
-        { "laborCents": 150_000 },
-        { "laborCents": null, "partCents": 30_000, "partCostCents": 12_000 },
+        { "laborCents": 150_000, "discount": { "type": "fixed", "cents": 50_000 } },
+        { "laborCents": null, "partCents": 30_000, "partCostCents": 12_000,
+          "discount": { "type": "percentage", "basisPoints": 1_250 } },
+        { "laborCents": 10_000, "discount": { "type": "fixed", "cents": 20_000 } },
     ] });
     let (status, body) = post(&app, "/api/calc/repair", &request, Some(&staff)).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let data = &body["data"];
-    assert_eq!(data["laborCents"], 400_000);
-    assert_eq!(data["partsCents"], 1_230_000);
-    assert_eq!(data["priceCents"], 1_630_000);
-    assert_eq!(data["costCents"], 862_000);
+    assert_eq!(data["totals"]["laborCents"], 410_000);
+    assert_eq!(data["totals"]["partsCents"], 1_230_000);
+    assert_eq!(data["totals"]["discountCents"], 50_000 + 3_750);
+    assert_eq!(data["totals"]["priceCents"], 1_640_000 - 53_750);
+    assert_eq!(data["totals"]["costCents"], 862_000);
+    assert_eq!(data["itemDiscountsCents"], json!([0, 50_000, 3_750, 0]));
+    assert_eq!(
+        data["blockers"],
+        json!([{ "itemIndex": 3, "code": "discount_more_than_item" }])
+    );
     golden("repair", &request, data);
 
     let negative = json!({ "items": [{ "laborCents": -1 }] });
     let (status, _) = post(&app, "/api/calc/repair", &negative, Some(&staff)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let wild = json!({ "items": [
+        { "laborCents": 5_000, "discount": { "type": "percentage", "basisPoints": 20_000 } },
+    ] });
+    let (status, _) = post(&app, "/api/calc/repair", &wild, Some(&staff)).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 
     let nobody = common::mint_token(&app.config, Some(Role::Staff), &[]);

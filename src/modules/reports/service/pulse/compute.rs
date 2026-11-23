@@ -74,7 +74,10 @@ pub fn compute(input: &PulseInput) -> DashboardPulse {
         .iter()
         .filter(|e| {
             e.status == EmployeeStatus::Active
-                && matches!(e.role, EmployeeRole::Technician | EmployeeRole::Printer)
+                && matches!(
+                    e.role,
+                    EmployeeRole::Owner | EmployeeRole::Technician | EmployeeRole::Printer
+                )
         })
         .map(|tech| {
             let mine = |r: &&Repair| {

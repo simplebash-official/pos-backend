@@ -13,8 +13,8 @@ use sqlx::sqlite::SqliteRow;
 const CLAIMS: &str = "warranty_claims";
 
 const CLAIM_COLUMNS: &str = "key, id, claim_number, warranty_key, warranty_number, item_name, \
-     serial_number, product_key, invoice_key, invoice_number, customer_key, customer_name, \
-     customer_phone, issue_description, void_checks, assigned_employee_key, \
+     serial_number, quantity, product_key, invoice_key, invoice_number, customer_key, customer_name, \
+     customer_phone, issue_description, void_checks, conditions, assigned_employee_key, \
      assigned_employee_name, status, inspection_notes, decision, decision_reason, \
      decided_by_user_id, decided_by_name, expired_override_by_name, resolution_note, \
      replacement_serial_number, replacement_warranty_key, credit_note_key, paid_repair_key, \
@@ -25,11 +25,13 @@ fn claims(db: &TenantDatabase) -> ScopedCollection<WarrantyClaimDocument> {
     db.collection(CLAIMS)
 }
 
-/// A serde value's stored text: an enum's name, or JSON for an object.
+/// A serde value's stored text: an enum's name, or JSON for an object or array.
 fn stored_text<T: serde::Serialize>(value: &T) -> AppResult<String> {
     match serde_json::to_value(value) {
         Ok(serde_json::Value::String(text)) => Ok(text),
-        Ok(other @ serde_json::Value::Object(_)) => Ok(other.to_string()),
+        Ok(other @ (serde_json::Value::Object(_) | serde_json::Value::Array(_))) => {
+            Ok(other.to_string())
+        }
         other => Err(AppError::internal(format!(
             "claim value did not serialize to text: {other:?}"
         ))),
@@ -63,6 +65,7 @@ fn row_to_claim(row: &SqliteRow) -> AppResult<WarrantyClaimDocument> {
         warranty_number: row.get("warranty_number"),
         item_name: row.get("item_name"),
         serial_number: row.get("serial_number"),
+        quantity: row.try_get("quantity").ok(),
         product_key: row.get("product_key"),
         invoice_key: row.get("invoice_key"),
         invoice_number: row.get("invoice_number"),
@@ -71,6 +74,12 @@ fn row_to_claim(row: &SqliteRow) -> AppResult<WarrantyClaimDocument> {
         customer_phone: row.get("customer_phone"),
         issue_description: row.get("issue_description"),
         void_checks: parse_json("void_checks", row.get("void_checks"))?,
+        conditions: row
+            .try_get::<String, _>("conditions")
+            .ok()
+            .map(|text| parse_json("conditions", &text))
+            .transpose()?
+            .unwrap_or_default(),
         assigned_employee_key: row.get("assigned_employee_key"),
         assigned_employee_name: row.get("assigned_employee_name"),
         status: parse_enum("status", row.get("status"))?,
@@ -116,6 +125,7 @@ fn bind_fields<'q>(
         .bind(&claim.warranty_number)
         .bind(&claim.item_name)
         .bind(&claim.serial_number)
+        .bind(claim.quantity.unwrap_or(1))
         .bind(&claim.product_key)
         .bind(&claim.invoice_key)
         .bind(&claim.invoice_number)
@@ -124,6 +134,7 @@ fn bind_fields<'q>(
         .bind(&claim.customer_phone)
         .bind(&claim.issue_description)
         .bind(stored_text(&claim.void_checks)?)
+        .bind(stored_text(&claim.conditions)?)
         .bind(&claim.assigned_employee_key)
         .bind(&claim.assigned_employee_name)
         .bind(stored_text(&claim.status)?)
@@ -365,5 +376,61 @@ pub(crate) async fn list_claims(
                 total,
             ))
         }
+    }
+}
+
+/// Every claim matching `filter`, in no particular order (for counting).
+pub(crate) async fn all_claims(
+    db: &Db,
+    filter: &ClaimFilter<'_>,
+) -> AppResult<Vec<WarrantyClaimDocument>> {
+    match db {
+        Db::Mongo(mongo) => Ok(claims(mongo)
+            .find(filter.mongo())
+            .await?
+            .try_collect()
+            .await?),
+        Db::Sqlite(pool) => {
+            let (clause, values) = filter.sqlite();
+            let select = format!("SELECT {CLAIM_COLUMNS} FROM warranty_claims WHERE {clause}");
+            let mut query = sqlx::query(&select);
+            for value in &values {
+                query = query.bind(value);
+            }
+            query
+                .fetch_all(pool)
+                .await?
+                .iter()
+                .map(row_to_claim)
+                .collect()
+        }
+    }
+}
+
+/// Claims sent to a supplier on a day from `from` up to, not including, `before` (both
+/// `YYYY-MM-DD`).
+pub(crate) async fn sent_to_supplier_between(
+    db: &Db,
+    from: &str,
+    before: &str,
+) -> AppResult<Vec<WarrantyClaimDocument>> {
+    match db {
+        Db::Mongo(mongo) => Ok(claims(mongo)
+            .find(doc! { "supplier.sentOn": { "$gte": from, "$lt": before } })
+            .await?
+            .try_collect()
+            .await?),
+        Db::Sqlite(pool) => sqlx::query(&format!(
+            "SELECT {CLAIM_COLUMNS} FROM warranty_claims \
+             WHERE json_extract(supplier, '$.sentOn') >= ? \
+             AND json_extract(supplier, '$.sentOn') < ?"
+        ))
+        .bind(from)
+        .bind(before)
+        .fetch_all(pool)
+        .await?
+        .iter()
+        .map(row_to_claim)
+        .collect(),
     }
 }

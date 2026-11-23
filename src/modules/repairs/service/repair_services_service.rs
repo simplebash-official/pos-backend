@@ -36,7 +36,7 @@ fn checked(body: SaveRepairServiceRequest) -> AppResult<SaveRepairServiceRequest
         )));
     }
     if body.labor_cents < 0 {
-        return Err(AppError::validation("Labour cannot be negative."));
+        return Err(AppError::validation("Fee cannot be negative."));
     }
     Ok(SaveRepairServiceRequest {
         name,

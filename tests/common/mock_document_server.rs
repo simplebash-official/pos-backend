@@ -297,6 +297,25 @@ pub(super) fn mock_templates_json() -> serde_json::Value {
                     true,
                     json!({ "paper": "a5", "warrantyNumber": "WTY-000001", "itemName": "Phone", "coverageLabel": "12 months", "validUntil": "02 Nov 2027" }),
                 ),
+                mock_template(
+                    "tpl_job_receipt",
+                    "doc_temp_JobRcpt0V1Std000",
+                    "Job Receipt",
+                    "job-receipt",
+                    json!({
+                        "required": ["paper", "ticketNumber", "jobKind", "estimateCents", "termsText", "uncollectedAfterDays"],
+                        "properties": {
+                            "paper": { "type": "string", "enum": ["a5", "thermal-58", "thermal-80"] },
+                            "ticketNumber": { "type": "string" },
+                            "jobKind": { "type": "string", "enum": ["repair", "print"] },
+                            "estimateCents": { "type": ["integer", "null"] },
+                            "termsText": { "type": "string" },
+                            "uncollectedAfterDays": { "type": ["integer", "null"] }
+                        }
+                    }),
+                    true,
+                    json!({ "paper": "a5", "ticketNumber": "REP-000001", "jobKind": "repair", "estimateCents": null, "termsText": "", "uncollectedAfterDays": null }),
+                ),
             ]
         }
     })

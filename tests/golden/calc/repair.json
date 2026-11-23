@@ -7,19 +7,49 @@
         "partCostCents": 850000
       },
       {
-        "laborCents": 150000
+        "laborCents": 150000,
+        "discount": {
+          "type": "fixed",
+          "cents": 50000
+        }
       },
       {
         "laborCents": null,
         "partCents": 30000,
-        "partCostCents": 12000
+        "partCostCents": 12000,
+        "discount": {
+          "type": "percentage",
+          "basisPoints": 1250
+        }
+      },
+      {
+        "laborCents": 10000,
+        "discount": {
+          "type": "fixed",
+          "cents": 20000
+        }
       }
     ]
   },
   "reply": {
-    "laborCents": 400000,
-    "partsCents": 1230000,
-    "priceCents": 1630000,
-    "costCents": 862000
+    "totals": {
+      "laborCents": 410000,
+      "partsCents": 1230000,
+      "discountCents": 53750,
+      "priceCents": 1586250,
+      "costCents": 862000
+    },
+    "itemDiscountsCents": [
+      0,
+      50000,
+      3750,
+      0
+    ],
+    "blockers": [
+      {
+        "itemIndex": 3,
+        "code": "discount_more_than_item"
+      }
+    ]
   }
 }

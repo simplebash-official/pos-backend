@@ -13,6 +13,7 @@ pub const TENANT_NOT_FOUND: &str = "TENANT_NOT_FOUND";
 pub const ACCOUNT_SUSPENDED: &str = "ACCOUNT_SUSPENDED";
 pub const SHOP_CODE_ALREADY_EXISTS: &str = "SHOP_CODE_ALREADY_EXISTS";
 pub const TENANT_ALREADY_EXISTS: &str = "TENANT_ALREADY_EXISTS";
+pub const INVALID_OR_EXPIRED_RESET_TOKEN: &str = "INVALID_OR_EXPIRED_RESET_TOKEN";
 
 // Products Status Codes
 pub const PRODUCT_NOT_FOUND: &str = "PRODUCT_NOT_FOUND";
@@ -80,6 +81,8 @@ pub const PAYMENT_EXCEEDS_BALANCE: &str = "PAYMENT_EXCEEDS_BALANCE";
 pub const CREDIT_NOTE_NOT_FOUND: &str = "CREDIT_NOTE_NOT_FOUND";
 pub const CREDIT_NOTE_QUANTITY_EXCEEDED: &str = "CREDIT_NOTE_QUANTITY_EXCEEDED";
 pub const CREDIT_NOTE_ALREADY_VOIDED: &str = "CREDIT_NOTE_ALREADY_VOIDED";
+pub const CREDIT_NOTE_NOT_AWAITING_RESOLUTION: &str = "CREDIT_NOTE_NOT_AWAITING_RESOLUTION";
+pub const CREDIT_NOTE_RESOLVE_CONFLICT: &str = "CREDIT_NOTE_RESOLVE_CONFLICT";
 pub const INVOICE_NOT_ELIGIBLE_FOR_CREDIT_NOTE: &str = "INVOICE_NOT_ELIGIBLE_FOR_CREDIT_NOTE";
 pub const INVALID_REFUND_AMOUNT: &str = "INVALID_REFUND_AMOUNT";
 pub const REFUND_EXCEEDS_PAID_AMOUNT: &str = "REFUND_EXCEEDS_PAID_AMOUNT";
@@ -98,6 +101,8 @@ pub const USER_INACTIVE: &str = "USER_INACTIVE";
 /// 429 — too many failed logins for this account; retry after the window.
 pub const RATE_LIMITED: &str = "RATE_LIMITED";
 pub const TOO_MANY_LOGIN_ATTEMPTS: &str = "TOO_MANY_LOGIN_ATTEMPTS";
+/// The signed-in user sent too many wrong manager PINs and must wait.
+pub const TOO_MANY_PIN_ATTEMPTS: &str = "TOO_MANY_PIN_ATTEMPTS";
 /// 401 — the account behind a still-valid token was deactivated, deleted or
 /// had its role changed; the user must sign in again.
 pub const SESSION_REVOKED: &str = "SESSION_REVOKED";
@@ -108,6 +113,8 @@ pub const ADMIN_ALREADY_EXISTS: &str = "ADMIN_ALREADY_EXISTS";
 pub const EMPLOYEE_NOT_FOUND: &str = "EMPLOYEE_NOT_FOUND";
 pub const EMPLOYEE_HAS_LOGIN: &str = "EMPLOYEE_HAS_LOGIN";
 pub const EMPLOYEE_ALREADY_HAS_LOGIN: &str = "EMPLOYEE_ALREADY_HAS_LOGIN";
+pub const OWNER_PROFILE_EXISTS: &str = "OWNER_PROFILE_EXISTS";
+pub const OWNER_HAS_NO_COMMISSION: &str = "OWNER_HAS_NO_COMMISSION";
 
 // Sync, Concurrency & Idempotency Status Codes
 pub const VERSION_CONFLICT: &str = "VERSION_CONFLICT";

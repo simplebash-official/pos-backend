@@ -9,8 +9,10 @@ use crate::core::middleware::auth::CurrentUser;
 use crate::core::middleware::sync_headers::DeviceId;
 use crate::core::response::{ApiResponse, ErrorResponse};
 use crate::domain::warranties::{
-    ClaimListQuery, ClaimListResponse, DecideClaimRequest, InspectClaimRequest, OpenClaimRequest,
-    ResolveClaimRequest, SendToSupplierRequest, SupplierReturnRequest, WarrantyClaim,
+    ClaimListQuery, ClaimListResponse, CreateConditionRequest, DecideClaimRequest,
+    InspectClaimRequest, OpenClaimRequest, OpenClaimsBatchRequest, OpenClaimsBatchResponse,
+    PaidRepairRequest, ProcessClaimRequest, ResolveClaimRequest, SendToSupplierRequest,
+    SupplierReturnRequest, WarrantyClaim, WarrantyCondition, WarrantyConditionsResponse,
 };
 use crate::modules::warranties::service;
 use axum::Json;
@@ -39,8 +41,62 @@ pub(super) async fn open_claim(
 ) -> AppResult<Json<ApiResponse<WarrantyClaim>>> {
     user.require_permission(perm::WARRANTY_CLAIMS_RECORD)?;
     let actor = actor(&state, &user).await?;
-    let claim = service::open_claim(&state.db, body, &actor, device_id).await?;
+    let caller = user.approval_caller(&state.db).await?;
+    let claim = service::open_claim(&state.db, body, &actor, &caller, device_id).await?;
     Ok(Json(ApiResponse::success(claim, "Claim opened")))
+}
+
+#[utoipa::path(post, path = "/batch", tag = modules::WARRANTY_CLAIMS,
+    request_body = OpenClaimsBatchRequest,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "One result per item: the claim that was opened, or why that item was not", body = ApiResponse<OpenClaimsBatchResponse>),
+        (status = 400, description = "No items, too many, a warranty twice, warranties of different invoices, or an approval nobody needs", body = ErrorResponse),
+        (status = 401, description = "Missing token, or the PIN is not a manager's or owner's", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+        (status = 404, description = "A warranty was not found", body = ErrorResponse),
+    )
+)]
+/// Opens one claim per warranty of one invoice. An item that cannot be opened is reported in
+/// its result and never stops the others.
+pub(super) async fn open_claims_batch(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    DeviceId(device_id): DeviceId,
+    Json(body): Json<OpenClaimsBatchRequest>,
+) -> AppResult<Json<ApiResponse<OpenClaimsBatchResponse>>> {
+    user.require_permission(perm::WARRANTY_CLAIMS_RECORD)?;
+    let actor = actor(&state, &user).await?;
+    let caller = user.approval_caller(&state.db).await?;
+    let response = service::open_claims_batch(&state.db, body, &actor, &caller, device_id).await?;
+    Ok(Json(ApiResponse::success(response, "Claims processed")))
+}
+
+#[utoipa::path(post, path = "/process", tag = modules::WARRANTY_CLAIMS,
+    request_body = ProcessClaimRequest,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Claim opened, inspected and decided, with the decision's outcome carried out", body = ApiResponse<WarrantyClaim>),
+        (status = 400, description = "Nothing written about what is wrong or what was found, a quantity below 1, or an approval that is not needed", body = ErrorResponse),
+        (status = 401, description = "Missing token, or the PIN is not a manager's or owner's", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+        (status = 404, description = "Warranty or product not found", body = ErrorResponse),
+        (status = 409, description = "Cancelled, already under a claim, or the new unit cannot be given", body = ErrorResponse),
+    )
+)]
+/// Takes a claim from the counter to its decision, and as far on as the outcome goes, in one
+/// request. Staff send a manager or owner PIN and a reason; an Admin or Manager sends none.
+pub(super) async fn process_claim(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    DeviceId(device_id): DeviceId,
+    Json(body): Json<ProcessClaimRequest>,
+) -> AppResult<Json<ApiResponse<WarrantyClaim>>> {
+    user.require_permission(perm::WARRANTY_CLAIMS_RECORD)?;
+    let actor = actor(&state, &user).await?;
+    let caller = user.approval_caller(&state.db).await?;
+    let claim = service::process_claim(&state.db, body, &actor, &caller, device_id).await?;
+    Ok(Json(ApiResponse::success(claim, "Claim processed")))
 }
 
 #[utoipa::path(get, path = "/", tag = modules::WARRANTY_CLAIMS,
@@ -132,7 +188,8 @@ pub(super) async fn decide_claim(
 ) -> AppResult<Json<ApiResponse<WarrantyClaim>>> {
     user.require_permission(perm::WARRANTY_CLAIMS_RECORD)?;
     let actor = actor(&state, &user).await?;
-    let claim = service::decide_claim(&state.db, &key, body, &actor).await?;
+    let caller = user.approval_caller(&state.db).await?;
+    let claim = service::decide_claim(&state.db, &key, body, &actor, &caller).await?;
     Ok(Json(ApiResponse::success(claim, "Claim decided")))
 }
 
@@ -243,6 +300,7 @@ pub(super) async fn return_to_customer(
 }
 
 #[utoipa::path(post, path = "/{key}/paid-repair", tag = modules::WARRANTY_CLAIMS,
+    request_body = PaidRepairRequest,
     params(("key" = String, Path, description = "Claim key (`wcl_…`)")),
     security(("bearerAuth" = [])),
     responses(
@@ -260,11 +318,12 @@ pub(super) async fn convert_to_paid_repair(
     user: CurrentUser,
     DeviceId(device_id): DeviceId,
     Path(key): Path<String>,
+    Json(body): Json<PaidRepairRequest>,
 ) -> AppResult<Json<ApiResponse<WarrantyClaim>>> {
     user.require_permission(perm::WARRANTY_CLAIMS_RECORD)?;
     user.require_permission(perm::REPAIRS_WRITE)?;
     let actor = actor(&state, &user).await?;
-    let claim = service::convert_to_paid_repair(&state.db, &key, &actor, device_id).await?;
+    let claim = service::convert_to_paid_repair(&state.db, &key, &actor, device_id, body).await?;
     Ok(Json(ApiResponse::success(claim, "Paid repair opened")))
 }
 
@@ -293,12 +352,79 @@ pub(super) async fn open_rework(
     Ok(Json(ApiResponse::success(claim, "Rework job opened")))
 }
 
+#[utoipa::path(get, path = "/conditions", tag = modules::WARRANTY_CLAIMS,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Active condition checklist options for the shop", body = ApiResponse<WarrantyConditionsResponse>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+    )
+)]
+/// Lists the active condition checklist templates for the shop.
+pub(super) async fn list_conditions(
+    State(state): State<AppState>,
+    user: CurrentUser,
+) -> AppResult<Json<ApiResponse<WarrantyConditionsResponse>>> {
+    user.require_permission(perm::WARRANTIES_VIEW)?;
+    let response = service::list_conditions(&state.db).await?;
+    Ok(Json(ApiResponse::success(response, "Conditions retrieved")))
+}
+
+#[utoipa::path(post, path = "/conditions", tag = modules::WARRANTY_CLAIMS,
+    request_body = CreateConditionRequest,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Condition template created or activated", body = ApiResponse<WarrantyCondition>),
+        (status = 400, description = "Invalid or empty name", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+    )
+)]
+/// Creates or activates a condition checklist option for the shop.
+pub(super) async fn create_condition(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Json(body): Json<CreateConditionRequest>,
+) -> AppResult<Json<ApiResponse<WarrantyCondition>>> {
+    user.require_permission(perm::WARRANTY_CLAIMS_RECORD)?;
+    let condition = service::create_condition(&state.db, &body.name).await?;
+    Ok(Json(ApiResponse::success(condition, "Condition created")))
+}
+
+#[utoipa::path(delete, path = "/conditions/{key}", tag = modules::WARRANTY_CLAIMS,
+    params(("key" = String, Path, description = "Condition key (`wcon_…`)")),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Condition template deactivated", body = ApiResponse<WarrantyCondition>),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+        (status = 404, description = "Condition not found", body = ErrorResponse),
+    )
+)]
+/// Deactivates a condition checklist option so it no longer appears in future claim intakes.
+pub(super) async fn delete_condition(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(key): Path<String>,
+) -> AppResult<Json<ApiResponse<WarrantyCondition>>> {
+    user.require_permission(perm::WARRANTY_CLAIMS_RECORD)?;
+    let condition = service::delete_condition(&state.db, &key).await?;
+    Ok(Json(ApiResponse::success(condition, "Condition deleted")))
+}
+
 /// Routes of `/api/warranty-claims`.
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
+        // Condition checklist templates.
+        .routes(routes!(list_conditions, create_condition))
+        .routes(routes!(delete_condition))
         // Reads.
         .routes(routes!(open_claim, list_claims))
         .routes(routes!(get_claim))
+        // Several claims of one invoice in one request.
+        .routes(routes!(open_claims_batch))
+        // The whole claim, up to its outcome, in one request.
+        .routes(routes!(process_claim))
         // Steps, in lifecycle order.
         .routes(routes!(inspect_claim))
         .routes(routes!(decide_claim))

@@ -22,6 +22,7 @@ use crate::domain::sessions::SubmitBlindCountRequest;
 use crate::domain::sessions::VARIANCE_TOLERANCE_CENTS;
 use crate::domain::settings::ShiftMode;
 use crate::domain::settings::ShiftPolicy;
+use crate::domain::users::ApprovalCaller;
 use crate::domain::users::Role;
 use crate::modules::cash_categories;
 use crate::modules::sequences;
@@ -140,8 +141,7 @@ pub async fn cancel_close(db: &Db, session_key: &str) -> AppResult<RegisterSessi
 pub async fn close_session(
     db: &Db,
     session_key: &str,
-    cashier_id: String,
-    cashier_name: String,
+    caller: &ApprovalCaller,
     body: CloseSessionRequest,
 ) -> AppResult<RegisterSession> {
     if body.counted_cash_cents < 0 {
@@ -199,28 +199,24 @@ pub async fn close_session(
 
         // If variance is outside small tolerance, require manager PIN approval
         if variance.abs() > VARIANCE_TOLERANCE_CENTS {
-            let pin = body.manager_pin.as_deref().ok_or_else(|| {
-                AppError::forbidden_with_code(
-                    "Manager PIN is required to approve cash variance exceeding tolerance",
-                    codes::VARIANCE_APPROVAL_REQUIRED,
-                )
-            })?;
-
-            let approver = users::service::verify_user_pin(db, pin, Some("manager"))
+            let approver = users::service::pin_approver(db, caller, body.manager_pin.as_deref())
                 .await?
                 .ok_or_else(|| {
-                    AppError::unauthorized_with_code("Invalid manager PIN", codes::INVALID_PIN)
+                    AppError::forbidden_with_code(
+                        "Manager PIN is required to approve cash variance exceeding tolerance",
+                        codes::VARIANCE_APPROVAL_REQUIRED,
+                    )
                 })?;
 
-            variance_approved_by_id = Some(approver.id);
+            variance_approved_by_id = Some(approver.user_id);
             variance_approved_by_name = Some(approver.name);
         }
     }
 
     let now = BsonDateTime::now();
     session.closed_at = Some(now);
-    session.closing_cashier_id = Some(cashier_id);
-    session.closing_cashier_name_snapshot = Some(cashier_name);
+    session.closing_cashier_id = Some(caller.user_id.clone());
+    session.closing_cashier_name_snapshot = Some(caller.name.clone());
     session.expected_cash_cents = Some(expected_cash);
     session.counted_cash_cents = Some(body.counted_cash_cents);
     session.cash_variance_cents = Some(variance);
@@ -270,8 +266,7 @@ pub async fn close_session(
 pub async fn convert_variance(
     db: &Db,
     session_key: &str,
-    recorded_by_user_id: String,
-    recorded_by_name: String,
+    caller: &ApprovalCaller,
     body: ConvertVarianceRequest,
     device_id: Option<String>,
 ) -> AppResult<CashMovement> {
@@ -304,9 +299,14 @@ pub async fn convert_variance(
     let shortage_amount = variance.abs();
 
     // Verify PIN: if shortage amount exceeds threshold, require owner/admin specifically
-    let approver = users::service::verify_user_pin(db, &body.manager_pin, Some("manager"))
+    let approver = users::service::pin_approver(db, caller, body.manager_pin.as_deref())
         .await?
-        .ok_or_else(|| AppError::unauthorized_with_code("Invalid PIN", codes::INVALID_PIN))?;
+        .ok_or_else(|| {
+            AppError::forbidden_with_code(
+                "A manager or owner PIN is required to convert a shortage",
+                codes::PIN_NOT_SET,
+            )
+        })?;
 
     let reservation = sequences::service::reserve_sequence(
         db,
@@ -348,9 +348,9 @@ pub async fn convert_variance(
             "Late-recorded owner withdrawal from variance: {}",
             body.reason
         )),
-        recorded_by_user_id,
-        recorded_by_name_snapshot: recorded_by_name,
-        approved_by_user_id: Some(approver.id),
+        recorded_by_user_id: caller.user_id.clone(),
+        recorded_by_name_snapshot: caller.name.clone(),
+        approved_by_user_id: Some(approver.user_id),
         approved_by_name_snapshot: Some(approver.name),
         approval_reason: None,
         reverses_key: None,
@@ -450,8 +450,7 @@ pub async fn list_sessions(db: &Db, query: SessionListQuery) -> AppResult<Sessio
 /// Opens a register session (one per cashier in `Personal` mode; one shop-wide in `SharedShop` mode).
 pub async fn open_session(
     db: &Db,
-    cashier_id: String,
-    cashier_name: String,
+    caller: &ApprovalCaller,
     body: OpenSessionRequest,
     device_id: Option<String>,
 ) -> AppResult<RegisterSession> {
@@ -462,6 +461,8 @@ pub async fn open_session(
         return Err(AppError::validation("openingFloatCents cannot be negative"));
     }
 
+    let cashier_id = caller.user_id.clone();
+    let cashier_name = caller.name.clone();
     let mode = current_shift_mode(db).await?;
     let existing = match mode {
         ShiftMode::Personal => sessions::find_active_session_for_cashier(db, &cashier_id).await?,
@@ -498,20 +499,16 @@ pub async fn open_session(
             ));
         }
 
-        let pin = body.manager_pin.as_deref().ok_or_else(|| {
-            AppError::forbidden_with_code(
-                "Manager PIN required to approve opening float discrepancy",
-                codes::VARIANCE_APPROVAL_REQUIRED,
-            )
-        })?;
-
-        let approver = users::service::verify_user_pin(db, pin, Some("manager"))
+        let approver = users::service::pin_approver(db, caller, body.manager_pin.as_deref())
             .await?
             .ok_or_else(|| {
-                AppError::unauthorized_with_code("Invalid manager PIN", codes::INVALID_PIN)
+                AppError::forbidden_with_code(
+                    "Manager PIN required to approve opening float discrepancy",
+                    codes::VARIANCE_APPROVAL_REQUIRED,
+                )
             })?;
 
-        approved_by_id = Some(approver.id);
+        approved_by_id = Some(approver.user_id);
         approved_by_name = Some(approver.name);
     }
 

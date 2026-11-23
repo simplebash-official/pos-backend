@@ -9,6 +9,9 @@
 //! "Warranty Card" payload.
 
 #[cfg(test)]
+mod job_receipt_drift_tests;
+mod job_receipt_print;
+#[cfg(test)]
 mod schema_drift_tests;
 mod service_print_payload;
 #[cfg(test)]
@@ -17,6 +20,7 @@ mod tests;
 mod warranty_drift_tests;
 mod warranty_print;
 
+pub(crate) use job_receipt_print::build_job_receipt_data;
 pub(crate) use service_print_payload::build_a4_invoice_data;
 pub(crate) use service_print_payload::build_credit_note_data;
 pub(crate) use service_print_payload::build_quotation_data;

@@ -38,9 +38,8 @@ pub struct PrintJob {
     pub key: String,
     /// Human-friendly ticket number (e.g. PRN-000001).
     pub ticket_number: String,
-    /// Key of linked customer, if any.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub customer_key: Option<String>,
+    /// Key of the customer the job is for.
+    pub customer_key: String,
     /// Customer name.
     pub customer_name: String,
     /// Customer contact phone.
@@ -58,7 +57,7 @@ pub struct PrintJob {
     /// Derived flag: promised-ready date has passed and the job is still open
     /// (not delivered/cancelled). Computed on every read, never stored.
     pub is_overdue: bool,
-    /// Status ("received", "in_progress", "completed", "delivered", "cancelled").
+    /// Status ("received", "in_repair" (in production), "ready", "delivered", "cancelled").
     pub status: String,
     /// Quoted or estimated price in cents.
     pub estimated_cost_cents: i64,
@@ -106,18 +105,14 @@ pub struct PrintJobAssignment {
     pub split_value: Option<f64>,
 }
 
-/// The `customer{}` sub-object of `CreatePrintJobRequest`/
-/// `UpdatePrintJobRequest` — same shape and override rule as
-/// `repairs::RepairCustomer`.
-#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+/// The `customer{}` sub-object of `CreatePrintJobRequest`/`UpdatePrintJobRequest`: the registered
+/// customer the job is for, same as `repairs::RepairCustomer`. Name and phone are read from that
+/// customer's record.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PrintJobCustomer {
-    /// Registered customer key.
-    pub customer_key: Option<String>,
-    /// Walk-in customer name.
-    pub customer_name: Option<String>,
-    /// Walk-in customer phone number.
-    pub customer_phone: Option<String>,
+    /// Key of the registered customer.
+    pub customer_key: String,
 }
 
 /// Query parameters for listing and filtering print jobs.
