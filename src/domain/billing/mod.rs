@@ -50,3 +50,4 @@ pub use payment::SplitPayment;
 pub use sale::CompleteSaleResponse;
 pub use sale::CreateSaleItemRequest;
 pub use sale::CreateSaleRequest;
+pub use sale::Handover;

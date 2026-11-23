@@ -425,6 +425,21 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             }
         }
     }
+    // A repair or print job records the invoice that billed it. Both columns are optional, so
+    // an old row simply has none until the one-time billing migration fills them.
+    for table in ["repairs", "print_jobs"] {
+        let columns = table_columns(pool, table).await?;
+        if columns.is_empty() {
+            continue;
+        }
+        for column in ["billed_invoice_key", "billed_invoice_number"] {
+            if !columns.iter().any(|c| c == column) {
+                tracing::info!("Migrating '{table}' table: adding '{column}' column");
+                pool.execute(format!("ALTER TABLE {table} ADD COLUMN {column} TEXT").as_str())
+                    .await?;
+            }
+        }
+    }
     migrate_drawer_state_to_users(pool).await?;
     migrate_drawer_state_sync_columns(pool).await?;
 

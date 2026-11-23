@@ -1,7 +1,7 @@
 //! Repair-ticket CRUD, layered model (BSON shapes) -> repository (Mongo
 //! only) -> service (business rules) -> routes (HTTP), same shape as
-//! `modules::customers`. `service::mark_delivered` is a narrow cross-module
-//! hook `modules::billing`'s complete-sale flow calls (Phase 4) — the same
+//! `modules::customers`. `service::mark_billed` and `service::clear_billed` are
+//! narrow cross-module hooks `modules::billing`'s complete-sale and void flows call — the same
 //! pattern as `customers::service::apply_financial_delta`.
 
 pub mod migration;

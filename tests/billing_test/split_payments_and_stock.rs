@@ -134,6 +134,7 @@ async fn complete_sale_with_repair_line_marks_ticket_delivered() {
         "discountCents": 0,
         "sourceType": "repair",
         "sourceTicketKey": ticket_key,
+        "handover": "now",
     }]);
 
     let (status, body) = send_authed(
@@ -181,6 +182,7 @@ async fn invoices_can_be_listed_by_the_ticket_they_billed() {
         "discountCents": 0,
         "sourceType": "repair",
         "sourceTicketKey": billed_key,
+        "handover": "now",
     }]);
     let (status, sale) = send_authed(
         &app.router,
@@ -230,6 +232,7 @@ async fn complete_sale_with_priceless_repair_line_is_rejected() {
         "discountCents": 0,
         "sourceType": "repair",
         "sourceTicketKey": ticket_key,
+        "handover": "now",
     }]);
 
     let (status, body) = send_authed(
@@ -287,6 +290,7 @@ async fn complete_sale_with_unknown_source_ticket_key_fails_the_whole_request() 
         "discountCents": 0,
         "sourceType": "repair",
         "sourceTicketKey": "rep_does_not_exist",
+        "handover": "now",
     }]);
 
     let (status, body) = send_authed(

@@ -5,6 +5,7 @@ mod print_job_status_upgrade;
 mod repair_items_upgrade;
 #[cfg(test)]
 mod tests;
+mod ticket_billing_upgrade;
 mod ticket_customers_upgrade;
 mod warranty_upgrade;
 

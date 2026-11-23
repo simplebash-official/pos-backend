@@ -636,6 +636,8 @@ async fn seed_print_job_with_named(
             assigned_employee_name: None,
             split_type: None,
             split_value: None,
+            billed_invoice_key: None,
+            billed_invoice_number: None,
             version: 1,
             created_at,
             updated_at: created_at,

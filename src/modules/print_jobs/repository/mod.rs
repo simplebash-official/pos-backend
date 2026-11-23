@@ -5,12 +5,13 @@
 mod print_jobs_repository;
 
 pub(crate) use print_jobs_repository::aggregate_stats;
+pub(crate) use print_jobs_repository::clear_billed_stamp;
 pub(crate) use print_jobs_repository::delete;
 
 pub(crate) use print_jobs_repository::find_by_id_or_key;
 
 pub(crate) use print_jobs_repository::insert;
 pub(crate) use print_jobs_repository::list;
-pub(crate) use print_jobs_repository::set_status_by_key;
+pub(crate) use print_jobs_repository::stamp_billed;
 
 pub(crate) use print_jobs_repository::update;

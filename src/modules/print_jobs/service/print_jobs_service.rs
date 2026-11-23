@@ -4,6 +4,7 @@ use crate::core::constants::{codes, prefixes};
 use crate::core::error::{AppError, AppResult};
 use crate::core::id::generate_id;
 use crate::core::utils::{build_bson_regex, calculate_pagination, shop_today_range};
+use crate::domain::billing::Handover;
 use crate::domain::print_jobs::{
     CreatePrintJobRequest, PrintJob, PrintJobAssignment, PrintJobListQuery, PrintJobListResponse,
     PrintJobStats, UpdatePrintJobRequest,
@@ -81,6 +82,8 @@ pub async fn create_print_job(
             assigned_employee_name,
             split_type,
             split_value,
+            billed_invoice_key: None,
+            billed_invoice_number: None,
             version: 1,
             created_at: now,
             updated_at: now,
@@ -217,22 +220,58 @@ pub async fn list_print_jobs(db: &Db, query: PrintJobListQuery) -> AppResult<Pri
     })
 }
 
-/// Cross-module hook — called by `billing::service::sale::complete_sale`.
-/// See `repairs::service::mark_delivered`'s comment for why this is
-/// deliberately narrow (status only).
-#[allow(dead_code)]
-pub(crate) async fn mark_delivered(db: &Db, key: &str) -> AppResult<PrintJob> {
-    crate::core::logging::domain::tracked("print_jobs.delivered", async move {
-        let updated = repository::set_status_by_key(db, key, "delivered")
+/// Cross-module hook, called by `billing::service::sale::complete_sale` when an invoice bills a
+/// print job. Same contract as `repairs::service::mark_billed`: stamps the job with the invoice
+/// and, for `Handover::Now`, sets `status` to `delivered`; a job already billed is a 409
+/// (`TICKET_ALREADY_BILLED`).
+pub(crate) async fn mark_billed(
+    db: &Db,
+    key: &str,
+    invoice_key: &str,
+    invoice_number: &str,
+    handover: Handover,
+) -> AppResult<PrintJob> {
+    crate::core::logging::domain::tracked("print_jobs.billed", async move {
+        let status = match handover {
+            Handover::Now => Some("delivered"),
+            Handover::Later => None,
+        };
+        if let Some(updated) =
+            repository::stamp_billed(db, key, invoice_key, invoice_number, status).await?
+        {
+            let job = updated.into_print_job();
+            if handover == Handover::Now {
+                // The status before the write is gone, so only "delivered" is compared: a job
+                // billed twice raises one notice (the dedupe key holds the status).
+                print_job_alerts::announce_status_change(db, &job, "").await?;
+            }
+            return Ok(job);
+        }
+        let existing = repository::find_by_id_or_key(db, key)
             .await?
             .ok_or_else(|| {
                 AppError::not_found_with_code("Print job not found", codes::PRINT_JOB_NOT_FOUND)
-            })?
-            .into_print_job();
-        // The status before the write is gone, so only "delivered" is compared: a job billed
-        // twice raises one notice (the dedupe key holds the status).
-        print_job_alerts::announce_status_change(db, &updated, "").await?;
-        Ok(updated)
+            })?;
+        Err(AppError::conflict(
+            codes::TICKET_ALREADY_BILLED,
+            format!(
+                "Print job {} was already billed on {}",
+                existing.ticket_number,
+                existing
+                    .billed_invoice_number
+                    .as_deref()
+                    .expect("a job that refused to be billed again carries its billing mark"),
+            ),
+        ))
+    })
+    .await
+}
+
+/// Cross-module hook, called by `billing::service::sale::void_invoice`: removes the billing mark
+/// the voided invoice left on a print job. Returns whether the job still carried that mark.
+pub(crate) async fn clear_billed(db: &Db, key: &str, invoice_key: &str) -> AppResult<bool> {
+    crate::core::logging::domain::tracked("print_jobs.unbilled", async move {
+        repository::clear_billed_stamp(db, key, invoice_key).await
     })
     .await
 }

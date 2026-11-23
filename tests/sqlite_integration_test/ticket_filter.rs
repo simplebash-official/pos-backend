@@ -53,6 +53,7 @@ async fn sqlite_lists_invoices_by_the_ticket_they_billed() {
                 "discountCents": 0,
                 "sourceType": "repair",
                 "sourceTicketKey": ticket_keys[0],
+                "handover": "now",
             }],
             "payment": { "paymentMethod": "cash", "isCredit": false,
                          "amountReceivedCents": 850000 },

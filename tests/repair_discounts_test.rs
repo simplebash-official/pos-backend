@@ -290,7 +290,8 @@ async fn scenario(app: &common::TestApp) {
             "POST",
             "/api/billing/sales",
             Some(sale(json!([{ "quantity": quantity, "discountCents": extra,
-                               "sourceType": "repair", "sourceTicketKey": repair_key }]))),
+                               "sourceType": "repair", "sourceTicketKey": repair_key,
+                               "handover": "now" }]))),
             &admin,
         )
         .await;
@@ -301,7 +302,8 @@ async fn scenario(app: &common::TestApp) {
         "POST",
         "/api/billing/sales",
         Some(sale(json!([{ "quantity": 1, "discountCents": 1_000,
-                           "sourceType": "repair", "sourceTicketKey": repair_key }]))),
+                           "sourceType": "repair", "sourceTicketKey": repair_key,
+                               "handover": "now" }]))),
         &admin,
     )
     .await;
