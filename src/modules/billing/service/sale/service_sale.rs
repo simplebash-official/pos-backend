@@ -291,6 +291,7 @@ pub(crate) async fn resolve_sale_item(
             None,
             None,
             Vec::new(),
+            0,
         ),
         other => {
             return Err(AppError::validation(format!(
