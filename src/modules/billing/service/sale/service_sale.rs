@@ -178,11 +178,20 @@ pub(crate) async fn resolve_sale_item(
                         codes::REPAIR_IS_REWORK,
                     ));
                 }
+                if let Some(invoice_number) = &ticket.billed_invoice_number {
+                    return Err(AppError::conflict(
+                        codes::TICKET_ALREADY_BILLED,
+                        format!(
+                            "Repair ticket {} was already billed on {invoice_number}",
+                            ticket.ticket_number
+                        ),
+                    ));
+                }
                 if ticket.status == "delivered" {
                     return Err(AppError::conflict(
                         codes::INVALID_JOB_STATUS,
                         format!(
-                            "Repair ticket {} has already been handed back and billed",
+                            "Repair ticket {} has already been handed back",
                             ticket.ticket_number
                         ),
                     ));
@@ -248,6 +257,24 @@ pub(crate) async fn resolve_sale_item(
         "print" => match &item.source_ticket_key {
             Some(ticket_key) => {
                 let ticket = print_jobs::service::get_print_job(db, ticket_key).await?;
+                if let Some(invoice_number) = &ticket.billed_invoice_number {
+                    return Err(AppError::conflict(
+                        codes::TICKET_ALREADY_BILLED,
+                        format!(
+                            "Print job {} was already billed on {invoice_number}",
+                            ticket.ticket_number
+                        ),
+                    ));
+                }
+                if ticket.status == "delivered" {
+                    return Err(AppError::conflict(
+                        codes::INVALID_JOB_STATUS,
+                        format!(
+                            "Print job {} has already been handed back",
+                            ticket.ticket_number
+                        ),
+                    ));
+                }
                 (
                     item.name.clone().unwrap_or_else(|| ticket.job_type.clone()),
                     None,
@@ -370,7 +397,8 @@ pub(crate) async fn resolve_sale_items(
 /// `InvoiceStatus::Voided`'s doc comment for why there is no separate
 /// zero-impact "Cancelled" status in this codebase. Does **not** touch
 /// repair/print-job ticket status (ambiguous what "un-delivering" a ticket
-/// should mean — flagged as a warning for manual follow-up instead) and
+/// should mean — flagged as a warning for manual follow-up instead); it only
+/// removes the billing mark the invoice left on the ticket, so it can be billed again and
 /// refuses to run at all if any payment beyond the original sale-time one
 /// has been recorded (reversing partial credit repayments is out of scope
 /// for this version).
@@ -432,11 +460,24 @@ pub async fn void_invoice(
 
         for item in &existing.items {
             if item.source_type != "retail" {
-                if matches!(item.source_type.as_str(), "repair" | "print") {
-                    warnings.push(format!(
-                        "Invoice voided — ticket for '{}' was not reverted and may need manual review",
-                        item.name
-                    ));
+                if let Some(ticket_key) = item.source_ticket_key.as_deref() {
+                    let cleared = if item.source_type == "repair" {
+                        repairs::service::clear_billed(db, ticket_key, &existing.key).await
+                    } else {
+                        print_jobs::service::clear_billed(db, ticket_key, &existing.key).await
+                    };
+                    match cleared {
+                        Ok(_) => warnings.push(format!(
+                            "Invoice voided: '{}' can be billed again, but its status and any \
+                             parts used were not reverted and may need manual review",
+                            item.name
+                        )),
+                        Err(err) => warnings.push(format!(
+                            "Invoice voided, but the billing mark on '{}' could not be \
+                             removed: {err}",
+                            item.name
+                        )),
+                    }
                 }
                 continue;
             }

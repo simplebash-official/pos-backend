@@ -374,7 +374,7 @@ async fn scenario(app: &common::TestApp) {
         "/api/billing/sales",
         Some(sale(
             json!([{ "quantity": 1, "discountCents": 0, "sourceType": "repair",
-                           "sourceTicketKey": repair_key }]),
+                           "sourceTicketKey": repair_key, "handover": "now" }]),
         )),
         &staff,
     )

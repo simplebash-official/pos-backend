@@ -157,6 +157,31 @@ pub(crate) async fn list(db: &Db, query: WarrantyListQuery) -> AppResult<Warrant
     })
 }
 
+/// Whether the items of one repair job already have a warranty (void or not) from one invoice.
+/// Handing a billed job back issues its warranties only when none were issued yet, so a job that
+/// is reopened and handed back again never gets them twice.
+pub(crate) async fn exist_for_repair_on_invoice(
+    db: &Db,
+    repair_key: &str,
+    invoice_key: &str,
+) -> AppResult<bool> {
+    let filter = WarrantyFilter::Repair(repair_key);
+    let mut seen = 0_u64;
+    loop {
+        let (page, total) = repository::list(db, &filter, seen, LIST_LIMIT_MAX).await?;
+        if page
+            .iter()
+            .any(|warranty| warranty.invoice_key == invoice_key)
+        {
+            return Ok(true);
+        }
+        seen += u64::try_from(page.len()).expect("a page count fits in u64");
+        if page.is_empty() || seen >= total {
+            return Ok(false);
+        }
+    }
+}
+
 /// Every warranty of an invoice that is not void, in line order (then by number), for the
 /// notes printed under its lines.
 pub(crate) async fn for_invoice_print(db: &Db, invoice_key: &str) -> AppResult<Vec<Warranty>> {

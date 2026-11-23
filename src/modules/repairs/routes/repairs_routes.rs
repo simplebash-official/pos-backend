@@ -8,6 +8,7 @@ use crate::domain::repairs::{
     UpdateRepairRequest,
 };
 use crate::modules::repairs::service;
+use crate::modules::warranties::service::WarrantyActor;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use utoipa_axum::router::OpenApiRouter;
@@ -147,7 +148,11 @@ pub(super) async fn update_repair(
     Json(body): Json<UpdateRepairRequest>,
 ) -> AppResult<Json<ApiResponse<Repair>>> {
     user.require_permission(perm::REPAIRS_WRITE)?;
-    let repair = service::update_repair(&state.db, &id, body, device_id.0).await?;
+    let actor = WarrantyActor {
+        user_id: user.user_id.clone(),
+        name: user.resolve_name(&state.db).await?,
+    };
+    let repair = service::update_repair(&state.db, &id, body, device_id.0, &actor).await?;
     Ok(Json(ApiResponse::success(
         repair,
         "Repair ticket updated successfully",

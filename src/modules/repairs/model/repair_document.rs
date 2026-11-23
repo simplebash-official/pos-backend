@@ -55,6 +55,12 @@ pub struct RepairDocument {
     /// Commission rate or fixed value.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub split_value: Option<f64>,
+    /// Key of the invoice that billed this job; set together with `billed_invoice_number`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub billed_invoice_key: Option<String>,
+    /// Number of the invoice that billed this job.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub billed_invoice_number: Option<String>,
     /// Concurrency version counter for optimistic locking.
     pub version: i64,
     /// Timestamp when repair ticket was created.
@@ -103,6 +109,8 @@ impl RepairDocument {
             assigned_employee_name: self.assigned_employee_name,
             split_type: self.split_type,
             split_value: self.split_value,
+            billed_invoice_key: self.billed_invoice_key,
+            billed_invoice_number: self.billed_invoice_number,
             created_at: self.created_at.to_chrono(),
             updated_at: self.updated_at.to_chrono(),
             version: self.version,

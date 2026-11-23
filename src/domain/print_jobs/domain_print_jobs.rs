@@ -76,6 +76,14 @@ pub struct PrintJob {
     /// Commission split value.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub split_value: Option<f64>,
+    /// Key of the invoice that billed this job. Absent until it is billed; set together with
+    /// `billed_invoice_number`, and cleared when that invoice is voided. A billed job cannot be
+    /// billed again, whether or not it has been handed back.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub billed_invoice_key: Option<String>,
+    /// Number of the invoice that billed this job (e.g. INV-000034).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub billed_invoice_number: Option<String>,
     /// Timestamp when job was created.
     pub created_at: DateTime<Utc>,
     /// Timestamp when job was last updated.

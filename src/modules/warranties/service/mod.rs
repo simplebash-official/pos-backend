@@ -49,6 +49,7 @@ pub(crate) use warranty_issue::void_for_returned_serial;
 pub(crate) use warranty_lifecycle::extend;
 pub(crate) use warranty_lifecycle::void;
 pub(crate) use warranty_lookup::detail;
+pub(crate) use warranty_lookup::exist_for_repair_on_invoice;
 pub(crate) use warranty_lookup::for_invoice_print;
 pub(crate) use warranty_lookup::hydrate_sync_documents;
 pub(crate) use warranty_lookup::hydrate_sync_events;
