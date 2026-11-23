@@ -48,6 +48,7 @@ const RAW_TYPES_ALLOWED: &[&str] = &[
     "src/modules/customers/migration/ticket_customers_migration.rs",
     "src/modules/repairs/migration/repair_migration.rs",
     "src/modules/warranties/migration/warranty_migration.rs",
+    "src/modules/print_jobs/migration/print_job_status_migration.rs",
 ];
 
 fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
