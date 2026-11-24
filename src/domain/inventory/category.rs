@@ -12,6 +12,15 @@ pub struct AddSubcategoryRequest {
     pub name: String,
 }
 
+/// Body for `PUT /categories/{categoryKey}/subcategories/{subcategoryKey}`
+/// (admin-only). A rename only changes the display name: products and the
+/// subcategory itself are referenced by its immutable `key`.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct RenameSubcategoryRequest {
+    /// New display name; surrounding whitespace is removed.
+    pub name: String,
+}
+
 /// Response for `GET /categories`.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct CategoriesResponse {

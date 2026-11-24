@@ -13,6 +13,7 @@ pub use category::AddSubcategoryRequest;
 pub use category::CategoriesResponse;
 pub use category::CategoryInfo;
 pub use category::CreateCategoryRequest;
+pub use category::RenameSubcategoryRequest;
 pub use category::SubcategoriesResponse;
 pub use category::SubcategoryInfo;
 pub use category::UpdateCategoryRequest;

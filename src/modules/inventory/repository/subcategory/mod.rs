@@ -13,3 +13,4 @@ pub(crate) use repository_subcategory::find_subcategory_by_key;
 pub(crate) use repository_subcategory::find_subcategory_keys_by_name_pattern;
 pub(crate) use repository_subcategory::insert_subcategory;
 pub(crate) use repository_subcategory::list_subcategories_by_category;
+pub(crate) use repository_subcategory::rename_subcategory_by_key;
