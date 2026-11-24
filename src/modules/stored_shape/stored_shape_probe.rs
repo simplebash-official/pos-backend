@@ -148,7 +148,6 @@ const BACKFILLABLE: &[(&str, &[&str])] = &[
             "category_key",
             "created_at",
             "is_serialized",
-            "min_stock_threshold",
             "name",
             "sku",
             "stock_quantity",
@@ -329,7 +328,6 @@ fn backfill_value(field: &str, object: &Document) -> Option<Bson> {
         | "charges_share_cents"
         | "credit_note_count"
         | "discount_cents"
-        | "min_stock_threshold"
         | "next_val"
         | "opening_discrepancy_cents"
         | "outstanding_balance_cents"

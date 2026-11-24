@@ -138,7 +138,7 @@ async fn seed_category(db: &Db, cat: SeedCategory) -> Result<CategoryOutcome, Ap
                     unit_cost_cents: p.cost_price_cents,
                     selling_price_cents: p.selling_price_cents,
                 }),
-                min_stock_threshold: p.min_stock_threshold,
+                min_stock_threshold: Some(p.min_stock_threshold),
                 suppliers: Vec::new(),
                 is_serialized: false,
                 warranty: ProductWarranty::none(),

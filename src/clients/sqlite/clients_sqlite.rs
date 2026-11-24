@@ -125,6 +125,7 @@ pub async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     migrate_schema(pool).await?;
     pool.execute(SCHEMA_SQL).await?;
     migrate_schema(pool).await?;
+    migrate_optional_stock_alert(pool).await?;
     migrate_purchases_to_receipts(pool).await?;
     crate::modules::warranties::migration::migrate_sqlite(pool).await?;
     crate::modules::repairs::migration::migrate_sqlite(pool).await?;
@@ -417,6 +418,45 @@ pub async fn migrate_purchases_to_receipts(pool: &SqlitePool) -> Result<(), sqlx
         .as_str(),
     )
     .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// One-time change for a database made when every product had to carry a low-stock alert level
+/// (`min_stock_threshold INTEGER NOT NULL DEFAULT 0`): the column becomes optional and every
+/// stored level is kept exactly as it is. SQLite cannot drop a `NOT NULL` in place, so the
+/// values move through a new column. The sync capture triggers are dropped first (a trigger that
+/// names the column blocks `DROP COLUMN`) and `init_db` installs them again right after, so the
+/// move is not uploaded. Runs once: a column that already allows null is left alone.
+pub async fn migrate_optional_stock_alert(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    let required: Option<i64> = sqlx::query_scalar(
+        "SELECT \"notnull\" FROM pragma_table_info('products') WHERE name = 'min_stock_threshold'",
+    )
+    .fetch_optional(pool)
+    .await?;
+    if required != Some(1) {
+        return Ok(());
+    }
+    tracing::info!("Making the product low-stock alert level optional");
+
+    let mut tx = pool.begin().await?;
+    let triggers: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'sync\\_%' ESCAPE '\\'",
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+    for trigger in triggers {
+        tx.execute(format!("DROP TRIGGER IF EXISTS \"{trigger}\"").as_str())
+            .await?;
+    }
+    tx.execute("ALTER TABLE products ADD COLUMN min_stock_alert INTEGER")
+        .await?;
+    tx.execute("UPDATE products SET min_stock_alert = min_stock_threshold")
+        .await?;
+    tx.execute("ALTER TABLE products DROP COLUMN min_stock_threshold")
+        .await?;
+    tx.execute("ALTER TABLE products RENAME COLUMN min_stock_alert TO min_stock_threshold")
+        .await?;
     tx.commit().await?;
     Ok(())
 }

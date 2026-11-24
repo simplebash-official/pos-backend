@@ -5228,7 +5228,7 @@ async fn main() {
                         unit_cost_cents: tmpl.cost_price_cents,
                         selling_price_cents: tmpl.selling_price_cents,
                     }),
-                    min_stock_threshold: tmpl.min_stock_threshold,
+                    min_stock_threshold: Some(tmpl.min_stock_threshold),
                     barcode: None,
                     auto_generate_barcode: true,
                     suppliers: Vec::new(),

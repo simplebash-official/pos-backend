@@ -12,6 +12,7 @@ pub use clients_sqlite::generate_id_hex;
 pub use clients_sqlite::init_db;
 pub use clients_sqlite::map_sqlite_row_to_document;
 pub use clients_sqlite::migrate_cash_movements;
+pub use clients_sqlite::migrate_optional_stock_alert;
 pub use clients_sqlite::migrate_purchases_to_receipts;
 pub use clients_sqlite::migrate_to_stock_batches;
 pub use clients_sqlite::now_utc_iso;

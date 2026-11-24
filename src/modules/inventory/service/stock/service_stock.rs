@@ -207,12 +207,10 @@ pub(crate) async fn apply_stock_delta(
     )
     .await?;
 
-    if crossed_into_low_stock(
-        previous_stock_quantity,
-        updated.stock_quantity,
-        updated.min_stock_threshold,
-    ) {
-        super::low_stock_alert::announce(&mut unit, &updated, &movement_key).await?;
+    if let Some(alert_level) = updated.min_stock_threshold
+        && crossed_into_low_stock(previous_stock_quantity, updated.stock_quantity, alert_level)
+    {
+        super::low_stock_alert::announce(&mut unit, &updated, alert_level, &movement_key).await?;
     }
 
     Ok((previous_stock_quantity, updated))
@@ -220,10 +218,11 @@ pub(crate) async fn apply_stock_delta(
 
 /// True only for the movement that takes stock from above the product's alert level to at or
 /// below it, or that empties it: a product already low does not raise again on every sale, but
-/// running out always does.
+/// running out always does. Only called for a product that has an alert level; one without
+/// never raises.
 #[must_use]
-fn crossed_into_low_stock(previous: i64, current: i64, threshold: i64) -> bool {
-    (previous > threshold && current <= threshold) || (previous > 0 && current <= 0)
+fn crossed_into_low_stock(previous: i64, current: i64, alert_level: i64) -> bool {
+    (previous > alert_level && current <= alert_level) || (previous > 0 && current <= 0)
 }
 
 fn insufficient_stock(
@@ -308,23 +307,27 @@ pub(crate) async fn list_stock_movements(
     })
 }
 
-/// Products at or below their configured reorder threshold.
+/// Products with an alert level that are at or below it.
 pub(crate) async fn low_stock(db: &Db) -> AppResult<LowStockResponse> {
     let documents = repository::product::find_low_stock_products(db).await?;
 
+    // A product without an alert level is never low, so it has no place on this list.
     let items: Vec<LowStockItem> = documents
         .into_iter()
-        .map(|document| LowStockItem {
-            id: document
-                .id
-                .expect("persisted product document must have an id")
-                .to_hex(),
-            key: document.key,
-            sku: document.sku,
-            name: document.name,
-            stock_quantity: document.stock_quantity,
-            min_stock_threshold: document.min_stock_threshold,
-            deficit: document.min_stock_threshold - document.stock_quantity,
+        .filter_map(|document| {
+            let alert_level = document.min_stock_threshold?;
+            Some(LowStockItem {
+                id: document
+                    .id
+                    .expect("persisted product document must have an id")
+                    .to_hex(),
+                key: document.key,
+                sku: document.sku,
+                name: document.name,
+                stock_quantity: document.stock_quantity,
+                min_stock_threshold: alert_level,
+                deficit: alert_level - document.stock_quantity,
+            })
         })
         .collect();
 

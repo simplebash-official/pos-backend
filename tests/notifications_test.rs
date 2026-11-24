@@ -453,6 +453,60 @@ async fn scenario(app: &common::TestApp) {
     .await;
     assert_eq!(titles(&body["data"]["items"]), ["Out of stock: Charger"]);
 
+    // ---- A product with no alert level raises nothing, not even when it runs out ----
+    let (status, quiet) = send(
+        app,
+        "POST",
+        "/api/inventory/products",
+        Some(json!({
+            "name": "Cable",
+            "categoryKey": text(&category["data"]["key"]),
+            "subcategoryKey": text(&category["data"]["subcategories"][0]["key"]),
+            "minStockThreshold": null,
+            "warranty": { "coverage": { "kind": "none" } },
+            "openingStock": { "quantity": 2, "unitCostCents": 300, "sellingPriceCents": 700 },
+        })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{quiet}");
+    assert!(quiet["data"]["minStockThreshold"].is_null(), "{quiet}");
+    let quiet_key = text(&quiet["data"]["key"]);
+    let quiet_id = text(&quiet["data"]["id"]);
+    let (_, quiet_batches) = send(
+        app,
+        "GET",
+        &format!("/api/inventory/products/{quiet_key}/batches"),
+        None,
+        &admin,
+    )
+    .await;
+    let quiet_batch = text(&quiet_batches["data"]["items"][0]["key"]);
+    for _ in 0..2 {
+        let (status, body) = send(
+            app,
+            "PATCH",
+            &format!("/api/inventory/products/{quiet_id}/stock"),
+            Some(json!({ "delta": -1, "reason": "Counted", "batchKey": quiet_batch })),
+            &admin,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+    let (_, body) = send(
+        app,
+        "GET",
+        &list("state=all&limit=10&categories=inventory"),
+        None,
+        &staff,
+    )
+    .await;
+    assert_eq!(
+        body["data"]["items"].as_array().expect("a list").len(),
+        2,
+        "the product with an alert level raised its two; the one without raised nothing: {body}"
+    );
+
     // ---- Retention: anything older than the window is removed with its read marks ----
     let old = BsonDateTime::from_millis(
         BsonDateTime::now().timestamp_millis()
