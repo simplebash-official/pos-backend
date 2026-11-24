@@ -8,7 +8,7 @@ use crate::modules::print_jobs::model::PrintJobDocument;
 use chrono::{DateTime, Utc};
 use futures_util::TryStreamExt;
 use mongodb::bson::oid::ObjectId;
-use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
+use mongodb::bson::{Bson, DateTime as BsonDateTime, Document, doc};
 use mongodb::options::ReturnDocument;
 use sqlx::Row;
 
@@ -244,9 +244,9 @@ pub(crate) async fn insert(db: &Db, mut document: PrintJobDocument) -> AppResult
                     key, id, ticket_number, customer_key, customer_name, customer_phone,
                     job_type, quantity, promised_ready_at, status, estimated_cost_cents,
                     material_cost_cents, assigned_employee_id, assigned_employee_name,
-                    split_type, split_value, version, created_at, updated_at, deleted_at,
-                    updated_by_device
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    split_type, split_value, billed_invoice_key, billed_invoice_number, version,
+                    created_at, updated_at, deleted_at, updated_by_device
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(&document.key)
@@ -265,6 +265,8 @@ pub(crate) async fn insert(db: &Db, mut document: PrintJobDocument) -> AppResult
             .bind(&document.assigned_employee_name)
             .bind(&document.split_type)
             .bind(document.split_value)
+            .bind(&document.billed_invoice_key)
+            .bind(&document.billed_invoice_number)
             .bind(document.version)
             .bind(&created_at_iso)
             .bind(&updated_at_iso)
@@ -461,6 +463,8 @@ pub(super) fn row_to_print_job_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<P
         assigned_employee_name: row.get("assigned_employee_name"),
         split_type: row.get("split_type"),
         split_value: row.get("split_value"),
+        billed_invoice_key: row.get("billed_invoice_key"),
+        billed_invoice_number: row.get("billed_invoice_number"),
         version: row.get("version"),
         created_at: to_bson_datetime(&created_at_str)?,
         updated_at: to_bson_datetime(&updated_at_str)?,
@@ -469,41 +473,97 @@ pub(super) fn row_to_print_job_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<P
     })
 }
 
-/// Narrow status-only mutator, looked up by `key` — used by
-/// `service::mark_delivered`, the cross-module hook `billing`'s
-/// complete-sale flow calls.
-pub(crate) async fn set_status_by_key(
+/// Marks the job as billed by one invoice, in one write: sets the invoice key and number and,
+/// when `status` is given, the status too (billing with an immediate hand-over sets `delivered`).
+/// Only a job that is not billed yet is changed, so of two sales racing for the same job one gets
+/// `None` back. `None` also means the job does not exist.
+pub(crate) async fn stamp_billed(
     db: &Db,
     key: &str,
-    status: &str,
+    invoice_key: &str,
+    invoice_number: &str,
+    status: Option<&str>,
 ) -> AppResult<Option<PrintJobDocument>> {
     match db {
-        Db::Mongo(db) => Ok(print_jobs(db)
-            .find_one_and_update(
-                doc! { "key": key, "deleted_at": { "$exists": false } },
-                doc! {
-                    "$set": { "status": status, "updated_at": BsonDateTime::now() },
-                    "$inc": { "version": 1 },
-                },
-            )
-            .return_document(ReturnDocument::After)
-            .await?),
+        Db::Mongo(db) => {
+            let mut set = doc! {
+                "billed_invoice_key": invoice_key,
+                "billed_invoice_number": invoice_number,
+                "updated_at": BsonDateTime::now(),
+            };
+            if let Some(status) = status {
+                set.insert("status", status);
+            }
+            Ok(print_jobs(db)
+                .find_one_and_update(
+                    doc! {
+                        "key": key,
+                        "deleted_at": { "$exists": false },
+                        "billed_invoice_key": Bson::Null,
+                    },
+                    doc! { "$set": set, "$inc": { "version": 1 } },
+                )
+                .return_document(ReturnDocument::After)
+                .await?)
+        }
         Db::Sqlite(pool) => {
-            let now_iso = now_utc_iso();
-            let res = sqlx::query(
-                "UPDATE print_jobs SET status = ?, version = version + 1, updated_at = ? WHERE key = ? AND deleted_at IS NULL",
-            )
-            .bind(status)
-            .bind(&now_iso)
-            .bind(key)
-            .execute(pool)
-            .await?;
-
+            let mut sql = String::from(
+                "UPDATE print_jobs SET billed_invoice_key = ?, billed_invoice_number = ?",
+            );
+            if status.is_some() {
+                sql.push_str(", status = ?");
+            }
+            sql.push_str(
+                ", version = version + 1, updated_at = ? \
+                 WHERE key = ? AND deleted_at IS NULL AND billed_invoice_key IS NULL",
+            );
+            let mut query = sqlx::query(&sql).bind(invoice_key).bind(invoice_number);
+            if let Some(status) = status {
+                query = query.bind(status);
+            }
+            let res = query.bind(now_utc_iso()).bind(key).execute(pool).await?;
             if res.rows_affected() == 0 {
                 return Ok(None);
             }
-
             find_by_key(db, key).await
+        }
+    }
+}
+
+/// Removes the billing mark from a job, but only while it still names `invoice_key`, so voiding an
+/// old invoice never erases the mark of a newer one. Returns whether a mark was removed.
+pub(crate) async fn clear_billed_stamp(db: &Db, key: &str, invoice_key: &str) -> AppResult<bool> {
+    match db {
+        Db::Mongo(db) => Ok(print_jobs(db)
+            .find_one_and_update(
+                doc! {
+                    "key": key,
+                    "deleted_at": { "$exists": false },
+                    "billed_invoice_key": invoice_key,
+                },
+                doc! {
+                    "$set": {
+                        "billed_invoice_key": Bson::Null,
+                        "billed_invoice_number": Bson::Null,
+                        "updated_at": BsonDateTime::now(),
+                    },
+                    "$inc": { "version": 1 },
+                },
+            )
+            .await?
+            .is_some()),
+        Db::Sqlite(pool) => {
+            let res = sqlx::query(
+                "UPDATE print_jobs SET billed_invoice_key = NULL, billed_invoice_number = NULL, \
+                 version = version + 1, updated_at = ? \
+                 WHERE key = ? AND deleted_at IS NULL AND billed_invoice_key = ?",
+            )
+            .bind(now_utc_iso())
+            .bind(key)
+            .bind(invoice_key)
+            .execute(pool)
+            .await?;
+            Ok(res.rows_affected() > 0)
         }
     }
 }

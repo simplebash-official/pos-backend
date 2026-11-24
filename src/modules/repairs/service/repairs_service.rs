@@ -5,6 +5,7 @@ use crate::core::constants::{codes, prefixes};
 use crate::core::error::{AppError, AppResult};
 use crate::core::id::generate_id;
 use crate::core::utils::{build_bson_regex, calculate_pagination, shop_today_range};
+use crate::domain::billing::Handover;
 use crate::domain::inventory::StockMovementType;
 use crate::domain::repairs::{
     CreateRepairRequest, Repair, RepairAssignment, RepairItem, RepairKind, RepairListQuery,
@@ -13,7 +14,9 @@ use crate::domain::repairs::{
 use crate::domain::sequences::ReserveSequenceRequest;
 use crate::modules::repairs::model::RepairDocument;
 use crate::modules::repairs::repository;
-use crate::modules::{customers, employees, sequences};
+use crate::modules::warranties::service::WarrantyActor;
+use crate::modules::{billing, customers, employees, sequences, warranties};
+use chrono::Utc;
 use mongodb::bson::{Bson, DateTime as BsonDateTime, Document, doc};
 
 /// Creates the repair.
@@ -35,7 +38,7 @@ pub async fn create_repair(
         let priced = price_items(db, body.items, &[], &kind).await?;
         validate_price_required_for_status(&status, &kind, &priced.items)?;
         if status == "delivered" {
-            refuse_handing_back_unbilled_parts(&kind, &priced.items)?;
+            refuse_handing_back_unbilled_parts(&kind, &priced.items, None)?;
         }
 
         let assignment = body.assignment.unwrap_or_default();
@@ -77,6 +80,8 @@ pub async fn create_repair(
             assigned_employee_name,
             split_type,
             split_value,
+            billed_invoice_key: None,
+            billed_invoice_number: None,
             version: 1,
             created_at: now,
             updated_at: now,
@@ -166,6 +171,8 @@ pub(crate) async fn create_rework(db: &Db, rework: NewRework<'_>) -> AppResult<R
             assigned_employee_name,
             split_type: None,
             split_value: None,
+            billed_invoice_key: None,
+            billed_invoice_number: None,
             version: 1,
             created_at: now,
             updated_at: now,
@@ -302,34 +309,73 @@ pub async fn list_repairs(db: &Db, query: RepairListQuery) -> AppResult<RepairLi
     })
 }
 
-/// Cross-module hook — called by `billing::service::sale::complete_sale`
-/// when a cart line bills a repair ticket. Narrow on purpose: only flips
-/// `status`, never touches items/assignment fields, since a sale completing
-/// shouldn't silently rewrite ticket details a technician entered. The
-/// caller then takes the parts out of stock (`use_parts`) and issues the
+/// Cross-module hook, called by `billing::service::sale::complete_sale` when an invoice bills a
+/// repair job. Narrow on purpose: only stamps the job with the invoice that billed it and, for a
+/// `Handover::Now` line, sets `status` to `delivered`. It never touches items or assignment, since
+/// a sale completing shouldn't silently rewrite details a technician entered. A job that is
+/// already billed is a 409 (`TICKET_ALREADY_BILLED`), so of two sales racing for one job only one
+/// wins. The caller then takes the parts out of stock (`use_parts`) and, for `Now`, issues the
 /// items' warranties.
-pub(crate) async fn mark_delivered(db: &Db, key: &str) -> AppResult<Repair> {
-    crate::core::logging::domain::tracked("repairs.delivered", async move {
-        let updated = repository::set_status_by_key(db, key, "delivered")
+pub(crate) async fn mark_billed(
+    db: &Db,
+    key: &str,
+    invoice_key: &str,
+    invoice_number: &str,
+    handover: Handover,
+) -> AppResult<Repair> {
+    crate::core::logging::domain::tracked("repairs.billed", async move {
+        let status = match handover {
+            Handover::Now => Some("delivered"),
+            Handover::Later => None,
+        };
+        if let Some(updated) =
+            repository::stamp_billed(db, key, invoice_key, invoice_number, status).await?
+        {
+            let repair = updated.into_repair();
+            if handover == Handover::Now {
+                // The status before the write is gone, so only "delivered" is compared: a job
+                // billed twice raises one notice (the dedupe key holds the status).
+                repair_alerts::announce_status_change(db, &repair, "").await?;
+            }
+            return Ok(repair);
+        }
+        let existing = repository::find_by_id_or_key(db, key)
             .await?
             .ok_or_else(|| {
                 AppError::not_found_with_code("Repair ticket not found", codes::REPAIR_NOT_FOUND)
-            })?
-            .into_repair();
-        // The status before the write is gone, so only "delivered" is compared: a job billed
-        // twice raises one notice (the dedupe key holds the status).
-        repair_alerts::announce_status_change(db, &updated, "").await?;
-        Ok(updated)
+            })?;
+        Err(AppError::conflict(
+            codes::TICKET_ALREADY_BILLED,
+            format!(
+                "Repair ticket {} was already billed on {}",
+                existing.ticket_number,
+                existing
+                    .billed_invoice_number
+                    .as_deref()
+                    .expect("a job that refused to be billed again carries its billing mark"),
+            ),
+        ))
+    })
+    .await
+}
+
+/// Cross-module hook, called by `billing::service::sale::void_invoice`: removes the billing mark
+/// the voided invoice left on a repair job, so the job can be billed again. Leaves the status and
+/// the parts alone. Returns whether the job still carried that invoice's mark.
+pub(crate) async fn clear_billed(db: &Db, key: &str, invoice_key: &str) -> AppResult<bool> {
+    crate::core::logging::domain::tracked("repairs.unbilled", async move {
+        repository::clear_billed_stamp(db, key, invoice_key).await
     })
     .await
 }
 
 /// Updates the repair.
-pub async fn update_repair(
+pub(crate) async fn update_repair(
     db: &Db,
     id_or_key: &str,
     body: UpdateRepairRequest,
     device_id: Option<String>,
+    actor: &WarrantyActor,
 ) -> AppResult<Repair> {
     crate::core::logging::domain::tracked("repairs.updated", async move {
         let existing = repository::find_by_id_or_key(db, id_or_key)
@@ -348,14 +394,26 @@ pub async fn update_repair(
         let customer = customers::service::get_customer_by_key(db, customer_key).await?;
         let device_model = body.device_model.unwrap_or(existing.device_model);
         let issue_description = body.issue_description.unwrap_or(existing.issue_description);
+        let serial_after = body
+            .serial_number
+            .clone()
+            .or_else(|| existing.serial_number.clone());
         let was_delivered = existing.status == "delivered";
         let previous_status = existing.status.clone();
         let status = body.status.unwrap_or(existing.status);
+        let billed_invoice_key = existing.billed_invoice_key.as_deref();
 
         validate_status(&status)?;
         validate_promised_ready_at(body.promised_ready_at.as_deref())?;
         validate_required_fields(&device_model, &issue_description)?;
         let priced = match body.items {
+            Some(_) if billed_invoice_key.is_some() => {
+                return Err(AppError::conflict(
+                    codes::REPAIR_ITEMS_LOCKED,
+                    "This job has been billed; its work can no longer be changed. Void the \
+                     invoice to change it.",
+                ));
+            }
             Some(_) if was_delivered => {
                 return Err(AppError::conflict(
                     codes::REPAIR_ITEMS_LOCKED,
@@ -372,7 +430,7 @@ pub async fn update_repair(
         validate_price_required_for_status(&status, &existing.kind, items)?;
         let handing_back = status == "delivered" && !was_delivered;
         if handing_back {
-            refuse_handing_back_unbilled_parts(&existing.kind, items)?;
+            refuse_handing_back_unbilled_parts(&existing.kind, items, billed_invoice_key)?;
         }
 
         let mut set_doc = doc! {
@@ -427,8 +485,26 @@ pub async fn update_repair(
                 set_doc.insert("split_value", sv);
             }
         }
-        if let Some(device) = device_id {
-            set_doc.insert("updated_by_device", device);
+        if let (true, Some(invoice_key)) = (handing_back, billed_invoice_key) {
+            // Billed with the hand-over later: the warranties start today, before the status
+            // moves, so a failure here leaves the job open and the hand-back can be retried.
+            issue_handback_warranties(
+                db,
+                HandedBack {
+                    repair_key: &existing.key,
+                    ticket_number: &existing.ticket_number,
+                    device_model: &device_model,
+                    serial_number: serial_after.as_deref(),
+                    items,
+                },
+                invoice_key,
+                actor,
+                device_id.clone(),
+            )
+            .await?;
+        }
+        if let Some(device) = &device_id {
+            set_doc.insert("updated_by_device", device.clone());
         }
 
         let updated = repository::update(db, object_id, set_doc)
@@ -453,18 +529,81 @@ pub async fn update_repair(
     .await
 }
 
-/// A billed job's stock parts leave stock with its invoice, so it is handed back by billing it.
-/// Marking it delivered by hand would leave its parts in stock forever.
-fn refuse_handing_back_unbilled_parts(kind: &RepairKind, items: &[RepairItem]) -> AppResult<()> {
+/// A job's stock parts leave stock with its invoice, so a job that has parts from stock is handed
+/// back only once it is billed (or by billing it with the hand-over now). Marking an unbilled job
+/// delivered by hand would leave its parts in stock forever.
+fn refuse_handing_back_unbilled_parts(
+    kind: &RepairKind,
+    items: &[RepairItem],
+    billed_invoice_key: Option<&str>,
+) -> AppResult<()> {
     let has_stock_part = items
         .iter()
         .any(|item| matches!(item.part, Some(RepairPart::Stock { .. })));
-    if !kind.is_rework() && has_stock_part {
+    if !kind.is_rework() && has_stock_part && billed_invoice_key.is_none() {
         return Err(AppError::validation_with_code(
             "Bill this job to hand it back: its parts from stock leave stock with the invoice.",
             codes::REPAIR_PART_INVALID,
         ));
     }
+    Ok(())
+}
+
+/// The job being handed back, as its warranties need it.
+#[derive(Debug)]
+struct HandedBack<'a> {
+    repair_key: &'a str,
+    ticket_number: &'a str,
+    device_model: &'a str,
+    serial_number: Option<&'a str>,
+    items: &'a [RepairItem],
+}
+
+/// Gives the items of a job billed with the hand-over later their warranties, starting today, from
+/// the invoice that billed it (its number, its line and its customer). Does nothing when that
+/// invoice already gave the job warranties: a job reopened and handed back again keeps its first
+/// ones. A rework is never billed, so it never gets here.
+async fn issue_handback_warranties(
+    db: &Db,
+    job: HandedBack<'_>,
+    invoice_key: &str,
+    actor: &WarrantyActor,
+    device_id: Option<String>,
+) -> AppResult<()> {
+    if warranties::service::exist_for_repair_on_invoice(db, job.repair_key, invoice_key).await? {
+        return Ok(());
+    }
+    let invoice = billing::service::get_invoice(db, invoice_key).await?;
+    let line_index = invoice
+        .items
+        .iter()
+        .position(|line| line.source_ticket_key.as_deref() == Some(job.repair_key))
+        .ok_or_else(|| {
+            AppError::internal(format!(
+                "invoice {} does not bill repair {}, which names it as its invoice",
+                invoice.invoice_number, job.ticket_number
+            ))
+        })?;
+    warranties::service::issue_for_repair(
+        db,
+        warranties::service::RepairLine {
+            invoice_key: &invoice.key,
+            invoice_number: &invoice.invoice_number,
+            delivered_at: Utc::now(),
+            customer_key: invoice.customer_key.as_deref(),
+            customer_name: invoice.customer_name_snapshot.as_deref(),
+            customer_phone: invoice.customer_phone_snapshot.as_deref(),
+            line_index,
+            repair_key: job.repair_key,
+            ticket_number: job.ticket_number,
+            device_model: job.device_model,
+            device_serial: job.serial_number,
+            items: job.items,
+            actor,
+            device_id,
+        },
+    )
+    .await?;
     Ok(())
 }
 

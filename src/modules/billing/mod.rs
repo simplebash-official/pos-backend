@@ -11,6 +11,7 @@
 //! migration plan) for why none of those sub-steps can fail the whole
 //! request once the invoice itself is durably inserted.
 
+pub mod migration;
 pub mod model;
 mod repository;
 pub mod routes;

@@ -306,6 +306,8 @@ async fn employee_commissions_survive_a_rename() {
         assigned_employee_name: Some("stale snapshot, must be ignored".to_string()),
         split_type: Some("percentage".to_string()),
         split_value: Some(30.0),
+        billed_invoice_key: None,
+        billed_invoice_number: None,
         version: 1,
         created_at: BsonDateTime::from_chrono(target_date),
         updated_at: BsonDateTime::from_chrono(target_date),

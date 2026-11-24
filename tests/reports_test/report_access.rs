@@ -529,6 +529,8 @@ async fn employee_commissions_and_performance_report() {
         assigned_employee_name: Some("Unique Tech Nimal".to_string()),
         split_type: Some("percentage".to_string()),
         split_value: Some(30.0), // 30% of 3,000 = 900 LKR (90000 cents)
+        billed_invoice_key: None,
+        billed_invoice_number: None,
         version: 1,
         created_at: BsonDateTime::from_chrono(target_date),
         updated_at: BsonDateTime::from_chrono(target_date),
@@ -560,6 +562,8 @@ async fn employee_commissions_and_performance_report() {
         assigned_employee_name: Some("Unique Printer Suneth".to_string()),
         split_type: Some("fixed".to_string()),
         split_value: Some(50000.0), // 500 LKR commission
+        billed_invoice_key: None,
+        billed_invoice_number: None,
         version: 1,
         created_at: BsonDateTime::from_chrono(target_date),
         updated_at: BsonDateTime::from_chrono(target_date),

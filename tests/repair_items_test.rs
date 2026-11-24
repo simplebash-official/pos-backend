@@ -508,7 +508,7 @@ async fn scenario(app: &common::TestApp) {
     // ---- Billed: parts leave stock, covered items get warranties on the device ----
     let bill = sale(
         json!([{ "quantity": 1, "discountCents": 0, "sourceType": "repair",
-                             "sourceTicketKey": repair_key }]),
+                             "sourceTicketKey": repair_key, "handover": "now" }]),
     );
     let (status, sold) = send(
         app,
@@ -724,7 +724,7 @@ async fn scenario(app: &common::TestApp) {
         "/api/billing/sales",
         Some(sale(
             json!([{ "quantity": 1, "discountCents": 0, "sourceType": "repair",
-                           "sourceTicketKey": rework_key }]),
+                           "sourceTicketKey": rework_key, "handover": "now" }]),
         )),
         &staff,
     )

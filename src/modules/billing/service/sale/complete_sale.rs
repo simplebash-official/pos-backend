@@ -1,12 +1,12 @@
 use super::service_sale::resolve_sale_items;
 use crate::clients::db::Db;
 use crate::core::calculations;
-use crate::core::constants::prefixes;
+use crate::core::constants::{codes, prefixes};
 use crate::core::error::{AppError, AppResult};
 use crate::core::id::generate_id;
 use crate::domain::billing::{
-    CompleteSaleResponse, CreateSaleItemRequest, CreateSaleRequest, InvoiceItem, InvoiceStatus,
-    PricingAdjustments,
+    CompleteSaleResponse, CreateSaleItemRequest, CreateSaleRequest, Handover, InvoiceItem,
+    InvoiceStatus, PricingAdjustments,
 };
 use crate::domain::inventory::{Product, StockMovementType};
 use crate::domain::sequences::ReserveSequenceRequest;
@@ -15,7 +15,7 @@ use crate::modules::billing::model::InvoiceDocument;
 use crate::modules::billing::repository;
 use crate::modules::{customers, inventory, print_jobs, repairs, sequences, warranties};
 use mongodb::bson::DateTime as BsonDateTime;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 const VALID_PAYMENT_METHODS: &[&str] = &["cash", "card", "online", "split", "credit"];
 
@@ -71,6 +71,23 @@ fn validate_sale_request(body: &CreateSaleRequest) -> AppResult<()> {
                 VALID_SOURCE_TYPES.join(", ")
             )));
         }
+        let names_a_ticket = item.source_type != "retail" && item.source_ticket_key.is_some();
+        match (names_a_ticket, item.handover) {
+            (true, None) => {
+                return Err(AppError::validation_with_code(
+                    "A repair or print job on the sale must say whether it is handed over now \
+                     or later (handover).",
+                    codes::HANDOVER_REQUIRED,
+                ));
+            }
+            (false, Some(_)) => {
+                return Err(AppError::validation_with_code(
+                    "Only a repair or print job that names its ticket can have a handover.",
+                    codes::HANDOVER_NOT_ALLOWED,
+                ));
+            }
+            (true, Some(_)) | (false, None) => {}
+        }
         if item.source_type == "charge" {
             validate_charge_item(item)?;
         }
@@ -85,6 +102,20 @@ fn validate_sale_request(body: &CreateSaleRequest) -> AppResult<()> {
                 "An item of source type '{}' cannot have a negative discount",
                 item.source_type
             )));
+        }
+    }
+    let mut tickets = HashSet::new();
+    for ticket_key in body
+        .items
+        .iter()
+        .filter(|item| item.source_type != "retail")
+        .filter_map(|item| item.source_ticket_key.as_deref())
+    {
+        if !tickets.insert(ticket_key) {
+            return Err(AppError::validation_with_code(
+                "The same repair or print job is on the sale twice.",
+                codes::TICKET_LISTED_TWICE,
+            ));
         }
     }
     if !VALID_PAYMENT_METHODS.contains(&body.payment.payment_method.as_str()) {
@@ -181,12 +212,14 @@ struct SaleContext<'a> {
     invoice: &'a InvoiceDocument,
     /// Per request line, in order: the cashier's warranty for it, when it was changed.
     warranty_overrides: &'a [Option<ProductWarranty>],
+    /// Per request line, in order: what the cashier chose to do with a repair or print job.
+    handovers: &'a [Option<Handover>],
     actor: &'a warranties::service::WarrantyActor,
     device_id: Option<String>,
 }
 
 /// One line item's post-commit side effect (stock decrement for retail,
-/// ticket-delivered for repair/print) — factored out of `complete_sale` so
+/// ticket billed, and delivered when handed over now, for repair/print) — factored out of `complete_sale` so
 /// every item's side effect can run concurrently via `join_all` rather than
 /// sequentially. Returns `Some(warning)` on a non-fatal failure, `None` on
 /// success; never fails the request itself (D4).
@@ -294,14 +327,22 @@ async fn apply_line_item_side_effects(
             }
             None
         }
-        "repair" => match &item.source_ticket_key {
-            Some(ticket_key) => {
+        "repair" => match (&item.source_ticket_key, sale.handovers[line_index]) {
+            (Some(ticket_key), Some(handover)) => {
                 let ticket_label = item.source_ticket_number.as_deref().unwrap_or(ticket_key);
-                let repair = match repairs::service::mark_delivered(db, ticket_key).await {
+                let repair = match repairs::service::mark_billed(
+                    db,
+                    ticket_key,
+                    &inserted_invoice.key,
+                    &inserted_invoice.invoice_number,
+                    handover,
+                )
+                .await
+                {
                     Ok(repair) => repair,
                     Err(err) => {
                         return Some(format!(
-                            "Repair ticket {ticket_label} could not be marked delivered: {err}"
+                            "Repair ticket {ticket_label} could not be marked as billed: {err}"
                         ));
                     }
                 };
@@ -316,6 +357,10 @@ async fn apply_line_item_side_effects(
                     return Some(format!(
                         "The parts of repair ticket {ticket_label} could not be taken out of stock: {err}"
                     ));
+                }
+                if handover == Handover::Later {
+                    // The warranty starts the day the job is handed back, which is not today.
+                    return None;
                 }
                 if let Err(err) = warranties::service::issue_for_repair(
                     db,
@@ -344,23 +389,39 @@ async fn apply_line_item_side_effects(
                 }
                 None
             }
-            None => Some(format!(
+            (Some(_), None) => Some(format!(
+                "Item '{}' is a repair line with no handover; its ticket was not updated",
+                item.name
+            )),
+            (None, _) => Some(format!(
                 "Item '{}' is a repair line with no ticket key; its ticket was not updated",
                 item.name
             )),
         },
-        "print" => match &item.source_ticket_key {
-            Some(ticket_key) => {
-                if let Err(err) = print_jobs::service::mark_delivered(db, ticket_key).await {
+        "print" => match (&item.source_ticket_key, sale.handovers[line_index]) {
+            (Some(ticket_key), Some(handover)) => {
+                if let Err(err) = print_jobs::service::mark_billed(
+                    db,
+                    ticket_key,
+                    &inserted_invoice.key,
+                    &inserted_invoice.invoice_number,
+                    handover,
+                )
+                .await
+                {
                     Some(format!(
-                        "Print job ticket {} could not be marked delivered: {err}",
+                        "Print job ticket {} could not be marked as billed: {err}",
                         item.source_ticket_number.as_deref().unwrap_or(ticket_key)
                     ))
                 } else {
                     None
                 }
             }
-            None => Some(format!(
+            (Some(_), None) => Some(format!(
+                "Item '{}' is a print-job line with no handover; its ticket was not updated",
+                item.name
+            )),
+            (None, _) => Some(format!(
                 "Item '{}' is a print-job line with no ticket key; its ticket was not updated",
                 item.name
             )),
@@ -380,6 +441,8 @@ pub async fn complete_sale(
 ) -> AppResult<CompleteSaleResponse> {
     crate::core::logging::domain::tracked("billing.sale_completed", async move {
         validate_sale_request(&body)?;
+        let handovers: Vec<Option<Handover>> =
+            body.items.iter().map(|item| item.handover).collect();
         let warranty_overrides = body
             .items
             .iter()
@@ -698,6 +761,7 @@ pub async fn complete_sale(
         let sale = SaleContext {
             invoice: &inserted_invoice,
             warranty_overrides: &warranty_overrides,
+            handovers: &handovers,
             actor: &actor,
             device_id: device_id.clone(),
         };

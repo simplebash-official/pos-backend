@@ -69,6 +69,20 @@ pub struct CreateSaleItemRequest {
     /// A different warranty for this retail line than the product carries (coverage `none`
     /// gives it none). Needs `warranties:adjust_at_sale`; refused on repair and print lines.
     pub warranty_override: Option<ProductWarranty>,
+    /// Whether the customer takes the device or print away with this sale. Required on a repair
+    /// or print line that names a ticket (`sourceTicketKey`), refused on every other line.
+    pub handover: Option<Handover>,
+}
+
+/// What billing a repair or print job does to its status. Either way the job is marked as billed
+/// by the invoice; only `Now` also hands it back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Handover {
+    /// The customer takes the work with this sale: the job becomes `delivered`.
+    Now,
+    /// The work stays in the shop: the job keeps its status and is handed back later.
+    Later,
 }
 
 /// Body for `POST /billing/sales`, grouped into sub-objects by concern
