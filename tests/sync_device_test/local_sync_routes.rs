@@ -142,6 +142,58 @@ async fn triggers_are_inert_until_enabled_then_enqueue_and_coalesce() {
     assert!(items[0]["seq"].as_i64().expect("the value is an integer") > last);
 }
 
+/// A renamed subcategory is not a wire resource of its own: it leaves the device as its parent
+/// category, carrying every subcategory with the new name.
+#[tokio::test]
+async fn renaming_a_subcategory_queues_its_category_with_the_new_name() {
+    let dev = Device::new().await;
+    dev.sync("POST", "/api/sync/enable", Some(json!({}))).await;
+    let cat = dev
+        .api(
+            "POST",
+            "/api/inventory/categories",
+            Some(json!({
+                "name": "Rename Sync", "icon": "x", "color": "red",
+                "subcategories": ["Cases"],
+            })),
+        )
+        .await;
+    let category_key = cat["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
+    let subcategory_key = cat["data"]["subcategories"][0]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
+    dev.sync(
+        "POST",
+        "/api/sync/outbox/ack",
+        Some(json!({ "upToSeq": 1_000_000 })),
+    )
+    .await;
+    assert_eq!(dev.pending_out().await, 0);
+
+    dev.api(
+        "PUT",
+        &format!("/api/inventory/categories/{category_key}/subcategories/{subcategory_key}"),
+        Some(json!({ "name": "Phone Cases" })),
+    )
+    .await;
+
+    let items = dev.drain_outbox().await;
+    assert_eq!(items.len(), 1, "only the parent category is queued");
+    assert_eq!(items[0]["record"]["resource"], "categories");
+    assert_eq!(items[0]["record"]["key"], category_key);
+    assert_eq!(items[0]["record"]["op"], "upsert");
+    let subcategories = items[0]["record"]["payload"]["subcategories"]
+        .as_array()
+        .expect("the value is an array");
+    assert_eq!(subcategories.len(), 1);
+    assert_eq!(subcategories[0]["key"], subcategory_key);
+    assert_eq!(subcategories[0]["name"], "Phone Cases");
+}
+
 #[tokio::test]
 async fn a_sale_moves_stock_without_resending_the_product_row() {
     let dev = Device::new().await;

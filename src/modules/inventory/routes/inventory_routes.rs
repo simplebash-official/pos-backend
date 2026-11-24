@@ -9,11 +9,11 @@ use crate::domain::inventory::{
     AddSubcategoryRequest, CategoriesResponse, CategoryInfo, CreateCategoryRequest,
     CreateProductRequest, DeleteProductsRequest, DeleteProductsResponse, InventoryMetrics,
     InventoryOverviewQuery, InventoryOverviewResponse, LowStockResponse, Product, ProductListQuery,
-    ProductListResponse, ProductSerialListQuery, ProductSerialListResponse, SerialLookup,
-    StockAdjustmentRequest, StockAdjustmentResponse, StockBatch, StockBatchListResponse,
-    StockMovementListQuery, StockMovementListResponse, StockMovementsResponse,
-    SubcategoriesResponse, UpdateCategoryRequest, UpdateProductRequest, UpdateStockBatchRequest,
-    ValidCategoriesResponse,
+    ProductListResponse, ProductSerialListQuery, ProductSerialListResponse,
+    RenameSubcategoryRequest, SerialLookup, StockAdjustmentRequest, StockAdjustmentResponse,
+    StockBatch, StockBatchListResponse, StockMovementListQuery, StockMovementListResponse,
+    StockMovementsResponse, SubcategoriesResponse, UpdateCategoryRequest, UpdateProductRequest,
+    UpdateStockBatchRequest, ValidCategoriesResponse,
 };
 use crate::domain::users::Role;
 use crate::modules::inventory::service;
@@ -646,6 +646,37 @@ pub(super) async fn remove_subcategory(
     )))
 }
 
+#[utoipa::path(put, path = "/categories/{categoryKey}/subcategories/{subcategoryKey}", tag = modules::INVENTORY,
+    params(
+        ("categoryKey" = String, Path, description = "Category key"),
+        ("subcategoryKey" = String, Path, description = "Subcategory key"),
+    ),
+    request_body = RenameSubcategoryRequest,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Subcategory renamed", body = ApiResponse<CategoryInfo>),
+        (status = 400, description = "Validation error", body = ErrorResponse),
+        (status = 403, description = "Admin access required", body = ErrorResponse),
+        (status = 404, description = "Category or subcategory not found", body = ErrorResponse),
+        (status = 409, description = "Another subcategory of this category has the name", body = ErrorResponse),
+    )
+)]
+pub(super) async fn rename_subcategory(
+    _admin: AdminUser,
+    State(state): State<AppState>,
+    Path((category_key, subcategory_key)): Path<(String, String)>,
+    Json(body): Json<RenameSubcategoryRequest>,
+) -> AppResult<Json<ApiResponse<CategoryInfo>>> {
+    let updated =
+        service::category::rename_subcategory(&state.db, category_key, subcategory_key, body.name)
+            .await?;
+
+    Ok(Json(ApiResponse::success(
+        updated,
+        "Subcategory renamed successfully",
+    )))
+}
+
 /// Routes of the inventory module.
 pub fn router() -> OpenApiRouter<AppState> {
     // Each `routes!()` call registers one axum path — handlers only share a
@@ -680,7 +711,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_valid_categories))
         // Subcategories
         .routes(routes!(get_category_subcategories, add_subcategory))
-        .routes(routes!(remove_subcategory))
+        .routes(routes!(rename_subcategory, remove_subcategory))
 }
 
 #[utoipa::path(get, path = "/", tag = modules::INVENTORY, responses(

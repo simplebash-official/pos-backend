@@ -332,6 +332,74 @@ pub(crate) async fn remove_subcategory(
     .await
 }
 
+/// Renames a subcategory. The name is trimmed and must not be empty (400), the
+/// category and subcategory must exist and belong together (404), and no other
+/// subcategory of this category may already have the name (409
+/// `SUBCATEGORY_ALREADY_EXISTS`; a change of letter case only is allowed).
+/// Renaming to the current name changes nothing. Products reference the
+/// subcategory by `key`, so no product is touched.
+pub(crate) async fn rename_subcategory(
+    db: &Db,
+    category_key: String,
+    subcategory_key: String,
+    name: String,
+) -> AppResult<CategoryInfo> {
+    crate::core::logging::domain::tracked("inventory.subcategory_renamed", async move {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(AppError::validation("Subcategory name is required"));
+        }
+
+        let category = repository::category::find_category_by_key(db, &category_key)
+            .await?
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Category not found", codes::CATEGORY_NOT_FOUND)
+            })?;
+
+        let subcategory = repository::subcategory::find_subcategory_by_key(db, &subcategory_key)
+            .await?
+            .filter(|document| document.category_key == category_key)
+            .ok_or_else(|| {
+                AppError::not_found_with_code("Subcategory not found", codes::SUBCATEGORY_NOT_FOUND)
+            })?;
+
+        if subcategory.name != name {
+            let clash = repository::subcategory::find_subcategory_by_category_and_name(
+                db,
+                &category_key,
+                name,
+            )
+            .await?;
+            if clash.is_some_and(|other| other.key != subcategory_key) {
+                return Err(AppError::custom(
+                    StatusCode::CONFLICT,
+                    codes::SUBCATEGORY_ALREADY_EXISTS,
+                    format!("'{name}' already exists under '{}'", category.name),
+                ));
+            }
+
+            repository::subcategory::rename_subcategory_by_key(db, &subcategory_key, name)
+                .await?
+                .ok_or_else(|| {
+                    AppError::not_found_with_code(
+                        "Subcategory not found",
+                        codes::SUBCATEGORY_NOT_FOUND,
+                    )
+                })?;
+        }
+
+        let subcategory_documents =
+            repository::subcategory::list_subcategories_by_category(db, &category_key).await?;
+        let subcategories = subcategory_documents
+            .into_iter()
+            .map(SubcategoryDocument::into_subcategory_info)
+            .collect();
+
+        Ok(category.into_category_info(subcategories))
+    })
+    .await
+}
+
 /// Updates a category's fields, looked up and persisted by its immutable
 /// `key`. Renaming (`name`) is now a pure display-label change — since
 /// products/subcategories reference this category by `key`, nothing else

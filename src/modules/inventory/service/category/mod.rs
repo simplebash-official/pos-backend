@@ -15,6 +15,7 @@ pub(crate) use service_category::get_valid_categories;
 pub(crate) use service_category::hydrate_sync_documents;
 pub use service_category::list_categories;
 pub(crate) use service_category::remove_subcategory;
+pub(crate) use service_category::rename_subcategory;
 pub use service_category::update_category;
 pub use service_uncategorized::{
     UNCATEGORIZED_CATEGORY_KEY, UNCATEGORIZED_SUBCATEGORY_KEY, ensure_uncategorized,
