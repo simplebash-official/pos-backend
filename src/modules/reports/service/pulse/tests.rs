@@ -163,3 +163,39 @@ fn pending_stock_quotations_are_tracked_and_flagged_ready_when_replenished() {
     assert!(pulse_ready.pending_stock_quotations[0].is_ready_to_fill);
     assert!(pulse_ready.pending_stock_quotations[0].items[0].has_sufficient_stock);
 }
+
+fn stocked_product(id: &str, stock: i64, alert_level: Option<i64>) -> Product {
+    from(json!({
+        "id": id, "key": format!("prod_{id}"), "sku": format!("SKU-{id}"), "name": format!("Item {id}"),
+        "categoryKey": "cat_1", "category": "Accessories",
+        "subcategoryKey": "sub_1", "subcategory": "Protectors",
+        "stockQuantity": stock, "minStockThreshold": alert_level,
+        "priceTiers": [], "isSerialized": false, "warranty": { "coverage": { "kind": "none" } },
+        "createdAt": NOW, "updatedAt": NOW, "version": 1
+    }))
+}
+
+#[test]
+fn only_products_with_an_alert_level_can_be_low_on_stock() {
+    let products = [
+        stocked_product("a", 3, Some(5)),
+        stocked_product("b", 3, None),
+        stocked_product("c", 0, None),
+        stocked_product("d", 0, Some(0)),
+        stocked_product("e", 6, Some(5)),
+        stocked_product("f", 1, Some(0)),
+    ];
+    let mut inp = input(&[], &[]);
+    inp.products = &products;
+
+    let low_stock = compute(&inp).low_stock;
+    let listed: Vec<(&str, i64, bool)> = low_stock
+        .iter()
+        .map(|item| (item.name.as_str(), item.threshold, item.out_of_stock))
+        .collect();
+    assert_eq!(
+        listed,
+        [("Item a", 5, false), ("Item d", 0, true)],
+        "a product with no level is never listed, not even when empty; no built-in line is applied"
+    );
+}

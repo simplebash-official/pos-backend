@@ -65,9 +65,9 @@ pub struct CreateProductRequest {
     pub subcategory_key: String,
     /// Units on hand that did not come from a supplier purchase.
     pub opening_stock: Option<OpeningStockRequest>,
-    /// Minimum stock alert threshold.
-    #[serde(default)]
-    pub min_stock_threshold: i64,
+    /// Stock level at or below which the shop is told this product is running low. Omitted
+    /// or null means the product has no alert at all.
+    pub min_stock_threshold: Option<i64>,
     /// Optional initial purchase deliveries from suppliers.
     #[serde(default)]
     pub suppliers: Vec<ProductSupplierIntake>,
@@ -196,8 +196,9 @@ pub struct Product {
     /// Current count of items in stock (the sum of every batch's remaining
     /// quantity — derived from the stock-movement ledger).
     pub stock_quantity: i64,
-    /// Threshold count for low stock warnings.
-    pub min_stock_threshold: i64,
+    /// Stock level at or below which the shop is told this product is running low; null when
+    /// the product has no alert.
+    pub min_stock_threshold: Option<i64>,
     /// True when individual units of this product are tracked by serial
     /// number (see `ProductSerial`) rather than only as an aggregate
     /// `stock_quantity` count.
@@ -246,7 +247,7 @@ pub struct ProductListQuery {
     pub category_key: Option<String>,
     /// Filter products by subcategory key.
     pub subcategory_key: Option<String>,
-    /// Filter products below their min stock threshold.
+    /// Only products at or below their alert level; a product with no alert level never matches.
     pub low_stock: Option<bool>,
     /// Page number (1-indexed).
     pub page: Option<u64>,
@@ -286,6 +287,16 @@ pub struct ProductSupplierIntake {
     pub notes: Option<String>,
 }
 
+/// Reads a field that is present as `Some(value)`, and an explicit `null` as `Some(None)`; a field
+/// that is absent never reaches this function and stays `None` through `#[serde(default)]`.
+fn present_or_null<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+
 /// Body for `PUT /products/{id}`. Every field is optional so a client can
 /// send only what changed — `service::product::update_product` fills in
 /// omitted fields from the existing document rather than clearing them.
@@ -307,8 +318,11 @@ pub struct UpdateProductRequest {
     pub category_key: Option<String>,
     /// Updated subcategory key.
     pub subcategory_key: Option<String>,
-    /// Updated low-stock warning threshold.
-    pub min_stock_threshold: Option<i64>,
+    /// Omit to leave the alert level as it is, send a number to set it, send null to remove
+    /// the alert.
+    #[serde(default, deserialize_with = "present_or_null")]
+    #[schema(value_type = Option<i64>, nullable)]
+    pub min_stock_threshold: Option<Option<i64>>,
     /// Updated serialized-tracking flag.
     pub is_serialized: Option<bool>,
     /// Replaces the product's warranty for units sold from now on.

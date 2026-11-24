@@ -11,10 +11,12 @@ use crate::modules::inventory::model::ProductDocument;
 use crate::modules::notifications;
 
 /// Tells everyone who can see stock that `product` is running low (or ran out), inside the
-/// transaction of the movement `movement_key` that made it so.
+/// transaction of the movement `movement_key` that made it so. Only a product with an alert
+/// level is announced, so the caller passes that `alert_level`.
 pub(super) async fn announce(
     unit: impl Into<Unit<'_>>,
     product: &ProductDocument,
+    alert_level: i64,
     movement_key: &str,
 ) -> AppResult<()> {
     let left = product.stock_quantity;
@@ -33,7 +35,7 @@ pub(super) async fn announce(
             format!("Low stock: {}", product.name),
             format!(
                 "Only {left} left of {} (you asked to be told at {}).",
-                product.name, product.min_stock_threshold
+                product.name, alert_level
             ),
         )
     };

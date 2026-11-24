@@ -47,7 +47,7 @@ async fn seed_product_with(
             category_key: category_key.to_string(),
             subcategory_key: subcategory_key.to_string(),
             stock_quantity,
-            min_stock_threshold,
+            min_stock_threshold: Some(min_stock_threshold),
             is_serialized: false,
             warranty: ProductWarranty::none(),
             version: 1,

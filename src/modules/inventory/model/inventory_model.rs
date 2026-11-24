@@ -98,8 +98,9 @@ pub struct ProductDocument {
     /// Current number of units in inventory stock — the sum of the product's
     /// stock movements (a derived column; see `sync::derived_*`).
     pub stock_quantity: i64,
-    /// Minimum threshold count for low-stock warning alerts.
-    pub min_stock_threshold: i64,
+    /// Stock level at or below which the shop is told this product is running low; `None` when
+    /// the product has no alert.
+    pub min_stock_threshold: Option<i64>,
     /// True when units of this product are tracked individually by serial number.
     pub is_serialized: bool,
     /// The warranty each unit comes with (coverage `none` when it has none).

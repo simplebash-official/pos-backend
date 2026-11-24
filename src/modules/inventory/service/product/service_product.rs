@@ -728,8 +728,8 @@ pub(crate) async fn update_product(
             {
                 conflicting.push("subcategoryKey");
             }
-            if let Some(min) = body.min_stock_threshold
-                && min != existing.min_stock_threshold
+            if let Some(requested) = body.min_stock_threshold
+                && requested != existing.min_stock_threshold
             {
                 conflicting.push("minStockThreshold");
             }
@@ -794,9 +794,10 @@ pub(crate) async fn update_product(
 
         let category_key = body.category_key.unwrap_or(existing.category_key);
         let subcategory_key = body.subcategory_key.unwrap_or(existing.subcategory_key);
-        let min_stock_threshold = body
-            .min_stock_threshold
-            .unwrap_or(existing.min_stock_threshold);
+        let min_stock_threshold = match body.min_stock_threshold {
+            Some(requested) => requested,
+            None => existing.min_stock_threshold,
+        };
 
         validate_min_stock_threshold(min_stock_threshold)?;
         let (category_name, subcategory_name) =
@@ -866,8 +867,9 @@ pub(super) fn validate_manual_barcode(value: &str) -> AppResult<()> {
     Ok(())
 }
 
-pub(super) fn validate_min_stock_threshold(min_stock_threshold: i64) -> AppResult<()> {
-    if min_stock_threshold < 0 {
+/// A product may have no alert level; one that has it cannot be negative.
+pub(super) fn validate_min_stock_threshold(min_stock_threshold: Option<i64>) -> AppResult<()> {
+    if min_stock_threshold.is_some_and(|alert_level| alert_level < 0) {
         return Err(AppError::validation(
             "Minimum stock threshold cannot be negative",
         ));
