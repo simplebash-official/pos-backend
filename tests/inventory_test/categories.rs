@@ -760,3 +760,309 @@ async fn uncategorized_is_seeded_usable_and_protected_on_mongo() {
 async fn uncategorized_is_seeded_usable_and_protected_on_sqlite() {
     check_uncategorized_is_seeded_usable_and_protected(&common::spawn_app_sqlite().await).await;
 }
+
+/// The URL of one subcategory.
+fn subcategory_path(category_key: &str, subcategory_key: &str) -> String {
+    format!("/api/inventory/categories/{category_key}/subcategories/{subcategory_key}")
+}
+
+/// Creates a category through the API with these subcategories; returns its key and a
+/// `(name, key)` pair for each subcategory, in the order given.
+async fn create_category_with(
+    app: &common::TestApp,
+    admin: &str,
+    names: &[&str],
+) -> (String, Vec<(String, String)>) {
+    let (status, created) = send_authed(
+        &app.router,
+        "POST",
+        "/api/inventory/categories",
+        Some(json!({
+            "name": format!("Rename Test {}", Uuid::new_v4()),
+            "icon": "Box",
+            "color": "blue",
+            "subcategories": names,
+        })),
+        admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let subcategories = created["data"]["subcategories"]
+        .as_array()
+        .expect("the value is an array")
+        .iter()
+        .map(|sub| {
+            (
+                sub["name"].as_str().expect("a name").to_string(),
+                sub["key"].as_str().expect("a key").to_string(),
+            )
+        })
+        .collect();
+    (
+        created["data"]["key"]
+            .as_str()
+            .expect("a category key")
+            .to_string(),
+        subcategories,
+    )
+}
+
+fn key_of(subcategories: &[(String, String)], name: &str) -> String {
+    subcategories
+        .iter()
+        .find(|(candidate, _)| candidate == name)
+        .map(|(_, key)| key.clone())
+        .expect("the subcategory was created")
+}
+
+fn names_of(category: &serde_json::Value) -> Vec<String> {
+    category["subcategories"]
+        .as_array()
+        .expect("the value is an array")
+        .iter()
+        .map(|sub| sub["name"].as_str().expect("a name").to_string())
+        .collect()
+}
+
+/// Renaming a subcategory changes only its name: same key, newer version, products and their
+/// SKU untouched; blank, duplicate and cross-category requests are refused; Admin only.
+async fn check_subcategory_rename(app: &common::TestApp) {
+    let admin = admin_token(&app.config);
+    let (category_key, subs) = create_category_with(app, &admin, &["Cases", "Chargers"]).await;
+    let cases = key_of(&subs, "Cases");
+    let chargers = key_of(&subs, "Chargers");
+
+    let (status, product) = send(
+        app,
+        "POST",
+        "/api/inventory/products",
+        Some(json!({
+            "name": "Rename Probe",
+            "categoryKey": category_key,
+            "subcategoryKey": cases,
+            "warranty": { "coverage": { "kind": "none" } },
+            "openingStock": { "quantity": 2, "unitCostCents": 500, "sellingPriceCents": 900 },
+            "minStockThreshold": 0,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{product}");
+    let product_id = product["data"]["id"].as_str().expect("an id").to_string();
+    let sku = product["data"]["sku"].as_str().expect("a sku").to_string();
+
+    // A rename, with surrounding spaces, in a used subcategory: key stays, name is trimmed,
+    // the version moves up, and the list stays sorted by name.
+    let (status, renamed) = send_authed(
+        &app.router,
+        "PUT",
+        &subcategory_path(&category_key, &cases),
+        Some(json!({ "name": "  Phone Cases  " })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{renamed}");
+    assert_eq!(
+        names_of(&renamed["data"]),
+        vec!["Chargers".to_string(), "Phone Cases".to_string()]
+    );
+    let after = renamed["data"]["subcategories"]
+        .as_array()
+        .expect("the value is an array")
+        .iter()
+        .find(|sub| sub["key"] == cases)
+        .expect("the key did not change");
+    assert_eq!(after["version"], 2);
+
+    // The product shows the new name at once and keeps its SKU.
+    let (status, product) = send(
+        app,
+        "GET",
+        &format!("/api/inventory/products/{product_id}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{product}");
+    assert_eq!(product["data"]["subcategory"], "Phone Cases");
+    assert_eq!(product["data"]["subcategoryKey"], cases);
+    assert_eq!(product["data"]["sku"], sku);
+
+    // The same name again changes nothing, not even the version.
+    let (status, same) = send_authed(
+        &app.router,
+        "PUT",
+        &subcategory_path(&category_key, &cases),
+        Some(json!({ "name": "Phone Cases" })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{same}");
+    let unchanged = same["data"]["subcategories"]
+        .as_array()
+        .expect("the value is an array")
+        .iter()
+        .find(|sub| sub["key"] == cases)
+        .expect("the key did not change");
+    assert_eq!(unchanged["version"], 2);
+
+    // A change of letter case alone is a rename, not a duplicate of itself.
+    let (status, cased) = send_authed(
+        &app.router,
+        "PUT",
+        &subcategory_path(&category_key, &cases),
+        Some(json!({ "name": "phone cases" })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cased}");
+    assert!(names_of(&cased["data"]).contains(&"phone cases".to_string()));
+
+    // Blank is refused.
+    let (status, blank) = send_authed(
+        &app.router,
+        "PUT",
+        &subcategory_path(&category_key, &cases),
+        Some(json!({ "name": "   " })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{blank}");
+
+    // Another subcategory of the same category already has this name.
+    let (status, clash) = send_authed(
+        &app.router,
+        "PUT",
+        &subcategory_path(&category_key, &cases),
+        Some(json!({ "name": "Chargers" })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{clash}");
+    assert_eq!(clash["code"], codes::SUBCATEGORY_ALREADY_EXISTS);
+
+    // The same name under a different category is fine.
+    let (other_key, other_subs) = create_category_with(app, &admin, &["Chargers"]).await;
+    let (status, elsewhere) = send_authed(
+        &app.router,
+        "PUT",
+        &subcategory_path(&other_key, &key_of(&other_subs, "Chargers")),
+        Some(json!({ "name": "Phone Cases" })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{elsewhere}");
+
+    // Unknown category, and a subcategory that belongs to another category.
+    let (status, missing) = send_authed(
+        &app.router,
+        "PUT",
+        &subcategory_path("cat_missing", &chargers),
+        Some(json!({ "name": "Anything" })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{missing}");
+    assert_eq!(missing["code"], codes::CATEGORY_NOT_FOUND);
+
+    let (status, wrong) = send_authed(
+        &app.router,
+        "PUT",
+        &subcategory_path(&other_key, &chargers),
+        Some(json!({ "name": "Anything" })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{wrong}");
+    assert_eq!(wrong["code"], codes::SUBCATEGORY_NOT_FOUND);
+
+    // Only the Admin may rename.
+    let (status, denied) = send_authed(
+        &app.router,
+        "PUT",
+        &subcategory_path(&category_key, &chargers),
+        Some(json!({ "name": "Power" })),
+        &manager_token(&app.config),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied}");
+    let (status, denied) = send_authed(
+        &app.router,
+        "PUT",
+        &subcategory_path(&category_key, &chargers),
+        Some(json!({ "name": "Power" })),
+        &token_with_role(&app.config, None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied}");
+
+    // The shipped General subcategory can be renamed (its key is what the till uses) but not removed.
+    let (status, general) = send_authed(
+        &app.router,
+        "PUT",
+        &subcategory_path("cat_uncategorized", "subcat_uncategorized_general"),
+        Some(json!({ "name": "Everything else" })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{general}");
+    assert_eq!(
+        names_of(&general["data"]),
+        vec!["Everything else".to_string()]
+    );
+    let (status, refused) = send_authed(
+        &app.router,
+        "DELETE",
+        &subcategory_path("cat_uncategorized", "subcat_uncategorized_general"),
+        None,
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(refused["code"], codes::SYSTEM_CATEGORY_PROTECTED);
+}
+
+#[tokio::test]
+async fn subcategory_rename_on_mongo() {
+    check_subcategory_rename(&common::spawn_app().await).await;
+}
+
+#[tokio::test]
+async fn subcategory_rename_on_sqlite() {
+    check_subcategory_rename(&common::spawn_app_sqlite().await).await;
+}
+
+/// On the cloud a subcategory travels folded into its category, so a rename must make the
+/// category newer, or devices would never pull the new name.
+#[tokio::test]
+async fn subcategory_rename_makes_the_category_newer_on_mongo() {
+    let app = common::spawn_app().await;
+    let admin = admin_token(&app.config);
+    let (category_key, subs) = create_category_with(&app, &admin, &["Cases"]).await;
+    let cases = key_of(&subs, "Cases");
+
+    let (status, before) = send(&app, "GET", "/api/inventory/categories", None).await;
+    assert_eq!(status, StatusCode::OK, "{before}");
+    let version_of = |listing: &serde_json::Value| {
+        listing["data"]["categories"]
+            .as_array()
+            .expect("the value is an array")
+            .iter()
+            .find(|category| category["key"] == category_key)
+            .expect("the category is listed")["version"]
+            .as_i64()
+            .expect("a version")
+    };
+    let first = version_of(&before);
+
+    let (status, renamed) = send_authed(
+        &app.router,
+        "PUT",
+        &subcategory_path(&category_key, &cases),
+        Some(json!({ "name": "Phone Cases" })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{renamed}");
+
+    let (_, after) = send(&app, "GET", "/api/inventory/categories", None).await;
+    assert_eq!(version_of(&after), first + 1);
+}

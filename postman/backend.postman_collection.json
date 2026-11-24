@@ -4777,6 +4777,43 @@
               "response": []
             },
             {
+              "name": "Rename Subcategory",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Phone Cameras\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{backendBaseUrl}}/api/inventory/categories/{{categoryKey}}/subcategories/{{subcategoryKey}}",
+                  "host": [
+                    "{{backendBaseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "inventory",
+                    "categories",
+                    "{{categoryKey}}",
+                    "subcategories",
+                    "{{subcategoryKey}}"
+                  ]
+                },
+                "description": "Rename a subcategory (looked up by its key). Only the display name changes: the key, the products in it and their SKUs stay the same. The name is trimmed; a blank name returns 400, a name another subcategory of the same category already has returns 409 `SUBCATEGORY_ALREADY_EXISTS` (changing only the letter case is allowed), and sending the current name changes nothing. The response is the whole category with its subcategories.\n\n**Requires admin JWT** (`role: admin` claim) — inherited Bearer token must be an admin token or the API returns 403 `ADMIN_REQUIRED`."
+              },
+              "response": []
+            },
+            {
               "name": "Remove Subcategory",
               "request": {
                 "method": "DELETE",

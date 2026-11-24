@@ -6,6 +6,7 @@ use crate::modules::inventory::model::SubcategoryDocument;
 use futures_util::TryStreamExt;
 use mongodb::bson::oid::ObjectId;
 use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
+use mongodb::options::ReturnDocument;
 use sqlx::Row;
 
 /// For `GET /inventory/stats`. Subcategories are hard-deleted, not
@@ -214,6 +215,45 @@ pub(crate) async fn list_subcategories_by_category(
                     .await?;
 
             rows.iter().map(row_to_subcategory_doc).collect()
+        }
+    }
+}
+
+/// Sets a subcategory's display name, bumping its `version` and `updated_at`,
+/// and returns the stored row, or `None` when no subcategory has this key. Like
+/// insert and delete, a Mongo rename also marks the parent category changed so
+/// devices pick it up; on SQLite the capture trigger does that.
+pub(crate) async fn rename_subcategory_by_key(
+    db: &Db,
+    key: &str,
+    name: &str,
+) -> AppResult<Option<SubcategoryDocument>> {
+    let now = BsonDateTime::now();
+    match db {
+        Db::Mongo(mongo) => {
+            let renamed = subcategories(mongo)
+                .find_one_and_update(
+                    doc! { "key": key },
+                    doc! { "$set": { "name": name, "updated_at": now }, "$inc": { "version": 1 } },
+                )
+                .return_document(ReturnDocument::After)
+                .await?;
+            if let Some(subcategory) = &renamed {
+                touch_parent_category(mongo, &subcategory.category_key).await?;
+            }
+            Ok(renamed)
+        }
+        Db::Sqlite(pool) => {
+            sqlx::query(
+                "UPDATE subcategories SET name = ?, version = version + 1, updated_at = ? \
+                 WHERE key = ?",
+            )
+            .bind(name)
+            .bind(bson_to_iso(&now))
+            .bind(key)
+            .execute(pool)
+            .await?;
+            find_subcategory_by_key(db, key).await
         }
     }
 }
