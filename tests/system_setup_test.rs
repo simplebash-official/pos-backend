@@ -143,13 +143,12 @@ async fn test_setup_without_sample_data_creates_clean_database() {
     )
     .await;
     assert_eq!(cat_status, StatusCode::OK);
-    assert_eq!(
-        cat_res["data"]["categories"]
-            .as_array()
-            .expect("the value is an array")
-            .len(),
-        0
-    );
+    // No sample categories: only the built-in "Uncategorized" every shop has.
+    let categories = cat_res["data"]["categories"]
+        .as_array()
+        .expect("the value is an array");
+    assert_eq!(categories.len(), 1);
+    assert_eq!(categories[0]["key"], "cat_uncategorized");
 
     // 3. Status endpoint now reflects setup completed with clean tables
     let (status, status_res) =

@@ -27,6 +27,7 @@ pub(crate) async fn get_daily_sales_report(
     let mut total_invoices = 0;
     let mut total_repair_revenue_cents = 0;
     let mut total_print_revenue_cents = 0;
+    let mut total_charge_revenue_cents = 0;
     let mut total_retail_revenue_cents = 0;
     let mut total_discounts_cents = 0;
     let mut payment_methods = PaymentMethodBreakdown::default();
@@ -36,6 +37,7 @@ pub(crate) async fn get_daily_sales_report(
         total_invoices += s.total_invoices;
         total_repair_revenue_cents += s.repair_revenue_cents;
         total_print_revenue_cents += s.print_revenue_cents;
+        total_charge_revenue_cents += s.charge_revenue_cents;
         total_retail_revenue_cents += s.retail_revenue_cents;
         total_discounts_cents += s.discount_cents;
 
@@ -51,6 +53,7 @@ pub(crate) async fn get_daily_sales_report(
         total_invoices,
         total_repair_revenue_cents,
         total_print_revenue_cents,
+        total_charge_revenue_cents,
         total_retail_revenue_cents,
         total_discounts_cents,
         payment_methods,

@@ -100,6 +100,7 @@ pub(crate) async fn aggregate_invoice_kpis(
                             "retail" => agg.retail_revenue_cents += revenue,
                             "repair" => agg.repair_revenue_cents += revenue,
                             "print" => agg.print_revenue_cents += revenue,
+                            "charge" => agg.charge_revenue_cents += revenue,
                             _ => {}
                         }
                     }
@@ -165,6 +166,7 @@ pub(crate) async fn aggregate_invoice_kpis(
                             }
                             "repair" => agg.repair_revenue_cents += line_total,
                             "print" => agg.print_revenue_cents += line_total,
+                            "charge" => agg.charge_revenue_cents += line_total,
                             _ => {}
                         }
                     }
@@ -287,6 +289,7 @@ pub(crate) async fn aggregate_revenue_series(
                             "retail" => entry.retail_revenue_cents += revenue,
                             "repair" => entry.repair_revenue_cents += revenue,
                             "print" => entry.print_revenue_cents += revenue,
+                            "charge" => entry.charge_revenue_cents += revenue,
                             _ => {}
                         }
                     }
@@ -351,6 +354,7 @@ pub(crate) async fn aggregate_revenue_series(
                             }
                             "repair" => entry.repair_revenue_cents += line_total,
                             "print" => entry.print_revenue_cents += line_total,
+                            "charge" => entry.charge_revenue_cents += line_total,
                             _ => {}
                         }
                     }
@@ -374,6 +378,7 @@ pub(crate) struct InvoiceKpiAggregate {
     pub retail_revenue_cents: i64,
     pub repair_revenue_cents: i64,
     pub print_revenue_cents: i64,
+    pub charge_revenue_cents: i64,
     pub retail_items_sold: i64,
     pub retail_cogs_cents: i64,
     /// Retail revenue on lines that carried a `unitCostCents` snapshot.
@@ -391,6 +396,7 @@ pub(crate) struct RawSeriesBucket {
     pub retail_revenue_cents: i64,
     pub repair_revenue_cents: i64,
     pub print_revenue_cents: i64,
+    pub charge_revenue_cents: i64,
     pub cogs_cents: i64,
     pub discount_cents: i64,
     pub invoice_count: u64,

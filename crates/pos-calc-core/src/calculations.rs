@@ -131,7 +131,7 @@ pub fn order_discount_cents(subtotal_cents: i64, discount_type: &str, discount_v
     }
 }
 
-/// Where a cart line's money came from, for the retail / repairs / print split.
+/// Where a cart line's money came from, for the retail / repairs / print / charges split.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -141,6 +141,8 @@ pub enum LineSource {
     Retail,
     Repair,
     Print,
+    /// A one-time charge: a service or fee with no stock behind it.
+    Charge,
 }
 
 /// What was typed as a cart line's discount. A percentage follows the line (it is a share of the
@@ -182,9 +184,10 @@ pub struct CartTotals {
     pub retail_cents: i64,
     pub repairs_cents: i64,
     pub print_cents: i64,
+    pub charges_cents: i64,
 }
 
-/// Every line, the subtotal, the order discount, the total and the retail/repairs/print split.
+/// Every line, the subtotal, the order discount, the total and the retail/repairs/print/charges split.
 pub fn cart_totals(
     lines: &[CartLine],
     discount_type: Option<&str>,
@@ -199,6 +202,7 @@ pub fn cart_totals(
         retail_cents: 0,
         repairs_cents: 0,
         print_cents: 0,
+        charges_cents: 0,
     };
     for line in lines {
         let gross = line_totals(line.unit_price_cents, line.quantity, 0)?.gross_cents;
@@ -218,6 +222,7 @@ pub fn cart_totals(
             LineSource::Retail => out.retail_cents = add(out.retail_cents)?,
             LineSource::Repair => out.repairs_cents = add(out.repairs_cents)?,
             LineSource::Print => out.print_cents = add(out.print_cents)?,
+            LineSource::Charge => out.charges_cents = add(out.charges_cents)?,
         }
         out.lines.push(totals);
     }
@@ -628,14 +633,23 @@ mod tests {
                 source: LineSource::Print,
                 ..retail(600, 2, 0)
             },
+            CartLine {
+                source: LineSource::Charge,
+                ..retail(300, 1, 0)
+            },
         ];
         let t = cart_totals(&mixed, Some("fixed"), 700.0).unwrap();
-        assert_eq!(t.subtotal_cents, 4700);
+        assert_eq!(t.subtotal_cents, 5000);
         assert_eq!(
-            (t.retail_cents, t.repairs_cents, t.print_cents),
-            (1000, 2500, 1200)
+            (
+                t.retail_cents,
+                t.repairs_cents,
+                t.print_cents,
+                t.charges_cents
+            ),
+            (1000, 2500, 1200, 300)
         );
-        assert_eq!((t.order_discount_cents, t.total_cents), (700, 4000));
+        assert_eq!((t.order_discount_cents, t.total_cents), (700, 4300));
     }
 
     fn pay(method: TenderMethod, total: i64, tendered: i64) -> PaymentInput<'static> {

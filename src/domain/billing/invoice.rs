@@ -223,7 +223,8 @@ pub struct InvoiceItem {
     /// zero, in any margin calculation that must not silently understate cost.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unit_cost_cents: Option<i64>,
-    /// Source category: `"retail"`, `"repair"`, or `"print"`.
+    /// Source category: `"retail"`, `"repair"`, `"print"`, or `"charge"` (a one-time charge with no
+    /// stock, ticket or cost on record).
     pub source_type: String,
     /// Key of linked repair or print job ticket, if applicable.
     #[serde(skip_serializing_if = "Option::is_none")]

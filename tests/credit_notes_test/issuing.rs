@@ -715,3 +715,114 @@ async fn credit_note_past_return_window_is_blocked_unless_manager_overrides() {
     assert_eq!(admin_status, StatusCode::OK, "{admin_body}");
     assert_eq!(admin_body["data"]["isManagerOverride"], true);
 }
+
+#[tokio::test]
+async fn charge_line_is_refunded_without_touching_stock_and_voids_cleanly() {
+    let app = common::spawn_app().await;
+    let token = staff_token(&app.config);
+
+    let sale = |amount: i64| {
+        json!({
+            "staff": { "cashierName": "Cashier Alice" },
+            "items": [{
+                "name": "Delivery fee",
+                "unitPriceCents": 1500,
+                "quantity": 2,
+                "discountCents": 0,
+                "sourceType": "charge"
+            }],
+            "payment": { "paymentMethod": "cash", "isCredit": false, "amountReceivedCents": amount },
+            "shopProfileSnapshot": { "tradingName": "Tech Shop" }
+        })
+    };
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/billing/sales",
+        Some(sale(3000)),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    let invoice_key = body["data"]["invoice"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
+
+    // A charge is not a physical item: damaged / disposition choices make no sense on it.
+    let damaged = json!({
+        "invoiceKey": invoice_key,
+        "returnedItems": [{
+            "name": "Delivery fee",
+            "quantity": 1,
+            "reason": "defective",
+            "condition": "damaged",
+            "disposition": "write_off_scrap"
+        }],
+        "paymentMethod": "cash"
+    });
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/billing/credit-notes",
+        Some(damaged),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "Body: {body}");
+
+    let refund = json!({
+        "invoiceKey": invoice_key,
+        "returnedItems": [{
+            "name": "Delivery fee",
+            "quantity": 1,
+            "reason": "defective",
+            "condition": "resalable"
+        }],
+        "paymentMethod": "cash"
+    });
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/billing/credit-notes",
+        Some(refund),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    assert_eq!(body["data"]["returnSubtotalCents"], 1500);
+    assert_eq!(body["data"]["netRefundCents"], 1500);
+    assert_eq!(body["data"]["refundCashCents"], 1500);
+    assert_eq!(body["data"]["returnedItems"][0]["sourceType"], "charge");
+    assert!(body["data"]["returnedItems"][0]["productKey"].is_null());
+
+    // A second sale on the same shape, voided, reverses nothing and warns about nothing.
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        "/api/billing/sales",
+        Some(sale(3000)),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    let second_key = body["data"]["invoice"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string();
+    let admin = admin_token(&app.config);
+    let (status, body) = send_authed(
+        &app.router,
+        "POST",
+        &format!("/api/billing/invoices/{second_key}/void"),
+        Some(json!({ "reason": "Entered by mistake" })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    assert_eq!(body["data"]["status"], "voided", "Body: {body}");
+    assert_eq!(
+        body["message"], "Invoice voided successfully",
+        "a charge has nothing to put back, so no warning: {body}"
+    );
+}

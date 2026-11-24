@@ -1,3 +1,4 @@
+mod charges;
 #[path = "../common/mod.rs"]
 mod common;
 mod documents_and_migrations;
