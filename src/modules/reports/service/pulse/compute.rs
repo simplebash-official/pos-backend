@@ -17,9 +17,6 @@ use crate::domain::reports::{
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 
-/// A product with no low-stock line of its own counts as low at this many units.
-const DEFAULT_LOW_STOCK_LINE: i64 = 5;
-
 /// Active jobs that mean a technician is full.
 const FULL_LOAD_JOBS: i64 = 5;
 
@@ -151,7 +148,7 @@ pub fn compute(input: &PulseInput) -> DashboardPulse {
                     selling_price_cents: item.unit_price_cents,
                     category: product.map(|p| p.category.clone()),
                     remaining_stock: product.map(|p| p.stock_quantity),
-                    min_threshold: product.map(|p| p.min_stock_threshold),
+                    min_threshold: product.and_then(|p| p.min_stock_threshold),
                 },
             ));
         }
@@ -168,11 +165,7 @@ pub fn compute(input: &PulseInput) -> DashboardPulse {
         .products
         .iter()
         .filter_map(|p| {
-            let line = if p.min_stock_threshold > 0 {
-                p.min_stock_threshold
-            } else {
-                DEFAULT_LOW_STOCK_LINE
-            };
+            let line = p.min_stock_threshold?;
             (p.stock_quantity <= line).then(|| PulseLowStock {
                 product_id: p.id.clone(),
                 reference: if p.sku.is_empty() {

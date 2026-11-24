@@ -7,7 +7,7 @@ use crate::clients::uow::{Backend, Unit};
 use crate::core::error::{AppError, AppResult};
 use crate::modules::inventory::model::ProductDocument;
 use mongodb::bson::oid::ObjectId;
-use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
+use mongodb::bson::{Bson, DateTime as BsonDateTime, Document, doc};
 use mongodb::options::ReturnDocument;
 
 pub(crate) async fn adjust_product_stock_pipeline(
@@ -288,8 +288,15 @@ pub(crate) async fn update_product(
             if let Ok(subcategory_key) = set_doc.get_str("subcategory_key") {
                 doc.subcategory_key = subcategory_key.to_string();
             }
-            if let Ok(min_stock) = set_doc.get_i64("min_stock_threshold") {
-                doc.min_stock_threshold = min_stock;
+            match set_doc.get("min_stock_threshold") {
+                Some(Bson::Int64(alert_level)) => doc.min_stock_threshold = Some(*alert_level),
+                Some(Bson::Null) => doc.min_stock_threshold = None,
+                Some(other) => {
+                    return Err(AppError::internal(format!(
+                        "min_stock_threshold update is not an integer or null: {other}"
+                    )));
+                }
+                None => {}
             }
             if let Ok(is_ser) = set_doc.get_bool("is_serialized") {
                 doc.is_serialized = is_ser;

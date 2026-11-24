@@ -11,7 +11,9 @@ CREATE TABLE IF NOT EXISTS products (
     category_key TEXT NOT NULL,
     subcategory_key TEXT NOT NULL,
     stock_quantity INTEGER NOT NULL DEFAULT 0,
-    min_stock_threshold INTEGER NOT NULL DEFAULT 0,
+    -- The stock level at or below which the shop is told this product is running low; NULL
+    -- means the product has no alert.
+    min_stock_threshold INTEGER,
     is_serialized INTEGER NOT NULL DEFAULT 0,
     -- The warranty each unit comes with (`domain::warranties::ProductWarranty` as JSON).
     warranty TEXT NOT NULL,

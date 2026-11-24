@@ -36,7 +36,7 @@ pub struct InventoryMetrics {
     pub total_categories: u64,
     /// Total count of subcategories.
     pub total_subcategories: u64,
-    /// Total number of products currently below low stock threshold.
+    /// Total number of products with an alert level that are at or below it.
     pub low_stock_alerts: u64,
 }
 

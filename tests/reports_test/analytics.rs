@@ -120,7 +120,7 @@ async fn inventory_valuation_and_top_products_report() {
         category_key: "cat_accessories".to_string(),
         subcategory_key: "subcat_cases".to_string(),
         stock_quantity: 20,
-        min_stock_threshold: 5,
+        min_stock_threshold: Some(5),
         is_serialized: false,
         warranty: ProductWarranty::none(),
         version: 1,
@@ -140,7 +140,7 @@ async fn inventory_valuation_and_top_products_report() {
         category_key: "cat_parts".to_string(),
         subcategory_key: "subcat_screens".to_string(),
         stock_quantity: 3, // Low stock (<= 5)
-        min_stock_threshold: 5,
+        min_stock_threshold: Some(5),
         is_serialized: true,
         warranty: simplebash_pos_backend::modules::warranties::migration::legacy_profile(Some(6)),
         version: 1,

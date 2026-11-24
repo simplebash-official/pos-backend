@@ -75,22 +75,27 @@ fn get_money_cents(
 }
 
 fn get_i64(row: &Value, keys: &[&str], default: i64) -> Result<i64, String> {
+    Ok(find_i64(row, keys)?.unwrap_or(default))
+}
+
+/// The first of `keys` that holds a number, or `None` when every one is absent or blank.
+fn find_i64(row: &Value, keys: &[&str]) -> Result<Option<i64>, String> {
     for key in keys {
         if let Some(val) = row.get(*key) {
             match val {
                 Value::Number(n) => {
                     if let Some(i) = n.as_i64() {
-                        return Ok(i);
+                        return Ok(Some(i));
                     }
                     if let Some(f) = n.as_f64() {
-                        return Ok(f.round() as i64);
+                        return Ok(Some(f.round() as i64));
                     }
                 }
                 Value::String(s) => {
                     let trimmed = s.trim();
                     if !trimmed.is_empty() {
                         match trimmed.parse::<i64>() {
-                            Ok(i) => return Ok(i),
+                            Ok(i) => return Ok(Some(i)),
                             Err(_) => {
                                 return Err(format!(
                                     "Expected an integer for '{key}', found '{s}'"
@@ -103,7 +108,7 @@ fn get_i64(row: &Value, keys: &[&str], default: i64) -> Result<i64, String> {
             }
         }
     }
-    Ok(default)
+    Ok(None)
 }
 
 fn get_bool(row: &Value, keys: &[&str], default: bool) -> bool {
@@ -458,7 +463,7 @@ pub(crate) async fn process_inventory_import(
             continue;
         }
 
-        let min_stock_threshold = match get_i64(
+        let min_stock_threshold = match find_i64(
             row,
             &[
                 "minStockThreshold",
@@ -468,10 +473,10 @@ pub(crate) async fn process_inventory_import(
                 "alertThreshold",
                 "alert_threshold",
             ],
-            0,
         ) {
-            Ok(th) if th >= 0 => th,
-            Ok(th) => {
+            Ok(None) => None,
+            Ok(Some(th)) if th >= 0 => Some(th),
+            Ok(Some(th)) => {
                 errors.push(ImportRowError {
                     row_number,
                     field: Some("minStockThreshold".to_string()),
