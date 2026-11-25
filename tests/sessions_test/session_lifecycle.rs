@@ -14,7 +14,9 @@ use tower::ServiceExt;
 
 #[tokio::test]
 async fn session_full_lifecycle_and_z_report() {
-    let app = common::spawn_app().await;
+    // Its own database: it sets the `admin` account's PIN, which another test on the shared
+    // database sets to a different one.
+    let app = common::spawn_app_isolated().await;
 
     // Seed Admin
     simplebash_pos_backend::seeds::admin::seed_admin(&app.db_handle, &app.config.seed_admin)
@@ -638,4 +640,8 @@ async fn session_full_lifecycle_and_z_report() {
             .len(),
         0
     );
+    app.mongo()
+        .drop()
+        .await
+        .expect("the throwaway database is dropped");
 }

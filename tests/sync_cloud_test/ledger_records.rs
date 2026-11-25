@@ -4,6 +4,8 @@
 
 use axum::http::StatusCode;
 use serde_json::Value;
+use simplebash_pos_backend::clients::indexes::ensure_indexes;
+use simplebash_pos_backend::core::config::TenantMode;
 use simplebash_pos_backend::core::tenancy::{Tenant, with_tenant};
 use simplebash_pos_backend::modules::cash_categories::service::ensure_system_categories;
 use simplebash_pos_backend::modules::inventory::service::stock_batch_migration::Mode;
@@ -121,6 +123,9 @@ async fn ledger_records_travel_from_the_web_to_a_device_and_back() {
 async fn the_backfill_publishes_rows_the_feed_never_had() {
     let _guard = SERIAL.lock().await;
     let app = common::spawn_app_multi_tenant().await;
+    // A repeat is refused by the unique index on `source_token`, which the server creates when it
+    // starts and the tool relies on.
+    ensure_indexes(app.mongo(), TenantMode::Multi).await;
     let tid = "tnt_backfill";
     // Written before anything watches the database, so no change is captured for them.
     shop_with_ledger(&app, tid).await;
