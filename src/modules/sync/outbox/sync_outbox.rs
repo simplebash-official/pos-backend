@@ -41,9 +41,12 @@ pub async fn list_outbox(db: &Db, query: OutboxQuery) -> AppResult<OutboxRespons
         let resource: String = entry.get("resource");
         let key: String = entry.get("key");
         let queued_op: String = entry.get("op");
-        let Some(spec) = resources::spec(&resource) else {
-            continue;
-        };
+        // Skipping a row here would let the next acknowledgement delete it unsent.
+        let spec = resources::spec(&resource).ok_or_else(|| {
+            AppError::internal(format!(
+                "queued row {seq} names an unknown resource '{resource}'"
+            ))
+        })?;
 
         let meta = sqlx::query(
             "SELECT updated_at_ms, device_id, version FROM sync_row_meta WHERE resource = ? AND key = ?",
@@ -91,9 +94,11 @@ pub async fn list_outbox(db: &Db, query: OutboxQuery) -> AppResult<OutboxRespons
             };
             let document = map_sqlite_row_to_document(&row);
             let mut hydrated = hydrate(db, spec.name, vec![document]).await?;
-            let Some(mut payload) = hydrated.pop() else {
-                continue;
-            };
+            let mut payload = hydrated.pop().ok_or_else(|| {
+                AppError::internal(format!(
+                    "queued row {seq} of '{resource}' could not be read"
+                ))
+            })?;
             // Some DTOs (supplier links) do not surface the legacy id, which
             // the receiver must preserve because foreign keys still use it.
             if let Some(object) = payload.as_object_mut() {

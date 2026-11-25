@@ -141,14 +141,13 @@ pub(super) async fn meta_i64(db: &Db, field: &str) -> AppResult<i64> {
     }
 }
 
-/// The oldest desktop app that may sync with this cloud: 1.31.0 is the first
-/// release with shared shop sessions, synced `shopProfiles` and `drawerState`,
-/// ledger-derived session totals, and `"session"` / `"cashMovement"` offline
-/// number blocks. An older app would overwrite shared session totals or miss
-/// shop profile / drawer state sync, so it is held back until it updates.
-/// (1.24.0 was lot-priced purchase lines and receipt charges; 1.23.0 supplier
-/// receipts; 1.14.0 stock batches.)
-pub(crate) const MIN_DESKTOP_APP_VERSION: (u64, u64, u64) = (1, 31, 0);
+/// The oldest desktop app that may sync with this cloud: 1.36.0 is the first release that can
+/// upload the money ledgers and shop rules (cash categories, payees, regular bills, incomes,
+/// openings, advance recoveries, attachments, drawer rules). An older app deletes such rows from
+/// its queue unsent and never received them, so it is held back until it updates.
+/// (1.31.0 was shared shop sessions and drawer state; 1.24.0 lot-priced purchase lines and
+/// receipt charges; 1.23.0 supplier receipts; 1.14.0 stock batches.)
+pub(crate) const MIN_DESKTOP_APP_VERSION: (u64, u64, u64) = (1, 36, 0);
 
 /// `"1.13.0"` (a `-suffix` such as `-dev` is ignored) as comparable numbers;
 /// `None` for anything that is not three dot-separated numbers.
