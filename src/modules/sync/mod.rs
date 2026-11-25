@@ -11,6 +11,7 @@ pub(crate) mod derived_mongo;
 pub(crate) mod derived_session;
 pub mod derived_sqlite;
 pub mod live;
+pub mod migration;
 pub(crate) mod mongo_codec;
 pub mod outbox;
 pub mod pull;

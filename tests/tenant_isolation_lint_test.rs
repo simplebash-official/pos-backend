@@ -19,6 +19,9 @@ const UNSCOPED_ALLOWED: &[&str] = &[
     // `with_tenant` per event; compaction walks the platform-wide log.
     "src/modules/sync/cloud_capture.rs",
     "src/modules/sync/compaction/",
+    // The one-time ledger backfill reads every shop's rows (read-only) and publishes each inside
+    // `with_tenant` for the shop that owns it.
+    "src/modules/sync/migration/ledger_backfill.rs",
     // The realtime watcher reads every tenant's change-log inserts (read-only)
     // and hands each event only to subscribers of that row's own `tenant_id`.
     "src/modules/sync/live/",

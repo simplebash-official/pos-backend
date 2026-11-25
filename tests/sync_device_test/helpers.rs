@@ -298,8 +298,16 @@ pub(crate) async fn table_rows(pool: &SqlitePool, table: &str) -> Vec<Value> {
             // Subcategories and the locally seeded shop profile mint a per-device id
             // while remaining keyed by business key across replicas.
             // Shipped rows (the built-in Uncategorized category and its subcategory, the shop
-            // profile) are seeded on each device with the same key but their own local id.
-            if table == "categories" || table == "subcategories" || table == "shop_profiles" {
+            // profile, the cash categories and the drawer rules) are seeded on each device with
+            // the same key but their own local id.
+            if matches!(
+                table,
+                "categories"
+                    | "subcategories"
+                    | "shop_profiles"
+                    | "cash_categories"
+                    | "cash_settings"
+            ) {
                 object.remove("id");
                 object.remove("_id");
             }

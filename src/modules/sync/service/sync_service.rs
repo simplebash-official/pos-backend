@@ -1,5 +1,5 @@
 use crate::clients::db::Db;
-use crate::core::error::AppResult;
+use crate::core::error::{AppError, AppResult};
 use crate::domain::sync::{
     ResourceChanges, ResourceSyncStatus, SyncChangesQuery, SyncChangesResponse, SyncStatusResponse,
 };
@@ -282,12 +282,19 @@ pub(crate) async fn hydrate(
         "receiptCharges" | "receipt_charges" => to_values(
             purchases_receipt_service::hydrate_charge_documents(documents)?,
         )?,
-        // The expense ledger has no read-time enrichment on its stored rows, so the wire shape is
-        // the stored fields in camelCase.
+        // The money ledgers and shop rules travel as stored, in camelCase: a device writes every
+        // column back, and the REST DTOs leave some out (`normalized_name`, an attachment's
+        // image) or add figures worked out on read.
         "expenses" | "expensePayments" | "expense_payments" | "shopProfiles" | "shop_profiles"
         | "drawerState" | "drawer_state" | "registerSessions" | "register_sessions"
         | "cashMovements" | "cash_movements" | "notifications" | "notificationReads"
-        | "notification_reads" => documents.into_iter().map(stored_fields_to_json).collect(),
+        | "notification_reads" | "payees" | "cashCategories" | "cash_categories"
+        | "recurringExpenses" | "recurring_expenses" | "incomes" | "accountOpenings"
+        | "account_openings" | "balanceOpenings" | "balance_openings" | "advanceRecoveries"
+        | "advance_recoveries" | "attachments" | "cashSettings" | "cash_settings" => documents
+            .into_iter()
+            .map(stored_fields_to_json)
+            .collect::<AppResult<_>>()?,
         "stockMovements" | "stock_movements" => {
             to_values(inventory_stock::hydrate_sync_documents(documents)?)?
         }
@@ -331,14 +338,18 @@ pub(crate) async fn hydrate(
         "repairServices" | "repair_service_templates" => to_values(
             crate::modules::repairs::service::hydrate_sync_services(documents)?,
         )?,
-        _ => Vec::new(),
+        _ => {
+            return Err(AppError::internal(format!(
+                "no sync hydrator for resource '{resource}'"
+            )));
+        }
     };
     Ok(values)
 }
 
 /// A stored document as the camelCase JSON a device applies: `_id` becomes `id`, dates become
 /// RFC 3339 text, and the tenant marker (`tenant_id`) never leaves the cloud.
-fn stored_fields_to_json(document: Document) -> Value {
+fn stored_fields_to_json(document: Document) -> AppResult<Value> {
     fn camel(snake: &str) -> String {
         let mut out = String::with_capacity(snake.len());
         let mut upper = false;
@@ -354,29 +365,37 @@ fn stored_fields_to_json(document: Document) -> Value {
         }
         out
     }
-    fn convert(value: mongodb::bson::Bson) -> Value {
+    fn convert(value: mongodb::bson::Bson) -> AppResult<Value> {
         use mongodb::bson::Bson;
-        match value {
+        Ok(match value {
             Bson::ObjectId(id) => Value::String(id.to_hex()),
             Bson::DateTime(date) => Value::String(date.to_chrono().to_rfc3339()),
             Bson::Document(inner) => Value::Object(
                 inner
                     .into_iter()
-                    .map(|(k, v)| (camel(&k), convert(v)))
-                    .collect(),
+                    .map(|(k, v)| Ok((camel(&k), convert(v)?)))
+                    .collect::<AppResult<_>>()?,
             ),
-            Bson::Array(items) => Value::Array(items.into_iter().map(convert).collect()),
+            Bson::Array(items) => {
+                Value::Array(items.into_iter().map(convert).collect::<AppResult<_>>()?)
+            }
             Bson::String(text) => Value::String(text),
             Bson::Boolean(flag) => Value::Bool(flag),
             Bson::Int32(n) => Value::from(n),
             Bson::Int64(n) => Value::from(n),
             Bson::Double(n) => Value::from(n),
-            // The ledger rows hold only text, numbers, booleans, dates and ids; anything else
-            // would be a field this conversion has not been taught.
-            _ => Value::Null,
-        }
+            Bson::Null => Value::Null,
+            // The ledger rows hold only the types above; anything else would be a field this
+            // conversion has not been taught, and sending it as empty would erase it.
+            other => {
+                return Err(AppError::internal(format!(
+                    "cannot send a stored {:?} value to a device",
+                    other.element_type()
+                )));
+            }
+        })
     }
-    Value::Object(
+    Ok(Value::Object(
         document
             .into_iter()
             .filter(|(key, _)| key != crate::core::tenancy::TENANT_FIELD)
@@ -386,10 +405,10 @@ fn stored_fields_to_json(document: Document) -> Value {
                 } else {
                     camel(&key)
                 };
-                (name, convert(value))
+                Ok((name, convert(value)?))
             })
-            .collect(),
-    )
+            .collect::<AppResult<_>>()?,
+    ))
 }
 
 fn to_values<T: serde::Serialize>(items: Vec<T>) -> AppResult<Vec<Value>> {
@@ -428,3 +447,28 @@ pub(super) const SYNCABLE: &[(&str, &str)] = &[
     ("creditNotes", "credit_notes"),
     ("productSerials", "product_serials"),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A synced resource without an arm in `hydrate` can never leave a device or enter the cloud's
+    /// change feed, so every one of them must be known to it.
+    #[tokio::test]
+    async fn every_synced_resource_has_a_hydrator() {
+        use crate::clients::sqlite;
+        use crate::core::logging::SqlLogging;
+        use crate::modules::sync::resources::SYNC_RESOURCES;
+
+        let pool = sqlite::connect("sqlite::memory:", SqlLogging::Off)
+            .await
+            .expect("an in-memory database opens");
+        let db = Db::Sqlite(pool);
+        let synced = SYNC_RESOURCES.iter().map(|spec| spec.name);
+        let legacy_feed = SYNCABLE.iter().map(|(name, _table)| *name);
+        for resource in synced.chain(legacy_feed) {
+            let hydrated = hydrate(&db, resource, Vec::new()).await;
+            assert!(hydrated.is_ok(), "{resource}: {hydrated:?}");
+        }
+    }
+}
