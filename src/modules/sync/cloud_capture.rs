@@ -242,6 +242,34 @@ async fn clear_resume_token(db: &Db, holder: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// The shop a stored document belongs to; `None` for one that belongs to no shop.
+pub(crate) fn shop_of(document: &Document) -> Option<&str> {
+    match document.get_str("tenant_id") {
+        Ok(shop) if shop != DENY_TENANT => Some(shop),
+        _ => None,
+    }
+}
+
+/// Publishes `full`, a document of `table` read outside the change stream, to `shop`'s feed. The
+/// token names `source` and the exact revision, so publishing that revision again from the same
+/// source adds nothing.
+pub(crate) async fn republish(
+    db: &Db,
+    table: &str,
+    shop: &str,
+    full: Document,
+    source: &str,
+) -> AppResult<()> {
+    let key = crate::modules::sync::apply_mongo::required_str(&full, "key")?.to_string();
+    let version = crate::modules::sync::apply_mongo::required_i64(&full, "version")?;
+    let updated_ms = full
+        .get_datetime("updated_at")
+        .map_err(|err| AppError::internal(format!("stored document has no updated_at: {err}")))?
+        .timestamp_millis();
+    let token = format!("{source}:{table}:{key}:{updated_ms}:{version}");
+    with_tenant(Tenant::id(shop)?, publish(db, table, full, &token)).await
+}
+
 /// Re-publishes everything written since `since` (the last saved position, minus a margin): every
 /// document of a syncable collection changed after it, and every hard-delete marker. Each row gets
 /// its own `source_token`, so a document published twice just produces a second, identical change.
@@ -260,23 +288,10 @@ async fn catch_up(db: &Db, since: BsonDateTime) -> AppResult<usize> {
             .find(doc! { "updated_at": { "$gte": since } })
             .await?;
         while let Some(full) = cursor.try_next().await? {
-            let Ok(tenant_id) = full.get_str("tenant_id") else {
+            let Some(shop) = shop_of(&full).map(str::to_owned) else {
                 continue;
             };
-            if tenant_id == DENY_TENANT {
-                continue;
-            }
-            let tenant = Tenant::id(tenant_id)?;
-            let key = crate::modules::sync::apply_mongo::required_str(&full, "key")?.to_string();
-            let version = crate::modules::sync::apply_mongo::required_i64(&full, "version")?;
-            let updated_ms = full
-                .get_datetime("updated_at")
-                .map_err(|err| {
-                    AppError::internal(format!("stored document has no updated_at: {err}"))
-                })?
-                .timestamp_millis();
-            let token = format!("catchup:{}:{key}:{updated_ms}:{version}", spec.table);
-            with_tenant(tenant, publish(db, spec.table, full, &token)).await?;
+            republish(db, spec.table, &shop, full, "catchup").await?;
             published += 1;
         }
     }
@@ -544,15 +559,14 @@ async fn publish(db: &Db, collection: &str, full: Document, source_token: &str) 
     } else {
         let value = hydrate(db, spec.name, vec![doc_for_change.clone()])
             .await?
-            .into_iter()
-            .next();
-        match value {
-            Some(v) => Some(
-                bson::serialize_to_bson(&v)
-                    .map_err(|e| AppError::internal(format!("cannot store payload: {e}")))?,
-            ),
-            None => return Ok(()),
-        }
+            .pop()
+            .ok_or_else(|| {
+                AppError::internal(format!("{} document '{key}' could not be read", spec.name))
+            })?;
+        Some(
+            bson::serialize_to_bson(&value)
+                .map_err(|e| AppError::internal(format!("cannot store payload: {e}")))?,
+        )
     };
 
     let device = doc_for_change

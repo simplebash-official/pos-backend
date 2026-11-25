@@ -6,9 +6,9 @@ use crate::domain::sync_local::{
     SyncStateResponse, UpdateSyncStateRequest,
 };
 use crate::modules::sync::resources;
-use crate::modules::sync::resources::{Phase, SYNC_RESOURCES};
+use crate::modules::sync::resources::{Phase, ResourceSpec, SYNC_RESOURCES};
 use chrono::{DateTime, Utc};
-use sqlx::{Row, SqlitePool};
+use sqlx::{Row, SqliteConnection, SqlitePool};
 
 /// Drops outbox rows the cloud has accepted (`seq <= up_to`). Rows enqueued
 /// while a push was in flight have higher sequence numbers and are kept.
@@ -262,6 +262,29 @@ pub async fn resolve_conflict(db: &Db, key: &str, resolution: &str) -> AppResult
     .await
 }
 
+/// Queues every row of one synced table for upload (a tombstoned row as a delete) and returns how
+/// many that was. The rows' merge metadata is left as it is.
+pub(crate) async fn enqueue_every_row(
+    conn: &mut SqliteConnection,
+    spec: &ResourceSpec,
+) -> Result<i64, sqlx::Error> {
+    let op_expr = if spec.soft_delete {
+        "CASE WHEN deleted_at IS NOT NULL THEN 'delete' ELSE 'upsert' END"
+    } else {
+        "'upsert'"
+    };
+    let queued = sqlx::query(&format!(
+        "INSERT OR REPLACE INTO sync_outbox (resource, key, op, enqueued_at) \
+         SELECT '{name}', key, {op_expr}, strftime('%Y-%m-%dT%H:%M:%fZ', 'now') FROM {table}",
+        name = spec.name,
+        table = spec.table,
+    ))
+    .execute(conn)
+    .await?
+    .rows_affected();
+    i64::try_from(queued).map_err(|err| sqlx::Error::Protocol(err.to_string()))
+}
+
 /// Enqueues every row of every synced table (and records its merge metadata)
 /// - the initial upload of a device that becomes a tenant's first device.
 pub async fn seed_outbox(db: &Db) -> AppResult<SeedResponse> {
@@ -269,26 +292,12 @@ pub async fn seed_outbox(db: &Db) -> AppResult<SeedResponse> {
     let mut tx = pool.begin().await?;
     let mut enqueued = 0i64;
     for spec in SYNC_RESOURCES.iter().filter(|s| s.phase == Phase::P3a) {
-        let op_expr = if spec.soft_delete {
-            "CASE WHEN deleted_at IS NOT NULL THEN 'delete' ELSE 'upsert' END"
-        } else {
-            "'upsert'"
-        };
+        enqueued += enqueue_every_row(&mut tx, spec).await?;
         let version_expr = if spec.table == "product_serials" {
             "1"
         } else {
             "version"
         };
-        let inserted = sqlx::query(&format!(
-            "INSERT OR REPLACE INTO sync_outbox (resource, key, op, enqueued_at) \
-             SELECT '{name}', key, {op_expr}, strftime('%Y-%m-%dT%H:%M:%fZ', 'now') FROM {table}",
-            name = spec.name,
-            table = spec.table,
-        ))
-        .execute(&mut *tx)
-        .await?
-        .rows_affected();
-        enqueued += inserted as i64;
         sqlx::query(&format!(
             "INSERT OR REPLACE INTO sync_row_meta (resource, key, updated_at_ms, device_id, version) \
              SELECT '{name}', key, \

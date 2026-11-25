@@ -8,6 +8,7 @@ mod sync_state;
 
 pub use sync_state::ack_outbox;
 pub use sync_state::enable;
+pub(crate) use sync_state::enqueue_every_row;
 pub use sync_state::get_state;
 pub use sync_state::list_conflicts;
 pub use sync_state::migrate_opening_balances;

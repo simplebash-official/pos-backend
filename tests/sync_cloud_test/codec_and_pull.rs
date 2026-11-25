@@ -7,6 +7,7 @@ use mongodb::bson::{Bson, Document, doc};
 use serde_json::{Value, json};
 
 use simplebash_pos_backend::core::tenancy::{Tenant, with_tenant};
+use simplebash_pos_backend::modules::cash_categories::service::ensure_system_categories;
 
 use simplebash_pos_backend::modules::sync::apply_mongo::test_support::{
     encode_for_test, hydrate_for_test,
@@ -69,6 +70,13 @@ async fn codec_round_trips_real_documents() {
     web_quotation(&app, "tnt_codec", "Active customer").await;
     let cancelled = web_quotation(&app, "tnt_codec", "Cancelled customer").await;
     web_cancel_quotation(&app, "tnt_codec", &text(&cancelled, "/key")).await;
+    with_tenant(
+        Tenant::id("tnt_codec").expect("the tenant id is valid"),
+        ensure_system_categories(&app.db_handle),
+    )
+    .await
+    .expect("the built-in categories are seeded");
+    common::create_ledger_records(&app.router, &admin_token(&app, "tnt_codec")).await;
     let tenant = Tenant::id("tnt_codec").expect("the tenant id is valid");
 
     // Exactly the columns the merge rules manage themselves.
@@ -82,7 +90,7 @@ async fn codec_round_trips_real_documents() {
         "deleted_at",
     ];
     let mut checked = 0;
-    for (resource, table) in [
+    let tables = [
         ("categories", "categories"),
         ("suppliers", "suppliers"),
         ("products", "products"),
@@ -92,7 +100,8 @@ async fn codec_round_trips_real_documents() {
         ("invoices", "invoices"),
         ("payments", "payments"),
         ("quotations", "quotations"),
-    ] {
+    ];
+    for (resource, table) in tables.into_iter().chain(common::LEDGER_RESOURCES) {
         let mut cursor = mongodb::Collection::<Document>::find(
             &app.mongo().collection::<Document>(table),
             doc! { "tenant_id": "tnt_codec" },
@@ -504,6 +513,8 @@ async fn an_outdated_desktop_app_cannot_push_or_pull_until_it_updates() {
     refused(register("1.23.0").await);
     refused(register("1.24.0").await);
     refused(register("1.30.0").await);
+    refused(register("1.31.0").await);
+    refused(register("1.35.1").await);
     refused(register("not-a-version").await);
     try_all().await.into_iter().for_each(refused);
     let stored = app
@@ -515,7 +526,7 @@ async fn an_outdated_desktop_app_cannot_push_or_pull_until_it_updates() {
     assert_eq!(stored, 0, "nothing from the outdated app was applied");
 
     // After the update it registers its new version and syncs as usual.
-    let (status, body) = register("1.31.0").await;
+    let (status, body) = register("1.36.0").await;
     assert_eq!(status, StatusCode::OK, "{body}");
     for (status, body) in try_all().await {
         assert_eq!(status, StatusCode::OK, "{body}");

@@ -443,7 +443,9 @@ async fn sync_changes_cursor_and_tombstones() {
 
 #[tokio::test]
 async fn sync_status_returns_latest_resource_timestamps() {
-    let app = common::spawn_app().await;
+    // Its own database: the cursor must still be the newest when it is replayed, and other tests
+    // on the shared database write categories at the same time.
+    let app = common::spawn_app_isolated().await;
 
     // 1. Unauthenticated request -> 401
     let req = Request::builder()
@@ -539,6 +541,10 @@ async fn sync_status_returns_latest_resource_timestamps() {
             .len(),
         0
     );
+    app.mongo()
+        .drop()
+        .await
+        .expect("the throwaway database is dropped");
 }
 
 /// The delta feed and the REST snapshot feed are mirrored into the same

@@ -140,6 +140,7 @@ pub async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     super::super::sync_capture::install_triggers(pool)
         .await
         .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
+    crate::modules::sync::migration::migrate_sqlite(pool).await?;
     tracing::info!("SQLite database schema and indexes initialized");
     Ok(())
 }
@@ -171,6 +172,10 @@ pub fn map_sqlite_row_to_document(row: &sqlx::sqlite::SqliteRow) -> mongodb::bso
                         | "no_receipt"
                         | "is_manager_override"
                         | "is_active"
+                        | "active"
+                        | "pinned"
+                        | "is_system"
+                        | "requires_receipt"
                         | "has_out_of_stock_items"
                         | "allow_shared_user_sessions"
                         | "allow_staff_multi_device_sessions"
