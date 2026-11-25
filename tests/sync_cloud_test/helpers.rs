@@ -359,6 +359,30 @@ pub(crate) async fn seed_tenant(app: &common::TestApp, tid: &str) -> Seed {
     }
 }
 
+/// Every change in the shop's snapshot, all pages.
+pub(crate) async fn snapshot(app: &common::TestApp, token: &str) -> Vec<Value> {
+    let mut changes = Vec::new();
+    let mut page: Option<String> = None;
+    loop {
+        let uri = match &page {
+            Some(page) => format!("/api/sync/snapshot?limit=500&page={page}"),
+            None => "/api/sync/snapshot?limit=500".to_string(),
+        };
+        let (status, body) = call(&app.router, "GET", &uri, Some(token), None).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        changes.extend(
+            body["data"]["changes"]
+                .as_array()
+                .expect("changes is an array")
+                .clone(),
+        );
+        page = body["data"]["nextPage"].as_str().map(str::to_owned);
+        if page.is_none() {
+            return changes;
+        }
+    }
+}
+
 pub(crate) async fn drop_db(app: &common::TestApp) {
     app.mongo().drop().await.ok();
 }

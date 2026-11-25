@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 /// What a run found (and, unless it was a dry run, published).
 #[derive(Debug, Default)]
 pub struct Report {
-    /// Ledger documents per shop id.
+    /// Documents found per shop id.
     pub shops: BTreeMap<String, u64>,
 }
 
