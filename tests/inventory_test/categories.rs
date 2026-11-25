@@ -1022,7 +1022,14 @@ async fn check_subcategory_rename(app: &common::TestApp) {
 
 #[tokio::test]
 async fn subcategory_rename_on_mongo() {
-    check_subcategory_rename(&common::spawn_app().await).await;
+    // Its own database: it renames the shipped General subcategory, whose name other tests on the
+    // shared database check.
+    let app = common::spawn_app_isolated().await;
+    check_subcategory_rename(&app).await;
+    app.mongo()
+        .drop()
+        .await
+        .expect("the throwaway database is dropped");
 }
 
 #[tokio::test]
