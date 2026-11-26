@@ -20,7 +20,7 @@ pub struct PrintJobDocument {
     pub customer_name: String,
     /// Customer phone number snapshot.
     pub customer_phone: String,
-    /// Type of print job ("mug", "t-shirt", "handbill", "banner", "custom").
+    /// Type of print job ("mug", "t-shirt", "handbill", "banner", "photo-framing", "custom").
     pub job_type: String,
     /// Number of items to print.
     pub quantity: i32,

@@ -93,6 +93,7 @@ fn print_job_title(job_type: &str) -> AppResult<&'static str> {
         "t-shirt" => Ok("T-shirt"),
         "handbill" => Ok("Handbill"),
         "banner" => Ok("Banner"),
+        "photo-framing" => Ok("Photo & Framing"),
         "custom" => Ok("Custom print"),
         other => Err(AppError::internal(format!(
             "print job is stored with the unknown type `{other}`"
@@ -167,5 +168,18 @@ impl JobReceiptSource {
             promised_ready_on: job.promised_ready_at.clone(),
             is_warranty_rework,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::print_job_title;
+
+    #[test]
+    fn photo_framing_is_named_on_the_receipt() {
+        assert_eq!(
+            print_job_title("photo-framing").ok(),
+            Some("Photo & Framing")
+        );
     }
 }

@@ -45,7 +45,7 @@ pub struct PrintJob {
     pub customer_name: String,
     /// Customer contact phone.
     pub customer_phone: String,
-    /// `"mug" | "t-shirt" | "handbill" | "banner" | "custom"` — validated
+    /// `"mug" | "t-shirt" | "handbill" | "banner" | "photo-framing" | "custom"`, validated
     /// against that fixed set in `service`, not modeled as a Rust enum so
     /// the frontend's `PrintJobType` union stays the single source of truth
     /// without a serde-rename mapping to keep in sync.

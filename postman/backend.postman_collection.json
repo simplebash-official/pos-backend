@@ -5524,7 +5524,7 @@
           "response": []
         }
       ],
-      "description": "Print job ticket CRUD (mug/t-shirt/handbill/banner/custom jobs). `GET /` is now the real list endpoint, not a status stub — see List Print Jobs' description."
+      "description": "Print job ticket CRUD (mug/t-shirt/handbill/banner/photo-framing/custom jobs). `GET /` is now the real list endpoint, not a status stub — see List Print Jobs' description."
     },
     {
       "name": "Quotations",

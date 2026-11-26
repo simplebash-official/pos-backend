@@ -862,6 +862,22 @@ async fn a_refunded_print_line_loses_its_warranties(app: &common::TestApp, shop:
     assert_eq!(shop.warranties(app, &key).await[0]["state"], "void");
 }
 
+async fn photo_framing_job(app: &common::TestApp, shop: &Shop) {
+    let created = ok(
+        app,
+        "POST",
+        "/api/print-jobs",
+        Some(json!({
+            "customer": { "customerKey": shop.customer },
+            "jobType": "photo-framing", "quantity": 3,
+            "items": [service("8x10 photo print", 3, 45_000)],
+        })),
+        &shop.staff,
+    )
+    .await;
+    assert_eq!(created["jobType"], "photo-framing");
+}
+
 async fn scenario(app: &common::TestApp) {
     let shop = Shop::open(app).await;
     print_services(app, &shop).await;
@@ -872,6 +888,7 @@ async fn scenario(app: &common::TestApp) {
     rework_claim(app, &shop, &delivered).await;
     rejected_claim_becomes_a_paid_print_job(app, &shop, &delivered).await;
     a_refunded_print_line_loses_its_warranties(app, &shop).await;
+    photo_framing_job(app, &shop).await;
 }
 
 #[tokio::test]

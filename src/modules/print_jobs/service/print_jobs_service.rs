@@ -739,7 +739,14 @@ fn clean_note(typed: &str) -> AppResult<Option<String>> {
     Ok((!note.is_empty()).then(|| note.to_string()))
 }
 
-const VALID_JOB_TYPES: &[&str] = &["mug", "t-shirt", "handbill", "banner", "custom"];
+const VALID_JOB_TYPES: &[&str] = &[
+    "mug",
+    "t-shirt",
+    "handbill",
+    "banner",
+    "photo-framing",
+    "custom",
+];
 
 pub(super) fn validate_job_type(job_type: &str) -> AppResult<()> {
     if VALID_JOB_TYPES.contains(&job_type) {
