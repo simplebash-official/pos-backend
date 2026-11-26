@@ -22,6 +22,9 @@ const UNSCOPED_ALLOWED: &[&str] = &[
     // The one-time ledger backfill reads every shop's rows (read-only) and publishes each inside
     // `with_tenant` for the shop that owns it.
     "src/modules/sync/migration/ledger_backfill.rs",
+    // The one-time user version backfill numbers every shop's accounts that have no version; its
+    // only write adds that field to the account it just read.
+    "src/modules/sync/migration/user_version_backfill.rs",
     // The realtime watcher reads every tenant's change-log inserts (read-only)
     // and hands each event only to subscribers of that row's own `tenant_id`.
     "src/modules/sync/live/",

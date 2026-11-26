@@ -5,4 +5,5 @@ mod helpers;
 mod ledger_records;
 mod push_and_conflicts;
 mod shared_sessions;
+mod user_records;
 mod web_edits;

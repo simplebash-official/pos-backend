@@ -6,7 +6,7 @@ use crate::domain::users::Role;
 use crate::modules::users::model::UserDocument;
 use futures_util::TryStreamExt;
 use mongodb::bson::oid::ObjectId;
-use mongodb::bson::{Bson, DateTime as BsonDateTime, Document, doc};
+use mongodb::bson::{Bson, DateTime as BsonDateTime, Document, doc, serialize_to_document};
 use mongodb::options::ReturnDocument;
 use sqlx::Row;
 
@@ -164,7 +164,16 @@ pub(crate) async fn find_users_by_employee_keys(
 pub(crate) async fn insert_user(db: &Db, mut document: UserDocument) -> AppResult<UserDocument> {
     match db {
         Db::Mongo(db) => {
-            let result = users(db).insert_one(&document).await?;
+            let mut stored = serialize_to_document(&document).map_err(|err| {
+                AppError::internal(format!("failed to encode the user document: {err}"))
+            })?;
+            // Sync refuses a record without a version. `UserDocument` does not declare it, so an
+            // account stored without one still signs in until `migrate_user_versions` has run.
+            stored.insert("version", 1_i64);
+            let result = db
+                .collection::<Document>("users")
+                .insert_one(stored)
+                .await?;
             document.id = Some(
                 result
                     .inserted_id
