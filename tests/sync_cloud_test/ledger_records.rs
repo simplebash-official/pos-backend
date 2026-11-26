@@ -15,7 +15,8 @@ use std::collections::BTreeSet;
 use crate::common;
 use crate::common::{LEDGER_RESOURCES, create_ledger_records};
 use crate::helpers::{
-    SERIAL, admin_token, call, device_token, drop_db, push, record, reid, start, statuses, wait_for,
+    SERIAL, admin_token, call, device_token, drop_db, push, record, reid, snapshot, start,
+    statuses, wait_for,
 };
 
 /// A shop with its built-in cash categories and one record of every ledger kind, made on the web.
@@ -43,29 +44,6 @@ fn missing_from(changes: &[Value]) -> Vec<&'static str> {
         .map(|(resource, _)| *resource)
         .filter(|resource| !present.contains(*resource))
         .collect()
-}
-
-async fn snapshot(app: &common::TestApp, token: &str) -> Vec<Value> {
-    let mut changes = Vec::new();
-    let mut page: Option<String> = None;
-    loop {
-        let uri = match &page {
-            Some(page) => format!("/api/sync/snapshot?limit=500&page={page}"),
-            None => "/api/sync/snapshot?limit=500".to_string(),
-        };
-        let (status, body) = call(&app.router, "GET", &uri, Some(token), None).await;
-        assert_eq!(status, StatusCode::OK, "{body}");
-        changes.extend(
-            body["data"]["changes"]
-                .as_array()
-                .expect("changes is an array")
-                .clone(),
-        );
-        page = body["data"]["nextPage"].as_str().map(str::to_owned);
-        if page.is_none() {
-            return changes;
-        }
-    }
 }
 
 #[tokio::test]
