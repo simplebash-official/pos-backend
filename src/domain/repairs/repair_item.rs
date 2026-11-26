@@ -5,8 +5,9 @@
 //! These types are stored inside the repair document exactly as sent, so the camelCase field
 //! names are also the stored names (the same rule as `ProductWarranty` and `InvoiceItem`).
 
+use crate::domain::applied_discount::AppliedDiscount;
 use crate::domain::warranties::ProductWarranty;
-use pos_calc_core::repair::ItemDiscount;
+use pos_calc_core::item_discount::ItemDiscount;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -35,17 +36,6 @@ pub enum RepairPart {
     },
 }
 
-/// The discount on one item: as typed (so it can be edited again) and what the server worked it
-/// out to, stored together like `part_cents` and `part_cost_cents`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct RepairItemDiscount {
-    #[serde(flatten)]
-    pub typed: ItemDiscount,
-    /// What the discount comes to, in cents (`pos_calc_core::repair::item_discount_cents`).
-    pub amount_cents: i64,
-}
-
 /// One piece of work on a job, as stored and returned.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -64,7 +54,7 @@ pub struct RepairItem {
     pub part_cost_cents: i64,
     /// The discount off this item; absent for none. Never on a warranty rework.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub discount: Option<RepairItemDiscount>,
+    pub discount: Option<AppliedDiscount>,
     /// The cover this work comes with once the job is handed back.
     pub warranty: ProductWarranty,
 }

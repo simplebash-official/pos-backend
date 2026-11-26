@@ -558,6 +558,48 @@ async fn warranty_periods_are_worked_out_on_the_server() {
 }
 
 #[tokio::test]
+async fn print_job_totals_are_worked_out_on_the_server() {
+    let app = common::spawn_app_sqlite().await;
+    let staff = common::mint_token(
+        &app.config,
+        Some(Role::Staff),
+        roles::default_permissions(Role::Staff),
+    );
+    let request = json!({ "items": [
+        { "kind": "part", "quantity": 100, "unitPriceCents": 45_000,
+          "cost": { "basis": "per_unit", "cents": 30_000 } },
+        { "kind": "service", "quantity": 100, "unitPriceCents": 15_000,
+          "discount": { "type": "percentage", "basisPoints": 1_250 } },
+        { "kind": "part", "quantity": 2, "unitPriceCents": 1_000,
+          "cost": { "basis": "line", "cents": 1_500 } },
+        { "kind": "service", "quantity": 1, "unitPriceCents": 500,
+          "discount": { "type": "fixed", "cents": 900 } },
+    ] });
+    let (status, body) = post(&app, "/api/calc/print-job", &request, Some(&staff)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let data = &body["data"];
+    assert_eq!(data["totals"]["partsCents"], 4_502_000);
+    assert_eq!(data["totals"]["servicesCents"], 1_500_500);
+    assert_eq!(data["totals"]["discountCents"], 187_500);
+    assert_eq!(data["totals"]["priceCents"], 6_002_500 - 187_500);
+    assert_eq!(data["totals"]["costCents"], 3_001_500);
+    assert_eq!(data["lines"][0]["profitCents"], 1_500_000);
+    assert_eq!(data["costKnown"], true);
+    assert_eq!(
+        data["blockers"],
+        json!([{ "itemIndex": 3, "code": "discount_more_than_line" }])
+    );
+    golden("print_job", &request, data);
+
+    let negative = json!({ "items": [{ "kind": "service", "quantity": 1, "unitPriceCents": -1 }] });
+    let (status, _) = post(&app, "/api/calc/print-job", &negative, Some(&staff)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let nobody = common::mint_token(&app.config, Some(Role::Staff), &[]);
+    let (status, _) = post(&app, "/api/calc/print-job", &request, Some(&nobody)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn repair_totals_are_worked_out_on_the_server() {
     let app = common::spawn_app_sqlite().await;
     let staff = common::mint_token(

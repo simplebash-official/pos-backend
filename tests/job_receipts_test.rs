@@ -194,7 +194,9 @@ async fn scenario(app: &common::TestApp) {
             "customer": { "customerKey": customer },
             "jobType": "mug",
             "quantity": 20,
-            "estimatedCostCents": 800000
+            "items": [{ "description": "Printing", "quantity": 1,
+                    "source": { "type": "service", "unitPriceCents": 800000 },
+                    "warranty": { "coverage": { "kind": "none" } } }]
         })),
         &staff,
     )
@@ -217,7 +219,7 @@ async fn scenario(app: &common::TestApp) {
     );
     assert!(pdf.contains("\"detail\":\"20 × Mug\""), "{pdf}");
     assert!(pdf.contains("\"estimateCents\":800000"), "{pdf}");
-    assert!(pdf.contains("\"itemLines\":[]"), "{pdf}");
+    assert!(pdf.contains("\"itemLines\":[\"Printing x 1\"]"), "{pdf}");
     let (status, _) = send(
         app,
         "GET",

@@ -77,7 +77,7 @@ pub struct JobReceiptSource {
     /// Repair: what the customer reported. Print job: the quantity and kind of print.
     pub detail: String,
     pub serial_number: Option<String>,
-    /// Repair: what the shop plans to do, one line per piece of work. Print job: empty.
+    /// What the shop plans to do, one line per item; a print job's line says its quantity.
     pub item_lines: Vec<String>,
     /// The estimate in cents; none while nothing is quoted.
     pub estimate_cents: Option<i64>,
@@ -133,17 +133,19 @@ impl JobReceiptSource {
         }
     }
 
-    /// The receipt of a print job. A job quoted at nothing has no estimate.
+    /// The receipt of a print job. A job with no items yet has no estimate, and a warranty
+    /// rework is free. The staff note is never printed.
     ///
     /// # Errors
     ///
     /// An internal error when the stored job type is not one the shop can choose.
     pub fn from_print_job(job: &PrintJob) -> AppResult<Self> {
         let title = print_job_title(&job.job_type)?;
-        let estimate_cents = if job.estimated_cost_cents > 0 {
-            Some(job.estimated_cost_cents)
-        } else {
+        let is_warranty_rework = job.kind.is_rework();
+        let estimate_cents = if job.items.is_empty() || is_warranty_rework {
             None
+        } else {
+            Some(job.price_cents)
         };
         Ok(JobReceiptSource {
             kind: JobReceiptKind::Print,
@@ -156,10 +158,14 @@ impl JobReceiptSource {
             title: title.to_string(),
             detail: format!("{} × {title}", job.quantity),
             serial_number: None,
-            item_lines: Vec::new(),
+            item_lines: job
+                .items
+                .iter()
+                .map(|item| format!("{} x {}", item.description, item.quantity))
+                .collect(),
             estimate_cents,
             promised_ready_on: job.promised_ready_at.clone(),
-            is_warranty_rework: false,
+            is_warranty_rework,
         })
     }
 }

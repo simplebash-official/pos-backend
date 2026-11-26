@@ -39,6 +39,7 @@ pub const RECURRING_EXPENSES: &str = "recurring_expenses";
 pub const WARRANTIES: &str = "warranties";
 pub const WARRANTY_CLAIMS: &str = "warranty_claims";
 pub const REPAIR_SERVICES: &str = "repair_services";
+pub const PRINT_SERVICES: &str = "print_services";
 pub const NOTIFICATIONS: &str = "notifications";
 
 pub const DOCUMENT_PACKAGES: &str = "document-packages";

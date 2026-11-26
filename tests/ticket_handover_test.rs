@@ -210,7 +210,9 @@ impl Shop {
             "/api/print-jobs",
             Some(json!({
                 "customer": { "customerKey": self.customer },
-                "jobType": "t-shirt", "quantity": 12, "estimatedCostCents": 240_000,
+                "jobType": "t-shirt", "quantity": 12, "items": [{ "description": "Printing", "quantity": 1,
+                    "source": { "type": "service", "unitPriceCents": 240_000 },
+                    "warranty": { "coverage": { "kind": "none" } } }],
             })),
             &self.staff,
         )

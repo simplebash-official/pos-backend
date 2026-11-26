@@ -8,6 +8,7 @@ use crate::domain::print_jobs::{
     UpdatePrintJobRequest,
 };
 use crate::modules::print_jobs::service;
+use crate::modules::warranties::service::WarrantyActor;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use utoipa_axum::router::OpenApiRouter;
@@ -147,7 +148,11 @@ pub(super) async fn update_print_job(
     Json(body): Json<UpdatePrintJobRequest>,
 ) -> AppResult<Json<ApiResponse<PrintJob>>> {
     user.require_permission(perm::PRINT_JOBS_WRITE)?;
-    let print_job = service::update_print_job(&state.db, &id, body, device_id.0).await?;
+    let actor = WarrantyActor {
+        user_id: user.user_id.clone(),
+        name: user.resolve_name(&state.db).await?,
+    };
+    let print_job = service::update_print_job(&state.db, &id, body, device_id.0, &actor).await?;
     Ok(Json(ApiResponse::success(
         print_job,
         "Print job updated successfully",

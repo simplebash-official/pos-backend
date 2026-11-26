@@ -11,7 +11,6 @@
 
 mod repository_commissions;
 
-pub(crate) use repository_commissions::JobKind;
 pub(crate) use repository_commissions::JobMoney;
 pub(crate) use repository_commissions::UNASSIGNED_PRINTER;
 pub(crate) use repository_commissions::UNASSIGNED_TECHNICIAN;

@@ -54,7 +54,7 @@ pub(crate) async fn aggregate_stats(
                         {
                             "$group": {
                                 "_id": null,
-                                "sum": { "$sum": "$estimated_cost_cents" },
+                                "sum": { "$sum": "$price_cents" },
                                 "count": { "$sum": 1 },
                             }
                         }
@@ -98,7 +98,7 @@ pub(crate) async fn aggregate_stats(
                 r#"
                 SELECT
                     COUNT(CASE WHEN created_at >= ? AND created_at < ? THEN 1 ELSE NULL END) as today_job_count,
-                    COALESCE(SUM(CASE WHEN created_at >= ? AND created_at < ? THEN estimated_cost_cents ELSE 0 END), 0) as today_revenue_cents,
+                    COALESCE(SUM(CASE WHEN created_at >= ? AND created_at < ? THEN price_cents ELSE 0 END), 0) as today_revenue_cents,
                     COUNT(CASE WHEN status NOT IN ('delivered', 'cancelled') THEN 1 ELSE NULL END) as pending_job_count
                 FROM print_jobs
                 WHERE deleted_at IS NULL
@@ -242,11 +242,11 @@ pub(crate) async fn insert(db: &Db, mut document: PrintJobDocument) -> AppResult
                 r#"
                 INSERT INTO print_jobs (
                     key, id, ticket_number, customer_key, customer_name, customer_phone,
-                    job_type, quantity, promised_ready_at, status, estimated_cost_cents,
-                    material_cost_cents, assigned_employee_id, assigned_employee_name,
+                    job_type, quantity, promised_ready_at, status, note, kind, items,
+                    price_cents, cost_cents, assigned_employee_id, assigned_employee_name,
                     split_type, split_value, billed_invoice_key, billed_invoice_number, version,
                     created_at, updated_at, deleted_at, updated_by_device
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(&document.key)
@@ -259,8 +259,17 @@ pub(crate) async fn insert(db: &Db, mut document: PrintJobDocument) -> AppResult
             .bind(document.quantity as i64)
             .bind(&document.promised_ready_at)
             .bind(&document.status)
-            .bind(document.estimated_cost_cents)
-            .bind(document.material_cost_cents)
+            .bind(&document.note)
+            .bind(
+                serde_json::to_string(&document.kind)
+                    .expect("a print job kind serializes to JSON"),
+            )
+            .bind(
+                serde_json::to_string(&document.items)
+                    .expect("print job items serialize to JSON"),
+            )
+            .bind(document.price_cents)
+            .bind(document.cost_cents)
             .bind(&document.assigned_employee_id)
             .bind(&document.assigned_employee_name)
             .bind(&document.split_type)
@@ -438,6 +447,17 @@ pub(super) fn print_jobs(db: &TenantDatabase) -> ScopedCollection<PrintJobDocume
     db.collection("print_jobs")
 }
 
+/// A JSON column of a print job row.
+fn stored_json<T: serde::de::DeserializeOwned>(
+    row: &sqlx::sqlite::SqliteRow,
+    column: &str,
+) -> AppResult<T> {
+    let text: String = row.get(column);
+    serde_json::from_str(&text).map_err(|err| {
+        AppError::internal(format!("stored print job {column} is not readable: {err}"))
+    })
+}
+
 pub(super) fn row_to_print_job_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<PrintJobDocument> {
     let id_str: String = row.get("id");
     let id = ObjectId::parse_str(&id_str).ok();
@@ -457,8 +477,11 @@ pub(super) fn row_to_print_job_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<P
         quantity: quantity_int as i32,
         promised_ready_at: row.get("promised_ready_at"),
         status: row.get("status"),
-        estimated_cost_cents: row.get("estimated_cost_cents"),
-        material_cost_cents: row.get("material_cost_cents"),
+        note: row.get("note"),
+        kind: stored_json(row, "kind")?,
+        items: stored_json(row, "items")?,
+        price_cents: row.get("price_cents"),
+        cost_cents: row.get("cost_cents"),
         assigned_employee_id: row.get("assigned_employee_id"),
         assigned_employee_name: row.get("assigned_employee_name"),
         split_type: row.get("split_type"),
@@ -574,7 +597,7 @@ pub(crate) async fn clear_billed_stamp(db: &Db, key: &str, invoice_key: &str) ->
 pub(crate) struct StatsAggregateResult {
     /// Count of non-deleted jobs created in `[today_start, today_end)`.
     pub today_job_count: u64,
-    /// Sum of `estimated_cost_cents` for those same jobs.
+    /// Sum of `price_cents` for those same jobs.
     pub today_revenue_cents: i64,
     /// Count of ALL non-deleted jobs (any date) whose status is neither
     /// "delivered" nor "cancelled".
@@ -626,6 +649,13 @@ pub(crate) async fn update(
                     mongodb::bson::Bson::Double(f) => {
                         assignments.push(format!("{k} = ?"));
                         bindings.push(Some(f.to_string()));
+                    }
+                    mongodb::bson::Bson::Array(_) => {
+                        // `items` is a JSON column.
+                        assignments.push(format!("{k} = ?"));
+                        bindings.push(Some(serde_json::to_string(v).map_err(|err| {
+                            AppError::internal(format!("print job {k} does not serialize: {err}"))
+                        })?));
                     }
                     _ => {}
                 }

@@ -1,0 +1,88 @@
+{
+  "request": {
+    "items": [
+      {
+        "kind": "part",
+        "quantity": 100,
+        "unitPriceCents": 45000,
+        "cost": {
+          "basis": "per_unit",
+          "cents": 30000
+        }
+      },
+      {
+        "kind": "service",
+        "quantity": 100,
+        "unitPriceCents": 15000,
+        "discount": {
+          "type": "percentage",
+          "basisPoints": 1250
+        }
+      },
+      {
+        "kind": "part",
+        "quantity": 2,
+        "unitPriceCents": 1000,
+        "cost": {
+          "basis": "line",
+          "cents": 1500
+        }
+      },
+      {
+        "kind": "service",
+        "quantity": 1,
+        "unitPriceCents": 500,
+        "discount": {
+          "type": "fixed",
+          "cents": 900
+        }
+      }
+    ]
+  },
+  "reply": {
+    "totals": {
+      "servicesCents": 1500500,
+      "partsCents": 4502000,
+      "discountCents": 187500,
+      "priceCents": 5815000,
+      "costCents": 3001500
+    },
+    "lines": [
+      {
+        "grossCents": 4500000,
+        "discountCents": 0,
+        "netCents": 4500000,
+        "costCents": 3000000,
+        "profitCents": 1500000
+      },
+      {
+        "grossCents": 1500000,
+        "discountCents": 187500,
+        "netCents": 1312500,
+        "costCents": 0,
+        "profitCents": 1312500
+      },
+      {
+        "grossCents": 2000,
+        "discountCents": 0,
+        "netCents": 2000,
+        "costCents": 1500,
+        "profitCents": 500
+      },
+      {
+        "grossCents": 500,
+        "discountCents": 0,
+        "netCents": 500,
+        "costCents": 0,
+        "profitCents": 500
+      }
+    ],
+    "blockers": [
+      {
+        "itemIndex": 3,
+        "code": "discount_more_than_line"
+      }
+    ],
+    "costKnown": true
+  }
+}

@@ -11,8 +11,9 @@ use crate::core::response::{ApiResponse, ErrorResponse};
 use crate::domain::warranties::{
     ClaimListQuery, ClaimListResponse, CreateConditionRequest, DecideClaimRequest,
     InspectClaimRequest, OpenClaimRequest, OpenClaimsBatchRequest, OpenClaimsBatchResponse,
-    PaidRepairRequest, ProcessClaimRequest, ResolveClaimRequest, SendToSupplierRequest,
+    PaidJobRequest, ProcessClaimRequest, ResolveClaimRequest, SendToSupplierRequest,
     SupplierReturnRequest, WarrantyClaim, WarrantyCondition, WarrantyConditionsResponse,
+    WarrantySourceType,
 };
 use crate::modules::warranties::service;
 use axum::Json;
@@ -300,7 +301,7 @@ pub(super) async fn return_to_customer(
 }
 
 #[utoipa::path(post, path = "/{key}/paid-repair", tag = modules::WARRANTY_CLAIMS,
-    request_body = PaidRepairRequest,
+    request_body = PaidJobRequest,
     params(("key" = String, Path, description = "Claim key (`wcl_…`)")),
     security(("bearerAuth" = [])),
     responses(
@@ -309,7 +310,7 @@ pub(super) async fn return_to_customer(
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
         (status = 403, description = "Permission denied", body = ErrorResponse),
         (status = 404, description = "Claim not found", body = ErrorResponse),
-        (status = 409, description = "Not allowed from where the claim is, or changed by someone else meanwhile", body = ErrorResponse),
+        (status = 409, description = "Not allowed from where the claim is, changed by someone else meanwhile, or about print work", body = ErrorResponse),
     )
 )]
 /// Opens a paid repair job for an item whose claim was rejected.
@@ -318,13 +319,42 @@ pub(super) async fn convert_to_paid_repair(
     user: CurrentUser,
     DeviceId(device_id): DeviceId,
     Path(key): Path<String>,
-    Json(body): Json<PaidRepairRequest>,
+    Json(body): Json<PaidJobRequest>,
 ) -> AppResult<Json<ApiResponse<WarrantyClaim>>> {
     user.require_permission(perm::WARRANTY_CLAIMS_RECORD)?;
     user.require_permission(perm::REPAIRS_WRITE)?;
     let actor = actor(&state, &user).await?;
     let claim = service::convert_to_paid_repair(&state.db, &key, &actor, device_id, body).await?;
     Ok(Json(ApiResponse::success(claim, "Paid repair opened")))
+}
+
+#[utoipa::path(post, path = "/{key}/paid-print-job", tag = modules::WARRANTY_CLAIMS,
+    request_body = PaidJobRequest,
+    params(("key" = String, Path, description = "Claim key (`wcl_…`)")),
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "Paid print job opened", body = ApiResponse<WarrantyClaim>),
+        (status = 400, description = "No customer for the print job", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+        (status = 404, description = "Claim, warranty or original job not found", body = ErrorResponse),
+        (status = 409, description = "Not allowed from where the claim is, changed by someone else meanwhile, or not about print work", body = ErrorResponse),
+    )
+)]
+/// Opens a paid print job for print work whose claim was rejected.
+pub(super) async fn convert_to_paid_print_job(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    DeviceId(device_id): DeviceId,
+    Path(key): Path<String>,
+    Json(body): Json<PaidJobRequest>,
+) -> AppResult<Json<ApiResponse<WarrantyClaim>>> {
+    user.require_permission(perm::WARRANTY_CLAIMS_RECORD)?;
+    user.require_permission(perm::PRINT_JOBS_WRITE)?;
+    let actor = actor(&state, &user).await?;
+    let claim =
+        service::convert_to_paid_print_job(&state.db, &key, &actor, device_id, body).await?;
+    Ok(Json(ApiResponse::success(claim, "Paid print job opened")))
 }
 
 #[utoipa::path(post, path = "/{key}/rework", tag = modules::WARRANTY_CLAIMS,
@@ -335,10 +365,11 @@ pub(super) async fn convert_to_paid_repair(
         (status = 401, description = "Missing or invalid token", body = ErrorResponse),
         (status = 403, description = "Permission denied", body = ErrorResponse),
         (status = 404, description = "Claim, warranty or original job not found", body = ErrorResponse),
-        (status = 409, description = "Not decided as a repair, already resolved or reworked, or the warranty is not on repair work", body = ErrorResponse),
+        (status = 409, description = "Not decided as a repair, already resolved or reworked, or the warranty is not on repair or print work", body = ErrorResponse),
     )
 )]
-/// Opens the free rework job for a claim on repair work decided as a repair.
+/// Opens the free rework job for a claim on repair or print work decided as a repair. Needs the
+/// write permission of the kind of job it opens.
 pub(super) async fn open_rework(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -346,7 +377,11 @@ pub(super) async fn open_rework(
     Path(key): Path<String>,
 ) -> AppResult<Json<ApiResponse<WarrantyClaim>>> {
     user.require_permission(perm::WARRANTY_CLAIMS_RECORD)?;
-    user.require_permission(perm::REPAIRS_WRITE)?;
+    let job_permission = match service::claim_source(&state.db, &key).await? {
+        WarrantySourceType::Print => perm::PRINT_JOBS_WRITE,
+        WarrantySourceType::Repair | WarrantySourceType::ProductSale => perm::REPAIRS_WRITE,
+    };
+    user.require_permission(job_permission)?;
     let actor = actor(&state, &user).await?;
     let claim = service::open_rework(&state.db, &key, &actor, device_id).await?;
     Ok(Json(ApiResponse::success(claim, "Rework job opened")))
@@ -433,5 +468,6 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(resolve_claim))
         .routes(routes!(return_to_customer))
         .routes(routes!(convert_to_paid_repair))
+        .routes(routes!(convert_to_paid_print_job))
         .routes(routes!(open_rework))
 }

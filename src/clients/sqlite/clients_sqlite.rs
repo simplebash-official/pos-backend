@@ -131,6 +131,7 @@ pub async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     crate::modules::repairs::migration::migrate_sqlite(pool).await?;
     crate::modules::customers::migration::migrate_sqlite(pool).await?;
     crate::modules::print_jobs::migration::migrate_sqlite(pool).await?;
+    crate::modules::print_jobs::migration::migrate_items_sqlite(pool).await?;
     crate::modules::billing::migration::migrate_sqlite(pool).await?;
     // Sync v2 device bookkeeping: the single state row and the capture
     // triggers. Both are inert until sync is enabled (`capture_enabled = 1`).

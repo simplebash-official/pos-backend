@@ -838,6 +838,49 @@ async fn repair_items_on_mongo() {
 }
 
 #[tokio::test]
+async fn two_items_cannot_share_the_last_unit_of_a_price_tier() {
+    let app = common::spawn_app_sqlite().await;
+    let admin = token_for(&app, "admin", Role::Admin, "Owner Olivia");
+    let customer = common::register_customer(&app, "Nimal Perera", "0771234567").await;
+    let (status, category) = send(
+        &app,
+        "POST",
+        "/api/inventory/categories",
+        Some(json!({
+            "name": "Parts", "icon": "Box", "color": "blue", "subcategories": ["Spares"],
+        })),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{category}");
+    let (screen, _) = product(
+        &app,
+        &admin,
+        json!({
+            "name": "Screen", "warranty": no_cover(),
+            "categoryKey": text(&category["data"]["key"]),
+            "subcategoryKey": text(&category["data"]["subcategories"][0]["key"]),
+            "openingStock": { "quantity": 1, "unitCostCents": 4_000, "sellingPriceCents": 12_000 },
+        }),
+    )
+    .await;
+    let part = |description: &str| {
+        json!({ "description": description, "laborCents": 0, "warranty": no_cover(),
+                "part": { "source": "stock", "productKey": screen, "sellingPriceCents": 12_000 } })
+    };
+    let (status, body) = send(
+        &app,
+        "POST",
+        "/api/repairs",
+        Some(job(&customer, "DEV1", json!([part("A"), part("B")]))),
+        &admin,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "INSUFFICIENT_STOCK", "{body}");
+}
+
+#[tokio::test]
 async fn an_old_sqlite_database_moves_to_repair_items() {
     use simplebash_pos_backend::clients::sqlite;
     use simplebash_pos_backend::core::logging::SqlLogging;

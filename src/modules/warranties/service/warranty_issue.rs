@@ -4,6 +4,7 @@ use crate::core::constants::{codes, prefixes};
 use crate::core::error::{AppError, AppResult};
 use crate::core::id::generate_id;
 use crate::core::utils::shop_day;
+use crate::domain::print_jobs::{PrintItemSource, PrintJobItem};
 use crate::domain::repairs::RepairItem;
 use crate::domain::sequences::ReserveSequenceRequest;
 use crate::domain::warranties::{
@@ -113,6 +114,8 @@ pub(crate) async fn issue_for_sale_line(
             product_key: Some(line.product_key.to_string()),
             repair_key: None,
             repair_item_key: None,
+            print_job_key: None,
+            print_job_item_key: None,
             item_name: line.item_name.to_string(),
             serial_number: serial_number.cloned(),
             quantity,
@@ -212,6 +215,8 @@ pub(crate) async fn issue_for_repair(
             product_key: None,
             repair_key: Some(line.repair_key.to_string()),
             repair_item_key: Some(item.key.clone()),
+            print_job_key: None,
+            print_job_item_key: None,
             item_name: format!("{} ({})", item.description, line.device_model),
             serial_number: line.device_serial.map(str::to_string),
             quantity: 1,
@@ -247,6 +252,114 @@ pub(crate) async fn issue_for_repair(
                 to_status: Some(WarrantyStatus::Active.as_str()),
                 note: Some(format!(
                     "Repair {} handed back on {}",
+                    line.ticket_number, line.invoice_number
+                )),
+                actor: line.actor,
+                approved_by: None,
+            },
+        )
+        .await?;
+        issued.push(inserted);
+    }
+    Ok(issued)
+}
+
+/// A handed-back print job, as its lines' warranties need it.
+#[derive(Debug)]
+pub(crate) struct PrintJobLine<'a> {
+    pub invoice_key: &'a str,
+    pub invoice_number: &'a str,
+    pub delivered_at: DateTime<Utc>,
+    pub customer_key: Option<&'a str>,
+    pub customer_name: Option<&'a str>,
+    pub customer_phone: Option<&'a str>,
+    /// Zero-based position of the job's line on the invoice.
+    pub line_index: usize,
+    pub print_job_key: &'a str,
+    pub ticket_number: &'a str,
+    pub items: &'a [PrintJobItem],
+    pub actor: &'a WarrantyActor,
+    pub device_id: Option<String>,
+}
+
+/// Gives each covered line of a handed-back print job its own warranty, starting on the
+/// shop-local day it was handed back. One warranty covers the whole line, so it is a single unit
+/// whatever the line's quantity, which its name states. A serialized stock part is found by its
+/// serial number; other lines have none. An uncovered line gets no warranty.
+pub(crate) async fn issue_for_print_job(
+    db: &Db,
+    line: PrintJobLine<'_>,
+) -> AppResult<Vec<WarrantyDocument>> {
+    let starts_on = shop_day(line.delivered_at);
+    let line_index = i64::try_from(line.line_index).expect("an invoice has few lines");
+    let mut issued = Vec::new();
+    for item in line.items {
+        if !item.warranty.is_covered() {
+            continue;
+        }
+        let warranty_type = item.warranty.warranty_type.ok_or_else(|| {
+            AppError::internal("a covered print job line warranty always has a warranty type")
+        })?;
+        let ends_on = match warranty::ends_on(starts_on, item.warranty.coverage)? {
+            WarrantyEnd::On(day) => Some(day.to_string()),
+            WarrantyEnd::Never => None,
+        };
+        let serial_number = match &item.source {
+            PrintItemSource::Stock { serial_number, .. } => serial_number.clone(),
+            PrintItemSource::Service | PrintItemSource::Outside { .. } => None,
+        };
+        let now = BsonDateTime::now();
+        let document = WarrantyDocument {
+            id: None,
+            key: generate_id(prefixes::WARRANTY),
+            warranty_number: next_number(db, "warranty", line.device_id.clone()).await?,
+            source_type: WarrantySourceType::Print,
+            invoice_key: line.invoice_key.to_string(),
+            invoice_number: line.invoice_number.to_string(),
+            line_index,
+            product_key: None,
+            repair_key: None,
+            repair_item_key: None,
+            print_job_key: Some(line.print_job_key.to_string()),
+            print_job_item_key: Some(item.key.clone()),
+            item_name: format!(
+                "{} x {} ({})",
+                item.description, item.quantity, line.ticket_number
+            ),
+            serial_number,
+            quantity: 1,
+            claimed_quantity: Some(0),
+            customer_key: line.customer_key.map(str::to_string),
+            customer_name: line.customer_name.map(str::to_string),
+            customer_phone: line.customer_phone.map(str::to_string),
+            customer_phone_tail: line.customer_phone.and_then(phone_tail),
+            coverage: item.warranty.coverage,
+            warranty_type,
+            terms: item.warranty.terms.clone(),
+            unit_price_cents: item.net_cents(),
+            starts_on: starts_on.to_string(),
+            ends_on,
+            status: WarrantyStatus::Active,
+            void_reason: None,
+            replaces_warranty_key: None,
+            replaced_by_warranty_key: None,
+            claim_count: 0,
+            version: 1,
+            created_at: now,
+            updated_at: now,
+            updated_by_device: None,
+        };
+        let inserted = repository::insert_warranty(db, document).await?;
+        warranty_events::record(
+            db,
+            NewEvent {
+                warranty_key: &inserted.key,
+                claim_key: None,
+                kind: WarrantyEventKind::Created,
+                from_status: None,
+                to_status: Some(WarrantyStatus::Active.as_str()),
+                note: Some(format!(
+                    "Print job {} handed back on {}",
                     line.ticket_number, line.invoice_number
                 )),
                 actor: line.actor,
@@ -359,6 +472,26 @@ pub(crate) async fn void_for_returned_line(
     let line_index = i64::try_from(line_index).expect("an invoice has few lines");
     for warranty in invoice_warranties(db, invoice_key).await? {
         if warranty.line_index == line_index && warranty.serial_number.is_none() {
+            void_one(db, warranty, &reason, actor).await?;
+        }
+    }
+    Ok(())
+}
+
+/// Cancels every warranty of a job's invoice line once the job's price has come back, whether or
+/// not a warranty names a serial: the serial is the device's or a part's, not a unit the credit
+/// note can list.
+pub(crate) async fn void_for_returned_job(
+    db: &Db,
+    invoice_key: &str,
+    line_index: usize,
+    credit_note_number: &str,
+    actor: &WarrantyActor,
+) -> AppResult<()> {
+    let reason = format!("Returned on {credit_note_number}");
+    let line_index = i64::try_from(line_index).expect("an invoice has few lines");
+    for warranty in invoice_warranties(db, invoice_key).await? {
+        if warranty.line_index == line_index {
             void_one(db, warranty, &reason, actor).await?;
         }
     }

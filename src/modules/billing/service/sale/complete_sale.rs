@@ -400,7 +400,8 @@ async fn apply_line_item_side_effects(
         },
         "print" => match (&item.source_ticket_key, sale.handovers[line_index]) {
             (Some(ticket_key), Some(handover)) => {
-                if let Err(err) = print_jobs::service::mark_billed(
+                let ticket_label = item.source_ticket_number.as_deref().unwrap_or(ticket_key);
+                let job = match print_jobs::service::mark_billed(
                     db,
                     ticket_key,
                     &inserted_invoice.key,
@@ -409,13 +410,53 @@ async fn apply_line_item_side_effects(
                 )
                 .await
                 {
-                    Some(format!(
-                        "Print job ticket {} could not be marked as billed: {err}",
-                        item.source_ticket_number.as_deref().unwrap_or(ticket_key)
-                    ))
-                } else {
-                    None
+                    Ok(job) => job,
+                    Err(err) => {
+                        return Some(format!(
+                            "Print job {ticket_label} could not be marked as billed: {err}"
+                        ));
+                    }
+                };
+                if let Err(err) = print_jobs::service::use_parts(
+                    db,
+                    &job,
+                    StockMovementType::PrintPartConsumption,
+                    &inserted_invoice.key,
+                )
+                .await
+                {
+                    return Some(format!(
+                        "The parts of print job {ticket_label} could not be taken out of stock: {err}"
+                    ));
                 }
+                if handover == Handover::Later {
+                    // The warranty starts the day the job is handed back, which is not today.
+                    return None;
+                }
+                if let Err(err) = warranties::service::issue_for_print_job(
+                    db,
+                    warranties::service::PrintJobLine {
+                        invoice_key: &inserted_invoice.key,
+                        invoice_number: &inserted_invoice.invoice_number,
+                        delivered_at: inserted_invoice.created_at.to_chrono(),
+                        customer_key: inserted_invoice.customer_key.as_deref(),
+                        customer_name: inserted_invoice.customer_name_snapshot.as_deref(),
+                        customer_phone: inserted_invoice.customer_phone_snapshot.as_deref(),
+                        line_index,
+                        print_job_key: &job.key,
+                        ticket_number: &job.ticket_number,
+                        items: &job.items,
+                        actor: sale.actor,
+                        device_id: sale.device_id.clone(),
+                    },
+                )
+                .await
+                {
+                    return Some(format!(
+                        "The warranties of print job {ticket_label} could not be recorded: {err}"
+                    ));
+                }
+                None
             }
             (Some(_), None) => Some(format!(
                 "Item '{}' is a print-job line with no handover; its ticket was not updated",

@@ -93,7 +93,18 @@ fn print_job(overrides: Value) -> PrintJob {
         "quantity": 20,
         "isOverdue": false,
         "status": "received",
-        "estimatedCostCents": 800000,
+        "kind": {"kind": "standard"},
+        "items": [{
+            "key": "pit_1",
+            "description": "Mug printing",
+            "quantity": 20,
+            "source": {"type": "service"},
+            "unitPriceCents": 40000,
+            "costCents": 0,
+            "warranty": {"coverage": {"kind": "none"}}
+        }],
+        "priceCents": 800000,
+        "costCents": 0,
         "createdAt": "2026-11-20T09:05:00Z",
         "updatedAt": "2026-11-20T09:05:00Z",
         "version": 1
@@ -184,7 +195,7 @@ fn a_print_job_receipt_names_the_quantity_and_the_kind_and_matches_every_schema(
     assert_eq!(data["jobKind"], "print");
     assert_eq!(data["title"], "Mug");
     assert_eq!(data["detail"], "20 × Mug");
-    assert_eq!(data["itemLines"], json!([]));
+    assert_eq!(data["itemLines"], json!(["Mug printing x 20"]));
     assert_eq!(data["serialNumber"], "");
     assert_eq!(data["estimateCents"], 800_000);
     assert_eq!(data["qrData"], "PRN-000045");
@@ -194,13 +205,32 @@ fn a_print_job_receipt_names_the_quantity_and_the_kind_and_matches_every_schema(
 }
 
 #[test]
-fn a_print_job_quoted_at_nothing_has_no_estimate() {
-    let source = JobReceiptSource::from_print_job(&print_job(json!({"estimatedCostCents": 0})))
-        .expect("a mug job");
-    assert_eq!(
-        data_of(&source, &shop("", None), JobReceiptPaper::A5)["estimateCents"],
-        Value::Null
-    );
+fn a_print_job_with_no_items_has_no_estimate() {
+    let source =
+        JobReceiptSource::from_print_job(&print_job(json!({"items": [], "priceCents": 0})))
+            .expect("a mug job");
+    let data = data_of(&source, &shop("", None), JobReceiptPaper::A5);
+    assert_eq!(data["estimateCents"], Value::Null);
+    assert_eq!(data["itemLines"], json!([]));
+}
+
+#[test]
+fn a_print_rework_is_free() {
+    let source = JobReceiptSource::from_print_job(&print_job(json!({
+        "kind": {
+            "kind": "warranty_rework",
+            "claimKey": "wcl_1",
+            "claimNumber": "WCL-000001",
+            "originalPrintJobKey": "prn_old",
+            "originalTicketNumber": "PRN-000010"
+        },
+        "priceCents": 0
+    })))
+    .expect("a mug job");
+    let data = data_of(&source, &shop("", None), JobReceiptPaper::A5);
+    assert_eq!(data["isWarrantyRework"], true);
+    assert_eq!(data["estimateCents"], Value::Null);
+    assert_matches_schema(KIND, &data);
 }
 
 #[test]

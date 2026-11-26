@@ -365,8 +365,8 @@ pub(super) async fn transition_returned_serial(
     }
 }
 
-/// Cancels the warranties of what came back: each returned serial's, and a non-serialized
-/// line's once all of it has been returned. Best-effort like the stock movement it follows; a
+/// Cancels the warranties of what came back: each returned serial's, a non-serialized line's
+/// once all of it has been returned, and every one of a returned repair or print job's. Best-effort like the stock movement it follows; a
 /// failure is logged, never undoes the credit note.
 async fn void_returned_warranties(
     db: &Db,
@@ -399,9 +399,11 @@ async fn void_returned_warranties(
         }
     };
     for (line_index, line) in invoice.items.iter().enumerate() {
-        if line.serial_numbers.is_empty()
-            && line.returned_quantity >= line.quantity
-            && let Err(err) = warranties::service::void_for_returned_line(
+        if !line.serial_numbers.is_empty() || line.returned_quantity < line.quantity {
+            continue;
+        }
+        let voided = if matches!(line.source_type.as_str(), "repair" | "print") {
+            warranties::service::void_for_returned_job(
                 db,
                 invoice_key,
                 line_index,
@@ -409,7 +411,17 @@ async fn void_returned_warranties(
                 actor,
             )
             .await
-        {
+        } else {
+            warranties::service::void_for_returned_line(
+                db,
+                invoice_key,
+                line_index,
+                &created.credit_note_number,
+                actor,
+            )
+            .await
+        };
+        if let Err(err) = voided {
             tracing::warn!(invoice_key, line_index, error = %err, "could not cancel a returned line's warranty");
         }
     }

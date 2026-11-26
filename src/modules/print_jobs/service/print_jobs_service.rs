@@ -1,19 +1,27 @@
 use super::print_job_alerts;
+use super::print_job_items::{price_items, use_parts};
 use crate::clients::db::Db;
 use crate::core::constants::{codes, prefixes};
 use crate::core::error::{AppError, AppResult};
 use crate::core::id::generate_id;
 use crate::core::utils::{build_bson_regex, calculate_pagination, shop_today_range};
 use crate::domain::billing::Handover;
+use crate::domain::customers::Customer;
+use crate::domain::inventory::StockMovementType;
 use crate::domain::print_jobs::{
-    CreatePrintJobRequest, PrintJob, PrintJobAssignment, PrintJobListQuery, PrintJobListResponse,
-    PrintJobStats, UpdatePrintJobRequest,
+    CreatePrintJobRequest, PrintItemSource, PrintJob, PrintJobAssignment, PrintJobItem,
+    PrintJobKind, PrintJobListQuery, PrintJobListResponse, PrintJobStats, UpdatePrintJobRequest,
 };
 use crate::domain::sequences::ReserveSequenceRequest;
 use crate::modules::print_jobs::model::PrintJobDocument;
 use crate::modules::print_jobs::repository;
-use crate::modules::{customers, employees, sequences};
+use crate::modules::warranties::service::WarrantyActor;
+use crate::modules::{billing, customers, employees, sequences, warranties};
+use chrono::Utc;
 use mongodb::bson::{Bson, DateTime as BsonDateTime, Document, doc};
+
+/// The most characters a staff note can have.
+const NOTE_MAX: usize = 1000;
 
 /// Creates the print job.
 pub async fn create_print_job(
@@ -26,11 +34,21 @@ pub async fn create_print_job(
         validate_status(&status)?;
         validate_job_type(&body.job_type)?;
         validate_promised_ready_at(body.promised_ready_at.as_deref())?;
+        let note = match &body.note {
+            Some(typed) => clean_note(typed)?,
+            None => None,
+        };
 
         let customer =
             customers::service::get_customer_by_key(db, &body.customer.customer_key).await?;
 
-        validate_required_fields(&body.job_type, body.quantity, body.estimated_cost_cents)?;
+        validate_required_fields(&body.job_type, body.quantity)?;
+        let kind = PrintJobKind::Standard;
+        let priced = price_items(db, body.items, &[], &kind).await?;
+        validate_price_required_for_status(&status, &kind, &priced.items)?;
+        if status == "delivered" {
+            refuse_handing_back_unbilled_parts(&kind, &priced.items, None)?;
+        }
 
         let assignment = body.assignment.unwrap_or_default();
         let PrintJobAssignment {
@@ -48,51 +66,228 @@ pub async fn create_print_job(
             None => None,
         };
 
-        let reservation = sequences::service::reserve_sequence(
+        insert_job(
             db,
-            "printjob".to_string(),
-            ReserveSequenceRequest {
-                block_size: Some(1),
-                device_id: device_id.clone(),
+            NewJob {
+                customer: customer.into(),
+                job_type: body.job_type,
+                quantity: body.quantity,
+                promised_ready_at: body.promised_ready_at,
+                status,
+                note,
+                kind,
+                items: priced.items,
+                price_cents: priced.price_cents,
+                cost_cents: priced.cost_cents,
+                assigned_employee_id,
+                assigned_employee_name,
+                split_type,
+                split_value,
+                device_id,
             },
         )
-        .await?;
-        let ticket_number = format!(
-            "{}{:0width$}",
-            reservation.prefix,
-            reservation.start,
-            width = reservation.padding
-        );
+        .await
+    })
+    .await
+}
 
-        let now = BsonDateTime::now();
-        let document = PrintJobDocument {
-            id: None,
-            key: generate_id(prefixes::PRINT_JOB),
-            ticket_number,
-            customer_key: customer.key,
-            customer_name: customer.name,
-            customer_phone: customer.primary_phone,
-            job_type: body.job_type,
-            quantity: body.quantity,
-            promised_ready_at: body.promised_ready_at,
-            status,
-            estimated_cost_cents: body.estimated_cost_cents,
-            material_cost_cents: body.material_cost_cents,
-            assigned_employee_id,
-            assigned_employee_name,
-            split_type,
-            split_value,
-            billed_invoice_key: None,
-            billed_invoice_number: None,
-            version: 1,
-            created_at: now,
-            updated_at: now,
-            deleted_at: None,
-            updated_by_device: device_id,
+/// Whom a job is for, as it is copied onto the job.
+#[derive(Debug)]
+struct JobCustomer {
+    key: String,
+    name: String,
+    phone: String,
+}
+
+impl From<Customer> for JobCustomer {
+    fn from(customer: Customer) -> Self {
+        JobCustomer {
+            key: customer.key,
+            name: customer.name,
+            phone: customer.primary_phone,
+        }
+    }
+}
+
+/// A job whose every field is already checked, ready to be numbered and saved.
+#[derive(Debug)]
+struct NewJob {
+    customer: JobCustomer,
+    job_type: String,
+    quantity: i32,
+    promised_ready_at: Option<String>,
+    status: String,
+    note: Option<String>,
+    kind: PrintJobKind,
+    items: Vec<PrintJobItem>,
+    price_cents: i64,
+    cost_cents: i64,
+    assigned_employee_id: Option<String>,
+    assigned_employee_name: Option<String>,
+    split_type: Option<String>,
+    split_value: Option<f64>,
+    device_id: Option<String>,
+}
+
+/// Reserves the next `PRN-000001` number and saves the job under it.
+async fn insert_job(db: &Db, job: NewJob) -> AppResult<PrintJob> {
+    let reservation = sequences::service::reserve_sequence(
+        db,
+        "printjob".to_string(),
+        ReserveSequenceRequest {
+            block_size: Some(1),
+            device_id: job.device_id.clone(),
+        },
+    )
+    .await?;
+    let ticket_number = format!(
+        "{}{:0width$}",
+        reservation.prefix,
+        reservation.start,
+        width = reservation.padding
+    );
+
+    let now = BsonDateTime::now();
+    let document = PrintJobDocument {
+        id: None,
+        key: generate_id(prefixes::PRINT_JOB),
+        ticket_number,
+        customer_key: job.customer.key,
+        customer_name: job.customer.name,
+        customer_phone: job.customer.phone,
+        job_type: job.job_type,
+        quantity: job.quantity,
+        promised_ready_at: job.promised_ready_at,
+        status: job.status,
+        note: job.note,
+        kind: job.kind,
+        items: job.items,
+        price_cents: job.price_cents,
+        cost_cents: job.cost_cents,
+        assigned_employee_id: job.assigned_employee_id,
+        assigned_employee_name: job.assigned_employee_name,
+        split_type: job.split_type,
+        split_value: job.split_value,
+        billed_invoice_key: None,
+        billed_invoice_number: None,
+        version: 1,
+        created_at: now,
+        updated_at: now,
+        deleted_at: None,
+        updated_by_device: job.device_id,
+    };
+
+    Ok(repository::insert(db, document).await?.into_print_job())
+}
+
+/// What a warranty claim on print work needs to open its rework job.
+#[derive(Debug)]
+pub(crate) struct NewPrintRework<'a> {
+    pub claim_key: &'a str,
+    pub claim_number: &'a str,
+    pub original_print_job_key: &'a str,
+    /// What the customer says is wrong now.
+    pub issue_description: &'a str,
+    pub assigned_employee_key: Option<&'a str>,
+    pub device_id: Option<String>,
+}
+
+/// The job a warranty came from, even when it has since been deleted from the list.
+async fn require_original(db: &Db, key: &str) -> AppResult<PrintJobDocument> {
+    repository::find_by_keys(db, &[key.to_string()])
+        .await?
+        .into_iter()
+        .next()
+        .ok_or_else(|| {
+            AppError::not_found_with_code("Print job not found", codes::PRINT_JOB_NOT_FOUND)
+        })
+}
+
+/// Opens a free warranty rework of an earlier job: same customer, type and order quantity, the
+/// customer's complaint as its note, no lines yet (the person adds the work and any parts used),
+/// and a `WarrantyRework` kind that links back to the claim and the original job.
+pub(crate) async fn create_rework(db: &Db, rework: NewPrintRework<'_>) -> AppResult<PrintJob> {
+    crate::core::logging::domain::tracked("print_jobs.rework_created", async move {
+        let original = require_original(db, rework.original_print_job_key).await?;
+        let assigned_employee_name = match rework.assigned_employee_key {
+            Some(key) => Some(
+                employees::service::resolve_assignment(db, key, None, None)
+                    .await?
+                    .name,
+            ),
+            None => None,
         };
+        insert_job(
+            db,
+            NewJob {
+                customer: JobCustomer {
+                    key: original.customer_key,
+                    name: original.customer_name,
+                    phone: original.customer_phone,
+                },
+                job_type: original.job_type,
+                quantity: original.quantity,
+                promised_ready_at: None,
+                status: "received".to_string(),
+                note: Some(rework.issue_description.to_string()),
+                kind: PrintJobKind::WarrantyRework {
+                    claim_key: rework.claim_key.to_string(),
+                    claim_number: rework.claim_number.to_string(),
+                    original_print_job_key: original.key,
+                    original_ticket_number: original.ticket_number,
+                },
+                items: Vec::new(),
+                price_cents: 0,
+                cost_cents: 0,
+                assigned_employee_id: rework.assigned_employee_key.map(str::to_string),
+                assigned_employee_name,
+                split_type: None,
+                split_value: None,
+                device_id: rework.device_id,
+            },
+        )
+        .await
+    })
+    .await
+}
 
-        let inserted = repository::insert(db, document).await?;
-        Ok(inserted.into_print_job())
+/// What a rejected warranty claim on print work needs to open a paid job for the same work.
+#[derive(Debug)]
+pub(crate) struct NewPaidJob<'a> {
+    pub customer_key: &'a str,
+    pub original_print_job_key: &'a str,
+    /// What the customer says is wrong, and why the claim was not covered.
+    pub note: String,
+    pub device_id: Option<String>,
+}
+
+/// Opens an ordinary, still unpriced print job of the same type and order quantity as the one a
+/// rejected claim was about.
+pub(crate) async fn create_paid_job(db: &Db, paid: NewPaidJob<'_>) -> AppResult<PrintJob> {
+    crate::core::logging::domain::tracked("print_jobs.created", async move {
+        let original = require_original(db, paid.original_print_job_key).await?;
+        let customer = customers::service::get_customer_by_key(db, paid.customer_key).await?;
+        insert_job(
+            db,
+            NewJob {
+                customer: customer.into(),
+                job_type: original.job_type,
+                quantity: original.quantity,
+                promised_ready_at: None,
+                status: "received".to_string(),
+                note: Some(paid.note),
+                kind: PrintJobKind::Standard,
+                items: Vec::new(),
+                price_cents: 0,
+                cost_cents: 0,
+                assigned_employee_id: None,
+                assigned_employee_name: None,
+                split_type: None,
+                split_value: None,
+                device_id: paid.device_id,
+            },
+        )
+        .await
     })
     .await
 }
@@ -277,11 +472,12 @@ pub(crate) async fn clear_billed(db: &Db, key: &str, invoice_key: &str) -> AppRe
 }
 
 /// Updates the print job.
-pub async fn update_print_job(
+pub(crate) async fn update_print_job(
     db: &Db,
     id_or_key: &str,
     body: UpdatePrintJobRequest,
     device_id: Option<String>,
+    actor: &WarrantyActor,
 ) -> AppResult<PrintJob> {
     crate::core::logging::domain::tracked("print_jobs.updated", async move {
         let existing = repository::find_by_id_or_key(db, id_or_key)
@@ -300,16 +496,41 @@ pub async fn update_print_job(
         let customer = customers::service::get_customer_by_key(db, customer_key).await?;
         let job_type = body.job_type.unwrap_or(existing.job_type);
         let quantity = body.quantity.unwrap_or(existing.quantity);
-        let estimated_cost_cents = body
-            .estimated_cost_cents
-            .unwrap_or(existing.estimated_cost_cents);
+        let was_delivered = existing.status == "delivered";
         let previous_status = existing.status.clone();
         let status = body.status.unwrap_or(existing.status);
+        let billed_invoice_key = existing.billed_invoice_key.as_deref();
 
         validate_status(&status)?;
         validate_job_type(&job_type)?;
         validate_promised_ready_at(body.promised_ready_at.as_deref())?;
-        validate_required_fields(&job_type, quantity, estimated_cost_cents)?;
+        validate_required_fields(&job_type, quantity)?;
+        let priced = match body.items {
+            Some(_) if billed_invoice_key.is_some() => {
+                return Err(AppError::conflict(
+                    codes::PRINT_JOB_ITEMS_LOCKED,
+                    "This job has been billed; its items can no longer be changed. Void the \
+                     invoice to change them.",
+                ));
+            }
+            Some(_) if was_delivered => {
+                return Err(AppError::conflict(
+                    codes::PRINT_JOB_ITEMS_LOCKED,
+                    "This job has been handed back; its items can no longer be changed.",
+                ));
+            }
+            Some(inputs) => Some(price_items(db, inputs, &existing.items, &existing.kind).await?),
+            None => None,
+        };
+        let items = match &priced {
+            Some(priced) => &priced.items,
+            None => &existing.items,
+        };
+        validate_price_required_for_status(&status, &existing.kind, items)?;
+        let handing_back = status == "delivered" && !was_delivered;
+        if handing_back {
+            refuse_handing_back_unbilled_parts(&existing.kind, items, billed_invoice_key)?;
+        }
 
         let mut set_doc = doc! {
             "customer_key": &customer.key,
@@ -317,15 +538,22 @@ pub async fn update_print_job(
             "customer_phone": &customer.primary_phone,
             "job_type": &job_type,
             "quantity": quantity,
-            "estimated_cost_cents": estimated_cost_cents,
             "status": &status,
             "updated_at": BsonDateTime::now(),
         };
+        if let Some(priced) = &priced {
+            set_doc.insert("items", mongodb::bson::serialize_to_bson(&priced.items)?);
+            set_doc.insert("price_cents", priced.price_cents);
+            set_doc.insert("cost_cents", priced.cost_cents);
+        }
+        if let Some(typed) = &body.note {
+            match clean_note(typed)? {
+                Some(note) => set_doc.insert("note", note),
+                None => set_doc.insert("note", Bson::Null),
+            };
+        }
         if let Some(promised) = body.promised_ready_at {
             set_doc.insert("promised_ready_at", promised);
-        }
-        if let Some(mc) = body.material_cost_cents {
-            set_doc.insert("material_cost_cents", mc);
         }
         if let Some(assignment) = body.assignment {
             // A split sent with no employee still has to be checked against who the job is
@@ -359,8 +587,24 @@ pub async fn update_print_job(
                 set_doc.insert("split_value", sv);
             }
         }
-        if let Some(device) = device_id {
-            set_doc.insert("updated_by_device", device);
+        if let (true, Some(invoice_key)) = (handing_back, billed_invoice_key) {
+            // Billed with the hand-over later: the warranties start today, before the status
+            // moves, so a failure here leaves the job open and the hand-back can be retried.
+            issue_handback_warranties(
+                db,
+                HandedBack {
+                    print_job_key: &existing.key,
+                    ticket_number: &existing.ticket_number,
+                    items,
+                },
+                invoice_key,
+                actor,
+                device_id.clone(),
+            )
+            .await?;
+        }
+        if let Some(device) = &device_id {
+            set_doc.insert("updated_by_device", device.clone());
         }
 
         let updated = repository::update(db, object_id, set_doc)
@@ -370,9 +614,129 @@ pub async fn update_print_job(
             })?
             .into_print_job();
         print_job_alerts::announce_status_change(db, &updated, &previous_status).await?;
+        if handing_back && updated.kind.is_rework() {
+            // A rework is never billed, so its parts leave stock here, against the job itself.
+            use_parts(
+                db,
+                &updated,
+                StockMovementType::WarrantyReworkPartConsumption,
+                &updated.key,
+            )
+            .await?;
+        }
         Ok(updated)
     })
     .await
+}
+
+/// A job's stock parts leave stock with its invoice, so a job that has parts from stock is handed
+/// back only once it is billed (or by billing it with the hand-over now). Marking an unbilled job
+/// delivered by hand would leave its parts in stock forever.
+fn refuse_handing_back_unbilled_parts(
+    kind: &PrintJobKind,
+    items: &[PrintJobItem],
+    billed_invoice_key: Option<&str>,
+) -> AppResult<()> {
+    let has_stock_part = items
+        .iter()
+        .any(|item| matches!(item.source, PrintItemSource::Stock { .. }));
+    if !kind.is_rework() && has_stock_part && billed_invoice_key.is_none() {
+        return Err(AppError::validation_with_code(
+            "Bill this job to hand it back: its parts from stock leave stock with the invoice.",
+            codes::PRINT_JOB_PART_INVALID,
+        ));
+    }
+    Ok(())
+}
+
+/// The job being handed back, as its warranties need it.
+#[derive(Debug)]
+struct HandedBack<'a> {
+    print_job_key: &'a str,
+    ticket_number: &'a str,
+    items: &'a [PrintJobItem],
+}
+
+/// Gives the lines of a job billed with the hand-over later their warranties, starting today, from
+/// the invoice that billed it (its number, its line and its customer). Does nothing when that
+/// invoice already gave the job warranties: a job reopened and handed back again keeps its first
+/// ones. A rework is never billed, so it never gets here.
+async fn issue_handback_warranties(
+    db: &Db,
+    job: HandedBack<'_>,
+    invoice_key: &str,
+    actor: &WarrantyActor,
+    device_id: Option<String>,
+) -> AppResult<()> {
+    if warranties::service::exist_for_print_job_on_invoice(db, job.print_job_key, invoice_key)
+        .await?
+    {
+        return Ok(());
+    }
+    let invoice = billing::service::get_invoice(db, invoice_key).await?;
+    let line_index = invoice
+        .items
+        .iter()
+        .position(|line| line.source_ticket_key.as_deref() == Some(job.print_job_key))
+        .ok_or_else(|| {
+            AppError::internal(format!(
+                "invoice {} does not bill print job {}, which names it as its invoice",
+                invoice.invoice_number, job.ticket_number
+            ))
+        })?;
+    warranties::service::issue_for_print_job(
+        db,
+        warranties::service::PrintJobLine {
+            invoice_key: &invoice.key,
+            invoice_number: &invoice.invoice_number,
+            delivered_at: Utc::now(),
+            customer_key: invoice.customer_key.as_deref(),
+            customer_name: invoice.customer_name_snapshot.as_deref(),
+            customer_phone: invoice.customer_phone_snapshot.as_deref(),
+            line_index,
+            print_job_key: job.print_job_key,
+            ticket_number: job.ticket_number,
+            items: job.items,
+            actor,
+            device_id,
+        },
+    )
+    .await?;
+    Ok(())
+}
+
+/// A job may sit with no lines while `received`, `in_repair` (in production) or `cancelled`.
+/// Once it moves to `ready` or `delivered` it needs at least one line, since those statuses mean
+/// it is headed to pickup and billing. A warranty rework charges nothing, so it needs none.
+/// Called on the *effective* post-write status and lines, so one change that sets both together
+/// is checked against the combined result.
+const STATUSES_REQUIRING_PRICE: &[&str] = &["ready", "delivered"];
+
+fn validate_price_required_for_status(
+    status: &str,
+    kind: &PrintJobKind,
+    items: &[PrintJobItem],
+) -> AppResult<()> {
+    if STATUSES_REQUIRING_PRICE.contains(&status) && !kind.is_rework() && items.is_empty() {
+        return Err(AppError::validation_with_code(
+            format!(
+                "Add the items before moving a print job to '{status}'. A job needs at least one item."
+            ),
+            codes::PRINT_JOB_PRICE_REQUIRED,
+        ));
+    }
+    Ok(())
+}
+
+/// A staff note as typed: trimmed, and `None` when it is blank.
+fn clean_note(typed: &str) -> AppResult<Option<String>> {
+    let note = typed.trim();
+    if note.chars().count() > NOTE_MAX {
+        return Err(AppError::validation(format!(
+            "A note can be at most {NOTE_MAX} characters."
+        )));
+    }
+    Ok((!note.is_empty()).then(|| note.to_string()))
 }
 
 const VALID_JOB_TYPES: &[&str] = &["mug", "t-shirt", "handbill", "banner", "custom"];
@@ -402,19 +766,12 @@ pub(super) fn validate_promised_ready_at(promised_ready_at: Option<&str>) -> App
     }
 }
 
-pub(super) fn validate_required_fields(
-    job_type: &str,
-    quantity: i32,
-    estimated_cost_cents: i64,
-) -> AppResult<()> {
+pub(super) fn validate_required_fields(job_type: &str, quantity: i32) -> AppResult<()> {
     if job_type.trim().is_empty() {
         return Err(AppError::validation("Job type is required"));
     }
     if quantity < 1 {
         return Err(AppError::validation("Quantity must be at least 1"));
-    }
-    if estimated_cost_cents < 0 {
-        return Err(AppError::validation("Estimated cost cannot be negative"));
     }
     Ok(())
 }

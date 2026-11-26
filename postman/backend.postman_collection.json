@@ -1551,6 +1551,40 @@
             }
           },
           "response": []
+        },
+        {
+          "name": "Calculate Print Job Totals",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/calc/print-job",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "calc",
+                "print-job"
+              ]
+            },
+            "description": "What a print job charges and costs: totals, each line (gross, discount, net, cost, profit) and what blocks saving (`discount_more_than_line`). A missing quantity or amount counts as nothing; a missing part cost makes `costKnown` false. Writes nothing. Needs `print_jobs:write`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"kind\": \"part\",\n      \"quantity\": 25,\n      \"unitPriceCents\": 45000,\n      \"cost\": {\n        \"basis\": \"per_unit\",\n        \"cents\": 30000\n      }\n    },\n    {\n      \"kind\": \"service\",\n      \"quantity\": 25,\n      \"unitPriceCents\": 15000,\n      \"discount\": {\n        \"type\": \"percentage\",\n        \"basisPoints\": 500\n      }\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
         }
       ]
     },
@@ -5359,7 +5393,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"customer\": {\n    \"customerKey\": \"{{customerKey}}\"\n  },\n  \"jobType\": \"mug\",\n  \"quantity\": 25,\n  \"estimatedCostCents\": 500000,\n  \"materialCostCents\": 200000,\n  \"promisedReadyAt\": \"2026-09-15\"\n}",
+              "raw": "{\n  \"customer\": {\n    \"customerKey\": \"{{customerKey}}\"\n  },\n  \"jobType\": \"mug\",\n  \"quantity\": 25,\n  \"promisedReadyAt\": \"2026-12-15\",\n  \"note\": \"Blue logo on both sides\",\n  \"items\": [\n    {\n      \"description\": \"Mug printing\",\n      \"quantity\": 25,\n      \"source\": {\n        \"type\": \"service\",\n        \"unitPriceCents\": 15000\n      },\n      \"warranty\": {\n        \"coverage\": {\n          \"kind\": \"none\"\n        }\n      }\n    },\n    {\n      \"description\": \"White mug\",\n      \"quantity\": 25,\n      \"source\": {\n        \"type\": \"stock\",\n        \"productKey\": \"{{productKey}}\",\n        \"sellingPriceCents\": 45000\n      },\n      \"discount\": {\n        \"type\": \"percentage\",\n        \"basisPoints\": 500\n      },\n      \"warranty\": {\n        \"coverage\": {\n          \"kind\": \"limited\",\n          \"value\": 1,\n          \"unit\": \"months\"\n        },\n        \"warrantyType\": \"shop\"\n      }\n    },\n    {\n      \"description\": \"Gift box\",\n      \"quantity\": 25,\n      \"source\": {\n        \"type\": \"outside\",\n        \"name\": \"Gift box\",\n        \"unitPriceCents\": 8000,\n        \"unitCostCents\": 5000\n      },\n      \"warranty\": {\n        \"coverage\": {\n          \"kind\": \"none\"\n        }\n      }\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5376,7 +5410,7 @@
                 "print-jobs"
               ]
             },
-            "description": "Create a print job ticket. `ticketNumber` is never client-supplied — reserved server-side on create. `jobType` must be one of `mug | t-shirt | handbill | banner | custom`; `status` defaults to `received` if omitted. The request nests the customer into the required `customer{customerKey}` (a registered customer: 404 `CUSTOMER_NOT_FOUND` for an unknown key, 422 when `customer` or its key is missing; there are no walk-in print jobs) and technician assignment into `assignment{assignedEmployeeId, assignedEmployeeName, splitType, splitValue}` (optional). The ticket's customer name and phone are read from that customer's record.\n\n**Requires the `print_jobs:write` permission** in the token's `permissions` claim — granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role."
+            "description": "Creates a print job for a registered customer. Price and cost are worked out from `items` (at most 50). Each item has a `quantity` and a `source`: `service` (a fee per unit), `stock` (`productKey` plus one `serialNumber`, quantity 1, for a product with serial numbers, else the `sellingPriceCents` of a current price tier; priced and costed on the server) or `outside` (typed price and cost per unit). Optional `discount` per item and `warranty` per item (required, `none` for no cover). `note` is a staff note of at most 1000 characters, never printed. `items` may be empty until the job is `ready` (400 `PRINT_JOB_PRICE_REQUIRED`). 400 `PRINT_JOB_PART_INVALID` for a wrong stock pick, 409 `INSUFFICIENT_STOCK` / `PRICE_TIER_UNAVAILABLE`. Needs `print_jobs:write`."
           },
           "response": []
         },
@@ -5412,7 +5446,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"status\": \"ready\",\n  \"promisedReadyAt\": \"2026-09-15\"\n}",
+              "raw": "{\n  \"status\": \"ready\",\n  \"note\": \"Customer will collect on Friday\",\n  \"items\": [\n    {\n      \"description\": \"Mug printing\",\n      \"quantity\": 25,\n      \"source\": {\n        \"type\": \"service\",\n        \"unitPriceCents\": 15000\n      },\n      \"warranty\": {\n        \"coverage\": {\n          \"kind\": \"none\"\n        }\n      }\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5430,7 +5464,7 @@
                 "{{printJobKey}}"
               ]
             },
-            "description": "Partially update a print job — omit any field to leave it unchanged. The request nests the customer into `customer{customerKey}` (omit it to keep the job's customer; a key changes it, 404 `CUSTOMER_NOT_FOUND` when unknown) and technician assignment into `assignment{assignedEmployeeId, assignedEmployeeName, splitType, splitValue}` (optional). The job's customer name and phone are always read from the customer's record. `status: delivered` hands the job back, including one billed with `handover: later`.\n\n**Requires the `print_jobs:write` permission** in the token's `permissions` claim — granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role."
+            "description": "Changes the fields sent. `items` is the whole list (an item keeps its `key` when sent back with it); omit it to keep the items. `note` omitted keeps the note, blank removes it. Items of a billed or delivered job are locked (409 `PRINT_JOB_ITEMS_LOCKED`). A job with stock parts is handed back (`delivered`) only once billed (400 `PRINT_JOB_PART_INVALID`); a job billed with the hand-over later gets its warranties then. Needs `print_jobs:write`."
           },
           "response": []
         },
@@ -6014,6 +6048,106 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Screen replacement\",\n  \"laborCents\": 300000,\n  \"warranty\": {\n    \"coverage\": {\n      \"kind\": \"limited\",\n      \"value\": 6,\n      \"unit\": \"months\"\n    },\n    \"warrantyType\": \"shop\"\n  },\n  \"active\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Print Services",
+      "description": "The shop's ready-made print services (`/api/print-services`): a name, the usual price of one unit and warranty. The print form adds one as an item. The key is derived from the name (`pst_` + hash), so the same service added on two tills is one row. Never deleted; hide with `active: false`.",
+      "item": [
+        {
+          "name": "List Print Services",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/print-services?includeHidden=true",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "print-services"
+              ],
+              "query": [
+                {
+                  "key": "includeHidden",
+                  "value": "true",
+                  "description": "Also list hidden services (settings screen).",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "The services by name. Needs `print_jobs:write`; `includeHidden=true` also lists hidden ones and needs `print_services:manage`."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Print Service",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/print-services",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "print-services"
+              ]
+            },
+            "description": "Adds a service. 409 `PRINT_SERVICE_NAME_TAKEN` when another service has the name (case and spaces ignored, hidden ones included). Needs `print_services:manage` (Admin, Manager).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Mug printing\",\n  \"unitPriceCents\": 15000,\n  \"warranty\": {\n    \"coverage\": {\n      \"kind\": \"limited\",\n      \"value\": 3,\n      \"unit\": \"months\"\n    },\n    \"warrantyType\": \"shop\"\n  },\n  \"active\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Print Service",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/print-services/{{printServiceKey}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "print-services",
+                "{{printServiceKey}}"
+              ]
+            },
+            "description": "Replaces the whole service; `active: false` hides it. 404 `PRINT_SERVICE_NOT_FOUND`, 409 on a taken name or `VERSION_CONFLICT`. Needs `print_services:manage`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Mug printing\",\n  \"unitPriceCents\": 300000,\n  \"warranty\": {\n    \"coverage\": {\n      \"kind\": \"limited\",\n      \"value\": 6,\n      \"unit\": \"months\"\n    },\n    \"warrantyType\": \"shop\"\n  },\n  \"active\": true\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -9142,6 +9276,12 @@
                   "disabled": true
                 },
                 {
+                  "key": "printJobKey",
+                  "value": "{{printJobKey}}",
+                  "description": "Only the warranties of this print job's items.",
+                  "disabled": true
+                },
+                {
                   "key": "state",
                   "value": "expiring_soon",
                   "description": "`expiring_soon`: only warranties in force whose last day is within the coming week, ending soonest first. Not with customerKey, invoiceKey or repairKey.",
@@ -9736,7 +9876,42 @@
                 "paid-repair"
               ]
             },
-            "description": "Turns a rejected claim into a paid repair job for the same item, once per claim. Send `{}`, or `customerKey` of a registered customer for a claim whose sale had no customer (a customer the claim already has always wins; 400 when the repair then has no name or phone). Needs `warranty_claims:record` and `repairs:write`."
+            "description": "Turns a rejected claim into a paid repair job for the same item, once per claim. Send `{}`, or `customerKey` of a registered customer for a claim whose sale had no customer (a customer the claim already has always wins; 400 when the repair then has no name or phone). Needs `warranty_claims:record` and `repairs:write`. A claim on print work answers 409 `CLAIM_PAID_JOB_INVALID`: use *Convert Claim To Paid Print Job*."
+          },
+          "response": []
+        },
+        {
+          "name": "Convert Claim To Paid Print Job",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerKey\": \"{{customerKey}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/warranty-claims/{{warrantyClaimKey}}/paid-print-job",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "warranty-claims",
+                "{{warrantyClaimKey}}",
+                "paid-print-job"
+              ]
+            },
+            "description": "Opens a paid print job (same type and order quantity as the original, no items yet, the complaint as its note) for a rejected claim on print work, linked as `paidPrintJobKey`/`paidPrintJobNumber`. Once per claim. `customerKey` only for a claim without a customer. 409 `CLAIM_PAID_JOB_INVALID` for a claim that is not about print work. Needs `warranty_claims:record` and `print_jobs:write`."
           },
           "response": []
         },
@@ -9757,7 +9932,7 @@
                 "rework"
               ]
             },
-            "description": "Opens the free rework job (`kind: warranty_rework`) for a claim on repair work that was decided as a repair, before it is resolved: same customer and device, no items yet, linked back as `reworkRepairKey`/`reworkRepairNumber`. Once per claim. 409 `CLAIM_STEP_NOT_ALLOWED` when not decided as a repair, already resolved or already reworked; 409 `CLAIM_REWORK_INVALID` for a warranty that came with a product. Needs `warranty_claims:record` and `repairs:write`."
+            "description": "Opens the free rework job (`kind: warranty_rework`) for a claim on repair or print work that was decided as a repair, before it is resolved: a repair job (`reworkRepairKey`/`reworkRepairNumber`) or a print job (`reworkPrintJobKey`/`reworkPrintJobNumber`), same customer, no items yet. Once per claim. 409 `CLAIM_STEP_NOT_ALLOWED` when not decided as a repair, already resolved or already reworked; 409 `CLAIM_REWORK_INVALID` for a warranty that came with a product. Needs `warranty_claims:record` and the write permission of that job type (`repairs:write` or `print_jobs:write`)."
           },
           "response": []
         }
@@ -9957,6 +10132,10 @@
     },
     {
       "key": "repairServiceKey",
+      "value": ""
+    },
+    {
+      "key": "printServiceKey",
       "value": ""
     }
   ]

@@ -6,9 +6,9 @@ use crate::core::error::{AppError, AppResult};
 use crate::core::utils::{shop_day, shop_midnight};
 use crate::domain::reports::{ReminderEntry, ReminderKind};
 use crate::domain::warranties::{CLAIM_SLOW_AFTER_DAYS, ClaimStatus, WarrantyStats};
-use crate::modules::repairs;
 use crate::modules::warranties::model::{WarrantyClaimDocument, stored_day};
 use crate::modules::warranties::repository::{self, ClaimFilter};
+use crate::modules::{print_jobs, repairs};
 use chrono::{Datelike, Duration, Months, NaiveDate, Utc};
 use pos_calc_core::warranty;
 
@@ -99,9 +99,9 @@ pub(crate) async fn stats(db: &Db) -> AppResult<WarrantyStats> {
     let next_month = month_start
         .checked_add_months(Months::new(1))
         .expect("next month is a valid date");
-    let rework =
-        repairs::service::rework_costs(db, shop_midnight(month_start), shop_midnight(next_month))
-            .await?;
+    let (from, to) = (shop_midnight(month_start), shop_midnight(next_month));
+    let mut rework = repairs::service::rework_costs(db, from, to).await?;
+    rework.extend(print_jobs::service::rework_costs(db, from, to).await?);
 
     Ok(WarrantyStats {
         in_force_count: counts.in_force,
@@ -204,6 +204,10 @@ mod tests {
             paid_repair_number: None,
             rework_repair_key: None,
             rework_repair_number: None,
+            paid_print_job_key: None,
+            paid_print_job_number: None,
+            rework_print_job_key: None,
+            rework_print_job_number: None,
             supplier: None,
             received_on: received_on.to_string(),
             resolved_on: None,

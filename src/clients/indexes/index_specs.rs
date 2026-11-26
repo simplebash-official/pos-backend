@@ -456,6 +456,7 @@ pub fn index_specs(tenant_mode: TenantMode) -> Vec<IndexSpec> {
         ),
         ("warranties_phone_tail", doc! { "customer_phone_tail": 1 }),
         ("warranties_repair_key", doc! { "repair_key": 1 }),
+        ("warranties_print_job_key", doc! { "print_job_key": 1 }),
     ] {
         specs.add("warranties", name, keys, false);
     }
@@ -506,6 +507,19 @@ pub fn index_specs(tenant_mode: TenantMode) -> Vec<IndexSpec> {
     specs.add(
         "repair_service_templates",
         "repair_service_templates_sync",
+        doc! { "updated_at": 1, "key": 1 },
+        false,
+    );
+    // Print services: the same, for print jobs.
+    specs.add(
+        "print_service_templates",
+        "print_service_templates_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    specs.add(
+        "print_service_templates",
+        "print_service_templates_sync",
         doc! { "updated_at": 1, "key": 1 },
         false,
     );

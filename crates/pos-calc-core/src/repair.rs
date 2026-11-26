@@ -5,32 +5,13 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::calculations::round_half_up;
 use crate::error::{CalcError, CalcResult};
+use crate::item_discount::{self, ItemDiscount};
 
 const MAX_CENTS: i64 = 10_000_000_000_000;
 
 /// Most items one job can have.
 pub const MAX_REPAIR_ITEMS: usize = 50;
-
-/// The most a percentage discount can be, in basis points (100%).
-const MAX_BASIS_POINTS: u32 = 10_000;
-
-/// What was typed as one item's discount: a share of the item's price, or cents. A percentage
-/// travels as whole basis points (12.5% is 1250) so no floating point touches the money.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-#[cfg_attr(feature = "tsify", derive(tsify::Tsify))]
-#[cfg_attr(feature = "tsify", tsify(into_wasm_abi, from_wasm_abi))]
-pub enum ItemDiscount {
-    /// A share of the item's price, 1 to 10000 basis points.
-    #[serde(rename_all = "camelCase")]
-    Percentage { basis_points: u32 },
-    /// An amount off the item's price, at least 1 cent.
-    #[serde(rename_all = "camelCase")]
-    Fixed { cents: i64 },
-}
 
 /// The money on one repair item. A field still being typed is absent and counts as nothing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -145,9 +126,7 @@ enum DiscountProblem {
 impl DiscountProblem {
     fn message(self) -> &'static str {
         match self {
-            DiscountProblem::OutOfRange => {
-                "A discount must be between 0.01% and 100%, or at least 1 cent."
-            }
+            DiscountProblem::OutOfRange => item_discount::OUT_OF_RANGE_MESSAGE,
             DiscountProblem::OnMixedItem => {
                 "Give the discount to the fee or to the part, not to one item with both."
             }
@@ -161,35 +140,15 @@ fn check_discount(item: &RepairItemMoney) -> Result<i64, DiscountProblem> {
     let Some(discount) = item.discount else {
         return Ok(0);
     };
-    if let ItemDiscount::Percentage { basis_points } = discount
-        && !(1..=MAX_BASIS_POINTS).contains(&basis_points)
-    {
-        return Err(DiscountProblem::OutOfRange);
-    }
-    if let ItemDiscount::Fixed { cents } = discount
-        && cents < 1
-    {
+    if !discount.is_in_range() {
         return Err(DiscountProblem::OutOfRange);
     }
     if item.labor_cents > 0 && item.part_cents > 0 {
         return Err(DiscountProblem::OnMixedItem);
     }
-    let gross = item.labor_cents + item.part_cents;
-    match discount {
-        ItemDiscount::Percentage { basis_points } => {
-            if gross == 0 {
-                return Err(DiscountProblem::MoreThanItem);
-            }
-            let cents = round_half_up(i128::from(gross) * i128::from(basis_points), 10_000);
-            Ok(i64::try_from(cents).expect("a share of an in-range price fits in cents"))
-        }
-        ItemDiscount::Fixed { cents } => {
-            if cents > gross {
-                return Err(DiscountProblem::MoreThanItem);
-            }
-            Ok(cents)
-        }
-    }
+    discount
+        .amount_off(item.labor_cents + item.part_cents)
+        .ok_or(DiscountProblem::MoreThanItem)
 }
 
 /// What one item's discount comes to in cents (0 when it has none). The amounts must already be
