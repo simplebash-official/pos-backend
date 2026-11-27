@@ -36,16 +36,25 @@
           "type": "fixed",
           "cents": 900
         }
+      },
+      {
+        "kind": "service",
+        "quantity": 3,
+        "unitPriceCents": 1000,
+        "cost": {
+          "basis": "per_unit",
+          "cents": 400
+        }
       }
     ]
   },
   "reply": {
     "totals": {
-      "servicesCents": 1500500,
+      "servicesCents": 1503500,
       "partsCents": 4502000,
       "discountCents": 187500,
-      "priceCents": 5815000,
-      "costCents": 3001500
+      "priceCents": 5818000,
+      "costCents": 3002700
     },
     "lines": [
       {
@@ -75,6 +84,13 @@
         "netCents": 500,
         "costCents": 0,
         "profitCents": 500
+      },
+      {
+        "grossCents": 3000,
+        "discountCents": 0,
+        "netCents": 3000,
+        "costCents": 1200,
+        "profitCents": 1800
       }
     ],
     "blockers": [

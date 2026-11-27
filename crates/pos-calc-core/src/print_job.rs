@@ -25,7 +25,7 @@ const DISCOUNT_MORE_THAN_LINE: &str = "A discount cannot be more than the line's
 #[cfg_attr(feature = "tsify", derive(tsify::Tsify))]
 #[cfg_attr(feature = "tsify", tsify(into_wasm_abi, from_wasm_abi))]
 pub enum PrintLineKind {
-    /// Work the shop charges for. It costs the shop nothing of its own.
+    /// Work the shop charges for. It costs the shop only what is recorded for it.
     Service,
     /// A part: from stock, or bought in for the job.
     Part,
@@ -38,7 +38,7 @@ pub enum PrintLineKind {
 #[cfg_attr(feature = "tsify", derive(tsify::Tsify))]
 #[cfg_attr(feature = "tsify", tsify(into_wasm_abi, from_wasm_abi))]
 pub enum CalcPrintCost {
-    /// The cost of one unit, as typed for a part bought in.
+    /// The cost of one unit, as typed for a service or a part bought in.
     PerUnit { cents: i64 },
     /// The cost of the whole line, as the server saved it for a part from stock.
     Line { cents: i64 },
@@ -55,7 +55,8 @@ pub struct CalcPrintItem {
     pub quantity: Option<i64>,
     /// What the customer pays for one unit.
     pub unit_price_cents: Option<i64>,
-    /// Absent for a service, and for a part whose cost is not known yet.
+    /// Absent for a service with no recorded cost, which counts as nothing, and for a part
+    /// whose cost is not known yet.
     pub cost: Option<CalcPrintCost>,
     /// The discount typed on this line; absent for none.
     pub discount: Option<ItemDiscount>,
@@ -87,7 +88,7 @@ pub struct PrintJobTotals {
     pub discount_cents: i64,
     /// What the customer pays: services and parts, less the discounts.
     pub price_cents: i64,
-    /// What the parts cost the shop.
+    /// What the lines cost the shop.
     pub cost_cents: i64,
 }
 
@@ -479,6 +480,33 @@ mod tests {
         assert_eq!(preview.totals.cost_cents, 2_700);
         assert!(preview.cost_known);
         assert!(preview.blockers.is_empty());
+    }
+
+    #[test]
+    fn a_service_cost_is_per_unit_and_counts_on_a_line_charged_nothing() {
+        let preview = compute(&CalcPrintJobRequest {
+            items: vec![
+                CalcPrintItem {
+                    quantity: Some(3),
+                    unit_price_cents: Some(1_000),
+                    cost: Some(CalcPrintCost::PerUnit { cents: 400 }),
+                    ..typed(PrintLineKind::Service)
+                },
+                // A free rework line still cost the shop.
+                CalcPrintItem {
+                    quantity: Some(2),
+                    unit_price_cents: Some(0),
+                    cost: Some(CalcPrintCost::PerUnit { cents: 250 }),
+                    ..typed(PrintLineKind::Service)
+                },
+            ],
+        })
+        .expect("in range");
+        assert_eq!(preview.lines[0].cost_cents, Some(1_200));
+        assert_eq!(preview.lines[0].profit_cents, Some(1_800));
+        assert_eq!(preview.lines[1].profit_cents, Some(-500));
+        assert_eq!(preview.totals.cost_cents, 1_700);
+        assert!(preview.cost_known);
     }
 
     #[test]

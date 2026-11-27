@@ -103,7 +103,7 @@ pub struct Repair {
     /// What the customer pays: every item's labour and part price, less the item discounts
     /// (`pos_calc_core::repair::repair_totals`). Stored with the items so reports can add it up.
     pub price_cents: i64,
-    /// What the parts cost the shop, added up the same way.
+    /// What the shop paid: part costs and recorded labour costs, added up the same way.
     pub cost_cents: i64,
     /// Staff ID of assigned technician.
     #[serde(skip_serializing_if = "Option::is_none")]

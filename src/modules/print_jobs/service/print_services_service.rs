@@ -1,7 +1,7 @@
 //! The shop's ready-made print services: a name (unique per shop, ignoring case and spaces;
-//! the key is derived from it, see `print_service_key`), the usual price of one unit and the
-//! usual warranty. Never deleted: a job that used one keeps its own copy of the line, and a
-//! service no longer offered is hidden (`active: false`).
+//! the key is derived from it, see `print_service_key`), the usual price and cost of one unit
+//! and the usual warranty. Never deleted: a job that used one keeps its own copy of the line, and
+//! a service no longer offered is hidden (`active: false`).
 
 use crate::clients::db::Db;
 use crate::core::constants::codes;
@@ -24,7 +24,7 @@ pub(crate) async fn list_services(db: &Db, include_hidden: bool) -> AppResult<Ve
         .collect())
 }
 
-/// A checked request: name trimmed, price not negative, warranty valid.
+/// A checked request: name trimmed, price and cost not negative, warranty valid.
 fn checked(body: SavePrintServiceRequest) -> AppResult<SavePrintServiceRequest> {
     let name = body.name.trim().to_string();
     if name.is_empty() {
@@ -38,9 +38,13 @@ fn checked(body: SavePrintServiceRequest) -> AppResult<SavePrintServiceRequest> 
     if body.unit_price_cents < 0 {
         return Err(AppError::validation("The price cannot be negative."));
     }
+    if body.unit_cost_cents.is_some_and(|cents| cents < 0) {
+        return Err(AppError::validation("The cost cannot be negative."));
+    }
     Ok(SavePrintServiceRequest {
         name,
         unit_price_cents: body.unit_price_cents,
+        unit_cost_cents: body.unit_cost_cents,
         warranty: body.warranty.validated()?,
         active: body.active,
     })
@@ -88,6 +92,7 @@ pub(crate) async fn create_service(
             key: print_service_key(&body.name),
             name: body.name,
             unit_price_cents: body.unit_price_cents,
+            unit_cost_cents: body.unit_cost_cents,
             warranty: body.warranty,
             active: body.active,
             version: 1,
@@ -102,7 +107,7 @@ pub(crate) async fn create_service(
     .await
 }
 
-/// Replaces a service's name, price, warranty and whether it is offered.
+/// Replaces a service's name, price, cost, warranty and whether it is offered.
 pub(crate) async fn update_service(
     db: &Db,
     key: &str,
@@ -118,6 +123,7 @@ pub(crate) async fn update_service(
         let expected = document.version;
         document.name = body.name;
         document.unit_price_cents = body.unit_price_cents;
+        document.unit_cost_cents = body.unit_cost_cents;
         document.warranty = body.warranty;
         document.active = body.active;
         document.version = expected + 1;

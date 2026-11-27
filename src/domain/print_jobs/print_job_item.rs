@@ -17,7 +17,12 @@ use utoipa::ToSchema;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PrintItemSource {
     /// Work the shop charges for, such as design or printing.
-    Service,
+    #[serde(rename_all = "camelCase")]
+    Service {
+        /// What one unit costs the shop; absent when none is recorded.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        unit_cost_cents: Option<i64>,
+    },
     /// Units of a product the shop stocks. They leave stock when the job is billed.
     #[serde(rename_all = "camelCase")]
     Stock {
@@ -53,7 +58,8 @@ pub struct PrintJobItem {
     pub source: PrintItemSource,
     /// What the customer pays for one unit; always 0 on a warranty rework.
     pub unit_price_cents: i64,
-    /// What the whole line costs the shop; 0 for a service. Worked out by the server.
+    /// What the whole line costs the shop; 0 for a service with no recorded cost. Worked out by
+    /// the server.
     pub cost_cents: i64,
     /// The discount off this line; absent for none. Never on a warranty rework.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -78,7 +84,7 @@ impl PrintJobItem {
     pub fn money(&self) -> PrintItemMoney {
         PrintItemMoney {
             kind: match self.source {
-                PrintItemSource::Service => PrintLineKind::Service,
+                PrintItemSource::Service { .. } => PrintLineKind::Service,
                 PrintItemSource::Stock { .. } | PrintItemSource::Outside { .. } => {
                     PrintLineKind::Part
                 }
@@ -95,9 +101,13 @@ impl PrintJobItem {
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PrintItemSourceInput {
-    /// A service fee, charged per unit.
+    /// A service fee, charged per unit, with what one unit costs the shop when that is
+    /// recorded.
     #[serde(rename_all = "camelCase")]
-    Service { unit_price_cents: i64 },
+    Service {
+        unit_price_cents: i64,
+        unit_cost_cents: Option<i64>,
+    },
     /// Units from stock: one `serialNumber` for a product that tracks serial numbers, otherwise
     /// the `sellingPriceCents` of one of its current price tiers. Price and cost come from stock,
     /// never from the client.
@@ -151,5 +161,33 @@ impl PrintJobKind {
     #[must_use]
     pub fn is_rework(&self) -> bool {
         matches!(self, PrintJobKind::WarrantyRework { .. })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_service_line_is_stored_with_its_cost_only_when_one_is_recorded() {
+        for (unit_cost_cents, stored) in [
+            (None, json!({ "type": "service" })),
+            (Some(0), json!({ "type": "service", "unitCostCents": 0 })),
+            (
+                Some(400),
+                json!({ "type": "service", "unitCostCents": 400 }),
+            ),
+        ] {
+            let source = PrintItemSource::Service { unit_cost_cents };
+            assert_eq!(
+                serde_json::to_value(&source).expect("a source serializes"),
+                stored
+            );
+            assert_eq!(
+                serde_json::from_value::<PrintItemSource>(stored).expect("a source reads back"),
+                source
+            );
+        }
     }
 }

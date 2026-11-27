@@ -204,7 +204,7 @@ pub(crate) async fn aggregate_employee_commissions(
     Ok(perf_map)
 }
 
-/// What a job charges and what its parts cost.
+/// What a job charges and what it costs the shop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct JobMoney {
     pub revenue_cents: i64,

@@ -81,7 +81,9 @@ pub fn legacy_items(job: LegacyPrintJob<'_>) -> AppResult<MigratedItems> {
                 job.quantity
             ),
             quantity: 1,
-            source: PrintItemSource::Service,
+            source: PrintItemSource::Service {
+                unit_cost_cents: None,
+            },
             unit_price_cents: job.estimated_cost_cents,
             cost_cents: 0,
             discount: None,
@@ -138,7 +140,12 @@ mod tests {
         assert_eq!(service.key, "pit_mig_prn_1");
         assert_eq!(service.description, "Mug printing (12 units)");
         assert_eq!(service.quantity, 1);
-        assert_eq!(service.source, PrintItemSource::Service);
+        assert_eq!(
+            service.source,
+            PrintItemSource::Service {
+                unit_cost_cents: None
+            }
+        );
         assert!(!service.warranty.is_covered());
         let materials = &migrated.items[1];
         assert_eq!(materials.key, "pit_mig_mat_prn_1");

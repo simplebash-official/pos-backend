@@ -1,7 +1,8 @@
 //! What a repair job charges and costs, worked out from its items. Each item is a piece of
-//! work: labour, or at most one part with the price the customer pays for it and what the
-//! part cost the shop, and optionally one discount off that item. The job's price is all the
-//! labour and part prices less the discounts; its cost is the part costs.
+//! work: labour with what it cost the shop when that is recorded, or at most one part with the
+//! price the customer pays for it and what the part cost the shop, and optionally one discount
+//! off that item. The job's price is all the labour and part prices less the discounts; its cost
+//! is the part costs and the recorded labour costs.
 
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +23,8 @@ pub const MAX_REPAIR_ITEMS: usize = 50;
 pub struct CalcRepairItem {
     /// What the work itself is charged.
     pub labor_cents: Option<i64>,
+    /// What the work cost the shop; absent when none is recorded.
+    pub labor_cost_cents: Option<i64>,
     /// What the customer pays for the part.
     pub part_cents: Option<i64>,
     /// What the part cost the shop.
@@ -56,7 +59,7 @@ pub struct RepairTotals {
     pub discount_cents: i64,
     /// What the customer pays: labour and parts, less the discounts.
     pub price_cents: i64,
-    /// What the parts cost the shop.
+    /// What the parts and the recorded labour cost the shop.
     pub cost_cents: i64,
 }
 
@@ -85,8 +88,8 @@ pub struct RepairBlocker {
     pub code: RepairBlockerCode,
 }
 
-/// The repair form's live answer: the totals, each item's discount worked out, and what stops
-/// Save. An item with a blocker counts as having no discount in the totals.
+/// The repair form's live answer: the totals, each item's discount and profit worked out, and
+/// what stops Save. An item with a blocker counts as having no discount.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -96,6 +99,9 @@ pub struct RepairPreview {
     pub totals: RepairTotals,
     /// What each item's discount comes to, in the request's order; 0 for none.
     pub item_discounts_cents: Vec<i64>,
+    /// Each item's price less its discount and what it cost, in the request's order. Negative
+    /// when it cost more than it is charged.
+    pub item_profits_cents: Vec<i64>,
     pub blockers: Vec<RepairBlocker>,
 }
 
@@ -104,12 +110,27 @@ pub struct RepairPreview {
 pub struct RepairItemMoney {
     /// What the work itself is charged.
     pub labor_cents: i64,
+    /// What the work cost the shop; absent when none is recorded.
+    pub labor_cost_cents: Option<i64>,
     /// What the customer pays for the part.
     pub part_cents: i64,
     /// What the part cost the shop.
     pub part_cost_cents: i64,
     /// The discount typed on the item.
     pub discount: Option<ItemDiscount>,
+}
+
+impl RepairItemMoney {
+    /// What the item cost the shop: its part and its recorded labour cost, wide enough that
+    /// amounts not yet checked cannot overflow.
+    fn cost_cents(&self) -> i128 {
+        i128::from(self.part_cost_cents)
+            + self
+                .labor_cost_cents
+                .into_iter()
+                .map(i128::from)
+                .sum::<i128>()
+    }
 }
 
 /// Why an item's discount is refused.
@@ -181,6 +202,7 @@ pub fn repair_totals(items: &[RepairItemMoney]) -> CalcResult<RepairTotals> {
     let mut discount: i128 = 0;
     for item in items {
         if !in_range(item.labor_cents)
+            || !item.labor_cost_cents.into_iter().all(in_range)
             || !in_range(item.part_cents)
             || !in_range(item.part_cost_cents)
         {
@@ -190,7 +212,7 @@ pub fn repair_totals(items: &[RepairItemMoney]) -> CalcResult<RepairTotals> {
         }
         labor += i128::from(item.labor_cents);
         parts += i128::from(item.part_cents);
-        cost += i128::from(item.part_cost_cents);
+        cost += item.cost_cents();
         discount += i128::from(item_discount_cents(item)?);
     }
     let fit = |total: i128| {
@@ -222,6 +244,7 @@ pub fn compute(request: &CalcRepairRequest) -> CalcResult<RepairPreview> {
     for (index, typed) in request.items.iter().enumerate() {
         let mut money = RepairItemMoney {
             labor_cents: typed.labor_cents.unwrap_or(0),
+            labor_cost_cents: typed.labor_cost_cents,
             part_cents: typed.part_cents.unwrap_or(0),
             part_cost_cents: typed.part_cost_cents.unwrap_or(0),
             discount: typed.discount,
@@ -245,9 +268,22 @@ pub fn compute(request: &CalcRepairRequest) -> CalcResult<RepairPreview> {
         }
         items.push(money);
     }
+    let totals = repair_totals(&items)?;
+    // The totals above refused any amount out of range, so each profit fits.
+    let item_profits_cents = items
+        .iter()
+        .zip(&item_discounts_cents)
+        .map(|(item, discount_cents)| {
+            let profit = i128::from(item.labor_cents) + i128::from(item.part_cents)
+                - i128::from(*discount_cents)
+                - item.cost_cents();
+            i64::try_from(profit).expect("an item's amounts are in range")
+        })
+        .collect();
     Ok(RepairPreview {
-        totals: repair_totals(&items)?,
+        totals,
         item_discounts_cents,
+        item_profits_cents,
         blockers,
     })
 }
@@ -259,9 +295,17 @@ mod tests {
     fn item(labor: i64, part: i64, cost: i64) -> RepairItemMoney {
         RepairItemMoney {
             labor_cents: labor,
+            labor_cost_cents: None,
             part_cents: part,
             part_cost_cents: cost,
             discount: None,
+        }
+    }
+
+    fn costed_fee(labor: i64, labor_cost: i64) -> RepairItemMoney {
+        RepairItemMoney {
+            labor_cost_cents: Some(labor_cost),
+            ..item(labor, 0, 0)
         }
     }
 
@@ -283,10 +327,76 @@ mod tests {
     ) -> CalcRepairItem {
         CalcRepairItem {
             labor_cents: labor,
+            labor_cost_cents: None,
             part_cents: part,
             part_cost_cents: None,
             discount,
         }
+    }
+
+    #[test]
+    fn a_labour_cost_adds_to_the_job_cost_but_not_to_the_price() {
+        let totals = repair_totals(&[costed_fee(250_000, 100_000), item(0, 1_200_000, 850_000)])
+            .expect("in range");
+        assert_eq!(totals.price_cents, 1_450_000);
+        assert_eq!(totals.cost_cents, 950_000);
+    }
+
+    #[test]
+    fn refuses_a_labour_cost_out_of_range() {
+        assert!(repair_totals(&[costed_fee(1, -1)]).is_err());
+        assert!(repair_totals(&[costed_fee(1, MAX_CENTS + 1)]).is_err());
+        assert!(repair_totals(&[costed_fee(1, MAX_CENTS), item(0, 0, 1)]).is_err());
+    }
+
+    #[test]
+    fn the_preview_refuses_an_amount_too_large_to_add_up() {
+        let request = CalcRepairRequest {
+            items: vec![CalcRepairItem {
+                labor_cost_cents: Some(i64::MAX),
+                part_cost_cents: Some(i64::MAX),
+                ..typed(None, None, None)
+            }],
+        };
+        assert!(compute(&request).is_err());
+    }
+
+    #[test]
+    fn the_preview_gives_each_item_its_profit_after_discount_and_cost() {
+        let preview = compute(&CalcRepairRequest {
+            items: vec![
+                CalcRepairItem {
+                    labor_cost_cents: Some(100_000),
+                    ..typed(Some(250_000), None, Some(percent(1_000)))
+                },
+                // Sold below cost: the loss is shown.
+                CalcRepairItem {
+                    part_cost_cents: Some(900),
+                    ..typed(None, Some(500), None)
+                },
+                // A free rework still cost the shop.
+                CalcRepairItem {
+                    labor_cost_cents: Some(700),
+                    ..typed(None, None, None)
+                },
+                // A blocked discount counts as none.
+                typed(
+                    Some(10_000),
+                    None,
+                    Some(ItemDiscount::Fixed { cents: 20_000 }),
+                ),
+            ],
+        })
+        .expect("in range");
+        assert_eq!(
+            preview.item_profits_cents,
+            vec![125_000, -400, -700, 10_000]
+        );
+        assert_eq!(preview.totals.cost_cents, 101_600);
+        assert_eq!(
+            preview.totals.price_cents - preview.totals.cost_cents,
+            preview.item_profits_cents.iter().sum::<i64>()
+        );
     }
 
     #[test]

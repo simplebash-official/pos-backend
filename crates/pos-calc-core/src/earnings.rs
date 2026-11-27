@@ -41,7 +41,7 @@ impl SplitKind {
 pub struct CalcEarningsRequest {
     /// The job's price; absent until one is typed.
     pub price_cents: Option<i64>,
-    /// What the parts cost; 0 when nothing is typed.
+    /// What the job cost the shop; 0 when nothing is typed.
     pub material_cost_cents: i64,
     /// Absent when no employee is assigned: no commission then.
     pub split_type: Option<SplitKind>,

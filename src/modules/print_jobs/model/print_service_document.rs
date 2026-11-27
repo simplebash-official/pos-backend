@@ -12,6 +12,8 @@ pub struct PrintServiceDocument {
     pub key: String,
     pub name: String,
     pub unit_price_cents: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unit_cost_cents: Option<i64>,
     /// Stored in its API shape (camelCase), like a product's warranty.
     pub warranty: ProductWarranty,
     pub active: bool,
@@ -34,6 +36,7 @@ impl PrintServiceDocument {
             key: self.key,
             name: self.name,
             unit_price_cents: self.unit_price_cents,
+            unit_cost_cents: self.unit_cost_cents,
             warranty: self.warranty,
             active: self.active,
             version: self.version,

@@ -574,16 +574,19 @@ async fn print_job_totals_are_worked_out_on_the_server() {
           "cost": { "basis": "line", "cents": 1_500 } },
         { "kind": "service", "quantity": 1, "unitPriceCents": 500,
           "discount": { "type": "fixed", "cents": 900 } },
+        { "kind": "service", "quantity": 3, "unitPriceCents": 1_000,
+          "cost": { "basis": "per_unit", "cents": 400 } },
     ] });
     let (status, body) = post(&app, "/api/calc/print-job", &request, Some(&staff)).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let data = &body["data"];
     assert_eq!(data["totals"]["partsCents"], 4_502_000);
-    assert_eq!(data["totals"]["servicesCents"], 1_500_500);
+    assert_eq!(data["totals"]["servicesCents"], 1_503_500);
     assert_eq!(data["totals"]["discountCents"], 187_500);
-    assert_eq!(data["totals"]["priceCents"], 6_002_500 - 187_500);
-    assert_eq!(data["totals"]["costCents"], 3_001_500);
+    assert_eq!(data["totals"]["priceCents"], 6_005_500 - 187_500);
+    assert_eq!(data["totals"]["costCents"], 3_002_700);
     assert_eq!(data["lines"][0]["profitCents"], 1_500_000);
+    assert_eq!(data["lines"][4]["profitCents"], 1_800);
     assert_eq!(data["costKnown"], true);
     assert_eq!(
         data["blockers"],
@@ -609,7 +612,8 @@ async fn repair_totals_are_worked_out_on_the_server() {
     );
     let request = json!({ "items": [
         { "laborCents": 250_000, "partCents": 1_200_000, "partCostCents": 850_000 },
-        { "laborCents": 150_000, "discount": { "type": "fixed", "cents": 50_000 } },
+        { "laborCents": 150_000, "laborCostCents": 20_000,
+          "discount": { "type": "fixed", "cents": 50_000 } },
         { "laborCents": null, "partCents": 30_000, "partCostCents": 12_000,
           "discount": { "type": "percentage", "basisPoints": 1_250 } },
         { "laborCents": 10_000, "discount": { "type": "fixed", "cents": 20_000 } },
@@ -621,7 +625,12 @@ async fn repair_totals_are_worked_out_on_the_server() {
     assert_eq!(data["totals"]["partsCents"], 1_230_000);
     assert_eq!(data["totals"]["discountCents"], 50_000 + 3_750);
     assert_eq!(data["totals"]["priceCents"], 1_640_000 - 53_750);
-    assert_eq!(data["totals"]["costCents"], 862_000);
+    assert_eq!(data["totals"]["costCents"], 882_000);
+    // Each item: its fee and part, less its discount and what it cost.
+    assert_eq!(
+        data["itemProfitsCents"],
+        json!([600_000, 80_000, 14_250, 10_000])
+    );
     assert_eq!(data["itemDiscountsCents"], json!([0, 50_000, 3_750, 0]));
     assert_eq!(
         data["blockers"],

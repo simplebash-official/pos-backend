@@ -71,7 +71,7 @@ pub struct PrintJob {
     /// (`pos_calc_core::print_job::print_job_totals`). Stored with the items so reports can add
     /// it up.
     pub price_cents: i64,
-    /// What the parts cost the shop, added up the same way.
+    /// What the lines cost the shop, added up the same way.
     pub cost_cents: i64,
     /// Staff ID of assigned worker.
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -45,6 +45,9 @@ struct CheckedItem {
 enum CheckedSource {
     Service {
         unit_price_cents: i64,
+        unit_cost_cents: Option<i64>,
+        /// What the whole line costs: nothing when no unit cost is recorded.
+        cost_cents: i64,
     },
     Outside {
         name: String,
@@ -87,6 +90,13 @@ fn unit_amount(cents: i64, what: &str, free: bool) -> AppResult<i64> {
     Ok(cents)
 }
 
+/// What `quantity` units at `unit_cost_cents` each cost the shop.
+fn line_cost(unit_cost_cents: i64, quantity: i64) -> AppResult<i64> {
+    unit_cost_cents
+        .checked_mul(quantity)
+        .ok_or_else(|| AppError::validation("A print job amount cannot be negative or that large."))
+}
+
 /// Every check of the lines that needs no stock, so a bad list is refused before any lookup.
 fn check_items(
     inputs: Vec<PrintJobItemInput>,
@@ -127,9 +137,25 @@ fn check_items(
             ));
         }
         let source = match input.source {
-            PrintItemSourceInput::Service { unit_price_cents } => CheckedSource::Service {
-                unit_price_cents: unit_amount(unit_price_cents, "The fee", rework)?,
-            },
+            PrintItemSourceInput::Service {
+                unit_price_cents,
+                unit_cost_cents,
+            } => {
+                let unit_price_cents = unit_amount(unit_price_cents, "The fee", rework)?;
+                // What the work cost counts even on a free rework.
+                let unit_cost_cents = unit_cost_cents
+                    .map(|cents| unit_amount(cents, "The cost", false))
+                    .transpose()?;
+                let cost_cents = match unit_cost_cents {
+                    Some(cents) => line_cost(cents, quantity)?,
+                    None => 0,
+                };
+                CheckedSource::Service {
+                    unit_price_cents,
+                    unit_cost_cents,
+                    cost_cents,
+                }
+            }
             PrintItemSourceInput::Outside {
                 name,
                 unit_price_cents,
@@ -138,9 +164,7 @@ fn check_items(
                 let unit_price_cents = unit_amount(unit_price_cents, "The part price", rework)?;
                 // What a bought-in part cost counts even on a free rework.
                 let unit_cost_cents = unit_amount(unit_cost_cents, "The part cost", false)?;
-                let cost_cents = unit_cost_cents.checked_mul(quantity).ok_or_else(|| {
-                    AppError::validation("A print job amount cannot be negative or that large.")
-                })?;
+                let cost_cents = line_cost(unit_cost_cents, quantity)?;
                 CheckedSource::Outside {
                     name: trimmed(&name, "The part name", PART_NAME_MAX)?,
                     unit_price_cents,
@@ -186,7 +210,7 @@ fn stock_source(found: PlannedPart) -> PrintItemSource {
 /// already on the job keeps it; a new one gets a fresh key. A stock part is priced from the
 /// unit or tier it names, and every unit asked for must be in stock now. A warranty rework
 /// charges nothing and gives no new warranty, so its typed prices must be 0, its stock parts
-/// are charged at 0 (their cost still counts) and it takes no discount.
+/// are charged at 0 (every cost still counts) and it takes no discount.
 pub(crate) async fn price_items(
     db: &Db,
     inputs: Vec<PrintJobItemInput>,
@@ -217,9 +241,15 @@ pub(crate) async fn price_items(
     let mut items = Vec::with_capacity(checked.len());
     for item in checked {
         let (source, unit_price_cents, cost_cents) = match item.source {
-            CheckedSource::Service { unit_price_cents } => {
-                (PrintItemSource::Service, unit_price_cents, 0)
-            }
+            CheckedSource::Service {
+                unit_price_cents,
+                unit_cost_cents,
+                cost_cents,
+            } => (
+                PrintItemSource::Service { unit_cost_cents },
+                unit_price_cents,
+                cost_cents,
+            ),
             CheckedSource::Outside {
                 name,
                 unit_price_cents,
@@ -319,4 +349,58 @@ pub(crate) async fn use_parts(
     let note = format!("Part used on print job {}", job.ticket_number);
     let parts = plan_parts(db, job).await?;
     job_parts::take_job_parts(db, parts, movement_type, reference, &note).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn service(unit_price_cents: i64, unit_cost_cents: Option<i64>) -> PrintJobItemInput {
+        PrintJobItemInput {
+            key: None,
+            description: "Design".to_string(),
+            quantity: 3,
+            source: PrintItemSourceInput::Service {
+                unit_price_cents,
+                unit_cost_cents,
+            },
+            discount: None,
+            warranty: ProductWarranty::none(),
+        }
+    }
+
+    /// The unit cost and line cost of a checked service line.
+    fn costs(item: &CheckedItem) -> (Option<i64>, i64) {
+        match item.source {
+            CheckedSource::Service {
+                unit_cost_cents,
+                cost_cents,
+                ..
+            } => (unit_cost_cents, cost_cents),
+            CheckedSource::Outside { .. } | CheckedSource::Stock { .. } => {
+                panic!("expected a service line")
+            }
+        }
+    }
+
+    #[test]
+    fn a_free_rework_still_records_what_the_work_cost() {
+        let checked =
+            check_items(vec![service(0, Some(400))], &[], true).expect("a rework may cost");
+        assert_eq!(costs(&checked[0]), (Some(400), 1_200));
+    }
+
+    #[test]
+    fn a_line_with_no_recorded_cost_costs_nothing() {
+        let checked = check_items(vec![service(100, None), service(100, Some(0))], &[], false)
+            .expect("both are valid");
+        assert_eq!(costs(&checked[0]), (None, 0));
+        assert_eq!(costs(&checked[1]), (Some(0), 0));
+    }
+
+    #[test]
+    fn refuses_a_cost_that_is_negative_or_too_large_for_the_quantity() {
+        assert!(check_items(vec![service(100, Some(-1))], &[], false).is_err());
+        assert!(check_items(vec![service(100, Some(i64::MAX))], &[], false).is_err());
+    }
 }

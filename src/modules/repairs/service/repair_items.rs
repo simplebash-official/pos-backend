@@ -53,6 +53,7 @@ struct CheckedItem {
     key: String,
     description: String,
     labor_cents: i64,
+    labor_cost_cents: Option<i64>,
     part: Option<CheckedPart>,
     discount: Option<ItemDiscount>,
     warranty: ProductWarranty,
@@ -96,6 +97,10 @@ fn check_items(
         }
         let description = trimmed(&input.description, "What is done", DESCRIPTION_MAX)?;
         not_negative(input.labor_cents, "Fee")?;
+        // What the work cost counts even on a free rework.
+        if let Some(cost_cents) = input.labor_cost_cents {
+            not_negative(cost_cents, "The cost")?;
+        }
         if rework && input.labor_cents != 0 {
             return Err(AppError::validation(
                 "A warranty rework is free: its fees must be 0.",
@@ -147,6 +152,7 @@ fn check_items(
             key,
             description,
             labor_cents: input.labor_cents,
+            labor_cost_cents: input.labor_cost_cents,
             part,
             discount: input.discount,
             warranty,
@@ -171,7 +177,7 @@ fn stock_part(found: PlannedPart) -> RepairPart {
 /// already on the job keeps it; a new one gets a fresh key. A stock part is priced from the
 /// unit or tier it names, which must be in stock now. A warranty rework charges nothing and
 /// gives no new warranty, so its labour and outside-part prices must be 0 and its stock parts
-/// are charged at 0 (their cost still counts) and it takes no discount.
+/// are charged at 0 (labour and part costs still count) and it takes no discount.
 pub(crate) async fn price_items(
     db: &Db,
     inputs: Vec<RepairItemInput>,
@@ -219,6 +225,7 @@ pub(crate) async fn price_items(
             Some(typed) => {
                 let amount_cents = item_discount_cents(&RepairItemMoney {
                     labor_cents: item.labor_cents,
+                    labor_cost_cents: item.labor_cost_cents,
                     part_cents,
                     part_cost_cents,
                     discount: Some(typed),
@@ -234,6 +241,7 @@ pub(crate) async fn price_items(
             key: item.key,
             description: item.description,
             labor_cents: item.labor_cents,
+            labor_cost_cents: item.labor_cost_cents,
             part,
             part_cents,
             part_cost_cents,
@@ -245,6 +253,7 @@ pub(crate) async fn price_items(
         .iter()
         .map(|item| RepairItemMoney {
             labor_cents: item.labor_cents,
+            labor_cost_cents: item.labor_cost_cents,
             part_cents: item.part_cents,
             part_cost_cents: item.part_cost_cents,
             discount: item.discount.as_ref().map(|discount| discount.typed),
@@ -306,4 +315,40 @@ pub(crate) async fn use_parts(
     let note = format!("Part used on repair {}", repair.ticket_number);
     let parts = plan_parts(db, repair).await?;
     job_parts::take_job_parts(db, parts, movement_type, reference, &note).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fee(labor_cents: i64, labor_cost_cents: Option<i64>) -> RepairItemInput {
+        RepairItemInput {
+            key: None,
+            description: "Board repair".to_string(),
+            labor_cents,
+            labor_cost_cents,
+            part: None,
+            discount: None,
+            warranty: ProductWarranty::none(),
+        }
+    }
+
+    #[test]
+    fn a_free_rework_still_records_what_the_work_cost() {
+        let checked = check_items(vec![fee(0, Some(700))], &[], true).expect("a rework may cost");
+        assert_eq!(checked[0].labor_cost_cents, Some(700));
+    }
+
+    #[test]
+    fn no_recorded_cost_is_not_a_cost_of_zero() {
+        let checked = check_items(vec![fee(100, None), fee(100, Some(0))], &[], false)
+            .expect("both are valid");
+        assert_eq!(checked[0].labor_cost_cents, None);
+        assert_eq!(checked[1].labor_cost_cents, Some(0));
+    }
+
+    #[test]
+    fn refuses_a_negative_cost() {
+        assert!(check_items(vec![fee(100, Some(-1))], &[], false).is_err());
+    }
 }

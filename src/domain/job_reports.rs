@@ -3,7 +3,8 @@
 use chrono::NaiveDate;
 use std::collections::HashMap;
 
-/// One rework job's cost to the shop (its parts at cost; the work is free).
+/// One rework job's cost to the shop (its parts and recorded work costs; the customer pays
+/// nothing).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReworkCost {
     /// The shop-local day the rework was opened.

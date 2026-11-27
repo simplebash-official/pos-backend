@@ -310,7 +310,7 @@ pub(crate) async fn issue_for_print_job(
         };
         let serial_number = match &item.source {
             PrintItemSource::Stock { serial_number, .. } => serial_number.clone(),
-            PrintItemSource::Service | PrintItemSource::Outside { .. } => None,
+            PrintItemSource::Service { .. } | PrintItemSource::Outside { .. } => None,
         };
         let now = BsonDateTime::now();
         let document = WarrantyDocument {

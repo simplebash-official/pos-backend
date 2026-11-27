@@ -46,6 +46,9 @@ pub struct RepairItem {
     pub description: String,
     /// What the work is charged.
     pub labor_cents: i64,
+    /// What the work cost the shop; absent when none is recorded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub labor_cost_cents: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub part: Option<RepairPart>,
     /// What the customer pays for the part; 0 without one, and always 0 on a warranty rework.
@@ -101,6 +104,8 @@ pub struct RepairItemInput {
     pub key: Option<String>,
     pub description: String,
     pub labor_cents: i64,
+    /// What the work cost the shop; omit it to record none.
+    pub labor_cost_cents: Option<i64>,
     pub part: Option<RepairPartInput>,
     /// The discount typed on this item; absent for none. The server works out the amount.
     pub discount: Option<ItemDiscount>,

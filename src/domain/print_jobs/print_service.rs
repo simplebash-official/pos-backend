@@ -1,6 +1,6 @@
-//! A shop's ready-made print services ("Design", "Mug printing"): a name, the usual price of one
-//! unit and the warranty that work comes with. The print form adds one as a line in one tap, then
-//! the person adjusts it.
+//! A shop's ready-made print services ("Design", "Mug printing"): a name, the usual price and
+//! cost of one unit and the warranty that work comes with. The print form adds one as a line in
+//! one tap, then the person adjusts it.
 
 use crate::domain::warranties::ProductWarranty;
 use chrono::{DateTime, Utc};
@@ -29,6 +29,9 @@ pub struct PrintService {
     pub name: String,
     /// The usual price of one unit of this work.
     pub unit_price_cents: i64,
+    /// What one unit of this work usually costs the shop; absent when none is saved.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unit_cost_cents: Option<i64>,
     /// The cover this work usually comes with.
     pub warranty: ProductWarranty,
     /// A hidden service stays on old jobs but is not offered on new ones.
@@ -46,6 +49,8 @@ pub struct PrintService {
 pub struct SavePrintServiceRequest {
     pub name: String,
     pub unit_price_cents: i64,
+    /// Omit it to save no usual cost.
+    pub unit_cost_cents: Option<i64>,
     pub warranty: ProductWarranty,
     pub active: bool,
 }

@@ -26,6 +26,7 @@ fn from_row(row: &sqlx::sqlite::SqliteRow) -> AppResult<PrintServiceDocument> {
         key: row.get("key"),
         name: row.get("name"),
         unit_price_cents: row.get("unit_price_cents"),
+        unit_cost_cents: row.get("unit_cost_cents"),
         warranty: serde_json::from_str(&warranty).map_err(|e| {
             AppError::internal(format!(
                 "stored print service warranty is not readable: {e}"
@@ -86,14 +87,15 @@ pub(crate) async fn insert(
         Db::Sqlite(pool) => {
             let id = document.id.map_or_else(generate_id_hex, |oid| oid.to_hex());
             sqlx::query(
-                "INSERT INTO print_service_templates (key, id, name, unit_price_cents, warranty, \
-                 active, version, created_at, updated_at, updated_by_device) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO print_service_templates (key, id, name, unit_price_cents, unit_cost_cents, \
+                 warranty, active, version, created_at, updated_at, updated_by_device) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&document.key)
             .bind(&id)
             .bind(&document.name)
             .bind(document.unit_price_cents)
+            .bind(document.unit_cost_cents)
             .bind(serde_json::to_string(&document.warranty).expect("a warranty serializes"))
             .bind(i64::from(document.active))
             .bind(document.version)
@@ -125,12 +127,13 @@ pub(crate) async fn replace(
             .matched_count
             == 1),
         Db::Sqlite(pool) => Ok(sqlx::query(
-            "UPDATE print_service_templates SET name = ?, unit_price_cents = ?, warranty = ?, \
-             active = ?, version = ?, updated_at = ?, updated_by_device = ? \
+            "UPDATE print_service_templates SET name = ?, unit_price_cents = ?, unit_cost_cents = ?, \
+             warranty = ?, active = ?, version = ?, updated_at = ?, updated_by_device = ? \
              WHERE key = ? AND version = ?",
         )
         .bind(&document.name)
         .bind(document.unit_price_cents)
+        .bind(document.unit_cost_cents)
         .bind(serde_json::to_string(&document.warranty).expect("a warranty serializes"))
         .bind(i64::from(document.active))
         .bind(document.version)

@@ -97,6 +97,18 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             }
         }
     }
+    // A ready-made service can remember what it usually costs the shop. Optional.
+    for (table, column) in [
+        ("repair_service_templates", "labor_cost_cents"),
+        ("print_service_templates", "unit_cost_cents"),
+    ] {
+        let columns = table_columns(pool, table).await?;
+        if !columns.is_empty() && !columns.iter().any(|c| c == column) {
+            tracing::info!("Migrating '{table}' table: adding '{column}' column");
+            pool.execute(format!("ALTER TABLE {table} ADD COLUMN {column} INTEGER").as_str())
+                .await?;
+        }
+    }
     // `credit_notes.resolution` arrived with resolving a credit note held for inspection.
     let credit_note_cols = table_columns(pool, "credit_notes").await?;
     if !credit_note_cols.is_empty() && !credit_note_cols.iter().any(|c| c == "resolution") {
