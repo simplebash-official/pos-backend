@@ -530,6 +530,19 @@ pub fn index_specs(tenant_mode: TenantMode) -> Vec<IndexSpec> {
         doc! { "updated_at": 1, "key": 1 },
         false,
     );
+    // The frame size list: one row per derived key.
+    specs.add(
+        "print_frame_sizes",
+        "print_frame_sizes_key_unique",
+        doc! { "key": 1 },
+        true,
+    );
+    specs.add(
+        "print_frame_sizes",
+        "print_frame_sizes_sync",
+        doc! { "updated_at": 1, "key": 1 },
+        false,
+    );
     // Notifications: the history and bell read newest first; read marks are looked up per
     // notification (and unique per user).
     for (name, keys, unique) in [

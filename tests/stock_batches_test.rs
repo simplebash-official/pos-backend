@@ -616,7 +616,7 @@ async fn a_sqlite_database_from_before_batches_is_migrated() {
     assert_eq!(count, 1);
 
     pool.close().await;
-    let _ = std::fs::remove_file(&path);
+    common::remove_sqlite_files(&path);
 }
 
 /// The cloud migration (`stock_batch_migration::migrate_mongo`) turns

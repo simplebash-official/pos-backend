@@ -341,6 +341,9 @@ pub(crate) async fn hydrate(
         "printServices" | "print_service_templates" => {
             to_values(print_jobs_service::hydrate_sync_services(documents)?)?
         }
+        "printFrameSizes" | "print_frame_sizes" => {
+            to_values(print_jobs_service::hydrate_sync_frame_sizes(documents)?)?
+        }
         _ => {
             return Err(AppError::internal(format!(
                 "no sync hydrator for resource '{resource}'"

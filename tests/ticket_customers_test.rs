@@ -200,7 +200,7 @@ async fn an_old_sqlite_database_links_every_ticket_to_a_customer() {
         .expect("count");
     assert_eq!(before, after);
     drop(pool);
-    std::fs::remove_file(&path).ok();
+    common::remove_sqlite_files(&path);
 }
 
 async fn raw_ticket(

@@ -8,6 +8,8 @@
 //! `modules::reports::service::employee_earnings`).
 
 mod domain_print_jobs;
+mod print_frame_size;
+mod print_job_frame;
 mod print_job_item;
 mod print_service;
 
@@ -19,6 +21,15 @@ pub use domain_print_jobs::PrintJobListQuery;
 pub use domain_print_jobs::PrintJobListResponse;
 pub use domain_print_jobs::PrintJobStats;
 pub use domain_print_jobs::UpdatePrintJobRequest;
+pub use print_frame_size::CreatePrintFrameSizeRequest;
+pub use print_frame_size::PrintFrameSize;
+pub use print_frame_size::PrintFrameSizeListQuery;
+pub use print_frame_size::UpdatePrintFrameSizeRequest;
+pub use print_frame_size::frame_width_inches;
+pub use print_frame_size::normalize_frame_size;
+pub use print_frame_size::print_frame_size_key;
+pub use print_job_frame::PrintJobFrame;
+pub use print_job_frame::PrintJobFrameInput;
 pub use print_job_item::PrintItemSource;
 pub use print_job_item::PrintItemSourceInput;
 pub use print_job_item::PrintJobItem;

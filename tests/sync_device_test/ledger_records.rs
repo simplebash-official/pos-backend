@@ -146,8 +146,9 @@ async fn a_syncing_device_queues_its_ledger_rows_again_exactly_once() {
 
     let mut rows = 0;
     for (resource, table) in LEDGER_RESOURCES {
-        // Ready-made services always could be read, so none of theirs were dropped.
-        if !["repairServices", "printServices"].contains(&resource) {
+        // Ready-made services and frame sizes always could be read, so none of theirs were
+        // dropped.
+        if !["repairServices", "printServices", "printFrameSizes"].contains(&resource) {
             rows +=
                 i64::try_from(table_rows(dev.pool(), table).await.len()).expect("the count fits");
         }

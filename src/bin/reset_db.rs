@@ -58,6 +58,7 @@ async fn main() {
             "warranty_claims",
             "repair_service_templates",
             "print_service_templates",
+            "print_frame_sizes",
             "warranty_events",
             "warranties",
             "credit_notes",

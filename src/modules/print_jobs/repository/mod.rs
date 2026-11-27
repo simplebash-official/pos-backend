@@ -2,6 +2,7 @@
 //! miss-as-an-error convention as every other repository in this codebase —
 //! `service` decides what a missing row means.
 
+pub(crate) mod print_frame_sizes_repository;
 mod print_job_reports_repository;
 mod print_jobs_repository;
 pub(crate) mod print_services_repository;

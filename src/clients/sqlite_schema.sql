@@ -345,6 +345,7 @@ CREATE TABLE IF NOT EXISTS print_jobs (
     note TEXT,
     kind JSON NOT NULL,
     items JSON NOT NULL,
+    frames JSON,
     price_cents INTEGER NOT NULL,
     cost_cents INTEGER NOT NULL,
     assigned_employee_id TEXT,
@@ -952,6 +953,23 @@ CREATE TABLE IF NOT EXISTS print_service_templates (
 );
 
 CREATE INDEX IF NOT EXISTS idx_print_service_templates_sync ON print_service_templates(updated_at, key);
+
+-- The frame size list (`modules::print_jobs`): one row per size and width, with a key derived
+-- from both, so the same frame added on two tills is one row. Never deleted; hidden with
+-- `active = 0`.
+CREATE TABLE IF NOT EXISTS print_frame_sizes (
+    key TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    size TEXT NOT NULL,
+    width_hundredths_inch INTEGER NOT NULL,
+    active INTEGER NOT NULL,
+    version INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by_device TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_print_frame_sizes_sync ON print_frame_sizes(updated_at, key);
 
 -- Shop notifications (`modules::notifications`): written once, removed after the retention
 -- window. The audience is `audience_type` ('everyone' | 'permission' | 'user') with the

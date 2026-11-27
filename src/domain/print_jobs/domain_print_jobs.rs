@@ -1,4 +1,4 @@
-use super::{PrintJobItem, PrintJobItemInput, PrintJobKind};
+use super::{PrintJobFrame, PrintJobFrameInput, PrintJobItem, PrintJobItemInput, PrintJobKind};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
@@ -25,6 +25,8 @@ pub struct CreatePrintJobRequest {
     pub note: Option<String>,
     /// The job's lines: service fees and parts. Empty while the job is not priced yet.
     pub items: Vec<PrintJobItemInput>,
+    /// The frames a photo and framing job asks for; left out when it lists none.
+    pub frames: Option<Vec<PrintJobFrameInput>>,
     /// Staff assignment details.
     pub assignment: Option<PrintJobAssignment>,
 }
@@ -67,6 +69,8 @@ pub struct PrintJob {
     pub kind: PrintJobKind,
     /// The job's lines, in order.
     pub items: Vec<PrintJobItem>,
+    /// The frames the customer wants (photo and framing jobs only). They price nothing.
+    pub frames: Vec<PrintJobFrame>,
     /// What the customer pays: every line's price less the line discounts
     /// (`pos_calc_core::print_job::print_job_totals`). Stored with the items so reports can add
     /// it up.
@@ -221,6 +225,9 @@ pub struct UpdatePrintJobRequest {
     /// The job's whole list of lines, replacing the stored one. Omit it to leave the lines as
     /// they are. A line sent with the `key` of one already on the job keeps that key.
     pub items: Option<Vec<PrintJobItemInput>>,
+    /// The job's whole list of wanted frames, replacing the stored one. Omit it to leave them as
+    /// they are; send an empty list to remove them.
+    pub frames: Option<Vec<PrintJobFrameInput>>,
     /// Updated staff assignment.
     pub assignment: Option<PrintJobAssignment>,
 }

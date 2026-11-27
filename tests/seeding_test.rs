@@ -1,9 +1,12 @@
 mod common;
 
+use std::path::PathBuf;
+
 use axum::body::Body;
 
 use axum::http::{Request, StatusCode, header};
 use serde_json::json;
+use simplebash_pos_backend::core::config::Database;
 use simplebash_pos_backend::seeds;
 use tower::ServiceExt;
 
@@ -278,4 +281,32 @@ async fn test_seed_idempotency() {
     assert_eq!(summary2.suppliers.suppliers_created, 0);
     assert_eq!(summary2.customers.customers_created, 0);
     assert_eq!(summary2.inventory.products_created, 0);
+}
+
+#[tokio::test]
+async fn a_sqlite_test_app_removes_its_database_when_dropped() {
+    let app = common::spawn_app_sqlite().await;
+    let Database::Sqlite { url } = &app.config.database else {
+        panic!("spawn_app_sqlite runs on SQLite");
+    };
+    let path = PathBuf::from(
+        url.trim_start_matches("sqlite://")
+            .trim_end_matches("?mode=rwc"),
+    );
+    assert!(
+        path.exists(),
+        "{} should exist while the app is alive",
+        path.display()
+    );
+
+    drop(app);
+
+    let files = [
+        path.with_extension("db-wal"),
+        path.with_extension("db-shm"),
+        path,
+    ];
+    for file in files {
+        assert!(!file.exists(), "{} was left behind", file.display());
+    }
 }

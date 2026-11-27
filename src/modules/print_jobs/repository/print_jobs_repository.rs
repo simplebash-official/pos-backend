@@ -242,11 +242,11 @@ pub(crate) async fn insert(db: &Db, mut document: PrintJobDocument) -> AppResult
                 r#"
                 INSERT INTO print_jobs (
                     key, id, ticket_number, customer_key, customer_name, customer_phone,
-                    job_type, quantity, promised_ready_at, status, note, kind, items,
+                    job_type, quantity, promised_ready_at, status, note, kind, items, frames,
                     price_cents, cost_cents, assigned_employee_id, assigned_employee_name,
                     split_type, split_value, billed_invoice_key, billed_invoice_number, version,
                     created_at, updated_at, deleted_at, updated_by_device
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(&document.key)
@@ -268,6 +268,9 @@ pub(crate) async fn insert(db: &Db, mut document: PrintJobDocument) -> AppResult
                 serde_json::to_string(&document.items)
                     .expect("print job items serialize to JSON"),
             )
+            .bind(document.frames.as_ref().map(|frames| {
+                serde_json::to_string(frames).expect("print job frames serialize to JSON")
+            }))
             .bind(document.price_cents)
             .bind(document.cost_cents)
             .bind(&document.assigned_employee_id)
@@ -442,6 +445,20 @@ fn stored_json<T: serde::de::DeserializeOwned>(
     })
 }
 
+/// A JSON column a print job row may leave empty.
+fn optional_stored_json<T: serde::de::DeserializeOwned>(
+    row: &sqlx::sqlite::SqliteRow,
+    column: &str,
+) -> AppResult<Option<T>> {
+    row.get::<Option<String>, _>(column)
+        .map(|text| {
+            serde_json::from_str(&text).map_err(|err| {
+                AppError::internal(format!("stored print job {column} is not readable: {err}"))
+            })
+        })
+        .transpose()
+}
+
 pub(super) fn row_to_print_job_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<PrintJobDocument> {
     let id_str: String = row.get("id");
     let id = ObjectId::parse_str(&id_str).ok();
@@ -464,6 +481,7 @@ pub(super) fn row_to_print_job_doc(row: &sqlx::sqlite::SqliteRow) -> AppResult<P
         note: row.get("note"),
         kind: stored_json(row, "kind")?,
         items: stored_json(row, "items")?,
+        frames: optional_stored_json(row, "frames")?,
         price_cents: row.get("price_cents"),
         cost_cents: row.get("cost_cents"),
         assigned_employee_id: row.get("assigned_employee_id"),
@@ -635,7 +653,7 @@ pub(crate) async fn update(
                         bindings.push(Some(f.to_string()));
                     }
                     mongodb::bson::Bson::Array(_) => {
-                        // `items` is a JSON column.
+                        // `items` and `frames` are JSON columns.
                         assignments.push(format!("{k} = ?"));
                         bindings.push(Some(serde_json::to_string(v).map_err(|err| {
                             AppError::internal(format!("print job {k} does not serialize: {err}"))

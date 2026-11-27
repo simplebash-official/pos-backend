@@ -13,6 +13,8 @@ graphify-out/
 postman/
 docs/
 generated_documents/
+# Local SQLite databases, test leftovers included
+data/
 tests/
 Makefile
 *.md
