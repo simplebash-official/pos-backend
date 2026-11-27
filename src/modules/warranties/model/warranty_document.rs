@@ -27,6 +27,10 @@ pub struct WarrantyDocument {
     pub repair_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repair_item_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub print_job_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub print_job_item_key: Option<String>,
     pub item_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub serial_number: Option<String>,
@@ -112,6 +116,8 @@ impl WarrantyDocument {
             product_key: self.product_key,
             repair_key: self.repair_key,
             repair_item_key: self.repair_item_key,
+            print_job_key: self.print_job_key,
+            print_job_item_key: self.print_job_item_key,
             item_name: self.item_name,
             serial_number: self.serial_number,
             quantity: self.quantity,

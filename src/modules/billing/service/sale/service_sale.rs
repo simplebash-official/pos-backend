@@ -257,6 +257,15 @@ pub(crate) async fn resolve_sale_item(
         "print" => match &item.source_ticket_key {
             Some(ticket_key) => {
                 let ticket = print_jobs::service::get_print_job(db, ticket_key).await?;
+                if ticket.kind.is_rework() {
+                    return Err(AppError::conflict(
+                        codes::PRINT_JOB_IS_REWORK,
+                        format!(
+                            "Print job {} is a free warranty rework; hand it back from the print job screen instead of billing it",
+                            ticket.ticket_number
+                        ),
+                    ));
+                }
                 if let Some(invoice_number) = &ticket.billed_invoice_number {
                     return Err(AppError::conflict(
                         codes::TICKET_ALREADY_BILLED,
@@ -275,15 +284,40 @@ pub(crate) async fn resolve_sale_item(
                         ),
                     ));
                 }
+                if ticket.items.is_empty() {
+                    return Err(AppError::validation_with_code(
+                        format!(
+                            "Print job {} has no items yet, add them before billing it",
+                            ticket.ticket_number
+                        ),
+                        codes::PRINT_JOB_PRICE_REQUIRED,
+                    ));
+                }
+                print_jobs::service::check_parts_in_stock(db, &ticket).await?;
+                // The ticket's own discount is part of the line; the quantity and the cashier's
+                // extra discount are checked against the ticket, never silently capped.
+                if item.quantity != 1 {
+                    return Err(AppError::validation(format!(
+                        "Print job {} is billed once: its quantity must be 1",
+                        ticket.ticket_number
+                    )));
+                }
+                if item.discount_cents > ticket.price_cents {
+                    return Err(AppError::validation(format!(
+                        "The discount on print job {} cannot be more than what the customer pays for it",
+                        ticket.ticket_number
+                    )));
+                }
+                let ticket_discount_cents = ticket.discount_cents();
                 (
                     item.name.clone().unwrap_or_else(|| ticket.job_type.clone()),
                     None,
-                    ticket.estimated_cost_cents + ticket.material_cost_cents.unwrap_or(0),
+                    ticket.price_cents + ticket_discount_cents,
                     Some(ticket.ticket_number),
                     ticket.assigned_employee_name,
-                    Some(ticket.material_cost_cents.unwrap_or(0) / item.quantity.max(1)),
+                    Some(ticket.cost_cents),
                     Vec::new(),
-                    0,
+                    ticket_discount_cents,
                 )
             }
             None => (
@@ -327,7 +361,7 @@ pub(crate) async fn resolve_sale_item(
         }
     };
 
-    // A repair ticket's own discount and the cashier's extra both come off its price.
+    // A job's own discount and the cashier's extra both come off its price.
     let discount_cents = item.discount_cents + included_discount_cents;
     let total_cents =
         calculations::compute_line_total(unit_price_cents, item.quantity, discount_cents);

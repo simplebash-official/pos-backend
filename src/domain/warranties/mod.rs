@@ -18,7 +18,7 @@ pub use claim::ClaimStatus;
 pub use claim::DecideClaimRequest;
 pub use claim::InspectClaimRequest;
 pub use claim::OpenClaimRequest;
-pub use claim::PaidRepairRequest;
+pub use claim::PaidJobRequest;
 pub use claim::ProcessClaimRequest;
 pub use claim::ProcessOutcome;
 pub use claim::RepairFinish;

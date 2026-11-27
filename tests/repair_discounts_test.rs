@@ -94,10 +94,11 @@ fn job(customer_key: &str, items: Value) -> Value {
     })
 }
 
-fn sale(lines: Value) -> Value {
+/// A sale of `lines` to the registered customer whose job they bill.
+fn sale(customer: &str, lines: Value) -> Value {
     json!({
         "staff": { "cashierName": "Cashier Kamal" },
-        "customer": { "customerName": "Nimal Perera", "customerPhone": "077 123 4567" },
+        "customer": { "customerKey": customer },
         "items": lines,
         "payment": { "paymentMethod": "cash", "isCredit": false, "amountReceivedCents": 10_000_000 },
         "shopProfileSnapshot": { "tradingName": "Repair Test Shop" },
@@ -289,9 +290,12 @@ async fn scenario(app: &common::TestApp) {
             app,
             "POST",
             "/api/billing/sales",
-            Some(sale(json!([{ "quantity": quantity, "discountCents": extra,
+            Some(sale(
+                &customer,
+                json!([{ "quantity": quantity, "discountCents": extra,
                                "sourceType": "repair", "sourceTicketKey": repair_key,
-                               "handover": "now" }]))),
+                               "handover": "now" }]),
+            )),
             &admin,
         )
         .await;
@@ -301,9 +305,12 @@ async fn scenario(app: &common::TestApp) {
         app,
         "POST",
         "/api/billing/sales",
-        Some(sale(json!([{ "quantity": 1, "discountCents": 1_000,
+        Some(sale(
+            &customer,
+            json!([{ "quantity": 1, "discountCents": 1_000,
                            "sourceType": "repair", "sourceTicketKey": repair_key,
-                               "handover": "now" }]))),
+                               "handover": "now" }]),
+        )),
         &admin,
     )
     .await;

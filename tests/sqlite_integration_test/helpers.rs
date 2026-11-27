@@ -121,6 +121,44 @@ pub(crate) async fn send_authed(
     .await
 }
 
+/// Creates one record and returns its key.
+pub(crate) async fn create(ctx: &SqliteTestContext, token: &str, uri: &str, body: Value) -> Value {
+    let (status, created) = send_authed(&ctx.router, "POST", uri, Some(body), token).await;
+    assert!(status.is_success(), "Body: {created}");
+    created["data"]["key"].clone()
+}
+
+/// Asserts that `?search=term` on a list returns exactly the records with the `expected` keys.
+pub(crate) async fn assert_search(
+    ctx: &SqliteTestContext,
+    token: &str,
+    (uri, list): (&str, &str),
+    term: &str,
+    expected: &[&Value],
+) {
+    // A term may carry more query parameters, as in `a&category=x`.
+    let uri = format!("{uri}?search={term}");
+    let (status, body) = send_authed(&ctx.router, "GET", &uri, None, token).await;
+    assert_eq!(status, StatusCode::OK, "Body: {body}");
+    let mut found: Vec<&str> = body["data"][list]
+        .as_array()
+        .expect("the list is an array")
+        .iter()
+        .map(|job| job["key"].as_str().expect("the key is a string"))
+        .collect();
+    found.sort_unstable();
+    let mut expected: Vec<&str> = expected
+        .iter()
+        .map(|key| key.as_str().expect("the key is a string"))
+        .collect();
+    expected.sort_unstable();
+    assert_eq!(found, expected, "{uri}");
+    // Short lists (users, suppliers, employees) are not paginated and carry no total.
+    if let Some(total) = body["data"].get("total") {
+        assert_eq!(*total, expected.len(), "{uri}");
+    }
+}
+
 pub(crate) fn admin_token(config: &Config) -> String {
     common::mint_token(
         config,

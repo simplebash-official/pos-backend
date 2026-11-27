@@ -70,7 +70,7 @@ pub fn invoice_paid_and_balance(
     }
 }
 
-/// What a repair or print job earned the shop: the price less what the parts cost, never below zero.
+/// What a repair or print job earned the shop: the price less what it cost, never below zero.
 #[must_use]
 pub fn job_profit_cents(price_cents: i64, material_cost_cents: i64) -> i64 {
     price_cents.saturating_sub(material_cost_cents).max(0)

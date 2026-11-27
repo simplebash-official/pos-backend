@@ -14,6 +14,7 @@ use crate::modules::calc::credit_note::{
 };
 use crate::modules::calc::earnings::{CalcEarningsReply, CalcEarningsRequest};
 use crate::modules::calc::invoice_balance::{CalcInvoiceBalanceReply, CalcInvoiceBalanceRequest};
+use crate::modules::calc::print_job::{CalcPrintJobRequest, PrintJobPreview};
 use crate::modules::calc::quotation::{CalcQuotationReply, CalcQuotationRequest};
 use crate::modules::calc::receipt::{CalcReceiptReply, CalcReceiptRequest};
 use crate::modules::calc::repair::{CalcRepairRequest, RepairPreview};
@@ -24,8 +25,8 @@ use crate::modules::calc::shift_totals::{
 };
 use crate::modules::calc::warranty::{CalcWarrantyReply, CalcWarrantyRequest};
 use crate::modules::calc::{
-    cash, checkout, credit_note, earnings, invoice_balance, quotation, receipt, repair, settlement,
-    shares, shift_totals, warranty,
+    cash, checkout, credit_note, earnings, invoice_balance, print_job, quotation, receipt, repair,
+    settlement, shares, shift_totals, warranty,
 };
 use axum::Json;
 use axum::extract::State;
@@ -457,6 +458,25 @@ pub(super) async fn calc_repair(
     Ok(Json(ApiResponse::success(reply, "Calculated")))
 }
 
+#[utoipa::path(post, path = "/print-job", tag = modules::CALC, request_body = CalcPrintJobRequest,
+    security(("bearerAuth" = [])),
+    responses(
+        (status = 200, description = "What the print job charges and costs", body = ApiResponse<PrintJobPreview>),
+        (status = 400, description = "A quantity or amount is out of range, a discount is out of range, or there are too many items", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 403, description = "Permission denied", body = ErrorResponse),
+    )
+)]
+/// Needs `print_jobs:write`, like saving the job it previews.
+pub(super) async fn calc_print_job(
+    user: CurrentUser,
+    Json(body): Json<CalcPrintJobRequest>,
+) -> AppResult<Json<ApiResponse<PrintJobPreview>>> {
+    user.require_permission(perm::PRINT_JOBS_WRITE)?;
+    let reply = print_job::compute(&body)?;
+    Ok(Json(ApiResponse::success(reply, "Calculated")))
+}
+
 /// Routes of the calc module.
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
@@ -472,6 +492,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(calc_shift_totals))
         .routes(routes!(calc_warranty))
         .routes(routes!(calc_repair))
+        .routes(routes!(calc_print_job))
         .routes(routes!(calc_settlement))
         .routes(routes!(calc_invoice_balance))
 }

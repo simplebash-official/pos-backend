@@ -1,5 +1,6 @@
-//! Printing the receipt a customer gets when the shop receives a repair or a print job. Like
-//! `documents` it has no routes of its own: `repairs` and `print_jobs` each serve
-//! `GET …/{id}/documents/job-receipt` and hand the ticket to this module to print.
+//! Printing the slip a customer gets for the repair and print jobs they leave with the shop
+//! (`GET /job-receipts/document`). It reads the tickets through `repairs` and `print_jobs` and
+//! renders through `documents`; it stores nothing of its own.
 
-pub mod service;
+pub mod routes;
+mod service;

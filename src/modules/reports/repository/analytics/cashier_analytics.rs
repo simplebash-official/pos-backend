@@ -1,6 +1,6 @@
 //! Cashier performance and commission series.
 
-use super::super::commissions::{JobKind, JobMoney, job_money};
+use super::super::commissions::{JobMoney, job_money};
 use super::super::sales::{get_i64_flexible, recorded_cents};
 use super::analytics_shared::{align_bucket_instant, date_match, invoices, trunc};
 
@@ -170,15 +170,6 @@ pub(crate) async fn aggregate_cashier_performance(
     }
 }
 
-/// The job kind of the `repairs` or `print_jobs` collection.
-fn job_kind(collection: &str) -> JobKind {
-    if collection == "repairs" {
-        JobKind::Repair
-    } else {
-        JobKind::Print
-    }
-}
-
 /// `Σ earned commission` per `$dateTrunc` bucket, across delivered/completed
 /// repairs + print jobs in `[start, end)`. Bucketed on the job's `created_at`
 /// to match how revenue is recognised on the invoice date.
@@ -212,8 +203,6 @@ pub(crate) async fn aggregate_commission_series(
                             "bucket": trunc(unit),
                             "price_cents": 1,
                             "cost_cents": 1,
-                            "estimated_cost_cents": 1,
-                            "material_cost_cents": 1,
                             "split_type": 1,
                             "split_value": 1,
                         }
@@ -231,7 +220,7 @@ pub(crate) async fn aggregate_commission_series(
                     let JobMoney {
                         revenue_cents: revenue,
                         cost_cents: material,
-                    } = job_money(&row, job_kind(collection))?;
+                    } = job_money(&row)?;
                     let profit = crate::core::calculations::job_profit_cents(revenue, material);
                     let split_type = row.get_str("split_type").ok();
                     let split_value = row
@@ -274,7 +263,7 @@ pub(crate) async fn aggregate_commission_series(
                     let JobMoney {
                         revenue_cents: revenue,
                         cost_cents: material,
-                    } = job_money(&doc, job_kind(table))?;
+                    } = job_money(&doc)?;
                     let profit = crate::core::calculations::job_profit_cents(revenue, material);
                     let split_type = doc.get_str("split_type").ok();
                     let split_value = doc

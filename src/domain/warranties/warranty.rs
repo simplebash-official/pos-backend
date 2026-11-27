@@ -1,4 +1,5 @@
-//! One warranty: a covered unit (a sold serial, an invoice line, or later a repair item) with
+//! One warranty: a covered unit (a sold serial, an invoice line, a repair item or a print job
+//! line) with
 //! its period, and the actions staff take on it.
 
 use super::profile::WarrantyType;
@@ -16,6 +17,8 @@ pub enum WarrantySourceType {
     ProductSale,
     /// Work done on a customer's device.
     Repair,
+    /// A line of a print job.
+    Print,
 }
 
 impl WarrantySourceType {
@@ -25,6 +28,7 @@ impl WarrantySourceType {
         match self {
             WarrantySourceType::ProductSale => "product_sale",
             WarrantySourceType::Repair => "repair",
+            WarrantySourceType::Print => "print",
         }
     }
 }
@@ -99,6 +103,10 @@ pub struct Warranty {
     pub repair_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repair_item_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub print_job_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub print_job_item_key: Option<String>,
     /// The item's name when the warranty began.
     pub item_name: String,
     /// The covered unit's serial or IMEI; absent for a non-serialized line.
@@ -328,6 +336,8 @@ pub struct WarrantyListQuery {
     pub invoice_key: Option<String>,
     /// Only the warranties of this repair job's items.
     pub repair_key: Option<String>,
+    /// Only the warranties of this print job's items.
+    pub print_job_key: Option<String>,
     /// Only warranties in this state; the list is then ordered by end day, soonest first.
     pub state: Option<WarrantyListState>,
     /// Page number (1-indexed).

@@ -15,10 +15,11 @@ use sqlx::Executor;
 fn print_row(key: &str, ticket: &str, status: &str, deleted_at: &str) -> String {
     format!(
         "INSERT INTO print_jobs (key, id, ticket_number, customer_key, customer_name, \
-         customer_phone, job_type, status, estimated_cost_cents, version, created_at, \
-         updated_at, deleted_at) VALUES ('{key}', '65f1a1a1a1a1a1a1a2{ticket}', 'PRN-{ticket}', \
-         'cus_aa', 'Kamal Perera', '0712223334', 'mug', '{status}', 1000, 7, \
-         '2026-03-12T05:00:00+00:00', '2026-03-13T05:00:00+00:00', {deleted_at})"
+         customer_phone, job_type, status, kind, items, price_cents, cost_cents, version, \
+         created_at, updated_at, deleted_at) VALUES ('{key}', '65f1a1a1a1a1a1a1a2{ticket}', \
+         'PRN-{ticket}', 'cus_aa', 'Kamal Perera', '0712223334', 'mug', '{status}', \
+         '{{\"kind\":\"standard\"}}', '[]', 0, 0, 7, '2026-03-12T05:00:00+00:00', \
+         '2026-03-13T05:00:00+00:00', {deleted_at})"
     )
 }
 

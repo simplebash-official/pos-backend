@@ -1,3 +1,4 @@
+use super::{PrintJobItem, PrintJobItemInput, PrintJobKind};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
@@ -20,10 +21,10 @@ pub struct CreatePrintJobRequest {
     pub promised_ready_at: Option<String>,
     /// Initial status (defaults to "received").
     pub status: Option<String>,
-    /// Estimated total customer cost in cents.
-    pub estimated_cost_cents: i64,
-    /// Optional material cost in cents.
-    pub material_cost_cents: Option<i64>,
+    /// A staff note about the job; left out or blank for none.
+    pub note: Option<String>,
+    /// The job's lines: service fees and parts. Empty while the job is not priced yet.
+    pub items: Vec<PrintJobItemInput>,
     /// Staff assignment details.
     pub assignment: Option<PrintJobAssignment>,
 }
@@ -44,7 +45,7 @@ pub struct PrintJob {
     pub customer_name: String,
     /// Customer contact phone.
     pub customer_phone: String,
-    /// `"mug" | "t-shirt" | "handbill" | "banner" | "custom"` — validated
+    /// `"mug" | "t-shirt" | "handbill" | "banner" | "photo-framing" | "custom"`, validated
     /// against that fixed set in `service`, not modeled as a Rust enum so
     /// the frontend's `PrintJobType` union stays the single source of truth
     /// without a serde-rename mapping to keep in sync.
@@ -59,11 +60,19 @@ pub struct PrintJob {
     pub is_overdue: bool,
     /// Status ("received", "in_repair" (in production), "ready", "delivered", "cancelled").
     pub status: String,
-    /// Quoted or estimated price in cents.
-    pub estimated_cost_cents: i64,
-    /// Direct materials cost in cents.
+    /// A staff note about the job. Never printed for the customer.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub material_cost_cents: Option<i64>,
+    pub note: Option<String>,
+    /// Ordinary paid work, or free work redoing an earlier job under its warranty.
+    pub kind: PrintJobKind,
+    /// The job's lines, in order.
+    pub items: Vec<PrintJobItem>,
+    /// What the customer pays: every line's price less the line discounts
+    /// (`pos_calc_core::print_job::print_job_totals`). Stored with the items so reports can add
+    /// it up.
+    pub price_cents: i64,
+    /// What the lines cost the shop, added up the same way.
+    pub cost_cents: i64,
     /// Staff ID of assigned worker.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assigned_employee_id: Option<String>,
@@ -78,7 +87,7 @@ pub struct PrintJob {
     pub split_value: Option<f64>,
     /// Key of the invoice that billed this job. Absent until it is billed; set together with
     /// `billed_invoice_number`, and cleared when that invoice is voided. A billed job cannot be
-    /// billed again, whether or not it has been handed back.
+    /// billed again and its items are locked, whether or not it has been handed back.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub billed_invoice_key: Option<String>,
     /// Number of the invoice that billed this job (e.g. INV-000034).
@@ -96,6 +105,18 @@ pub struct PrintJob {
     /// Device identifier that last updated this record.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by_device: Option<String>,
+}
+
+impl PrintJob {
+    /// All the line discounts together: what was taken off the price the lines add up to.
+    #[must_use]
+    pub fn discount_cents(&self) -> i64 {
+        self.items
+            .iter()
+            .filter_map(|item| item.discount.as_ref())
+            .map(|discount| discount.amount_cents)
+            .sum()
+    }
 }
 
 /// The `assignment{}` sub-object of `CreatePrintJobRequest`/
@@ -130,6 +151,8 @@ pub struct PrintJobCustomer {
 pub struct PrintJobListQuery {
     /// Keyword search matching ticket number or customer name/phone.
     pub search: Option<String>,
+    /// Only the jobs of this registered customer. A blank key is refused.
+    pub customer_key: Option<String>,
     /// Filter by status.
     pub status: Option<String>,
     /// Only `"today"` is meaningful — scopes to `created_at` within
@@ -166,7 +189,7 @@ pub struct PrintJobListResponse {
 pub struct PrintJobStats {
     /// Count of print jobs created today (UTC day boundary).
     pub today_job_count: u64,
-    /// Sum of `estimatedCostCents` for jobs created today.
+    /// Sum of `priceCents` for jobs created today.
     pub today_revenue_cents: i64,
     /// Count of ALL non-deleted jobs (any date) whose status is neither
     /// "delivered" nor "cancelled" — i.e. still open in the pipeline.
@@ -193,10 +216,11 @@ pub struct UpdatePrintJobRequest {
     pub promised_ready_at: Option<String>,
     /// Updated lifecycle status.
     pub status: Option<String>,
-    /// Updated customer charge estimate in cents.
-    pub estimated_cost_cents: Option<i64>,
-    /// Updated material cost in cents.
-    pub material_cost_cents: Option<i64>,
+    /// Updated staff note. Omit it to keep the note; send a blank one to remove it.
+    pub note: Option<String>,
+    /// The job's whole list of lines, replacing the stored one. Omit it to leave the lines as
+    /// they are. A line sent with the `key` of one already on the job keeps that key.
+    pub items: Option<Vec<PrintJobItemInput>>,
     /// Updated staff assignment.
     pub assignment: Option<PrintJobAssignment>,
 }

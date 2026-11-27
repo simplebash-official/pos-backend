@@ -129,6 +129,8 @@ async fn credit_note_resalable_restocks_inventory_and_issues_cash_refund() {
     assert_eq!(cn_data["refundCashCents"], price_cents);
     assert_eq!(cn_data["balanceReductionCents"], 0);
     assert_eq!(cn_data["status"], "resolved");
+    assert_eq!(cn_data["customerKey"], cust_key.as_str());
+    assert_eq!(cn_data["customerNameSnapshot"], "Credit Note Test Customer");
     assert!(
         !cn_data["refundPaymentKeys"]
             .as_array()
