@@ -109,6 +109,13 @@ pub async fn migrate_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
                 .await?;
         }
     }
+    // `print_jobs.frames` (the frames a framing job asks for) arrived with the frame size list.
+    let print_job_cols = table_columns(pool, "print_jobs").await?;
+    if !print_job_cols.is_empty() && !print_job_cols.iter().any(|c| c == "frames") {
+        tracing::info!("Migrating 'print_jobs' table: adding 'frames' column");
+        pool.execute("ALTER TABLE print_jobs ADD COLUMN frames JSON")
+            .await?;
+    }
     // `credit_notes.resolution` arrived with resolving a credit note held for inspection.
     let credit_note_cols = table_columns(pool, "credit_notes").await?;
     if !credit_note_cols.is_empty() && !credit_note_cols.iter().any(|c| c == "resolution") {

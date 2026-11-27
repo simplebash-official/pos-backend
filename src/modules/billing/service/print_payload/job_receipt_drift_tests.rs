@@ -104,6 +104,7 @@ fn print_job(overrides: Value) -> PrintJob {
             "costCents": 0,
             "warranty": {"coverage": {"kind": "none"}}
         }],
+        "frames": [],
         "priceCents": 800000,
         "costCents": 0,
         "createdAt": "2026-11-20T09:05:00Z",
@@ -158,6 +159,31 @@ fn a_repair_receipt_is_in_shop_time_with_the_work_and_the_estimate() {
     assert_eq!(data["jobs"][0]["jobKind"], "repair");
     assert_eq!(data["termsText"], "Keep this slip.");
     assert_eq!(data["uncollectedAfterDays"], 30);
+}
+
+#[test]
+fn a_framing_job_lists_the_wanted_frames_before_its_work_and_charges_only_the_work() {
+    let job = print_job(json!({
+        "jobType": "photo-framing",
+        "frames": [
+            {"frameSizeKey": "pfs_1", "size": "8x10", "widthHundredthsInch": 75, "quantity": 2},
+            {"frameSizeKey": "pfs_2", "size": "A4", "widthHundredthsInch": 100, "quantity": 1}
+        ]
+    }));
+    let source = JobReceiptSource::from_print_job(&job).expect("a framing job");
+    for paper in PAPERS {
+        assert_matches_schema(KIND, &data_of(&source, &shop("", None), paper));
+    }
+    let data = data_of(&source, &shop("", None), JobReceiptPaper::A5);
+    assert_eq!(
+        data["jobs"][0]["itemLines"],
+        json!([
+            "Frame 8x10 · 0.75 inch x 2",
+            "Frame A4 · 1 inch x 1",
+            "Mug printing x 20"
+        ])
+    );
+    assert_eq!(data["jobs"][0]["estimateCents"], 800_000);
 }
 
 #[test]

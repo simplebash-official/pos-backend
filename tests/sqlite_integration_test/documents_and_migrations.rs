@@ -104,7 +104,7 @@ async fn test_sqlite_generated_documents_schema_migration() {
     .expect("INSERT INTO generated_documents must succeed after migration");
 
     // Clean up temp database
-    let _ = std::fs::remove_file(&db_path);
+    crate::common::remove_sqlite_files(&db_path);
 }
 
 #[tokio::test]

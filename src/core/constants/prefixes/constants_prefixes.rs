@@ -71,6 +71,8 @@ pub const PRINT_JOB: &str = "prn";
 pub const PRINT_JOB_ITEM: &str = "pit";
 /// A ready-made print service.
 pub const PRINT_SERVICE: &str = "pst";
+/// One frame size and width the shop offers.
+pub const PRINT_FRAME_SIZE: &str = "pfs";
 
 // Standard entity ID prefixes used for generating prefixed NanoID model keys.
 pub const PRODUCT: &str = "prod";

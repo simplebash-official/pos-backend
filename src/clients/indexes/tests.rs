@@ -28,8 +28,9 @@ fn single_tenant_specs_are_the_historical_set() {
     // + warranty_condition_templates key/active
     // + notifications key/created/sync + notification_reads key/user/sync
     // + warranties print job key + print_service_templates key/sync
-    // + repairs and print_jobs by customer.
-    assert_eq!(specs.len(), 104);
+    // + repairs and print_jobs by customer
+    // + print_frame_sizes key/sync.
+    assert_eq!(specs.len(), 106);
     assert!(specs.iter().all(|s| s.keys.get(TENANT_FIELD).is_none()));
     assert!(names(&specs).contains(&"products.sync_updated_at_key".to_string()));
     assert!(names(&specs).contains(&"idempotency_keys.idempotency_ttl".to_string()));
@@ -68,6 +69,7 @@ fn single_tenant_specs_are_the_historical_set() {
             "warranty_claims_key_unique",
             "repair_service_templates_key_unique",
             "print_service_templates_key_unique",
+            "print_frame_sizes_key_unique",
             "notifications_key_unique",
             "notification_reads_key_unique",
             "notification_reads_user",

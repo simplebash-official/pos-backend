@@ -73,7 +73,7 @@ async fn an_old_sqlite_database_moves_in_progress_print_jobs_to_in_repair() {
     sqlite::init_db(&pool).await.expect("the second start runs");
     assert_eq!(row(&pool, "prn_old").await, moved);
     drop(pool);
-    std::fs::remove_file(&path).ok();
+    common::remove_sqlite_files(&path);
 }
 
 async fn raw_print_job(app: &common::TestApp, key: &str, shop: &str, status: &str) {

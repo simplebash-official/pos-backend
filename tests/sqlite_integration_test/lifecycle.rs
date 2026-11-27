@@ -745,5 +745,5 @@ async fn test_sqlite_legacy_user_id_schema_migration() {
     .expect("INSERT INTO login_sessions without user_id must succeed after migration");
 
     // Clean up temp database
-    let _ = std::fs::remove_file(&db_path);
+    crate::common::remove_sqlite_files(&db_path);
 }

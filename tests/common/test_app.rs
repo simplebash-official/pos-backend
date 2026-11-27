@@ -1,5 +1,7 @@
 //! Test-harness pieces: test app.
 
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::Router;
@@ -19,6 +21,29 @@ pub struct TestApp {
     pub db_handle: simplebash_pos_backend::clients::db::Db,
     #[allow(dead_code)]
     pub config: Arc<Config>,
+    /// Removes the SQLite database when the app is dropped; `None` for apps on MongoDB. Kept
+    /// last, so the handles above are dropped first.
+    pub(super) _sqlite_file: Option<SqliteDatabaseFile>,
+}
+
+/// A SQLite test database that is removed from disk when dropped.
+pub(super) struct SqliteDatabaseFile(pub(super) PathBuf);
+
+impl Drop for SqliteDatabaseFile {
+    fn drop(&mut self) {
+        remove_sqlite_files(&self.0);
+    }
+}
+
+/// Removes a SQLite database with its `-wal` and `-shm` files. Best-effort test cleanup: a file
+/// that was never created, or cannot be removed, does not fail the test.
+#[allow(dead_code)]
+pub fn remove_sqlite_files(path: &Path) {
+    let sidecars = [path.with_extension("db-wal"), path.with_extension("db-shm")];
+    let _ = fs::remove_file(path);
+    for sidecar in sidecars {
+        let _ = fs::remove_file(sidecar);
+    }
 }
 
 impl TestApp {

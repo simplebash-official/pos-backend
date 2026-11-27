@@ -5509,7 +5509,7 @@
                 "print-jobs"
               ]
             },
-            "description": "Creates a print job for a registered customer. Price and cost are worked out from `items` (at most 50). Each item has a `quantity` and a `source`: `service` (a fee per unit, with an optional `unitCostCents` for what one unit costs the shop; omit it to record none), `stock` (`productKey` plus one `serialNumber`, quantity 1, for a product with serial numbers, else the `sellingPriceCents` of a current price tier; priced and costed on the server) or `outside` (typed price and cost per unit). Optional `discount` per item and `warranty` per item (required, `none` for no cover). `note` is a staff note of at most 1000 characters, never printed. `items` may be empty until the job is `ready` (400 `PRINT_JOB_PRICE_REQUIRED`). 400 `PRINT_JOB_PART_INVALID` for a wrong stock pick, 409 `INSUFFICIENT_STOCK` / `PRICE_TIER_UNAVAILABLE`. Needs `print_jobs:write`."
+            "description": "Creates a print job for a registered customer. Price and cost are worked out from `items` (at most 50). Each item has a `quantity` and a `source`: `service` (a fee per unit, with an optional `unitCostCents` for what one unit costs the shop; omit it to record none), `stock` (`productKey` plus one `serialNumber`, quantity 1, for a product with serial numbers, else the `sellingPriceCents` of a current price tier; priced and costed on the server) or `outside` (typed price and cost per unit). Optional `discount` per item and `warranty` per item (required, `none` for no cover). `note` is a staff note of at most 1000 characters, never printed. `items` may be empty until the job is `ready` (400 `PRINT_JOB_PRICE_REQUIRED`). 400 `PRINT_JOB_PART_INVALID` for a wrong stock pick, 409 `INSUFFICIENT_STOCK` / `PRICE_TIER_UNAVAILABLE`. Needs `print_jobs:write`. `frames` (photo-framing jobs only) lists the wanted frames as `{frameSizeKey, quantity}`; the server copies size and width from the frame size list and they change no price. Omit it on an update to keep them, send `[]` to remove them; locked once billed or handed back."
           },
           "response": []
         },
@@ -5563,7 +5563,7 @@
                 "{{printJobKey}}"
               ]
             },
-            "description": "Changes the fields sent. `items` is the whole list (an item keeps its `key` when sent back with it); omit it to keep the items. `note` omitted keeps the note, blank removes it. Items of a billed or delivered job are locked (409 `PRINT_JOB_ITEMS_LOCKED`). A job with stock parts is handed back (`delivered`) only once billed (400 `PRINT_JOB_PART_INVALID`); a job billed with the hand-over later gets its warranties then. Needs `print_jobs:write`."
+            "description": "Changes the fields sent. `items` is the whole list (an item keeps its `key` when sent back with it); omit it to keep the items. `note` omitted keeps the note, blank removes it. Items of a billed or delivered job are locked (409 `PRINT_JOB_ITEMS_LOCKED`). A job with stock parts is handed back (`delivered`) only once billed (400 `PRINT_JOB_PART_INVALID`); a job billed with the hand-over later gets its warranties then. Needs `print_jobs:write`. `frames` (photo-framing jobs only) lists the wanted frames as `{frameSizeKey, quantity}`; the server copies size and width from the frame size list and they change no price. Omit it on an update to keep them, send `[]` to remove them; locked once billed or handed back."
           },
           "response": []
         },
@@ -6183,6 +6183,106 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Mug printing\",\n  \"unitPriceCents\": 300000,\n  \"unitCostCents\": 120000,\n  \"warranty\": {\n    \"coverage\": {\n      \"kind\": \"limited\",\n      \"value\": 6,\n      \"unit\": \"months\"\n    },\n    \"warrantyType\": \"shop\"\n  },\n  \"active\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Print Frame Sizes",
+      "description": "The frame sizes a shop offers on photo and framing print jobs: one row per size and width, with no price. Nothing is preloaded.",
+      "item": [
+        {
+          "name": "List Print Frame Sizes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/print-frame-sizes?includeHidden=true",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "print-frame-sizes"
+              ],
+              "query": [
+                {
+                  "key": "includeHidden",
+                  "value": "true",
+                  "description": "Also list hidden sizes",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "The shop's frame sizes. Needs `print_jobs:write`; `includeHidden=true` also lists hidden ones and needs `print_frame_sizes:manage`."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Print Frame Size",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/print-frame-sizes",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "print-frame-sizes"
+              ]
+            },
+            "description": "Adds a size and width; a new one is offered. `widthHundredthsInch` 75 is 0.75 inch. 409 `PRINT_FRAME_SIZE_EXISTS` when that size and width is already saved (spaces, case and `×` ignored, hidden ones included). Needs `print_frame_sizes:manage` (Admin, Manager).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"size\": \"8x10\",\n  \"widthHundredthsInch\": 75\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Print Frame Size",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/print-frame-sizes/{{printFrameSizeKey}}",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "print-frame-sizes",
+                "{{printFrameSizeKey}}"
+              ]
+            },
+            "description": "Hides a size or offers it again; size and width never change. 404 `PRINT_FRAME_SIZE_NOT_FOUND`, 409 `VERSION_CONFLICT`. Needs `print_frame_sizes:manage`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"active\": false\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -10172,6 +10272,11 @@
     {
       "key": "printServiceKey",
       "value": ""
+    },
+    {
+      "key": "printFrameSizeKey",
+      "value": "",
+      "type": "string"
     }
   ]
 }

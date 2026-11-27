@@ -1,9 +1,10 @@
 //! Test-harness pieces: spawn app.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::mock_document_server::start_mock_document_server;
-use super::test_app::TestApp;
+use super::test_app::{SqliteDatabaseFile, TestApp};
 use super::test_config::{mongo_overrides, mongo_uri, test_config};
 use mongodb::Database;
 use simplebash_pos_backend::app::AppState;
@@ -133,6 +134,7 @@ pub(super) async fn spawn_mongo_app(db_name: String, document_server_url: String
         db: Some(db),
         db_handle,
         config,
+        _sqlite_file: None,
     }
 }
 
@@ -150,6 +152,8 @@ pub async fn spawn_app_sqlite_with_document_server_url(document_server_url: Stri
 
     let test_id = simplebash_pos_backend::core::id::generate_id("test");
     let test_db_path = format!("data/test_{test_id}.db");
+    // Created before connecting, so a failed set-up removes the file too.
+    let sqlite_file = SqliteDatabaseFile(PathBuf::from(&test_db_path));
     let database_url = format!("sqlite://{test_db_path}?mode=rwc");
     let config = test_config(&[
         ("DATABASE_URL", database_url.as_str()),
@@ -183,6 +187,7 @@ pub async fn spawn_app_sqlite_with_document_server_url(document_server_url: Stri
         db: None,
         db_handle,
         config,
+        _sqlite_file: Some(sqlite_file),
     }
 }
 
@@ -244,5 +249,6 @@ pub async fn spawn_app_multi_tenant_with_secret(provision_secret: Option<&str>) 
         db: Some(db),
         db_handle,
         config,
+        _sqlite_file: None,
     }
 }
