@@ -98,7 +98,7 @@ async fn an_old_sqlite_database_moves_to_print_job_items() {
     sqlite::init_db(&pool).await.expect("the second start runs");
     assert_eq!(job("prn_priced").await.items.len(), 2);
     drop(pool);
-    std::fs::remove_file(&path).ok();
+    common::remove_sqlite_files(&path);
 }
 
 /// Sends one request as an admin and returns the reply's `data`, which must be a success.

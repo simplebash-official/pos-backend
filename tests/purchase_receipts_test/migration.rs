@@ -103,7 +103,7 @@ async fn a_sqlite_database_from_before_receipts_is_migrated() {
         .expect("the awaited step succeeds");
     assert_eq!(count, 3);
     pool.close().await;
-    std::fs::remove_file(&path).ok();
+    common::remove_sqlite_files(&path);
 }
 
 /// The same history in Atlas gets the same receipts a desktop derives, and a second run

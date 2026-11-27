@@ -136,10 +136,11 @@ async fn the_backfill_publishes_rows_the_feed_never_had() {
         .await
         .expect("the backfill publishes");
     let published = feed().await;
-    // Ready-made services always could be sent, so the backfill leaves them to the feed.
+    // Ready-made services and frame sizes always could be sent, so the backfill leaves them to
+    // the feed.
     assert_eq!(
         missing_from(&published),
-        vec!["repairServices", "printServices"]
+        vec!["repairServices", "printServices", "printFrameSizes"]
     );
 
     migrate_mongo(&app.db_handle, Mode::Apply)

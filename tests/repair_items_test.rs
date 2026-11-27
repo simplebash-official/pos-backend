@@ -963,7 +963,7 @@ async fn an_old_sqlite_database_moves_to_repair_items() {
     assert_eq!(job.price_cents, 400_000);
     sqlite::init_db(&pool).await.expect("the second start runs");
     drop(pool);
-    std::fs::remove_file(&path).ok();
+    common::remove_sqlite_files(&path);
 }
 
 #[tokio::test]

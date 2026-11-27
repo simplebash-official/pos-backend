@@ -853,7 +853,7 @@ async fn an_old_sqlite_database_moves_to_warranty_records() {
         .expect("warranties read");
     assert_eq!(count, 1);
     drop(pool);
-    std::fs::remove_file(&path).ok();
+    common::remove_sqlite_files(&path);
 }
 
 #[tokio::test]

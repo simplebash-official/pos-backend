@@ -77,6 +77,14 @@ criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
 name = "engine_benchmarks"
 harness = false
 
+# Line tables only (backtraces keep file and line): faster builds and links, a much smaller
+# `target/`. The test profile inherits this. For variables in a debugger, set `debug = true`.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 [profile.profiling]
 inherits = "release"
 debug = true

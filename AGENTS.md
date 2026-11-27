@@ -22,11 +22,12 @@ The Rust/Axum API backend for **simplebash-pos**, a point-of-sale system for a r
 - `cargo run --bin seed_api_key` — generates and inserts a random API key into the `api_keys` table/collection
 - `make check` (defined in the root `Makefile`) — runs `cargo fmt --check`, then `cargo clippy --all-targets --all-features -- -D warnings`, then `cargo test`, in that order, stopping at the first failure; `make ci` is currently just an alias for `make check` (same steps, intended as the CI entrypoint)
 
-**After every change**, run the following and fix anything it reports before considering the work done:
+**After every change**, run the related tests and static checks, and fix anything they report before considering the work done. `make check` is the full gate: run it once before a push, not after every task.
 
 ```
-make check
-# (or: cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo test)
+cargo fmt --all
+cargo test --test <area>_test
+cargo clippy --all-targets --all-features -- -D warnings
 ```
 
 (`cargo fmt --check` fails on unformatted code without rewriting it; `clippy -D warnings` treats every lint as an error; `cargo check` is the fast type/borrow check; `cargo build --release` is the pre-deploy build. `rustfmt`/`clippy` components must be installed — `rustup component add rustfmt clippy` — if either command is missing.)

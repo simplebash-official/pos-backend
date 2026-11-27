@@ -638,6 +638,7 @@ async fn seed_print_job_with_named(
             note: None,
             kind: PrintJobKind::Standard,
             items: Vec::new(),
+            frames: None,
             price_cents,
             cost_cents: 0,
             assigned_employee_id: None,

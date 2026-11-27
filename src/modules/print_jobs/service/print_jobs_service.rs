@@ -1,4 +1,5 @@
 use super::print_job_alerts;
+use super::print_job_frames::{check_frames, ensure_framing_job};
 use super::print_job_items::{price_items, use_parts};
 use crate::clients::db::Db;
 use crate::core::constants::{codes, prefixes};
@@ -9,8 +10,9 @@ use crate::domain::billing::Handover;
 use crate::domain::customers::Customer;
 use crate::domain::inventory::StockMovementType;
 use crate::domain::print_jobs::{
-    CreatePrintJobRequest, PrintItemSource, PrintJob, PrintJobAssignment, PrintJobItem,
-    PrintJobKind, PrintJobListQuery, PrintJobListResponse, PrintJobStats, UpdatePrintJobRequest,
+    CreatePrintJobRequest, PrintItemSource, PrintJob, PrintJobAssignment, PrintJobFrame,
+    PrintJobItem, PrintJobKind, PrintJobListQuery, PrintJobListResponse, PrintJobStats,
+    UpdatePrintJobRequest,
 };
 use crate::domain::sequences::ReserveSequenceRequest;
 use crate::modules::print_jobs::model::PrintJobDocument;
@@ -43,6 +45,11 @@ pub async fn create_print_job(
             customers::service::get_customer_by_key(db, &body.customer.customer_key).await?;
 
         validate_required_fields(&body.job_type, body.quantity)?;
+        let frames = match body.frames {
+            Some(inputs) => check_frames(db, inputs, &[]).await?,
+            None => Vec::new(),
+        };
+        ensure_framing_job(&body.job_type, &frames)?;
         let kind = PrintJobKind::Standard;
         let priced = price_items(db, body.items, &[], &kind).await?;
         validate_price_required_for_status(&status, &kind, &priced.items)?;
@@ -77,6 +84,7 @@ pub async fn create_print_job(
                 note,
                 kind,
                 items: priced.items,
+                frames,
                 price_cents: priced.price_cents,
                 cost_cents: priced.cost_cents,
                 assigned_employee_id,
@@ -120,6 +128,7 @@ struct NewJob {
     note: Option<String>,
     kind: PrintJobKind,
     items: Vec<PrintJobItem>,
+    frames: Vec<PrintJobFrame>,
     price_cents: i64,
     cost_cents: i64,
     assigned_employee_id: Option<String>,
@@ -162,6 +171,7 @@ async fn insert_job(db: &Db, job: NewJob) -> AppResult<PrintJob> {
         note: job.note,
         kind: job.kind,
         items: job.items,
+        frames: (!job.frames.is_empty()).then_some(job.frames),
         price_cents: job.price_cents,
         cost_cents: job.cost_cents,
         assigned_employee_id: job.assigned_employee_id,
@@ -203,9 +213,9 @@ async fn require_original(db: &Db, key: &str) -> AppResult<PrintJobDocument> {
         })
 }
 
-/// Opens a free warranty rework of an earlier job: same customer, type and order quantity, the
-/// customer's complaint as its note, no lines yet (the person adds the work and any parts used),
-/// and a `WarrantyRework` kind that links back to the claim and the original job.
+/// Opens a free warranty rework of an earlier job: same customer, type, order quantity and wanted
+/// frames, the customer's complaint as its note, no lines yet (the person adds the work and any
+/// parts used), and a `WarrantyRework` kind that links back to the claim and the original job.
 pub(crate) async fn create_rework(db: &Db, rework: NewPrintRework<'_>) -> AppResult<PrintJob> {
     crate::core::logging::domain::tracked("print_jobs.rework_created", async move {
         let original = require_original(db, rework.original_print_job_key).await?;
@@ -237,6 +247,7 @@ pub(crate) async fn create_rework(db: &Db, rework: NewPrintRework<'_>) -> AppRes
                     original_ticket_number: original.ticket_number,
                 },
                 items: Vec::new(),
+                frames: original.frames.into_iter().flatten().collect(),
                 price_cents: 0,
                 cost_cents: 0,
                 assigned_employee_id: rework.assigned_employee_key.map(str::to_string),
@@ -261,8 +272,8 @@ pub(crate) struct NewPaidJob<'a> {
     pub device_id: Option<String>,
 }
 
-/// Opens an ordinary, still unpriced print job of the same type and order quantity as the one a
-/// rejected claim was about.
+/// Opens an ordinary, still unpriced print job of the same type, order quantity and wanted frames
+/// as the one a rejected claim was about.
 pub(crate) async fn create_paid_job(db: &Db, paid: NewPaidJob<'_>) -> AppResult<PrintJob> {
     crate::core::logging::domain::tracked("print_jobs.created", async move {
         let original = require_original(db, paid.original_print_job_key).await?;
@@ -278,6 +289,7 @@ pub(crate) async fn create_paid_job(db: &Db, paid: NewPaidJob<'_>) -> AppResult<
                 note: Some(paid.note),
                 kind: PrintJobKind::Standard,
                 items: Vec::new(),
+                frames: original.frames.into_iter().flatten().collect(),
                 price_cents: 0,
                 cost_cents: 0,
                 assigned_employee_id: None,
@@ -511,6 +523,22 @@ pub(crate) async fn update_print_job(
         validate_job_type(&job_type)?;
         validate_promised_ready_at(body.promised_ready_at.as_deref())?;
         validate_required_fields(&job_type, quantity)?;
+        if body.frames.is_some() && (billed_invoice_key.is_some() || was_delivered) {
+            return Err(AppError::conflict(
+                codes::PRINT_JOB_ITEMS_LOCKED,
+                "This job has been billed or handed back; its frames can no longer be changed.",
+            ));
+        }
+        let saved_frames: Vec<PrintJobFrame> = existing.frames.iter().flatten().cloned().collect();
+        let new_frames = match body.frames {
+            Some(inputs) => Some(check_frames(db, inputs, &saved_frames).await?),
+            None => None,
+        };
+        let frames = match &new_frames {
+            Some(frames) => frames,
+            None => &saved_frames,
+        };
+        ensure_framing_job(&job_type, frames)?;
         let priced = match body.items {
             Some(_) if billed_invoice_key.is_some() => {
                 return Err(AppError::conflict(
@@ -551,6 +579,13 @@ pub(crate) async fn update_print_job(
             set_doc.insert("items", mongodb::bson::serialize_to_bson(&priced.items)?);
             set_doc.insert("price_cents", priced.price_cents);
             set_doc.insert("cost_cents", priced.cost_cents);
+        }
+        if let Some(frames) = &new_frames {
+            if frames.is_empty() {
+                set_doc.insert("frames", Bson::Null);
+            } else {
+                set_doc.insert("frames", mongodb::bson::serialize_to_bson(frames)?);
+            }
         }
         if let Some(typed) = &body.note {
             match clean_note(typed)? {

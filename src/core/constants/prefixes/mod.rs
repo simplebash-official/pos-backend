@@ -29,6 +29,7 @@ pub use constants_prefixes::NOTIFICATION_READ;
 pub use constants_prefixes::PASSWORD_RESET_TOKEN;
 pub use constants_prefixes::PAYEE;
 pub use constants_prefixes::PAYMENT;
+pub use constants_prefixes::PRINT_FRAME_SIZE;
 pub use constants_prefixes::PRINT_JOB;
 pub use constants_prefixes::PRINT_JOB_ITEM;
 pub use constants_prefixes::PRINT_SERVICE;

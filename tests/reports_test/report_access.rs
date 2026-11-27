@@ -561,6 +561,7 @@ async fn employee_commissions_and_performance_report() {
         note: None,
         kind: PrintJobKind::Standard,
         items: Vec::new(),
+        frames: None,
         price_cents: 300000, // Revenue = 3,000 LKR
         cost_cents: 100000,  // Cost = 1,000 LKR -> Profit = 2,000 LKR
         assigned_employee_id: Some("emp_2".to_string()),

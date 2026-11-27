@@ -1,4 +1,4 @@
-use crate::domain::print_jobs::{PrintJob, PrintJobItem, PrintJobKind};
+use crate::domain::print_jobs::{PrintJob, PrintJobFrame, PrintJobItem, PrintJobKind};
 use crate::domain::repairs::compute_job_is_overdue;
 use mongodb::bson::DateTime as BsonDateTime;
 use mongodb::bson::oid::ObjectId;
@@ -37,6 +37,10 @@ pub struct PrintJobDocument {
     pub kind: PrintJobKind,
     /// The job's lines, stored in their API shape (camelCase).
     pub items: Vec<PrintJobItem>,
+    /// The frames the customer wants, in their API shape (camelCase); absent when the job lists
+    /// none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frames: Option<Vec<PrintJobFrame>>,
     /// Every line's price less its discount, worked out from `items` on every write.
     pub price_cents: i64,
     /// Every line's cost, worked out the same way.
@@ -96,6 +100,8 @@ impl PrintJobDocument {
             note: self.note,
             kind: self.kind,
             items: self.items,
+            // Absent means the job lists no frames.
+            frames: self.frames.into_iter().flatten().collect(),
             price_cents: self.price_cents,
             cost_cents: self.cost_cents,
             assigned_employee_id: self.assigned_employee_id,

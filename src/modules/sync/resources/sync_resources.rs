@@ -465,4 +465,15 @@ pub const SYNC_RESOURCES: &[ResourceSpec] = &[
         order: 169,
         phase: Phase::P3a,
     },
+    // The shop's frame size list: the same rules as the print services.
+    ResourceSpec {
+        name: "printFrameSizes",
+        table: "print_frame_sizes",
+        class: MergeClass::Lww,
+        soft_delete: false,
+        derived: &[],
+        local_only: &[],
+        order: 170,
+        phase: Phase::P3a,
+    },
 ];

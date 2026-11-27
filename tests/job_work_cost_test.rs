@@ -303,7 +303,7 @@ async fn an_old_sqlite_database_gains_the_ready_made_service_cost_columns() {
     .expect("the old service is read");
     assert_eq!(cost, None);
     drop(pool);
-    std::fs::remove_file(&path).expect("the database file is removed");
+    common::remove_sqlite_files(&path);
 }
 
 #[tokio::test]

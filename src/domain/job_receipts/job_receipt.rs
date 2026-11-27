@@ -5,6 +5,7 @@
 use crate::core::constants::{codes, prefixes};
 use crate::core::error::{AppError, AppResult};
 use crate::domain::print_jobs::PrintJob;
+use crate::domain::print_jobs::PrintJobFrame;
 use crate::domain::repairs::Repair;
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
@@ -144,7 +145,8 @@ pub struct JobReceiptJob {
     /// Repair: what the customer reported. Print job: the quantity and kind of print.
     pub detail: String,
     pub serial_number: Option<String>,
-    /// What the shop plans to do, one line per item; a print job's line says its quantity.
+    /// What the shop plans to do, one line per item; a print job lists the frames the customer
+    /// wants first, and each of its lines says its quantity.
     pub item_lines: Vec<String>,
     /// The estimate in cents; none while nothing is quoted.
     pub estimate_cents: Option<i64>,
@@ -239,9 +241,14 @@ impl JobReceiptSource {
                 detail: format!("{} × {title}", job.quantity),
                 serial_number: None,
                 item_lines: job
-                    .items
+                    .frames
                     .iter()
-                    .map(|item| format!("{} x {}", item.description, item.quantity))
+                    .map(PrintJobFrame::receipt_line)
+                    .chain(
+                        job.items
+                            .iter()
+                            .map(|item| format!("{} x {}", item.description, item.quantity)),
+                    )
                     .collect(),
                 estimate_cents,
                 promised_ready_on: job.promised_ready_at.clone(),

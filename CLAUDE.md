@@ -24,29 +24,27 @@ git -C pos/desktop submodule status
 - Never run `tauri dev` or build an installer while the working copy is behind the pin.
 - Dev run of the desktop app against the local Docker stack: build with `CLOUD_API_URL=http://localhost:8082 CLOUD_SYNC_API_URL=http://localhost:8081` (read at compile time with `option_env!`; `touch pos/desktop/src-tauri/src/cloud/mod.rs` to force a rebuild). Use `:8081` for the Docker POS API: the Docker backend on `:8080` shares its port with the desktop's own sidecar, which answers first on loopback.
 
-## Before finishing any task: test everything that can be tested
+## Testing: related tests while working, the full gate before a push
 
-A task is not done until everything in this codebase that *can* be tested, and everything related to the feature you implemented, has been tested and passes. Not just the lines you changed.
+### While working (every task)
 
-1. **The feature itself:** add or extend automated tests for every behaviour you added or changed (happy path, failure paths, edge cases), then run them.
-2. **Everything around it:** run this repo's full suite and quality gates (below), not only the new tests. A change can break a caller far away.
-3. **Across repos:** when a feature spans repos (backend, frontend, desktop shell, document-server, identity-server, app-frontend, deployment), run the gates in *every* repo you touched, plus the tests that exercise the whole path end to end.
+A task is done when these pass. Do not run the full gate just to finish a task or to commit.
+
+1. **The feature itself:** add or extend automated tests for every behaviour you added or changed (happy path, failure paths, edge cases).
+2. **Run only the related tests**, not the whole suite: `cargo test --test <area>_test` for the files covering the change and `cargo test --lib <module path>` for unit tests (a bare name filter still builds every test binary). Add `--test authorization_test --test openapi_test` when routes or permissions change, and `--test sync_cloud_test` when a synced domain model changes. Mongo-backed tests need `MONGODB_URI` (Atlas, never a Docker Mongo) and a **fresh throwaway database** (`MONGODB_DB_NAME=jt<area>_<20 hex> MONGODB_TEST_DB_NAME=<same>`), dropped afterwards (Atlas caps the cluster at 500 collections). The harness refuses a test database name that does not start with `jt`.
+3. **Static checks:** `cargo fmt --all`, then `cargo clippy --all-targets --all-features -- -D warnings` once at the end of the task.
 4. **For real:** what automated tests cannot reach (UI behaviour, a running stack, long-lived connections, a deploy) is verified by running it: the local Docker stack (`LOCAL_DOCKER_GUIDE.md` at the workspace root), the desktop app, or the browser.
-5. **Match CI's toolchain:** CI uses the latest stable Rust/Node. A lint that passes on an older local toolchain can still fail there, so update (`rustup update`) or run the gate with CI's version before calling it done.
-6. **Report honestly:** say what you ran and its result. Anything you could not test is named, with the reason, and never presented as passing. A suite that silently skips (e.g. no database configured) is not a passing suite.
 
-**This repo's gate:** `make check` (`cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test`). The Mongo-backed suites (`sync_cloud_test`, `sync_convergence_test`, `scenarios_test` and the other `spawn_app()` files) must actually run against Atlas via `MONGODB_URI` (never a Docker Mongo). For sync work also run `sync_device_test` and the desktop shell's `cargo test` in `pos/desktop/src-tauri`.
+### Before a push (once)
 
-**STRICT: after every implementation (every feature, fix or refactor, however small) AND again before every `git commit` in this repo, `make check-atlas` must pass. Do not call a task done, and never commit, and never ask to push, on a red or unrun result.** It runs clippy with CI's flags, then the whole `cargo test --no-fail-fast` against Atlas on a fresh `jtcheck_<hex>` database (`scripts/check-atlas.sh`, URI read from the workspace-root `.env.docker.local`, database dropped afterwards). Plain `make check` is not enough: without `MONGODB_URI` the Mongo-backed suites do not really run, so failures such as the sync codec round-trip (`sync_cloud_test`) only appeared in CI after a push. When a domain model gains a read-time (never stored) field, add it to `enrichment_fields` in `modules/sync/mongo_codec.rs` in the same change. State the `make check-atlas` result when reporting.
+1. **Full gate**, in this repo: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo check -p pos-calc-wasm --target wasm32-unknown-unknown` and `cargo test --workspace --no-fail-fast`, with the Mongo suites run against Atlas as above. For sync work also run `sync_device_test` and the desktop shell's `cargo test` in `pos/desktop/src-tauri`.
+2. **Across repos:** when a feature spans repos (backend, frontend, desktop shell, document-server, identity-server, app-frontend, deployment), run the full gate in _every_ repo you touched, plus the tests that exercise the whole path end to end.
+3. **Match CI's toolchain:** CI uses the latest stable Rust/Node. A lint that passes on an older local toolchain can still fail there, so update (`rustup update`) or run the gate with CI's version.
+4. After pushing, watch the run (`gh run list --limit 3`, `gh run view <id> --log-failed`) until it is green. Pushing is a separate, deliberate step, so ask first.
 
-**Run all of these before you say a backend task is finished** (a feature once reached CI with 12 clippy errors, a Staff token able to list login sessions, and undocumented routes, none of which a partial run would have caught):
+**Report honestly:** say what you ran and its result, and say when the full gate has not been run yet. Anything you could not test is named, with the reason, and never presented as passing. A suite that silently skips (e.g. no database configured) is not a passing suite.
 
-1. `cargo clippy --all-targets --all-features -- -D warnings` on the current stable Rust (`rustup update` first). This is exactly what CI runs; `cargo clippy --fix --allow-dirty` clears most of it. Do not rely on `cargo build` or `cargo test` alone: clippy has its own errors.
-2. The **whole** `cargo test` (use `--no-fail-fast` so one failing binary does not hide the rest), against Atlas, on a **fresh throwaway database**: `MONGODB_DB_NAME=jt<area>_<20 hex> MONGODB_TEST_DB_NAME=<same>`. The harness refuses any test database name that does not start with `jt`, and a shared database accumulates data, so tests such as the reminders ones then fail for reasons that have nothing to do with your change.
-3. For every new or changed route: a `security(("bearerAuth" = []))` entry in its `#[utoipa::path]` when it needs a token (`authorization_test` checks it), and its permission checks tested for each role.
-4. A new permission gets its own constant in `core/constants/permissions.rs`; never reuse an existing permission string for a different feature (`sessions:view` guards the login-session list, register shifts use `register_sessions:*`). Re-check what `ADMIN`/`MANAGER`/`STAFF_PERMISSIONS` now grant.
-5. `cargo fmt --all --check` (`max_width = 100`, the workspace `rustfmt.toml`) is enforced in CI and in `make check`; run `cargo fmt --all` before you finish.
-6. After pushing, watch the run (`gh run list --limit 3`, `gh run view <id> --log-failed`) until it is green. Pushing is a separate, deliberate step, so ask first.
+**Every change:** a route that needs a token has a `security(("bearerAuth" = []))` entry in its `#[utoipa::path]`, and its permission checks are tested for each role. A new permission gets its own constant in `core/constants/permissions.rs`; never reuse an existing permission string for a different feature (`sessions:view` guards the login-session list, register shifts use `register_sessions:*`), and re-check what `ADMIN`/`MANAGER`/`STAFF_PERMISSIONS` now grant. When a domain model gains a read-time (never stored) field, add it to `enrichment_fields` in `modules/sync/mongo_codec.rs` in the same change.
 
 # Where the rest of the guidance lives
 
@@ -83,11 +81,12 @@ The invariants below apply everywhere and are easy to violate, so they stay resi
 - `cargo run --bin migrate_user_versions [-- --dry-run]` — one-time MongoDB repair of accounts stored without a `version` (every account made on the website before the backend that writes it), which stop a shop being downloaded by a desktop; run it once after deploying, with the server running (its change stream sends the repaired accounts to linked desktops). Idempotent. Desktops already store a version.
 - `make check` (root `Makefile`) — runs `cargo fmt --check`, then `cargo clippy --all-targets --all-features -- -D warnings`, then `cargo test`, stopping at the first failure; `make ci` is an alias for it (the intended CI entrypoint)
 
-**After every change**, run the following and fix anything it reports before considering the work done:
+**After every change**, run the related tests and static checks, and fix anything they report before considering the work done. `make check` is the full gate: run it once before a push, not after every task.
 
 ```
-make check
-# (or: cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo test)
+cargo fmt --all
+cargo test --test <area>_test
+cargo clippy --all-targets --all-features -- -D warnings
 ```
 
 (`rustfmt`/`clippy` components must be installed — `rustup component add rustfmt clippy` — if either command is missing.)
@@ -192,5 +191,5 @@ Rules:
   - Run `cargo test --test backup_test` when modifying database schemas or backup routines to verify roundtrip export/restore and schema evolution tolerance.
   - Run `cargo test --test sqlite_integration_test` to ensure core POS flows succeed in SQLite mode.
 - **Quality Gates**:
-  - Always run `make check` (or `cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo test`) before finalizing any backend changes.
+  - Before finishing a task, run the related tests and static checks; `make check` is the full gate, for before a push (see *Testing* above).
 
