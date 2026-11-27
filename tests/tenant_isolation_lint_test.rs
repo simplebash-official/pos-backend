@@ -52,6 +52,7 @@ const RAW_TYPES_ALLOWED: &[&str] = &[
     "src/modules/purchases/service/receipt_migration/service_receipt_migration.rs",
     "src/modules/sessions/migration/drawer_migration.rs",
     "src/modules/billing/migration/ticket_billing_migration.rs",
+    "src/modules/billing/migration/credit_note_customers_migration.rs",
     "src/modules/customers/migration/ticket_customers_migration.rs",
     "src/modules/repairs/migration/repair_migration.rs",
     "src/modules/warranties/migration/warranty_migration.rs",
