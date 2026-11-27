@@ -1,3 +1,4 @@
+use super::job_customer;
 use super::service_sale::resolve_sale_items;
 use crate::clients::db::Db;
 use crate::core::calculations;
@@ -87,6 +88,12 @@ fn validate_sale_request(body: &CreateSaleRequest) -> AppResult<()> {
                 ));
             }
             (true, Some(_)) | (false, None) => {}
+        }
+        if !names_a_ticket && item.confirmed_job_customer_key.is_some() {
+            return Err(AppError::validation_with_code(
+                "Only a repair or print job that names its ticket can confirm its customer.",
+                codes::JOB_CUSTOMER_CONFIRMATION_NOT_ALLOWED,
+            ));
         }
         if item.source_type == "charge" {
             validate_charge_item(item)?;
@@ -368,9 +375,11 @@ async fn apply_line_item_side_effects(
                         invoice_key: &inserted_invoice.key,
                         invoice_number: &inserted_invoice.invoice_number,
                         delivered_at: inserted_invoice.created_at.to_chrono(),
-                        customer_key: inserted_invoice.customer_key.as_deref(),
-                        customer_name: inserted_invoice.customer_name_snapshot.as_deref(),
-                        customer_phone: inserted_invoice.customer_phone_snapshot.as_deref(),
+                        customer: warranties::service::JobCustomer {
+                            key: &repair.customer_key,
+                            name: &repair.customer_name,
+                            phone: &repair.customer_phone,
+                        },
                         line_index,
                         repair_key: &repair.key,
                         ticket_number: &repair.ticket_number,
@@ -439,9 +448,11 @@ async fn apply_line_item_side_effects(
                         invoice_key: &inserted_invoice.key,
                         invoice_number: &inserted_invoice.invoice_number,
                         delivered_at: inserted_invoice.created_at.to_chrono(),
-                        customer_key: inserted_invoice.customer_key.as_deref(),
-                        customer_name: inserted_invoice.customer_name_snapshot.as_deref(),
-                        customer_phone: inserted_invoice.customer_phone_snapshot.as_deref(),
+                        customer: warranties::service::JobCustomer {
+                            key: &job.customer_key,
+                            name: &job.customer_name,
+                            phone: &job.customer_phone,
+                        },
                         line_index,
                         print_job_key: &job.key,
                         ticket_number: &job.ticket_number,
@@ -524,6 +535,7 @@ pub async fn complete_sale(
         // an unresolvable productKey/sourceTicketKey can't produce a sensible
         // line item, so the whole sale is rejected rather than half-completed.
         let (resolved_items, resolved_products) = resolve_sale_items(db, &body.items).await?;
+        job_customer::check_job_customers(db, &body.items, customer_key.as_deref()).await?;
 
         // subtotal/discount/total/change are calculated via the authoritative calculation engine.
         let (subtotal_cents, discount_type, discount_value, discount_cents, total_cents) =

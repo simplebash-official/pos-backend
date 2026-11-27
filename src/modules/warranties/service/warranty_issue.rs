@@ -160,15 +160,21 @@ pub(crate) async fn issue_for_sale_line(
     Ok(issued)
 }
 
+/// The customer a repair or print job is for: who holds its warranties, whoever paid the bill.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct JobCustomer<'a> {
+    pub key: &'a str,
+    pub name: &'a str,
+    pub phone: &'a str,
+}
+
 /// A handed-back repair job, as its items' warranties need it.
 #[derive(Debug)]
 pub(crate) struct RepairLine<'a> {
     pub invoice_key: &'a str,
     pub invoice_number: &'a str,
     pub delivered_at: DateTime<Utc>,
-    pub customer_key: Option<&'a str>,
-    pub customer_name: Option<&'a str>,
-    pub customer_phone: Option<&'a str>,
+    pub customer: JobCustomer<'a>,
     /// Zero-based position of the job's line on the invoice.
     pub line_index: usize,
     pub repair_key: &'a str,
@@ -221,10 +227,10 @@ pub(crate) async fn issue_for_repair(
             serial_number: line.device_serial.map(str::to_string),
             quantity: 1,
             claimed_quantity: Some(0),
-            customer_key: line.customer_key.map(str::to_string),
-            customer_name: line.customer_name.map(str::to_string),
-            customer_phone: line.customer_phone.map(str::to_string),
-            customer_phone_tail: line.customer_phone.and_then(phone_tail),
+            customer_key: Some(line.customer.key.to_string()),
+            customer_name: Some(line.customer.name.to_string()),
+            customer_phone: Some(line.customer.phone.to_string()),
+            customer_phone_tail: phone_tail(line.customer.phone),
             coverage: item.warranty.coverage,
             warranty_type,
             terms: item.warranty.terms.clone(),
@@ -270,9 +276,7 @@ pub(crate) struct PrintJobLine<'a> {
     pub invoice_key: &'a str,
     pub invoice_number: &'a str,
     pub delivered_at: DateTime<Utc>,
-    pub customer_key: Option<&'a str>,
-    pub customer_name: Option<&'a str>,
-    pub customer_phone: Option<&'a str>,
+    pub customer: JobCustomer<'a>,
     /// Zero-based position of the job's line on the invoice.
     pub line_index: usize,
     pub print_job_key: &'a str,
@@ -329,10 +333,10 @@ pub(crate) async fn issue_for_print_job(
             serial_number,
             quantity: 1,
             claimed_quantity: Some(0),
-            customer_key: line.customer_key.map(str::to_string),
-            customer_name: line.customer_name.map(str::to_string),
-            customer_phone: line.customer_phone.map(str::to_string),
-            customer_phone_tail: line.customer_phone.and_then(phone_tail),
+            customer_key: Some(line.customer.key.to_string()),
+            customer_name: Some(line.customer.name.to_string()),
+            customer_phone: Some(line.customer.phone.to_string()),
+            customer_phone_tail: phone_tail(line.customer.phone),
             coverage: item.warranty.coverage,
             warranty_type,
             terms: item.warranty.terms.clone(),

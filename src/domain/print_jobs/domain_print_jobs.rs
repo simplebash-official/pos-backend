@@ -151,6 +151,8 @@ pub struct PrintJobCustomer {
 pub struct PrintJobListQuery {
     /// Keyword search matching ticket number or customer name/phone.
     pub search: Option<String>,
+    /// Only the jobs of this registered customer. A blank key is refused.
+    pub customer_key: Option<String>,
     /// Filter by status.
     pub status: Option<String>,
     /// Only `"today"` is meaningful — scopes to `created_at` within

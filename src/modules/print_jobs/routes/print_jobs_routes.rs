@@ -125,7 +125,6 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(list_print_jobs, create_print_job))
         .routes(routes!(get_print_job_stats))
         .routes(routes!(get_print_job, update_print_job, delete_print_job))
-        .merge(super::job_receipt_routes::router())
 }
 
 #[utoipa::path(patch, path = "/{id}", tag = modules::PRINT_JOBS,

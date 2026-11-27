@@ -326,6 +326,56 @@
           "response": []
         },
         {
+          "name": "Complete Sale (another customer's job)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const data = pm.response.json().data;",
+                  "    pm.environment.set(\"invoiceKey\", data.invoice.key);",
+                  "    console.log(`invoiceKey (${data.invoice.key}) saved`);",
+                  "}"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"staff\": {\n    \"cashierName\": \"Kasun\"\n  },\n  \"customer\": {\n    \"customerKey\": \"{{customerKey}}\"\n  },\n  \"items\": [\n    {\n      \"sourceType\": \"repair\",\n      \"sourceTicketKey\": \"{{repairKey}}\",\n      \"quantity\": 1,\n      \"discountCents\": 0,\n      \"handover\": \"now\",\n      \"confirmedJobCustomerKey\": \"cust_owner_of_the_job\"\n    }\n  ],\n  \"payment\": {\n    \"paymentMethod\": \"cash\",\n    \"isCredit\": false,\n    \"amountReceivedCents\": 500000\n  },\n  \"shopProfileSnapshot\": {\n    \"tradingName\": \"Tweek PC\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/billing/sales",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "billing",
+                "sales"
+              ]
+            },
+            "description": "Billing a repair or print job to anyone but its own customer (a walk-in too) needs confirmedJobCustomerKey: the job's own customerKey. Without it the sale is 409 TICKET_OTHER_CUSTOMER; sending it where nothing needs confirming is 400 JOB_CUSTOMER_CONFIRMATION_NOT_ALLOWED. The job's warranties belong to the job's customer."
+          }
+        },
+        {
           "name": "Complete Sale (partial credit + deposit)",
           "event": [
             {
@@ -4901,6 +4951,49 @@
       "description": "Reference module — full product CRUD, stock adjustment/movements, and category/subcategory management."
     },
     {
+      "name": "Job Receipts",
+      "item": [
+        {
+          "name": "Print Job Slip",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "The PDF slip for the jobs a customer leaves with the shop, listed in the order given. Needs repairs:write for a repair on it and print_jobs:write for a print job. 400 JOB_RECEIPT_JOBS_INVALID (not 1 to 20 distinct job keys) or JOB_RECEIPT_CUSTOMERS_DIFFER; 404 for an unknown job.",
+            "url": {
+              "raw": "{{backendBaseUrl}}/api/job-receipts/document?jobs={{repairKey}},{{printJobKey}}&paper=a5",
+              "host": [
+                "{{backendBaseUrl}}"
+              ],
+              "path": [
+                "api",
+                "job-receipts",
+                "document"
+              ],
+              "query": [
+                {
+                  "key": "jobs",
+                  "value": "{{repairKey}},{{printJobKey}}",
+                  "description": "1 to 20 repair and print job keys of one customer, comma separated, in print order"
+                },
+                {
+                  "key": "paper",
+                  "value": "a5",
+                  "description": "a5 | thermal-58 | thermal-80"
+                },
+                {
+                  "key": "template",
+                  "value": "doc_temp_JobRcpt0V1Std000",
+                  "description": "A design family for this print only",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "Labels",
       "item": [
         {
@@ -5339,6 +5432,12 @@
                   "key": "limit",
                   "value": "20",
                   "description": "Page size (default 20)"
+                },
+                {
+                  "key": "customerKey",
+                  "value": "{{customerKey}}",
+                  "description": "Only this registered customer's jobs (a blank key is refused)",
+                  "disabled": true
                 }
               ]
             },
@@ -5485,41 +5584,6 @@
               ]
             },
             "description": "Soft-deletes a print job (sets `deletedAt` so it can still appear as a sync tombstone).\n\n**Requires the `print_jobs:write` permission** in the token's `permissions` claim — granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role."
-          },
-          "response": []
-        },
-        {
-          "name": "Print Print Job Receipt",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "description": "The receipt a customer gets when the shop receives a print job, as a PDF with the design in force now (`application/pdf`). It always shows the job and the shop's terms as they stand today, so there is no `design=original`. Needs `print_jobs:write`.",
-            "url": {
-              "raw": "{{backendBaseUrl}}/api/print-jobs/{{printJobKey}}/documents/job-receipt?paper=a5&template=doc_temp_JobRcpt0V1Std000",
-              "host": [
-                "{{backendBaseUrl}}"
-              ],
-              "path": [
-                "api",
-                "print-jobs",
-                "{{printJobKey}}",
-                "documents",
-                "job-receipt"
-              ],
-              "query": [
-                {
-                  "key": "paper",
-                  "value": "a5",
-                  "description": "Required: `a5` (office printer), `thermal-58` or `thermal-80` (receipt roll)."
-                },
-                {
-                  "key": "template",
-                  "value": "doc_temp_JobRcpt0V1Std000",
-                  "description": "A design family for this print only; defaults to the shop's choice for job receipts.",
-                  "disabled": true
-                }
-              ]
-            }
           },
           "response": []
         }
@@ -5772,6 +5836,12 @@
                   "key": "limit",
                   "value": "20",
                   "description": "Page size (default 20)"
+                },
+                {
+                  "key": "customerKey",
+                  "value": "{{customerKey}}",
+                  "description": "Only this registered customer's jobs (a blank key is refused)",
+                  "disabled": true
                 }
               ]
             },
@@ -5918,41 +5988,6 @@
               ]
             },
             "description": "Soft-deletes a repair ticket (sets `deletedAt` so it can still appear as a sync tombstone).\n\n**Requires the `repairs:write` permission** in the token's `permissions` claim — granted to every role by default (see `core::constants::roles::default_permissions`), so in practice any logged-in user may call it; the check exists for future role tuning. Returns 401 without a token, 403 `PERMISSION_DENIED` if the permission is ever revoked from a role."
-          },
-          "response": []
-        },
-        {
-          "name": "Print Repair Receipt",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "description": "The receipt a customer gets when the shop receives a repair, as a PDF with the design in force now (`application/pdf`). It always shows the job and the shop's terms as they stand today, so there is no `design=original`. Needs `repairs:write`.",
-            "url": {
-              "raw": "{{backendBaseUrl}}/api/repairs/{{repairKey}}/documents/job-receipt?paper=a5&template=doc_temp_JobRcpt0V1Std000",
-              "host": [
-                "{{backendBaseUrl}}"
-              ],
-              "path": [
-                "api",
-                "repairs",
-                "{{repairKey}}",
-                "documents",
-                "job-receipt"
-              ],
-              "query": [
-                {
-                  "key": "paper",
-                  "value": "a5",
-                  "description": "Required: `a5` (office printer), `thermal-58` or `thermal-80` (receipt roll)."
-                },
-                {
-                  "key": "template",
-                  "value": "doc_temp_JobRcpt0V1Std000",
-                  "description": "A design family for this print only; defaults to the shop's choice for job receipts.",
-                  "disabled": true
-                }
-              ]
-            }
           },
           "response": []
         }

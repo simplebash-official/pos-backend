@@ -39,6 +39,7 @@ pub(crate) use warranty_conditions::create_condition;
 pub(crate) use warranty_conditions::delete_condition;
 pub(crate) use warranty_conditions::list_conditions;
 pub(crate) use warranty_events::WarrantyActor;
+pub(crate) use warranty_issue::JobCustomer;
 pub(crate) use warranty_issue::PrintJobLine;
 pub(crate) use warranty_issue::RepairLine;
 pub(crate) use warranty_issue::SaleLine;

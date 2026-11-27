@@ -382,6 +382,12 @@ pub async fn list_print_jobs(db: &Db, query: PrintJobListQuery) -> AppResult<Pri
 
         and_clauses.push(doc! { "$or": or_clauses });
     }
+    if let Some(customer_key) = query.customer_key {
+        if customer_key.trim().is_empty() {
+            return Err(AppError::validation("customerKey cannot be blank."));
+        }
+        and_clauses.push(doc! { "customer_key": customer_key.trim() });
+    }
     if let Some(status) = query.status.filter(|s| !s.trim().is_empty()) {
         and_clauses.push(doc! { "status": status.trim() });
     }
@@ -593,6 +599,12 @@ pub(crate) async fn update_print_job(
             issue_handback_warranties(
                 db,
                 HandedBack {
+                    // The customer the job names after this change, as the write below stores.
+                    customer: warranties::service::JobCustomer {
+                        key: &customer.key,
+                        name: &customer.name,
+                        phone: &customer.primary_phone,
+                    },
                     print_job_key: &existing.key,
                     ticket_number: &existing.ticket_number,
                     items,
@@ -652,15 +664,16 @@ fn refuse_handing_back_unbilled_parts(
 /// The job being handed back, as its warranties need it.
 #[derive(Debug)]
 struct HandedBack<'a> {
+    customer: warranties::service::JobCustomer<'a>,
     print_job_key: &'a str,
     ticket_number: &'a str,
     items: &'a [PrintJobItem],
 }
 
-/// Gives the lines of a job billed with the hand-over later their warranties, starting today, from
-/// the invoice that billed it (its number, its line and its customer). Does nothing when that
-/// invoice already gave the job warranties: a job reopened and handed back again keeps its first
-/// ones. A rework is never billed, so it never gets here.
+/// Gives the lines of a job billed with the hand-over later their warranties, starting today, for
+/// the job's own customer, on the invoice that billed it (its number and line). Does nothing when
+/// that invoice already gave the job warranties: a job reopened and handed back again keeps its
+/// first ones. A rework is never billed, so it never gets here.
 async fn issue_handback_warranties(
     db: &Db,
     job: HandedBack<'_>,
@@ -690,9 +703,7 @@ async fn issue_handback_warranties(
             invoice_key: &invoice.key,
             invoice_number: &invoice.invoice_number,
             delivered_at: Utc::now(),
-            customer_key: invoice.customer_key.as_deref(),
-            customer_name: invoice.customer_name_snapshot.as_deref(),
-            customer_phone: invoice.customer_phone_snapshot.as_deref(),
+            customer: job.customer,
             line_index,
             print_job_key: job.print_job_key,
             ticket_number: job.ticket_number,

@@ -187,6 +187,8 @@ pub struct RepairCustomer {
 pub struct RepairListQuery {
     /// Search term matching ticket number, customer name/phone, or model.
     pub search: Option<String>,
+    /// Only the jobs of this registered customer. A blank key is refused.
+    pub customer_key: Option<String>,
     /// Filter by status.
     pub status: Option<String>,
     /// Only `"today"` is meaningful — scopes to `created_at` within

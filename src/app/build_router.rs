@@ -168,6 +168,10 @@ pub fn build_router(state: AppState) -> Router {
             modules::print_jobs::routes::services_router(),
         )
         .nest(
+            &format!("/{}", mod_names::JOB_RECEIPTS.replace('_', "-")),
+            modules::job_receipts::routes::router(),
+        )
+        .nest(
             &format!("/{}", mod_names::QUOTATIONS),
             modules::quotations::routes::router(),
         )

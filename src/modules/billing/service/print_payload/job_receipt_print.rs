@@ -1,9 +1,10 @@
-//! The payload of the "Job Receipt" template: the slip a customer gets when the shop receives a
-//! repair or a print job. Only builds data; reading the ticket and rendering are the callers' job.
+//! The payload of the "Job Receipt" template: the slip a customer gets for the repair and print
+//! jobs they leave with the shop. Only builds data; reading the tickets and rendering are the
+//! callers' job.
 
 use crate::core::error::{AppError, AppResult};
 use crate::core::utils::shop_local;
-use crate::domain::job_receipts::{JobReceiptPaper, JobReceiptSource};
+use crate::domain::job_receipts::{JobReceipt, JobReceiptJob, JobReceiptPaper};
 use crate::domain::settings::ShopProfileResponse;
 use chrono::NaiveDate;
 use serde_json::{Value, json};
@@ -19,49 +20,59 @@ fn printed_day(day: &str) -> AppResult<String> {
         })
 }
 
-/// Builds `data` for the "Job Receipt" template. The receipt shows the job as it is now, in the
+fn job_data(job: &JobReceiptJob) -> AppResult<Value> {
+    let received = shop_local(job.received_at);
+    let promised_ready_on = match &job.promised_ready_on {
+        Some(day) => json!(printed_day(day)?),
+        None => Value::Null,
+    };
+    Ok(json!({
+        "ticketNumber": job.ticket_number,
+        "jobKind": job.kind.as_str(),
+        "receivedOn": received.format("%d %b %Y").to_string(),
+        "receivedAt": received.format("%H:%M").to_string(),
+        "title": job.title,
+        "detail": job.detail,
+        "serialNumber": job.serial_number.clone().unwrap_or_default(),
+        "itemLines": job.item_lines,
+        "estimateCents": job.estimate_cents,
+        "promisedReadyOn": promised_ready_on,
+        "isWarrantyRework": job.is_warranty_rework,
+        "qrData": job.ticket_number,
+    }))
+}
+
+/// Builds `data` for the "Job Receipt" template. The slip shows the jobs as they are now, in the
 /// shop's own time zone, with the shop's details, terms and pickup warning from its profile.
 ///
 /// # Errors
 ///
-/// An internal error when the stored promised-ready day cannot be read.
+/// An internal error when a stored promised-ready day cannot be read.
 pub(crate) fn build_job_receipt_data(
-    source: &JobReceiptSource,
+    receipt: &JobReceipt,
     shop: &ShopProfileResponse,
     paper: JobReceiptPaper,
 ) -> AppResult<Value> {
-    let received = shop_local(source.received_at);
-    let promised_ready_on = match &source.promised_ready_on {
-        Some(day) => json!(printed_day(day)?),
-        None => Value::Null,
-    };
-    let mut data = json!({
+    let jobs = receipt
+        .jobs
+        .iter()
+        .map(job_data)
+        .collect::<AppResult<Vec<_>>>()?;
+    Ok(json!({
         "paper": paper.as_str(),
         "logoUrl": shop.logo_base64,
-        "ticketNumber": source.ticket_number,
-        "jobKind": source.kind.as_str(),
-        "receivedOn": received.format("%d %b %Y").to_string(),
-        "receivedAt": received.format("%H:%M").to_string(),
-        "customerName": source.customer_name,
-        "customerPhone": source.customer_phone,
-        "title": source.title,
-        "detail": source.detail,
-        "serialNumber": source.serial_number.clone().unwrap_or_default(),
-        "itemLines": source.item_lines,
-        "estimateCents": source.estimate_cents,
-        "promisedReadyOn": promised_ready_on,
-        "isWarrantyRework": source.is_warranty_rework,
-        "qrData": source.ticket_number,
+        "customerName": receipt.customer.name,
+        "customerPhone": receipt.customer.phone,
+        "jobs": jobs,
+        "estimateTotalCents": receipt.estimate_total_cents,
         "termsText": shop.job_receipt_terms_text,
         "uncollectedAfterDays": shop.uncollected_after_days,
-    });
-    // Inserted after the fact: the `json!` above is near the macro recursion limit.
-    data["shopTradingName"] = json!(shop.trading_name);
-    data["shopLegalName"] = json!(shop.legal_name);
-    data["shopAddressLines"] = json!(shop.address_lines);
-    data["shopPrimaryPhone"] = json!(shop.primary_phone);
-    data["shopSecondaryPhone"] = json!(shop.secondary_phone);
-    data["shopEmail"] = json!(shop.email);
-    data["shopWebsite"] = json!(shop.website);
-    Ok(data)
+        "shopTradingName": shop.trading_name,
+        "shopLegalName": shop.legal_name,
+        "shopAddressLines": shop.address_lines,
+        "shopPrimaryPhone": shop.primary_phone,
+        "shopSecondaryPhone": shop.secondary_phone,
+        "shopEmail": shop.email,
+        "shopWebsite": shop.website,
+    }))
 }

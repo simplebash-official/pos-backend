@@ -265,6 +265,13 @@ fn sale(lines: Value) -> Value {
     })
 }
 
+/// A sale that bills a job, to the registered customer the job is for.
+fn ticket_sale(customer: &str, lines: Value) -> Value {
+    let mut body = sale(lines);
+    body["customer"] = json!({ "customerKey": customer });
+    body
+}
+
 fn items_of(body: &Value) -> Vec<Value> {
     body["data"]
         .as_array()
@@ -506,7 +513,8 @@ async fn scenario(app: &common::TestApp) {
     );
 
     // ---- Billed: parts leave stock, covered items get warranties on the device ----
-    let bill = sale(
+    let bill = ticket_sale(
+        &customer,
         json!([{ "quantity": 1, "discountCents": 0, "sourceType": "repair",
                              "sourceTicketKey": repair_key, "handover": "now" }]),
     );

@@ -1,7 +1,7 @@
-//! The receipt a customer gets when the shop receives a repair or a print job, on SQLite and on
-//! a throwaway Atlas database: what it says (the mock document-server echoes the payload into
-//! its fake PDF), the papers, the permissions, and that a changed ticket or changed shop terms
-//! print afresh.
+//! The slip a customer gets for the repair and print jobs they leave with the shop, on SQLite and
+//! on a throwaway Atlas database: what it says (the mock document-server echoes the payload into
+//! its fake PDF), one job or several on one slip, the papers, the permissions, the refusals, and
+//! that a changed ticket or changed shop terms print afresh.
 
 mod common;
 
@@ -101,11 +101,11 @@ async fn scenario(app: &common::TestApp) {
     let repair_key = repair["data"]["key"].as_str().expect("a key").to_string();
     let repair_number = repair["data"]["ticketNumber"].as_str().expect("a number");
 
-    let receipt =
-        |paper: &str| format!("/api/repairs/{repair_key}/documents/job-receipt?paper={paper}");
+    let slip =
+        |jobs: &str, paper: &str| format!("/api/job-receipts/document?jobs={jobs}&paper={paper}");
 
-    // What the repair receipt says.
-    let (status, pdf) = send(app, "GET", &receipt("a5"), None, &staff).await;
+    // What the slip of one repair says.
+    let (status, pdf) = send(app, "GET", &slip(&repair_key, "a5"), None, &staff).await;
     assert_eq!(status, StatusCode::OK, "{pdf}");
     assert!(pdf.contains("\"paper\":\"a5\""), "{pdf}");
     assert!(
@@ -124,6 +124,7 @@ async fn scenario(app: &common::TestApp) {
     );
     assert!(pdf.contains("\"itemLines\":[\"Replace display\"]"), "{pdf}");
     assert!(pdf.contains("\"estimateCents\":1850000"), "{pdf}");
+    assert!(pdf.contains("\"estimateTotalCents\":null"), "{pdf}");
     assert!(pdf.contains("\"promisedReadyOn\":\"27 Nov 2026\""), "{pdf}");
     assert!(pdf.contains("\"termsText\":\"Keep this slip.\""), "{pdf}");
     assert!(pdf.contains("\"uncollectedAfterDays\":30"), "{pdf}");
@@ -131,33 +132,25 @@ async fn scenario(app: &common::TestApp) {
 
     // Every paper prints; anything else, or none, is refused.
     for paper in ["thermal-58", "thermal-80"] {
-        let (status, pdf) = send(app, "GET", &receipt(paper), None, &staff).await;
+        let (status, pdf) = send(app, "GET", &slip(&repair_key, paper), None, &staff).await;
         assert_eq!(status, StatusCode::OK, "{paper}: {pdf}");
         assert!(pdf.contains(&format!("\"paper\":\"{paper}\"")), "{pdf}");
     }
-    let (status, _) = send(app, "GET", &receipt("a4"), None, &staff).await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-    let (status, _) = send(
-        app,
-        "GET",
-        &format!("/api/repairs/{repair_key}/documents/job-receipt"),
-        None,
-        &staff,
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
+    for refused in [
+        slip(&repair_key, "a4"),
+        format!("/api/job-receipts/document?jobs={repair_key}"),
+        "/api/job-receipts/document?paper=a5".to_string(),
+    ] {
+        let (status, body) = send(app, "GET", &refused, None, &staff).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}: {body}");
+    }
 
     // Unknown ticket, no token rights.
-    let (status, _) = send(
-        app,
-        "GET",
-        "/api/repairs/rep_missing/documents/job-receipt?paper=a5",
-        None,
-        &staff,
-    )
-    .await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-    let (status, _) = send(app, "GET", &receipt("a5"), None, &no_write).await;
+    for missing in ["rep_missing", "prn_missing"] {
+        let (status, _) = send(app, "GET", &slip(missing, "a5"), None, &staff).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{missing}");
+    }
+    let (status, _) = send(app, "GET", &slip(&repair_key, "a5"), None, &no_write).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
     // A changed ticket prints afresh.
@@ -169,7 +162,7 @@ async fn scenario(app: &common::TestApp) {
         &staff,
     )
     .await;
-    let (_, pdf) = send(app, "GET", &receipt("a5"), None, &staff).await;
+    let (_, pdf) = send(app, "GET", &slip(&repair_key, "a5"), None, &staff).await;
     assert!(pdf.contains("\"title\":\"Samsung Galaxy A16\""), "{pdf}");
 
     // Changed shop terms print afresh too, and a removed warning disappears.
@@ -181,36 +174,32 @@ async fn scenario(app: &common::TestApp) {
         &admin,
     )
     .await;
-    let (_, pdf) = send(app, "GET", &receipt("a5"), None, &staff).await;
+    let (_, pdf) = send(app, "GET", &slip(&repair_key, "a5"), None, &staff).await;
     assert!(pdf.contains("\"termsText\":\"New terms.\""), "{pdf}");
     assert!(pdf.contains("\"uncollectedAfterDays\":null"), "{pdf}");
 
     // A print job.
-    let job = send_json(
-        app,
-        "POST",
-        "/api/print-jobs",
-        Some(json!({
+    let print_job = |customer: String| {
+        json!({
             "customer": { "customerKey": customer },
             "jobType": "mug",
             "quantity": 20,
             "items": [{ "description": "Printing", "quantity": 1,
                     "source": { "type": "service", "unitPriceCents": 800000 },
                     "warranty": { "coverage": { "kind": "none" } } }]
-        })),
+        })
+    };
+    let job = send_json(
+        app,
+        "POST",
+        "/api/print-jobs",
+        Some(print_job(customer.clone())),
         &staff,
     )
     .await;
     let job_key = job["data"]["key"].as_str().expect("a key").to_string();
     let job_number = job["data"]["ticketNumber"].as_str().expect("a number");
-    let (status, pdf) = send(
-        app,
-        "GET",
-        &format!("/api/print-jobs/{job_key}/documents/job-receipt?paper=thermal-80"),
-        None,
-        &staff,
-    )
-    .await;
+    let (status, pdf) = send(app, "GET", &slip(&job_key, "thermal-80"), None, &staff).await;
     assert_eq!(status, StatusCode::OK, "{pdf}");
     assert!(pdf.contains("\"jobKind\":\"print\""), "{pdf}");
     assert!(
@@ -220,33 +209,87 @@ async fn scenario(app: &common::TestApp) {
     assert!(pdf.contains("\"detail\":\"20 × Mug\""), "{pdf}");
     assert!(pdf.contains("\"estimateCents\":800000"), "{pdf}");
     assert!(pdf.contains("\"itemLines\":[\"Printing x 1\"]"), "{pdf}");
-    let (status, _) = send(
+
+    // Both on one slip, in the order asked, with the total.
+    let both = format!("{job_key},{repair_key}");
+    let (status, pdf) = send(app, "GET", &slip(&both, "a5"), None, &staff).await;
+    assert_eq!(status, StatusCode::OK, "{pdf}");
+    let print_at = pdf.find(job_number).expect("the print job is listed");
+    let repair_at = pdf.find(repair_number).expect("the repair is listed");
+    assert!(print_at < repair_at, "{pdf}");
+    assert!(pdf.contains("\"estimateTotalCents\":2650000"), "{pdf}");
+
+    // Each kind on the slip needs its own permission.
+    let repairs_only = token(app, Role::Staff, &["repairs:write"]);
+    let prints_only = token(app, Role::Staff, &["print_jobs:write"]);
+    for (token, jobs, expected) in [
+        (&repairs_only, repair_key.as_str(), StatusCode::OK),
+        (&repairs_only, job_key.as_str(), StatusCode::FORBIDDEN),
+        (&repairs_only, both.as_str(), StatusCode::FORBIDDEN),
+        (&prints_only, job_key.as_str(), StatusCode::OK),
+        (&prints_only, repair_key.as_str(), StatusCode::FORBIDDEN),
+        (&prints_only, both.as_str(), StatusCode::FORBIDDEN),
+    ] {
+        let (status, body) = send(app, "GET", &slip(jobs, "a5"), None, token).await;
+        assert_eq!(status, expected, "{jobs}: {body}");
+    }
+
+    // One slip is one customer's.
+    let other = common::register_customer(app, "Kamal Silva", "0779999999").await;
+    let theirs = send_json(
         app,
-        "GET",
-        &format!("/api/print-jobs/{job_key}/documents/job-receipt?paper=a4"),
-        None,
+        "POST",
+        "/api/print-jobs",
+        Some(print_job(other)),
         &staff,
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let theirs = theirs["data"]["key"].as_str().expect("a key");
+    let mixed = format!("{repair_key},{theirs}");
+    let (status, body) = send(app, "GET", &slip(&mixed, "a5"), None, &staff).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body.contains("JOB_RECEIPT_CUSTOMERS_DIFFER"), "{body}");
+
+    // Up to 20 jobs, each once, and nothing that is not a job.
+    let mut keys = vec![repair_key.clone(), job_key.clone()];
+    for _ in 0..19 {
+        let more = send_json(
+            app,
+            "POST",
+            "/api/print-jobs",
+            Some(print_job(customer.clone())),
+            &staff,
+        )
+        .await;
+        keys.push(more["data"]["key"].as_str().expect("a key").to_string());
+    }
+    let (status, body) = send(app, "GET", &slip(&keys[..20].join(","), "a5"), None, &staff).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    for refused in [
+        keys.join(","),
+        String::new(),
+        format!("{repair_key},{repair_key}"),
+        format!("{repair_key},"),
+        "inv_1".to_string(),
+    ] {
+        let (status, body) = send(app, "GET", &slip(&refused, "a5"), None, &staff).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "`{refused}`: {body}");
+        assert!(
+            body.contains("JOB_RECEIPT_JOBS_INVALID"),
+            "`{refused}`: {body}"
+        );
+    }
+
+    // The old per-job addresses are gone.
     let (status, _) = send(
         app,
         "GET",
-        "/api/print-jobs/prn_missing/documents/job-receipt?paper=a5",
+        &format!("/api/repairs/{repair_key}/documents/job-receipt?paper=a5"),
         None,
         &staff,
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
-    let (status, _) = send(
-        app,
-        "GET",
-        &format!("/api/print-jobs/{job_key}/documents/job-receipt?paper=a5"),
-        None,
-        &no_write,
-    )
-    .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]

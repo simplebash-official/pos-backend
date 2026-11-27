@@ -152,6 +152,13 @@ pub fn index_specs(tenant_mode: TenantMode) -> Vec<IndexSpec> {
             doc! { "promised_ready_at": 1, "status": 1 },
             false,
         );
+        // One customer's jobs, newest change first: the till and the customer page.
+        specs.add(
+            collection,
+            "customer_updated_at",
+            doc! { "customer_key": 1, "updated_at": -1 },
+            false,
+        );
     }
 
     // `sales-by-category` joins invoice lines to `products` by `key`; the sync

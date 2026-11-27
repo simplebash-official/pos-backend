@@ -10,6 +10,7 @@
 //! module already has between "purchase inserted" and "stock bumped".
 
 mod complete_sale;
+mod job_customer;
 mod service_sale;
 
 pub use complete_sale::complete_sale;
