@@ -1,7 +1,7 @@
 //! The shop's ready-made repair services: a name (unique per shop, ignoring case and spaces;
 //! the key is derived from it, see `repair_service_key`), the usual
-//! labour and the usual warranty. Never deleted: a job that used one keeps its own copy of the
-//! item, and a service no longer offered is hidden (`active: false`).
+//! labour and cost and the usual warranty. Never deleted: a job that used one keeps its own copy
+//! of the item, and a service no longer offered is hidden (`active: false`).
 
 use crate::clients::db::Db;
 use crate::core::constants::codes;
@@ -24,7 +24,7 @@ pub(crate) async fn list_services(db: &Db, include_hidden: bool) -> AppResult<Ve
         .collect())
 }
 
-/// A checked request: name trimmed, labour not negative, warranty valid.
+/// A checked request: name trimmed, labour and cost not negative, warranty valid.
 fn checked(body: SaveRepairServiceRequest) -> AppResult<SaveRepairServiceRequest> {
     let name = body.name.trim().to_string();
     if name.is_empty() {
@@ -38,9 +38,13 @@ fn checked(body: SaveRepairServiceRequest) -> AppResult<SaveRepairServiceRequest
     if body.labor_cents < 0 {
         return Err(AppError::validation("Fee cannot be negative."));
     }
+    if body.labor_cost_cents.is_some_and(|cents| cents < 0) {
+        return Err(AppError::validation("The cost cannot be negative."));
+    }
     Ok(SaveRepairServiceRequest {
         name,
         labor_cents: body.labor_cents,
+        labor_cost_cents: body.labor_cost_cents,
         warranty: body.warranty.validated()?,
         active: body.active,
     })
@@ -91,6 +95,7 @@ pub(crate) async fn create_service(
             key: repair_service_key(&body.name),
             name: body.name,
             labor_cents: body.labor_cents,
+            labor_cost_cents: body.labor_cost_cents,
             warranty: body.warranty,
             active: body.active,
             version: 1,
@@ -105,7 +110,7 @@ pub(crate) async fn create_service(
     .await
 }
 
-/// Replaces a service's name, labour, warranty and whether it is offered.
+/// Replaces a service's name, labour, cost, warranty and whether it is offered.
 pub(crate) async fn update_service(
     db: &Db,
     key: &str,
@@ -124,6 +129,7 @@ pub(crate) async fn update_service(
         let expected = document.version;
         document.name = body.name;
         document.labor_cents = body.labor_cents;
+        document.labor_cost_cents = body.labor_cost_cents;
         document.warranty = body.warranty;
         document.active = body.active;
         document.version = expected + 1;

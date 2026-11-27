@@ -1,11 +1,11 @@
 //! Helpers shared by the product repository files: collection handle, row mapping, filters.
 
-use crate::clients::sqlite::{SqlFilter, to_bson_datetime};
+use crate::clients::sqlite::{SqlFilter, like_pattern, to_bson_datetime};
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use crate::core::error::{AppError, AppResult};
 use crate::modules::inventory::model::ProductDocument;
+use mongodb::bson::Document;
 use mongodb::bson::oid::ObjectId;
-use mongodb::bson::{Bson, Document};
 use sqlx::Row;
 
 pub(super) fn build_product_where_clause(filter: &Document) -> SqlFilter {
@@ -103,34 +103,6 @@ pub(super) fn build_product_where_clause(filter: &Document) -> SqlFilter {
         clause: where_clause,
         bindings,
     }
-}
-
-/// The SQLite `LIKE` pattern (`%text%`, with `%`, `_` and `\` escaped for
-/// `ESCAPE '\'`) for a `{ "$regex": … }` search clause. `service::product`
-/// sends a BSON regex built by `build_bson_regex`, whose text is regex-escaped,
-/// so the escaping is undone first; a plain string is taken as it is.
-pub(super) fn like_pattern(clause: &Document) -> Option<String> {
-    let regex = match clause.get("$regex")? {
-        Bson::RegularExpression(regex) => regex.pattern.to_string(),
-        Bson::String(text) => text.clone(),
-        _ => return None,
-    };
-    let mut text = String::with_capacity(regex.len() + 2);
-    text.push('%');
-    let mut chars = regex.chars();
-    while let Some(c) = chars.next() {
-        // `regex_escape` puts a backslash before each special character.
-        let literal = match c {
-            '\\' => chars.next().unwrap_or('\\'),
-            other => other,
-        };
-        if matches!(literal, '%' | '_' | '\\') {
-            text.push('\\');
-        }
-        text.push(literal);
-    }
-    text.push('%');
-    Some(text)
 }
 
 /// Sort field standing for "a product's cheapest in-stock price". A product

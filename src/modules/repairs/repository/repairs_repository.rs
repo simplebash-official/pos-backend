@@ -1,6 +1,6 @@
 use crate::clients::db::Db;
 use crate::clients::sqlite::{
-    SqlFilter, bson_to_iso, generate_id_hex, now_utc_iso, to_bson_datetime,
+    SqlFilter, bson_to_iso, generate_id_hex, like_pattern, now_utc_iso, to_bson_datetime,
 };
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use crate::core::error::{AppError, AppResult};
@@ -314,39 +314,23 @@ fn build_repair_where_clause(filter: &Document) -> SqlFilter {
             let mut or_parts = Vec::new();
             for or_item in or_arr {
                 if let Some(or_doc) = or_item.as_document() {
-                    if let Ok(tick_doc) = or_doc.get_document("ticket_number") {
-                        if let Ok(regex) = tick_doc.get_str("$regex") {
-                            let clean = regex.trim_start_matches('^').trim_end_matches('$');
-                            or_parts.push("ticket_number LIKE ?".to_string());
-                            bindings.push(format!("%{clean}%"));
-                        }
-                    } else if let Ok(tick_exact) = or_doc.get_str("ticket_number") {
+                    if let Ok(ticket) = or_doc.get_str("ticket_number") {
                         or_parts.push("ticket_number = ?".to_string());
-                        bindings.push(tick_exact.to_string());
+                        bindings.push(ticket.to_string());
                     }
 
-                    if let Ok(cname) = or_doc.get_document("customer_name")
-                        && let Ok(regex) = cname.get_str("$regex")
-                    {
-                        let clean = regex.trim_start_matches('^').trim_end_matches('$');
-                        or_parts.push("customer_name LIKE ?".to_string());
-                        bindings.push(format!("%{clean}%"));
-                    }
-
-                    if let Ok(cphone) = or_doc.get_document("customer_phone")
-                        && let Ok(regex) = cphone.get_str("$regex")
-                    {
-                        let clean = regex.trim_start_matches('^').trim_end_matches('$');
-                        or_parts.push("customer_phone LIKE ?".to_string());
-                        bindings.push(format!("%{clean}%"));
-                    }
-
-                    if let Ok(dev) = or_doc.get_document("device_model")
-                        && let Ok(regex) = dev.get_str("$regex")
-                    {
-                        let clean = regex.trim_start_matches('^').trim_end_matches('$');
-                        or_parts.push("device_model LIKE ?".to_string());
-                        bindings.push(format!("%{clean}%"));
+                    for column in [
+                        "ticket_number",
+                        "customer_name",
+                        "customer_phone",
+                        "device_model",
+                    ] {
+                        if let Ok(clause) = or_doc.get_document(column)
+                            && let Some(pattern) = like_pattern(clause)
+                        {
+                            or_parts.push(format!("{column} LIKE ? ESCAPE '\\'"));
+                            bindings.push(pattern);
+                        }
                     }
                 }
             }

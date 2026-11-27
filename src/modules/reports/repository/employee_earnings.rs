@@ -21,7 +21,7 @@ use crate::core::error::AppResult;
 
 use crate::domain::employees::EmployeeEarningRecord;
 
-use crate::modules::reports::repository::commissions::{JobKind, JobMoney, job_money};
+use crate::modules::reports::repository::commissions::{JobMoney, job_money};
 
 fn repairs(db: &TenantDatabase) -> ScopedCollection<Document> {
     db.collection("repairs")
@@ -39,14 +39,7 @@ fn to_record(
     let JobMoney {
         revenue_cents: revenue,
         cost_cents: material_cost,
-    } = job_money(
-        doc,
-        if work_type == "repair" {
-            JobKind::Repair
-        } else {
-            JobKind::Print
-        },
-    )?;
+    } = job_money(doc)?;
     let profit = job_profit_cents(revenue, material_cost);
 
     let split_type = doc.get_str("split_type").ok();

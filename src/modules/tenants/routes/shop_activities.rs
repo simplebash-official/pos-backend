@@ -302,7 +302,7 @@ pub(super) async fn shop_activities(
                     reference: prn.ticket_number,
                     cashier_name: prn.assigned_employee_name,
                     user_role: None,
-                    amount_cents: Some(prn.estimated_cost_cents),
+                    amount_cents: Some(prn.price_cents),
                     description: format!(
                         "Print job {} (qty: {}, status: {})",
                         prn.job_type, prn.quantity, prn.status

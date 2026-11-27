@@ -47,6 +47,7 @@ async fn sqlite_lists_invoices_by_the_ticket_they_billed() {
         "/api/billing/sales",
         Some(json!({
             "staff": { "cashierName": "Default Admin" },
+            "customer": { "customerKey": customer_key },
             "items": [{
                 "name": "Screen Replacement",
                 "quantity": 1,

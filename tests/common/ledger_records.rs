@@ -13,7 +13,7 @@ use tower::ServiceExt;
 
 /// The synced resources those records belong to, as `(wire name, table)`.
 #[allow(dead_code)]
-pub const LEDGER_RESOURCES: [(&str, &str); 10] = [
+pub const LEDGER_RESOURCES: [(&str, &str); 11] = [
     ("payees", "payees"),
     ("cashCategories", "cash_categories"),
     ("recurringExpenses", "recurring_expenses"),
@@ -24,6 +24,7 @@ pub const LEDGER_RESOURCES: [(&str, &str); 10] = [
     ("attachments", "attachments"),
     ("cashSettings", "cash_settings"),
     ("repairServices", "repair_service_templates"),
+    ("printServices", "print_service_templates"),
 ];
 
 async fn send(router: &axum::Router, token: &str, method: &str, uri: &str, body: Value) -> Value {
@@ -165,7 +166,18 @@ pub async fn create_ledger_records(router: &axum::Router, token: &str) {
         "POST",
         "/api/repair-services",
         json!({
-            "name": "Screen replacement", "laborCents": 2_500,
+            "name": "Screen replacement", "laborCents": 2_500, "laborCostCents": 900,
+            "warranty": { "coverage": { "kind": "none" } }, "active": true,
+        }),
+    )
+    .await;
+    send(
+        router,
+        token,
+        "POST",
+        "/api/print-services",
+        json!({
+            "name": "Design", "unitPriceCents": 1_000, "unitCostCents": 400,
             "warranty": { "coverage": { "kind": "none" } }, "active": true,
         }),
     )

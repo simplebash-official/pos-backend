@@ -365,8 +365,8 @@ pub(super) async fn transition_returned_serial(
     }
 }
 
-/// Cancels the warranties of what came back: each returned serial's, and a non-serialized
-/// line's once all of it has been returned. Best-effort like the stock movement it follows; a
+/// Cancels the warranties of what came back: each returned serial's, a non-serialized line's
+/// once all of it has been returned, and every one of a returned repair or print job's. Best-effort like the stock movement it follows; a
 /// failure is logged, never undoes the credit note.
 async fn void_returned_warranties(
     db: &Db,
@@ -399,9 +399,11 @@ async fn void_returned_warranties(
         }
     };
     for (line_index, line) in invoice.items.iter().enumerate() {
-        if line.serial_numbers.is_empty()
-            && line.returned_quantity >= line.quantity
-            && let Err(err) = warranties::service::void_for_returned_line(
+        if !line.serial_numbers.is_empty() || line.returned_quantity < line.quantity {
+            continue;
+        }
+        let voided = if matches!(line.source_type.as_str(), "repair" | "print") {
+            warranties::service::void_for_returned_job(
                 db,
                 invoice_key,
                 line_index,
@@ -409,7 +411,17 @@ async fn void_returned_warranties(
                 actor,
             )
             .await
-        {
+        } else {
+            warranties::service::void_for_returned_line(
+                db,
+                invoice_key,
+                line_index,
+                &created.credit_note_number,
+                actor,
+            )
+            .await
+        };
+        if let Err(err) = voided {
             tracing::warn!(invoice_key, line_index, error = %err, "could not cancel a returned line's warranty");
         }
     }
@@ -555,9 +567,7 @@ pub async fn create_credit_note(
 
         let (
             invoice_id,
-            invoice_key_owned,
-            invoice_number,
-            customer_key,
+            invoice_ref,
             resolved_return_items,
             return_subtotal_cents,
             refund_shape,
@@ -778,9 +788,12 @@ pub async fn create_credit_note(
                 Some(_) => {
                     break (
                         invoice_id,
-                        invoice.key.clone(),
-                        invoice.invoice_number.clone(),
-                        invoice.customer_key.clone(),
+                        InvoiceRef {
+                            key: invoice.key.clone(),
+                            number: invoice.invoice_number.clone(),
+                            customer_key: invoice.customer_key.clone(),
+                            customer_name: invoice.customer_name_snapshot.clone(),
+                        },
                         resolved_return_items,
                         return_subtotal_cents,
                         refund_shape,
@@ -811,7 +824,7 @@ pub async fn create_credit_note(
         };
         let result = finish_create_credit_note(
             db,
-            Some((invoice_key_owned, invoice_number)),
+            Some(invoice_ref),
             resolved_return_items,
             return_subtotal_cents,
             refund_shape,
@@ -846,7 +859,7 @@ pub async fn create_credit_note(
                 {
                     tracing::error!(claim_key, credit_note = %created.credit_note_number, error = %err, "credit note written but its warranty claim was not closed");
                 }
-                if let Some(customer_key) = &customer_key
+                if let Some(customer_key) = &created.customer_key
                     && created.refund_cash_cents != 0
                     && let Err(err) = customers::service::apply_financial_delta(
                         db,
@@ -880,6 +893,14 @@ pub async fn create_credit_note(
     .await
 }
 
+/// What a credit note copies from the invoice it returns against.
+struct InvoiceRef {
+    key: String,
+    number: String,
+    customer_key: Option<String>,
+    customer_name: Option<String>,
+}
+
 /// Shared tail of `create_credit_note`'s no-receipt and normal paths: takes
 /// an already-computed `RefundShape` (see `compute_refund_shape` — a pure,
 /// no-writes step run *before* this function, so the normal path can claim
@@ -889,7 +910,7 @@ pub async fn create_credit_note(
 #[allow(clippy::too_many_arguments)]
 async fn finish_create_credit_note(
     db: &Db,
-    invoice_ref: Option<(String, String)>,
+    invoice_ref: Option<InvoiceRef>,
     resolved_return_items: Vec<CreditNoteItem>,
     return_subtotal_cents: i64,
     refund_shape: RefundShape,
@@ -971,7 +992,7 @@ async fn finish_create_credit_note(
                 key: generate_id(prefixes::PAYMENT),
                 invoice_key: invoice_ref
                     .as_ref()
-                    .map(|(k, _)| k.clone())
+                    .map(|invoice| invoice.key.clone())
                     .unwrap_or_default(),
                 amount_cents: -leg.amount_cents,
                 payment_method: leg.method.clone(),
@@ -1039,11 +1060,13 @@ async fn finish_create_credit_note(
         id: None,
         key: credit_note_key,
         credit_note_number,
-        invoice_key: invoice_ref.as_ref().map(|(k, _)| k.clone()),
-        invoice_number: invoice_ref.as_ref().map(|(_, n)| n.clone()),
+        invoice_key: invoice_ref.as_ref().map(|invoice| invoice.key.clone()),
+        invoice_number: invoice_ref.as_ref().map(|invoice| invoice.number.clone()),
         no_receipt,
-        customer_key: None,
-        customer_name_snapshot: None,
+        customer_key: invoice_ref
+            .as_ref()
+            .and_then(|invoice| invoice.customer_key.clone()),
+        customer_name_snapshot: invoice_ref.and_then(|invoice| invoice.customer_name),
         cashier_id,
         cashier_name_snapshot: cashier_name,
         returned_items: resolved_return_items,

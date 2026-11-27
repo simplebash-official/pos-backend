@@ -21,6 +21,7 @@ use utoipa::{Modify, OpenApi};
         (name = "employees", description = "Employee HR/commission profiles"),
         (name = "inventory", description = "Inventory"),
         (name = "print_jobs", description = "Print jobs"),
+        (name = "job_receipts", description = "Job slips"),
         (name = "quotations", description = "Customer quotations (Admin and Manager)"),
         (name = "repairs", description = "Repairs"),
         (name = "reports", description = "Reports"),

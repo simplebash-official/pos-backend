@@ -1,6 +1,4 @@
-use crate::core::constants::prefixes;
-use crate::core::id::generate_id;
-use crate::domain::print_jobs::PrintJob;
+use crate::domain::print_jobs::{PrintJob, PrintJobItem, PrintJobKind};
 use crate::domain::repairs::compute_job_is_overdue;
 use mongodb::bson::DateTime as BsonDateTime;
 use mongodb::bson::oid::ObjectId;
@@ -22,7 +20,7 @@ pub struct PrintJobDocument {
     pub customer_name: String,
     /// Customer phone number snapshot.
     pub customer_phone: String,
-    /// Type of print job ("mug", "t-shirt", "handbill", "banner", "custom").
+    /// Type of print job ("mug", "t-shirt", "handbill", "banner", "photo-framing", "custom").
     pub job_type: String,
     /// Number of items to print.
     pub quantity: i32,
@@ -32,11 +30,17 @@ pub struct PrintJobDocument {
     /// Job lifecycle status ("received", "in_repair" (in production), "ready", "delivered",
     /// "cancelled").
     pub status: String,
-    /// Estimated charge to customer in cents.
-    pub estimated_cost_cents: i64,
-    /// Internal raw material cost in cents.
+    /// A staff note about the job; absent for none.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub material_cost_cents: Option<i64>,
+    pub note: Option<String>,
+    /// Ordinary paid work, or a warranty rework of an earlier job.
+    pub kind: PrintJobKind,
+    /// The job's lines, stored in their API shape (camelCase).
+    pub items: Vec<PrintJobItem>,
+    /// Every line's price less its discount, worked out from `items` on every write.
+    pub price_cents: i64,
+    /// Every line's cost, worked out the same way.
+    pub cost_cents: i64,
     /// User ID of employee assigned to perform this job.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assigned_employee_id: Option<String>,
@@ -73,18 +77,13 @@ impl PrintJobDocument {
     #[must_use]
     /// Converts the stored document into the type the API returns.
     pub fn into_print_job(self) -> PrintJob {
-        let key = if self.key.is_empty() {
-            generate_id(prefixes::PRINT_JOB)
-        } else {
-            self.key
-        };
         let is_overdue = compute_job_is_overdue(&self.status, self.promised_ready_at.as_deref());
         PrintJob {
             id: self
                 .id
                 .expect("persisted print job document must have an id")
                 .to_hex(),
-            key,
+            key: self.key,
             ticket_number: self.ticket_number,
             customer_key: self.customer_key,
             customer_name: self.customer_name,
@@ -94,8 +93,11 @@ impl PrintJobDocument {
             promised_ready_at: self.promised_ready_at,
             is_overdue,
             status: self.status,
-            estimated_cost_cents: self.estimated_cost_cents,
-            material_cost_cents: self.material_cost_cents,
+            note: self.note,
+            kind: self.kind,
+            items: self.items,
+            price_cents: self.price_cents,
+            cost_cents: self.cost_cents,
             assigned_employee_id: self.assigned_employee_id,
             assigned_employee_name: self.assigned_employee_name,
             split_type: self.split_type,

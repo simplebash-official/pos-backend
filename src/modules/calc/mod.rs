@@ -10,6 +10,7 @@ pub mod checkout;
 pub mod credit_note;
 pub mod earnings;
 pub mod invoice_balance;
+pub mod print_job;
 pub mod quotation;
 pub mod receipt;
 pub mod repair;

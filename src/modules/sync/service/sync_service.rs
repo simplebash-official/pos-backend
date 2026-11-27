@@ -338,6 +338,9 @@ pub(crate) async fn hydrate(
         "repairServices" | "repair_service_templates" => to_values(
             crate::modules::repairs::service::hydrate_sync_services(documents)?,
         )?,
+        "printServices" | "print_service_templates" => {
+            to_values(print_jobs_service::hydrate_sync_services(documents)?)?
+        }
         _ => {
             return Err(AppError::internal(format!(
                 "no sync hydrator for resource '{resource}'"

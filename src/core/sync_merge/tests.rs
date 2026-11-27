@@ -402,6 +402,41 @@ fn credit_note_status_ranks_and_immutable_body() {
 }
 
 #[test]
+fn a_blank_credit_note_customer_may_be_filled_but_never_changed() {
+    let blank = json!({ "key": "cn_1", "refundCashCents": 100, "status": "awaiting_resolution" });
+    let mut filled = blank.clone();
+    filled["customerKey"] = json!("cust_1");
+    filled["customerNameSnapshot"] = json!("Jane");
+    let resolved = |note: &Value| {
+        let mut note = note.clone();
+        note["status"] = json!("resolved");
+        note
+    };
+
+    // Whichever replica has the customer, the other's status change lands and the customer stays.
+    for (local, incoming) in [(&blank, resolved(&filled)), (&filled, resolved(&blank))] {
+        let outcome = merge_lifecycle("creditNotes", local, &incoming);
+        assert_eq!(outcome.rejected, None);
+        assert_eq!(outcome.merged, resolved(&filled));
+    }
+    let late = merge_lifecycle("creditNotes", &resolved(&blank), &filled);
+    assert_eq!(late.merged, resolved(&filled));
+    assert!(late.changed);
+
+    let mut other = filled.clone();
+    other["customerKey"] = json!("cust_2");
+    assert_eq!(
+        merge_lifecycle("creditNotes", &filled, &other).rejected,
+        Some("IMMUTABLE_MISMATCH")
+    );
+    // Only credit notes have this allowance.
+    assert_eq!(
+        merge_lifecycle("quotations", &blank, &filled).rejected,
+        Some("IMMUTABLE_MISMATCH")
+    );
+}
+
+#[test]
 fn a_resolution_travels_with_the_resolved_status() {
     let held = json!({
         "key": "cn_1", "refundCashCents": 100, "status": "awaiting_resolution",

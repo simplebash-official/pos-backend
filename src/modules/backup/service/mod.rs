@@ -1,6 +1,7 @@
 //! Service orchestration and business validation for full data backup and restore.
 
 mod backup_service;
+mod print_job_items_upgrade;
 mod print_job_status_upgrade;
 mod repair_items_upgrade;
 #[cfg(test)]

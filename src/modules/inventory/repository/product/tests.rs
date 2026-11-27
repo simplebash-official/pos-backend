@@ -1,6 +1,6 @@
 use super::product_shared::build_product_where_clause;
-use super::product_shared::like_pattern;
 use crate::clients::sqlite::SqlFilter;
+use crate::clients::sqlite::like_pattern;
 use crate::core::utils::build_bson_regex;
 use mongodb::bson::doc;
 

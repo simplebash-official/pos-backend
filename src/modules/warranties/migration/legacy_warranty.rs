@@ -131,6 +131,8 @@ pub fn legacy_warranty(unit: &LegacySoldUnit<'_>) -> Result<MigratedWarranty, St
         product_key: Some(unit.product_key.to_string()),
         repair_key: None,
         repair_item_key: None,
+        print_job_key: None,
+        print_job_item_key: None,
         item_name: line.name.clone(),
         serial_number: Some(unit.serial_number.to_string()),
         quantity: 1,

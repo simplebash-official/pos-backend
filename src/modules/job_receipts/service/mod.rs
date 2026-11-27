@@ -2,4 +2,5 @@
 
 mod job_receipts_service;
 
+pub(crate) use job_receipts_service::load;
 pub(crate) use job_receipts_service::print;

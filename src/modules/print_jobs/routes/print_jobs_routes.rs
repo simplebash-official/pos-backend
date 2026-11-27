@@ -8,6 +8,7 @@ use crate::domain::print_jobs::{
     UpdatePrintJobRequest,
 };
 use crate::modules::print_jobs::service;
+use crate::modules::warranties::service::WarrantyActor;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use utoipa_axum::router::OpenApiRouter;
@@ -124,7 +125,6 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(list_print_jobs, create_print_job))
         .routes(routes!(get_print_job_stats))
         .routes(routes!(get_print_job, update_print_job, delete_print_job))
-        .merge(super::job_receipt_routes::router())
 }
 
 #[utoipa::path(patch, path = "/{id}", tag = modules::PRINT_JOBS,
@@ -147,7 +147,11 @@ pub(super) async fn update_print_job(
     Json(body): Json<UpdatePrintJobRequest>,
 ) -> AppResult<Json<ApiResponse<PrintJob>>> {
     user.require_permission(perm::PRINT_JOBS_WRITE)?;
-    let print_job = service::update_print_job(&state.db, &id, body, device_id.0).await?;
+    let actor = WarrantyActor {
+        user_id: user.user_id.clone(),
+        name: user.resolve_name(&state.db).await?,
+    };
+    let print_job = service::update_print_job(&state.db, &id, body, device_id.0, &actor).await?;
     Ok(Json(ApiResponse::success(
         print_job,
         "Print job updated successfully",

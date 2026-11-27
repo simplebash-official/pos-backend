@@ -103,7 +103,7 @@ pub struct Repair {
     /// What the customer pays: every item's labour and part price, less the item discounts
     /// (`pos_calc_core::repair::repair_totals`). Stored with the items so reports can add it up.
     pub price_cents: i64,
-    /// What the parts cost the shop, added up the same way.
+    /// What the shop paid: part costs and recorded labour costs, added up the same way.
     pub cost_cents: i64,
     /// Staff ID of assigned technician.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -187,6 +187,8 @@ pub struct RepairCustomer {
 pub struct RepairListQuery {
     /// Search term matching ticket number, customer name/phone, or model.
     pub search: Option<String>,
+    /// Only the jobs of this registered customer. A blank key is refused.
+    pub customer_key: Option<String>,
     /// Filter by status.
     pub status: Option<String>,
     /// Only `"today"` is meaningful — scopes to `created_at` within

@@ -1,10 +1,12 @@
-//! Server-side calculations for the point of sale: checkout, receipts, quotations, earnings, shares, cash counts, repair totals and warranty periods. All money is integer cents. The backend serves these over HTTP and the browser runs the same code as WebAssembly, so a screen and the server can never disagree.
+//! Server-side calculations for the point of sale: checkout, receipts, quotations, earnings, shares, cash counts, repair and print job totals and warranty periods. All money is integer cents. The backend serves these over HTTP and the browser runs the same code as WebAssembly, so a screen and the server can never disagree.
 
 pub mod calculations;
 pub mod cash;
 pub mod checkout;
 pub mod earnings;
 pub mod error;
+pub mod item_discount;
+pub mod print_job;
 pub mod quotation;
 pub mod receipt;
 pub mod repair;
