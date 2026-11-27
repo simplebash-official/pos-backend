@@ -1,5 +1,4 @@
 use crate::clients::db::Db;
-use crate::clients::sqlite::search_regex;
 use crate::clients::sqlite::{bson_to_iso, generate_id_hex, now_utc_iso, to_bson_datetime};
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use crate::core::error::{AppError, AppResult};
@@ -294,15 +293,34 @@ pub(crate) async fn list_employees(db: &Db, filter: Document) -> AppResult<Vec<E
                         if let Ok(status_str) = clause_doc.get_str("status") {
                             items.retain(|e| e.status.as_str() == status_str);
                         }
-                        if let Ok(or_arr) = clause_doc.get_array("$or")
-                            && let Some(search) = search_regex(or_arr)?
-                        {
-                            items.retain(|e| {
-                                [Some(&e.name), Some(&e.phone), e.nic_or_id.as_ref()]
-                                    .into_iter()
-                                    .flatten()
-                                    .any(|field| search.is_match(field))
-                            });
+                        if let Ok(or_arr) = clause_doc.get_array("$or") {
+                            // Search filter
+                            let mut pattern = String::new();
+                            for cond in or_arr {
+                                if let Some(cond_doc) = cond.as_document() {
+                                    for key in ["name", "phone", "nic_or_id"] {
+                                        if let Ok(field_doc) = cond_doc.get_document(key)
+                                            && let Ok(regex) = field_doc.get_str("$regex")
+                                        {
+                                            pattern = regex.to_lowercase();
+                                            break;
+                                        }
+                                    }
+                                }
+                                if !pattern.is_empty() {
+                                    break;
+                                }
+                            }
+                            if !pattern.is_empty() {
+                                items.retain(|e| {
+                                    e.name.to_lowercase().contains(&pattern)
+                                        || e.phone.to_lowercase().contains(&pattern)
+                                        || e.nic_or_id
+                                            .as_ref()
+                                            .map(|nic| nic.to_lowercase().contains(&pattern))
+                                            .unwrap_or(false)
+                                });
+                            }
                         }
                     }
                 }

@@ -113,8 +113,8 @@ pub(crate) async fn lookup(db: &Db, q: &str) -> AppResult<WarrantyLookupResponse
     })
 }
 
-/// A page of warranties for one customer, invoice, repair job or print job (newest first), or
-/// those ending within the week (ending soonest first), or all of them.
+/// A page of warranties for one customer, invoice or repair job (newest first), or those ending
+/// within the week (ending soonest first), or all of them.
 pub(crate) async fn list(db: &Db, query: WarrantyListQuery) -> AppResult<WarrantyListResponse> {
     let today = today();
     let from = today.format("%Y-%m-%d").to_string();
@@ -125,23 +125,21 @@ pub(crate) async fn list(db: &Db, query: WarrantyListQuery) -> AppResult<Warrant
         &query.customer_key,
         &query.invoice_key,
         &query.repair_key,
-        &query.print_job_key,
         query.state,
     ) {
-        (Some(customer), None, None, None, None) => WarrantyFilter::Customer(customer),
-        (None, Some(invoice), None, None, None) => WarrantyFilter::InvoiceKey(invoice),
-        (None, None, Some(repair), None, None) => WarrantyFilter::Repair(repair),
-        (None, None, None, Some(job), None) => WarrantyFilter::PrintJob(job),
-        (None, None, None, None, Some(WarrantyListState::ExpiringSoon)) => {
+        (Some(customer), None, None, None) => WarrantyFilter::Customer(customer),
+        (None, Some(invoice), None, None) => WarrantyFilter::InvoiceKey(invoice),
+        (None, None, Some(repair), None) => WarrantyFilter::Repair(repair),
+        (None, None, None, Some(WarrantyListState::ExpiringSoon)) => {
             WarrantyFilter::EndingBetween {
                 from: &from,
                 until: &until,
             }
         }
-        (None, None, None, None, None) => WarrantyFilter::All,
+        (None, None, None, None) => WarrantyFilter::All,
         _ => {
             return Err(AppError::validation(
-                "Filter by one of a customer, an invoice, a repair job, a print job or a state.",
+                "Filter by one of a customer, an invoice, a repair job or a state.",
             ));
         }
     };
@@ -167,24 +165,7 @@ pub(crate) async fn exist_for_repair_on_invoice(
     repair_key: &str,
     invoice_key: &str,
 ) -> AppResult<bool> {
-    any_from_invoice(db, WarrantyFilter::Repair(repair_key), invoice_key).await
-}
-
-/// The same question as [`exist_for_repair_on_invoice`], for one print job.
-pub(crate) async fn exist_for_print_job_on_invoice(
-    db: &Db,
-    print_job_key: &str,
-    invoice_key: &str,
-) -> AppResult<bool> {
-    any_from_invoice(db, WarrantyFilter::PrintJob(print_job_key), invoice_key).await
-}
-
-/// Whether any warranty the filter matches came from this invoice.
-async fn any_from_invoice(
-    db: &Db,
-    filter: WarrantyFilter<'_>,
-    invoice_key: &str,
-) -> AppResult<bool> {
+    let filter = WarrantyFilter::Repair(repair_key);
     let mut seen = 0_u64;
     loop {
         let (page, total) = repository::list(db, &filter, seen, LIST_LIMIT_MAX).await?;

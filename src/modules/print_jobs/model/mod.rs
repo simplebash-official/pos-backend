@@ -3,7 +3,5 @@
 //! `ObjectId` never leak into request/response payloads.
 
 mod print_job_document;
-mod print_service_document;
 
 pub use print_job_document::PrintJobDocument;
-pub use print_service_document::PrintServiceDocument;

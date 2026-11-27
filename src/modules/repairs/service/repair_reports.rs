@@ -4,10 +4,24 @@
 use crate::clients::db::Db;
 use crate::core::error::{AppError, AppResult};
 use crate::core::utils::shop_day;
-use crate::domain::job_reports::{JobTechnician, ReworkCost};
 use crate::modules::repairs::repository;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use std::collections::HashMap;
+
+/// One rework job's cost to the shop (its parts at cost; the labour is free).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReworkCost {
+    /// The shop-local day the rework was opened.
+    pub opened_on: NaiveDate,
+    pub cost_cents: i64,
+}
+
+/// The technician a job was assigned to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct JobTechnician {
+    pub employee_id: String,
+    pub name: String,
+}
 
 /// The rework jobs opened in `[start, end)` that were not cancelled, with their cost.
 pub(crate) async fn rework_costs(

@@ -8,7 +8,6 @@
       },
       {
         "laborCents": 150000,
-        "laborCostCents": 20000,
         "discount": {
           "type": "fixed",
           "cents": 50000
@@ -38,19 +37,13 @@
       "partsCents": 1230000,
       "discountCents": 53750,
       "priceCents": 1586250,
-      "costCents": 882000
+      "costCents": 862000
     },
     "itemDiscountsCents": [
       0,
       50000,
       3750,
       0
-    ],
-    "itemProfitsCents": [
-      600000,
-      80000,
-      14250,
-      10000
     ],
     "blockers": [
       {

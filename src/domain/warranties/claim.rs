@@ -286,16 +286,6 @@ pub struct WarrantyClaim {
     pub rework_repair_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rework_repair_number: Option<String>,
-    /// The paid print job made from a rejected claim on print work.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub paid_print_job_key: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub paid_print_job_number: Option<String>,
-    /// The free rework print job opened from a claim on print work decided as a repair.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub rework_print_job_key: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub rework_print_job_number: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub supplier: Option<SupplierClaim>,
     /// `YYYY-MM-DD`, shop-local.
@@ -389,12 +379,11 @@ pub struct ResolveClaimRequest {
     pub replacement: Option<ReplacementRequest>,
 }
 
-/// `POST /warranty-claims/{key}/paid-repair` and `…/paid-print-job`: the customer, for a claim
-/// whose sale had none.
+/// `POST /warranty-claims/{key}/paid-repair`: the customer, for a claim whose sale had none.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct PaidJobRequest {
-    /// A registered customer to open the paid job for. Used only when the claim has no
+pub struct PaidRepairRequest {
+    /// A registered customer to open the repair job for. Used only when the claim has no
     /// customer of its own; the job takes the name and phone from the customer record.
     pub customer_key: Option<String>,
 }

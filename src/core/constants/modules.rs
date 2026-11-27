@@ -6,7 +6,6 @@ pub const BILLING: &str = "billing";
 pub const CALC: &str = "calc";
 pub const CUSTOMERS: &str = "customers";
 pub const INVENTORY: &str = "inventory";
-pub const JOB_RECEIPTS: &str = "job_receipts";
 pub const PRINT_JOBS: &str = "print_jobs";
 pub const REPAIRS: &str = "repairs";
 pub const REPORTS: &str = "reports";
@@ -40,7 +39,6 @@ pub const RECURRING_EXPENSES: &str = "recurring_expenses";
 pub const WARRANTIES: &str = "warranties";
 pub const WARRANTY_CLAIMS: &str = "warranty_claims";
 pub const REPAIR_SERVICES: &str = "repair_services";
-pub const PRINT_SERVICES: &str = "print_services";
 pub const NOTIFICATIONS: &str = "notifications";
 
 pub const DOCUMENT_PACKAGES: &str = "document-packages";

@@ -50,7 +50,6 @@ pub fn legacy_items(
     let part_cost_cents = material_cost_cents.unwrap_or(0);
     let totals = repair_totals(&[RepairItemMoney {
         labor_cents,
-        labor_cost_cents: None,
         part_cents: 0,
         part_cost_cents,
         discount: None,
@@ -65,7 +64,6 @@ pub fn legacy_items(
             key: migrated_item_key(repair_key),
             description,
             labor_cents,
-            labor_cost_cents: None,
             part: (part_cost_cents > 0).then(|| RepairPart::Outside {
                 name: MIGRATED_MATERIALS_NAME.to_string(),
             }),

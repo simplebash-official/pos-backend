@@ -146,13 +146,6 @@ fn sale(lines: Value) -> Value {
     })
 }
 
-/// A sale that bills a job, to the registered customer the job is for.
-fn ticket_sale(customer: &str, lines: Value) -> Value {
-    let mut body = sale(lines);
-    body["customer"] = json!({ "customerKey": customer });
-    body
-}
-
 /// Moves a claim's arrival day, and when given its supplier's promised day, straight in the
 /// store: the API never accepts a day in the past.
 async fn backdate_claim(
@@ -379,8 +372,7 @@ async fn scenario(app: &common::TestApp) {
         app,
         "POST",
         "/api/billing/sales",
-        Some(ticket_sale(
-            &repair_customer,
+        Some(sale(
             json!([{ "quantity": 1, "discountCents": 0, "sourceType": "repair",
                            "sourceTicketKey": repair_key, "handover": "now" }]),
         )),

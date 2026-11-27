@@ -342,11 +342,8 @@ CREATE TABLE IF NOT EXISTS print_jobs (
     quantity INTEGER NOT NULL DEFAULT 1,
     promised_ready_at TEXT,
     status TEXT NOT NULL,
-    note TEXT,
-    kind JSON NOT NULL,
-    items JSON NOT NULL,
-    price_cents INTEGER NOT NULL,
-    cost_cents INTEGER NOT NULL,
+    estimated_cost_cents INTEGER NOT NULL,
+    material_cost_cents INTEGER,
     assigned_employee_id TEXT,
     assigned_employee_name TEXT,
     split_type TEXT,
@@ -787,8 +784,6 @@ CREATE TABLE IF NOT EXISTS warranties (
     product_key TEXT,
     repair_key TEXT,
     repair_item_key TEXT,
-    print_job_key TEXT,
-    print_job_item_key TEXT,
     item_name TEXT NOT NULL,
     serial_number TEXT,
     quantity INTEGER NOT NULL,
@@ -821,7 +816,6 @@ CREATE INDEX IF NOT EXISTS idx_warranties_invoice_number ON warranties(invoice_n
 CREATE INDEX IF NOT EXISTS idx_warranties_customer_key ON warranties(customer_key);
 CREATE INDEX IF NOT EXISTS idx_warranties_phone_tail ON warranties(customer_phone_tail);
 CREATE INDEX IF NOT EXISTS idx_warranties_repair_key ON warranties(repair_key);
-CREATE INDEX IF NOT EXISTS idx_warranties_print_job_key ON warranties(print_job_key);
 CREATE INDEX IF NOT EXISTS idx_warranties_sync ON warranties(updated_at, key);
 
 -- A warranty's activity log: append-only, who did what and when.
@@ -884,10 +878,6 @@ CREATE TABLE IF NOT EXISTS warranty_claims (
     paid_repair_number TEXT,
     rework_repair_key TEXT,
     rework_repair_number TEXT,
-    paid_print_job_key TEXT,
-    paid_print_job_number TEXT,
-    rework_print_job_key TEXT,
-    rework_print_job_number TEXT,
     supplier TEXT,
     received_on TEXT NOT NULL,
     resolved_on TEXT,
@@ -924,7 +914,6 @@ CREATE TABLE IF NOT EXISTS repair_service_templates (
     id TEXT NOT NULL,
     name TEXT NOT NULL,
     labor_cents INTEGER NOT NULL,
-    labor_cost_cents INTEGER,
     warranty JSON NOT NULL,
     active INTEGER NOT NULL,
     version INTEGER NOT NULL,
@@ -934,24 +923,6 @@ CREATE TABLE IF NOT EXISTS repair_service_templates (
 );
 
 CREATE INDEX IF NOT EXISTS idx_repair_service_templates_sync ON repair_service_templates(updated_at, key);
-
--- Ready-made print services (`modules::print_jobs`): the key is derived from the name, so the
--- same service added on two tills is one row. Never deleted; hidden with `active = 0`.
-CREATE TABLE IF NOT EXISTS print_service_templates (
-    key TEXT PRIMARY KEY,
-    id TEXT NOT NULL,
-    name TEXT NOT NULL,
-    unit_price_cents INTEGER NOT NULL,
-    unit_cost_cents INTEGER,
-    warranty JSON NOT NULL,
-    active INTEGER NOT NULL,
-    version INTEGER NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    updated_by_device TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_print_service_templates_sync ON print_service_templates(updated_at, key);
 
 -- Shop notifications (`modules::notifications`): written once, removed after the retention
 -- window. The audience is `audience_type` ('everyone' | 'permission' | 'user') with the

@@ -1,6 +1,6 @@
 //! A shop's ready-made repair services ("Screen replacement", "Battery swap"): a name, the
-//! usual labour, what it usually costs the shop and the warranty that work comes with. The repair
-//! form adds one as an item in one tap, then the technician adjusts it.
+//! usual labour and the warranty that work comes with. The repair form adds one as an item in
+//! one tap, then the technician adjusts it.
 
 use crate::domain::warranties::ProductWarranty;
 use chrono::{DateTime, Utc};
@@ -29,9 +29,6 @@ pub struct RepairService {
     pub name: String,
     /// The usual labour for this work.
     pub labor_cents: i64,
-    /// What the work usually costs the shop; absent when none is saved.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub labor_cost_cents: Option<i64>,
     /// The cover this work usually comes with.
     pub warranty: ProductWarranty,
     /// A hidden service stays on old jobs but is not offered on new ones.
@@ -49,8 +46,6 @@ pub struct RepairService {
 pub struct SaveRepairServiceRequest {
     pub name: String,
     pub labor_cents: i64,
-    /// Omit it to save no usual cost.
-    pub labor_cost_cents: Option<i64>,
     pub warranty: ProductWarranty,
     pub active: bool,
 }

@@ -71,15 +71,6 @@ pub struct WarrantyClaimDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rework_repair_number: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub paid_print_job_key: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub paid_print_job_number: Option<String>,
-    /// The free rework job opened from a print work claim decided as a repair.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub rework_print_job_key: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub rework_print_job_number: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub supplier: Option<SupplierClaim>,
     /// `YYYY-MM-DD`, shop-local.
     pub received_on: String,
@@ -165,10 +156,6 @@ impl WarrantyClaimDocument {
             paid_repair_number: self.paid_repair_number,
             rework_repair_key: self.rework_repair_key,
             rework_repair_number: self.rework_repair_number,
-            paid_print_job_key: self.paid_print_job_key,
-            paid_print_job_number: self.paid_print_job_number,
-            rework_print_job_key: self.rework_print_job_key,
-            rework_print_job_number: self.rework_print_job_number,
             supplier: self.supplier,
             received_on: self.received_on,
             resolved_on: self.resolved_on,

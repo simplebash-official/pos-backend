@@ -3,8 +3,7 @@
 //! handed over now or later, billing marks the ticket with its invoice (and, for "now", delivers
 //! it), a billed ticket cannot be billed again and its work is locked, a job billed with the
 //! hand-over later gets its warranties the day it is handed back, voiding the invoice removes the
-//! mark, a job billed to anyone but its own customer must be confirmed (and its warranty stays
-//! with that customer), and the one-time migration marks tickets billed before the mark existed.
+//! mark, and the one-time migration marks tickets billed before the mark existed.
 
 mod common;
 
@@ -211,9 +210,7 @@ impl Shop {
             "/api/print-jobs",
             Some(json!({
                 "customer": { "customerKey": self.customer },
-                "jobType": "t-shirt", "quantity": 12, "items": [{ "description": "Printing", "quantity": 1,
-                    "source": { "type": "service", "unitPriceCents": 240_000 },
-                    "warranty": { "coverage": { "kind": "none" } } }],
+                "jobType": "t-shirt", "quantity": 12, "estimatedCostCents": 240_000,
             })),
             &self.staff,
         )
@@ -515,213 +512,6 @@ async fn print_jobs(app: &common::TestApp, shop: &Shop) {
     assert!(job.get("billedInvoiceKey").is_none(), "{job}");
 }
 
-/// A sale of `lines` to `buyer`; `None` is a walk-in.
-fn sale_to(buyer: Option<&str>, lines: Value, credit: bool) -> Value {
-    let mut body = sale("", lines, credit);
-    match buyer {
-        Some(key) => body["customer"] = json!({ "customerKey": key }),
-        None => {
-            body.as_object_mut().expect("a sale").remove("customer");
-        }
-    }
-    body
-}
-
-/// A ticket line that says the cashier confirmed billing `owner`'s job to someone else.
-fn confirmed(ticket_type: &str, ticket_key: &str, handover: &str, owner: &str) -> Value {
-    let mut line = line(ticket_type, ticket_key, Some(handover));
-    line["confirmedJobCustomerKey"] = json!(owner);
-    line
-}
-
-async fn another_customers_job(app: &common::TestApp, shop: &Shop) {
-    let payer = common::register_customer(app, "Kamal Silva", "0779999999").await;
-    let sell = |buyer: Option<String>, lines: Value, credit: bool| async move {
-        send(
-            app,
-            "POST",
-            "/api/billing/sales",
-            Some(sale_to(buyer.as_deref(), lines, credit)),
-            &shop.staff,
-        )
-        .await
-    };
-
-    let repair = shop.repair(app, true).await;
-    let before = shop.stock(app).await;
-    // Someone else, or a walk-in, without a confirmation or with the wrong one: nothing happens.
-    for (buyer, lines) in [
-        (
-            Some(payer.clone()),
-            json!([line("repair", &repair, Some("now"))]),
-        ),
-        (None, json!([line("repair", &repair, Some("now"))])),
-        (
-            Some(payer.clone()),
-            json!([confirmed("repair", &repair, "now", &payer)]),
-        ),
-    ] {
-        let (status, body) = sell(buyer, lines, false).await;
-        assert_eq!(status, StatusCode::CONFLICT, "{body}");
-        assert_eq!(body["code"], "TICKET_OTHER_CUSTOMER");
-        assert!(
-            body["message"]
-                .as_str()
-                .expect("a message")
-                .contains("Nimal Perera"),
-            "{body}"
-        );
-    }
-    // A confirmation nothing asks for is refused: on the owner's own sale and on another line.
-    let retail = json!([{ "name": "Cable", "unitPriceCents": 500, "quantity": 1,
-        "discountCents": 0, "sourceType": "retail", "confirmedJobCustomerKey": shop.customer }]);
-    for lines in [
-        json!([confirmed("repair", &repair, "now", &shop.customer)]),
-        retail,
-    ] {
-        let (status, body) = sell(Some(shop.customer.clone()), lines, false).await;
-        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-        assert_eq!(body["code"], "JOB_CUSTOMER_CONFIRMATION_NOT_ALLOWED");
-    }
-    let job = shop.get(app, "repairs", &repair).await;
-    assert!(job.get("billedInvoiceKey").is_none(), "{job}");
-    assert_eq!(shop.stock(app).await, before, "nothing left stock");
-
-    // Confirmed: the payer's invoice, the job owner's warranty.
-    let (status, sold) = sell(
-        Some(payer.clone()),
-        json!([confirmed("repair", &repair, "now", &shop.customer)]),
-        false,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{sold}");
-    no_warnings(&sold);
-    let invoice = &sold["data"]["invoice"];
-    assert_eq!(invoice["customerKey"], payer.as_str());
-    let issued = shop.warranties_of(app, &repair).await;
-    assert_eq!(issued.len(), 1, "{issued:?}");
-    assert_eq!(issued[0]["customerKey"], shop.customer.as_str());
-    assert_eq!(issued[0]["customerName"], "Nimal Perera");
-    assert_eq!(issued[0]["customerPhone"], "0771234567");
-
-    // The owner's claim can still be refunded from the payer's invoice.
-    let (status, claim) = send(
-        app,
-        "POST",
-        "/api/warranty-claims",
-        Some(json!({ "warrantyKey": issued[0]["key"], "issueDescription": "Cracked again" })),
-        &shop.admin,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{claim}");
-    assert_eq!(claim["data"]["customerKey"], shop.customer.as_str());
-    let claim_key = text(&claim["data"]["key"]);
-    for (step, body) in [
-        ("inspect", json!({ "inspectionNotes": "Glass lifted" })),
-        ("decide", json!({ "decision": "refund" })),
-    ] {
-        let (status, answer) = send(
-            app,
-            "POST",
-            &format!("/api/warranty-claims/{claim_key}/{step}"),
-            Some(body),
-            &shop.admin,
-        )
-        .await;
-        assert_eq!(status, StatusCode::OK, "{step}: {answer}");
-    }
-    let (status, note) = send(
-        app,
-        "POST",
-        "/api/billing/credit-notes",
-        Some(json!({
-            "invoiceKey": invoice["key"],
-            "warrantyClaimKey": claim_key,
-            "returnedItems": [{
-                "sourceTicketKey": repair, "name": invoice["items"][0]["name"],
-                "quantity": 1, "reason": "defective", "condition": "resalable",
-                "serialNumber": issued[0]["serialNumber"],
-            }],
-            "paymentMethod": "cash",
-        })),
-        &shop.admin,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{note}");
-
-    // Handed back later, by a walk-in: still the job owner's warranty.
-    let later = shop.repair(app, false).await;
-    let (status, sold) = sell(
-        None,
-        json!([confirmed("repair", &later, "later", &shop.customer)]),
-        false,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{sold}");
-    let (status, body) = shop
-        .patch(app, "repairs", &later, json!({ "status": "delivered" }))
-        .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    let issued = shop.warranties_of(app, &later).await;
-    assert_eq!(issued[0]["customerKey"], shop.customer.as_str());
-
-    // Print jobs follow the same two paths.
-    for handover in ["now", "later"] {
-        let (status, created) = send(
-            app,
-            "POST",
-            "/api/print-jobs",
-            Some(json!({
-                "customer": { "customerKey": shop.customer },
-                "jobType": "mug", "quantity": 2,
-                "items": [{ "description": "Printing", "quantity": 2,
-                    "source": { "type": "service", "unitPriceCents": 40_000 },
-                    "warranty": months(1) }],
-            })),
-            &shop.staff,
-        )
-        .await;
-        assert_eq!(status, StatusCode::OK, "{created}");
-        let print = text(&created["data"]["key"]);
-        let (status, body) = sell(
-            Some(payer.clone()),
-            json!([line("print", &print, Some(handover))]),
-            false,
-        )
-        .await;
-        assert_eq!(status, StatusCode::CONFLICT, "{body}");
-        assert_eq!(body["code"], "TICKET_OTHER_CUSTOMER");
-        let (status, sold) = sell(
-            Some(payer.clone()),
-            json!([confirmed("print", &print, handover, &shop.customer)]),
-            false,
-        )
-        .await;
-        assert_eq!(status, StatusCode::OK, "{sold}");
-        no_warnings(&sold);
-        if handover == "later" {
-            let (status, body) = shop
-                .patch(app, "print-jobs", &print, json!({ "status": "delivered" }))
-                .await;
-            assert_eq!(status, StatusCode::OK, "{body}");
-        }
-        let (status, found) = send(
-            app,
-            "GET",
-            &format!("/api/warranties?printJobKey={print}"),
-            None,
-            &shop.staff,
-        )
-        .await;
-        assert_eq!(status, StatusCode::OK, "{found}");
-        assert_eq!(
-            found["data"]["items"][0]["customerKey"],
-            shop.customer.as_str(),
-            "{handover}: {found}"
-        );
-    }
-}
-
 /// The marks of tickets billed before the mark existed are worked out from their invoices.
 async fn backfill(app: &common::TestApp, shop: &Shop) {
     let marked = shop.repair(app, false).await;
@@ -810,7 +600,6 @@ async fn scenario(app: &common::TestApp) {
     hand_back_rules(app, &shop).await;
     voiding_removes_the_mark(app, &shop).await;
     print_jobs(app, &shop).await;
-    another_customers_job(app, &shop).await;
     backfill(app, &shop).await;
 }
 

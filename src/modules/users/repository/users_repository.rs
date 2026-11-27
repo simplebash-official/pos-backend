@@ -1,5 +1,4 @@
 use crate::clients::db::Db;
-use crate::clients::sqlite::search_regex;
 use crate::clients::sqlite::{generate_id_hex, to_bson_datetime};
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use crate::core::error::{AppError, AppResult};
@@ -234,54 +233,41 @@ pub(crate) async fn list_users(db: &Db, filter: Document) -> AppResult<Vec<UserD
             Ok(items)
         }
         Db::Sqlite(pool) => {
-            let rows = sqlx::query("SELECT * FROM users ORDER BY name ASC")
-                .fetch_all(pool)
-                .await?;
-            let mut items = rows
-                .iter()
-                .map(user_from_sqlite_row)
-                .collect::<AppResult<Vec<_>>>()?;
+            // Check for role filter or is_active filter
+            let role_filter = filter.get_document("role").ok().and_then(|r| {
+                r.get_array("$in").ok().map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect::<Vec<String>>()
+                })
+            });
 
-            // `service::list_users` combines its clauses under `$and`; other callers pass one.
-            match filter.get_array("$and") {
-                Ok(clauses) => {
-                    for clause in clauses.iter().filter_map(Bson::as_document) {
-                        retain_matching(&mut items, clause)?;
-                    }
+            let rows = if let Some(roles) = role_filter {
+                if roles.is_empty() {
+                    return Ok(Vec::new());
                 }
-                Err(_) => retain_matching(&mut items, &filter)?,
-            }
-            Ok(items)
-        }
-    }
-}
+                let placeholders: Vec<String> =
+                    (1..=roles.len()).map(|i| format!("${i}")).collect();
+                let query_str = format!(
+                    "SELECT * FROM users WHERE role IN ({}) ORDER BY name ASC",
+                    placeholders.join(", ")
+                );
+                let mut query = sqlx::query(&query_str);
+                for r in roles {
+                    query = query.bind(r);
+                }
+                query.fetch_all(pool).await?
+            } else {
+                sqlx::query("SELECT * FROM users ORDER BY name ASC")
+                    .fetch_all(pool)
+                    .await?
+            };
 
-/// Applies one clause of a `list_users` filter in memory. A condition it does not know is an
-/// error: ignoring one would return users the caller asked to leave out.
-fn retain_matching(users: &mut Vec<UserDocument>, clause: &Document) -> AppResult<()> {
-    for (field, condition) in clause {
-        let unsupported = || AppError::internal(format!("unsupported user filter on `{field}`"));
-        match (field.as_str(), condition) {
-            ("role", Bson::String(role)) => users.retain(|user| user.role.as_str() == role),
-            ("role", Bson::Document(any_of)) => {
-                let roles = any_of.get_array("$in").map_err(|_| unsupported())?;
-                users.retain(|user| {
-                    roles
-                        .iter()
-                        .any(|role| role.as_str() == Some(user.role.as_str()))
-                });
-            }
-            ("is_active", Bson::Boolean(active)) => {
-                users.retain(|user| user.is_active == *active);
-            }
-            ("$or", Bson::Array(branches)) => {
-                let search = search_regex(branches)?.ok_or_else(unsupported)?;
-                users.retain(|user| search.is_match(&user.name) || search.is_match(&user.username));
-            }
-            _ => return Err(unsupported()),
+            rows.iter()
+                .map(user_from_sqlite_row)
+                .collect::<AppResult<Vec<_>>>()
         }
     }
-    Ok(())
 }
 
 /// `set_doc` is built by the caller (`service::update_user`), which decides

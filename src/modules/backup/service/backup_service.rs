@@ -67,7 +67,6 @@ pub(crate) async fn restore_backup(
         super::repair_items_upgrade::upgrade_pre_repair_items_backup(&mut backup.tables);
         super::ticket_customers_upgrade::upgrade_pre_ticket_customers_backup(&mut backup.tables);
         super::print_job_status_upgrade::upgrade_pre_print_job_status_backup(&mut backup.tables);
-        super::print_job_items_upgrade::upgrade_pre_print_job_items_backup(&mut backup.tables);
         super::ticket_billing_upgrade::upgrade_pre_ticket_billing_backup(&mut backup.tables);
 
         if backup.version != BACKUP_SCHEMA_VERSION {

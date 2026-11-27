@@ -1,7 +1,6 @@
 //! What a decided claim does: a repair puts the warranty back in force, a replacement takes a
 //! new unit out of stock with a warranty that runs to the old end date, a refund ends with a
-//! credit note, a rejected item can become a paid repair or print job, and repair or print work
-//! decided as a repair opens a free rework job.
+//! credit note, and a rejected item can become a paid repair job.
 
 use super::claim_steps::{
     log_step, release_warranty, require_claim, save_claim, save_warranty, step, today,
@@ -17,13 +16,13 @@ use crate::domain::billing::CreateCreditNoteItemRequest;
 use crate::domain::inventory::{BatchAllocation, StockMovementType};
 use crate::domain::repairs::{CreateRepairRequest, RepairCustomer};
 use crate::domain::warranties::{
-    ClaimAction, ClaimDecision, ClaimStatus, PaidJobRequest, ReplacementRequest,
-    ResolveClaimRequest, WarrantyClaim, WarrantyEventKind, WarrantySourceType, WarrantyStatus,
+    ClaimAction, ClaimDecision, ClaimStatus, PaidRepairRequest, ReplacementRequest,
+    ResolveClaimRequest, WarrantyClaim, WarrantyEventKind, WarrantyStatus,
 };
 use crate::modules::inventory::model::ProductSerialDocument;
 use crate::modules::warranties::model::{WarrantyClaimDocument, WarrantyDocument};
 use crate::modules::warranties::repository;
-use crate::modules::{inventory, print_jobs, repairs};
+use crate::modules::{inventory, repairs};
 use mongodb::bson::DateTime as BsonDateTime;
 
 fn replacement_invalid(message: impl Into<String>) -> AppError {
@@ -450,127 +449,52 @@ pub(crate) async fn finish_claim_refund(
     .await
 }
 
-/// What the warranty a claim is on came from, which decides the kind of job it can open.
-pub(crate) async fn claim_source(db: &Db, key: &str) -> AppResult<WarrantySourceType> {
-    let claim = require_claim(db, key).await?;
-    Ok(require(db, &claim.warranty_key).await?.source_type)
-}
-
-/// The number of the paid job a claim already has, of either kind.
-fn paid_job_number(claim: &WarrantyClaimDocument) -> Option<&str> {
-    claim
-        .paid_repair_number
-        .as_deref()
-        .or(claim.paid_print_job_number.as_deref())
-}
-
-/// A rejected claim that may still become a paid job: the claim, the customer the job is for,
-/// and why the claim was not covered.
-#[derive(Debug)]
-struct RejectedClaim {
-    claim: WarrantyClaimDocument,
-    customer_key: String,
-    /// The customer's complaint, with the claim it came from.
-    complaint: String,
-}
-
-/// Checks a claim can become a paid job: rejected, finished, and without one yet. A walk-in
-/// sale leaves the claim without a customer, so the registered customer in `customer` stands in;
-/// a customer the claim already has always wins. `job_kind` ("repair" or "print") words the
-/// refusals.
-async fn rejected_claim(
-    db: &Db,
-    key: &str,
-    customer: PaidJobRequest,
-    job_kind: &str,
-) -> AppResult<RejectedClaim> {
-    let claim = require_claim(db, key).await?;
-    let rejected_and_done = claim.decision == Some(ClaimDecision::Reject)
-        && matches!(claim.status, ClaimStatus::Resolved | ClaimStatus::Returned);
-    if !rejected_and_done {
-        return Err(AppError::conflict(
-            codes::CLAIM_STEP_NOT_ALLOWED,
-            format!("Only a rejected claim can become a paid {job_kind} job."),
-        ));
-    }
-    if let Some(number) = paid_job_number(&claim) {
-        return Err(AppError::conflict(
-            codes::CLAIM_STEP_NOT_ALLOWED,
-            format!("This claim already has {job_kind} job {number}."),
-        ));
-    }
-    // A decision a signed-in manager made themselves carries no written reason.
-    let not_covered = match &claim.decision_reason {
-        Some(reason) => format!("not covered: {reason}"),
-        None => "not covered".to_string(),
-    };
-    let customer_key = claim
-        .customer_key
-        .clone()
-        .or(customer.customer_key)
-        .ok_or_else(|| {
-            AppError::validation(format!("Choose the customer for this {job_kind} job."))
-        })?;
-    let complaint = format!(
-        "{} (warranty claim {} {not_covered})",
-        claim.issue_description, claim.claim_number
-    );
-    Ok(RejectedClaim {
-        claim,
-        customer_key,
-        complaint,
-    })
-}
-
-/// Saves a claim that gained a job and logs the step.
-async fn save_job_on_claim(
-    db: &Db,
-    claim: &mut WarrantyClaimDocument,
-    note: String,
-    actor: &WarrantyActor,
-) -> AppResult<()> {
-    let expected = claim.version;
-    save_claim(db, claim, expected).await?;
-    log_step(
-        db,
-        claim,
-        WarrantyEventKind::ClaimAdvanced,
-        None,
-        Some(note),
-        actor,
-        None,
-    )
-    .await
-}
-
 /// Opens a paid repair job for an item whose claim was rejected, so the customer can still
-/// have it fixed. Once per claim. Print work gets a paid print job instead.
+/// have it fixed. Once per claim. A walk-in sale leaves the claim without a customer, so the
+/// registered customer in `customer` stands in; a customer the claim already has always wins.
 pub(crate) async fn convert_to_paid_repair(
     db: &Db,
     key: &str,
     actor: &WarrantyActor,
     device_id: Option<String>,
-    customer: PaidJobRequest,
+    customer: PaidRepairRequest,
 ) -> AppResult<WarrantyClaim> {
     crate::core::logging::domain::tracked("warranties.claim_paid_repair", async move {
-        if claim_source(db, key).await? == WarrantySourceType::Print {
+        let mut claim = require_claim(db, key).await?;
+        let rejected_and_done = claim.decision == Some(ClaimDecision::Reject)
+            && matches!(claim.status, ClaimStatus::Resolved | ClaimStatus::Returned);
+        if !rejected_and_done {
             return Err(AppError::conflict(
-                codes::CLAIM_PAID_JOB_INVALID,
-                "This claim is about print work: make a paid print job instead.",
+                codes::CLAIM_STEP_NOT_ALLOWED,
+                "Only a rejected claim can become a paid repair.",
             ));
         }
-        let RejectedClaim {
-            mut claim,
-            customer_key,
-            complaint,
-        } = rejected_claim(db, key, customer, "repair").await?;
+        if let Some(number) = &claim.paid_repair_number {
+            return Err(AppError::conflict(
+                codes::CLAIM_STEP_NOT_ALLOWED,
+                format!("This claim already has repair job {number}."),
+            ));
+        }
+        // A decision a signed-in manager made themselves carries no written reason.
+        let not_covered = match &claim.decision_reason {
+            Some(reason) => format!("not covered: {reason}"),
+            None => "not covered".to_string(),
+        };
+        let customer_key = claim
+            .customer_key
+            .clone()
+            .or(customer.customer_key)
+            .ok_or_else(|| AppError::validation("Choose the customer for this repair job."))?;
         let repair = repairs::service::create_repair(
             db,
             CreateRepairRequest {
                 customer: RepairCustomer { customer_key },
                 device_model: claim.item_name.clone(),
                 serial_number: claim.serial_number.clone(),
-                issue_description: complaint,
+                issue_description: format!(
+                    "{} (warranty claim {} {not_covered})",
+                    claim.issue_description, claim.claim_number
+                ),
                 promised_ready_at: None,
                 status: None,
                 items: Vec::new(),
@@ -579,59 +503,27 @@ pub(crate) async fn convert_to_paid_repair(
             device_id,
         )
         .await?;
+        let expected = claim.version;
         claim.paid_repair_key = Some(repair.key);
         claim.paid_repair_number = Some(repair.ticket_number.clone());
-        let note = format!("Paid repair {} opened", repair.ticket_number);
-        save_job_on_claim(db, &mut claim, note, actor).await?;
-        claim.into_claim(today())
-    })
-    .await
-}
-
-/// Opens a paid print job for print work whose claim was rejected, so the customer can still
-/// have it done again. Once per claim.
-pub(crate) async fn convert_to_paid_print_job(
-    db: &Db,
-    key: &str,
-    actor: &WarrantyActor,
-    device_id: Option<String>,
-    customer: PaidJobRequest,
-) -> AppResult<WarrantyClaim> {
-    crate::core::logging::domain::tracked("warranties.claim_paid_print_job", async move {
-        let warranty_key = require_claim(db, key).await?.warranty_key;
-        let warranty = require(db, &warranty_key).await?;
-        let Some(original_print_job_key) = warranty.print_job_key.as_deref() else {
-            return Err(AppError::conflict(
-                codes::CLAIM_PAID_JOB_INVALID,
-                "Only a claim about print work can become a paid print job.",
-            ));
-        };
-        let RejectedClaim {
-            mut claim,
-            customer_key,
-            complaint,
-        } = rejected_claim(db, key, customer, "print").await?;
-        let job = print_jobs::service::create_paid_job(
+        save_claim(db, &mut claim, expected).await?;
+        log_step(
             db,
-            print_jobs::service::NewPaidJob {
-                customer_key: &customer_key,
-                original_print_job_key,
-                note: complaint,
-                device_id,
-            },
+            &claim,
+            WarrantyEventKind::ClaimAdvanced,
+            None,
+            Some(format!("Paid repair {} opened", repair.ticket_number)),
+            actor,
+            None,
         )
         .await?;
-        claim.paid_print_job_key = Some(job.key);
-        claim.paid_print_job_number = Some(job.ticket_number.clone());
-        let note = format!("Paid print job {} opened", job.ticket_number);
-        save_job_on_claim(db, &mut claim, note, actor).await?;
         claim.into_claim(today())
     })
     .await
 }
 
-/// Opens the free rework job for a claim on earlier repair or print work that was decided as a
-/// repair: the same customer, linked back to the claim and the original job, charging nothing.
+/// Opens the free rework job for a claim on an earlier repair that was decided as a repair:
+/// same customer and device, linked back to the claim and the original job, charging nothing.
 /// Once per claim, and only before the claim is resolved.
 pub(crate) async fn open_rework(
     db: &Db,
@@ -647,66 +539,45 @@ pub(crate) async fn open_rework(
                 "A rework job is opened once a claim is decided as a repair, before it is resolved.",
             ));
         }
-        if let Some(number) = claim
-            .rework_repair_number
-            .as_deref()
-            .or(claim.rework_print_job_number.as_deref())
-        {
+        if let Some(number) = &claim.rework_repair_number {
             return Err(AppError::conflict(
                 codes::CLAIM_STEP_NOT_ALLOWED,
                 format!("This claim already has rework job {number}."),
             ));
         }
         let warranty = require(db, &claim.warranty_key).await?;
-        let invalid = || {
-            AppError::conflict(
+        let Some(original_repair_key) = warranty.repair_key.as_deref() else {
+            return Err(AppError::conflict(
                 codes::CLAIM_REWORK_INVALID,
-                "Only a warranty on repair or print work can be reworked; this one came with a \
-                 product.",
-            )
+                "Only a warranty on repair work can be reworked; this one came with a product.",
+            ));
         };
-        let ticket_number = match warranty.source_type {
-            WarrantySourceType::ProductSale => return Err(invalid()),
-            WarrantySourceType::Repair => {
-                let original_repair_key = warranty.repair_key.as_deref().ok_or_else(invalid)?;
-                let rework = repairs::service::create_rework(
-                    db,
-                    repairs::service::NewRework {
-                        claim_key: &claim.key,
-                        claim_number: &claim.claim_number,
-                        original_repair_key,
-                        issue_description: &claim.issue_description,
-                        assigned_employee_key: claim.assigned_employee_key.as_deref(),
-                        device_id,
-                    },
-                )
-                .await?;
-                claim.rework_repair_key = Some(rework.key);
-                claim.rework_repair_number = Some(rework.ticket_number.clone());
-                rework.ticket_number
-            }
-            WarrantySourceType::Print => {
-                let original_print_job_key =
-                    warranty.print_job_key.as_deref().ok_or_else(invalid)?;
-                let rework = print_jobs::service::create_rework(
-                    db,
-                    print_jobs::service::NewPrintRework {
-                        claim_key: &claim.key,
-                        claim_number: &claim.claim_number,
-                        original_print_job_key,
-                        issue_description: &claim.issue_description,
-                        assigned_employee_key: claim.assigned_employee_key.as_deref(),
-                        device_id,
-                    },
-                )
-                .await?;
-                claim.rework_print_job_key = Some(rework.key);
-                claim.rework_print_job_number = Some(rework.ticket_number.clone());
-                rework.ticket_number
-            }
-        };
-        let note = format!("Rework job {ticket_number} opened");
-        save_job_on_claim(db, &mut claim, note, actor).await?;
+        let rework = repairs::service::create_rework(
+            db,
+            repairs::service::NewRework {
+                claim_key: &claim.key,
+                claim_number: &claim.claim_number,
+                original_repair_key,
+                issue_description: &claim.issue_description,
+                assigned_employee_key: claim.assigned_employee_key.as_deref(),
+                device_id,
+            },
+        )
+        .await?;
+        let expected = claim.version;
+        claim.rework_repair_key = Some(rework.key);
+        claim.rework_repair_number = Some(rework.ticket_number.clone());
+        save_claim(db, &mut claim, expected).await?;
+        log_step(
+            db,
+            &claim,
+            WarrantyEventKind::ClaimAdvanced,
+            None,
+            Some(format!("Rework job {} opened", rework.ticket_number)),
+            actor,
+            None,
+        )
+        .await?;
         claim.into_claim(today())
     })
     .await

@@ -29,7 +29,6 @@ pub fn label_column(table: &str) -> Option<&'static str> {
         "warranty_events" => Some("key"),
         "warranty_claims" => Some("claim_number"),
         "repair_service_templates" => Some("key"),
-        "print_service_templates" => Some("key"),
         "notifications" => Some("title"),
         _ => None,
     }

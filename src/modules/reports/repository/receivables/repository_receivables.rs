@@ -1,5 +1,4 @@
 use crate::clients::db::Db;
-use crate::clients::sqlite::contains_pattern;
 use crate::clients::sqlite::parse_iso_datetime;
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use crate::core::error::AppResult;
@@ -258,10 +257,8 @@ pub(crate) async fn list_outstanding_invoices(
             let today = Utc::now().date_naive();
             let (where_search, search_pattern) = match search.filter(|s| !s.trim().is_empty()) {
                 Some(s) => (
-                    " AND (i.invoice_number LIKE ? ESCAPE '\\' \
-                     OR i.customer_name_snapshot LIKE ? ESCAPE '\\' \
-                     OR i.customer_phone_snapshot LIKE ? ESCAPE '\\')",
-                    Some(contains_pattern(s.trim())),
+                    " AND (i.invoice_number LIKE ? OR i.customer_key LIKE ?)",
+                    Some(format!("%{}%", s.trim())),
                 ),
                 None => ("", None),
             };
@@ -271,14 +268,13 @@ pub(crate) async fn list_outstanding_invoices(
             );
             let mut count_query = sqlx::query_scalar::<_, i64>(&count_sql);
             if let Some(ref pat) = search_pattern {
-                count_query = count_query.bind(pat).bind(pat).bind(pat);
+                count_query = count_query.bind(pat).bind(pat);
             }
             let total: i64 = count_query.fetch_one(pool).await?;
 
             let list_sql = format!(
                 r#"SELECT 
                     i.id, i.key, i.invoice_number, i.customer_key,
-                    i.customer_name_snapshot, i.customer_phone_snapshot,
                     i.total_cents, i.due_date, i.created_at,
                     COALESCE(p.paid_cents, 0) as paid_cents
                 FROM invoices i
@@ -291,7 +287,7 @@ pub(crate) async fn list_outstanding_invoices(
             );
             let mut list_query = sqlx::query(&list_sql);
             if let Some(ref pat) = search_pattern {
-                list_query = list_query.bind(pat).bind(pat).bind(pat);
+                list_query = list_query.bind(pat).bind(pat);
             }
             let rows = list_query
                 .bind(limit as i64)
@@ -325,8 +321,8 @@ pub(crate) async fn list_outstanding_invoices(
                     key,
                     invoice_number,
                     customer_key,
-                    customer_name: r.get("customer_name_snapshot"),
-                    customer_phone: r.get("customer_phone_snapshot"),
+                    customer_name: None,
+                    customer_phone: None,
                     total_cents,
                     amount_paid_cents,
                     balance_due_cents,

@@ -72,9 +72,6 @@ pub struct CreateSaleItemRequest {
     /// Whether the customer takes the device or print away with this sale. Required on a repair
     /// or print line that names a ticket (`sourceTicketKey`), refused on every other line.
     pub handover: Option<Handover>,
-    /// The key of the job's own customer, confirming that the job is billed to someone else
-    /// (or to a walk-in). Required on such a repair or print line, refused on every other line.
-    pub confirmed_job_customer_key: Option<String>,
 }
 
 /// What billing a repair or print job does to its status. Either way the job is marked as billed

@@ -1,18 +1,18 @@
 //! The warranty report: how often warranties given in a period were claimed, by product, by
-//! repair service, by print work and by technician; what suppliers did with the claims sent to them; and what
+//! repair service and by technician; what suppliers did with the claims sent to them; and what
 //! free rework cost each month.
 
 use crate::clients::db::Db;
 use crate::core::error::{AppError, AppResult};
 use crate::core::utils::shop_day;
-use crate::domain::job_reports::{JobTechnician, PrintJobFacts, ReworkCost};
 use crate::domain::warranties::{
     ClaimRateRow, ReworkMonth, SupplierClaimRow, SupplierOutcome, WarrantyReport,
     WarrantySourceType, WarrantyStatus,
 };
+use crate::modules::repairs;
+use crate::modules::repairs::service::{JobTechnician, ReworkCost};
 use crate::modules::warranties::model::{WarrantyClaimDocument, WarrantyDocument, stored_day};
 use crate::modules::warranties::repository;
-use crate::modules::{print_jobs, repairs};
 use chrono::{DateTime, NaiveDate, Utc};
 use mongodb::bson::DateTime as BsonDateTime;
 use std::collections::{BTreeMap, HashMap};
@@ -86,40 +86,19 @@ fn into_rows<K>(groups: BTreeMap<K, Tally>) -> Vec<ClaimRateRow> {
     rows
 }
 
-/// The claim-rate tables. Every repair warranty's job must be in `repair_technicians` and every
-/// print warranty's job in `print_facts`.
+/// The three claim-rate tables. Every repair warranty's job must be in `technicians`.
 struct ClaimRates {
     by_product: Vec<ClaimRateRow>,
     by_repair_service: Vec<ClaimRateRow>,
-    by_print_work: Vec<ClaimRateRow>,
     by_technician: Vec<ClaimRateRow>,
-}
-
-/// Counts one warranty for whoever did its job (`None`: nobody was assigned).
-fn add_technician(
-    people: &mut BTreeMap<Option<String>, Tally>,
-    technician: Option<&JobTechnician>,
-    w: &WarrantyDocument,
-) {
-    match technician {
-        Some(person) => add(
-            people,
-            Some(person.employee_id.clone()),
-            Some(&person.name),
-            w,
-        ),
-        None => add(people, None, None, w),
-    }
 }
 
 fn claim_rates(
     issued: &[WarrantyDocument],
-    repair_technicians: &HashMap<String, Option<JobTechnician>>,
-    print_facts: &HashMap<String, PrintJobFacts>,
+    technicians: &HashMap<String, Option<JobTechnician>>,
 ) -> AppResult<ClaimRates> {
     let mut products = BTreeMap::new();
     let mut services = BTreeMap::new();
-    let mut print_work = BTreeMap::new();
     let mut people = BTreeMap::new();
     for w in issued {
         match w.source_type {
@@ -136,38 +115,26 @@ fn claim_rates(
                 let job = w.repair_key.as_ref().ok_or_else(|| {
                     AppError::internal(format!("repair warranty `{}` has no job", w.key))
                 })?;
-                let technician = repair_technicians.get(job).ok_or_else(|| {
+                let technician = technicians.get(job).ok_or_else(|| {
                     AppError::internal(format!("repair warranty `{}` names a missing job", w.key))
                 })?;
-                add_technician(&mut people, technician.as_ref(), w);
-            }
-            WarrantySourceType::Print => {
-                let job = w.print_job_key.as_ref().ok_or_else(|| {
-                    AppError::internal(format!("print warranty `{}` has no job", w.key))
-                })?;
-                let facts = print_facts.get(job).ok_or_else(|| {
-                    AppError::internal(format!("print warranty `{}` names a missing job", w.key))
-                })?;
-                // A delivered job's lines are locked, but a reopened one can drop the covered
-                // line; the warranty's own name still says what it covers.
-                let description = match w
-                    .print_job_item_key
-                    .as_ref()
-                    .and_then(|item| facts.line_descriptions.get(item))
-                {
-                    Some(description) => description,
-                    None => &w.item_name,
-                };
-                let work = description.trim().to_lowercase();
-                add(&mut print_work, work, Some(description), w);
-                add_technician(&mut people, facts.technician.as_ref(), w);
+                match technician {
+                    Some(person) => {
+                        add(
+                            &mut people,
+                            Some(person.employee_id.clone()),
+                            Some(&person.name),
+                            w,
+                        );
+                    }
+                    None => add(&mut people, None, None, w),
+                }
             }
         }
     }
     Ok(ClaimRates {
         by_product: into_rows(products),
         by_repair_service: into_rows(services),
-        by_print_work: into_rows(print_work),
         by_technician: into_rows(people),
     })
 }
@@ -272,14 +239,6 @@ fn rework_months(costs: &[ReworkCost]) -> Vec<ReworkMonth> {
     months.into_values().collect()
 }
 
-/// The values once each, in order.
-fn distinct(values: impl Iterator<Item = String>) -> Vec<String> {
-    let mut values: Vec<String> = values.collect();
-    values.sort();
-    values.dedup();
-    values
-}
-
 /// The warranty report for warranties given, and claims sent to suppliers, in `[start, end)`.
 pub(crate) async fn report(
     db: &Db,
@@ -292,11 +251,11 @@ pub(crate) async fn report(
         .into_iter()
         .filter(counts_as_issued)
         .collect();
-    let repair_jobs = distinct(issued.iter().filter_map(|w| w.repair_key.clone()));
-    let print_job_keys = distinct(issued.iter().filter_map(|w| w.print_job_key.clone()));
-    let repair_technicians = repairs::service::technicians_by_job(db, &repair_jobs).await?;
-    let print_facts = print_jobs::service::facts_by_job(db, &print_job_keys).await?;
-    let rates = claim_rates(&issued, &repair_technicians, &print_facts)?;
+    let mut jobs: Vec<String> = issued.iter().filter_map(|w| w.repair_key.clone()).collect();
+    jobs.sort();
+    jobs.dedup();
+    let technicians = repairs::service::technicians_by_job(db, &jobs).await?;
+    let rates = claim_rates(&issued, &technicians)?;
 
     let sent = repository::sent_to_supplier_between(
         db,
@@ -304,8 +263,7 @@ pub(crate) async fn report(
         &shop_day(end).format("%Y-%m-%d").to_string(),
     )
     .await?;
-    let mut rework = repairs::service::rework_costs(db, start, end).await?;
-    rework.extend(print_jobs::service::rework_costs(db, start, end).await?);
+    let rework = repairs::service::rework_costs(db, start, end).await?;
 
     let issued_count = u64::try_from(issued.len()).expect("a warranty count fits in u64");
     let claimed_count = u64::try_from(issued.iter().filter(|w| w.claim_count > 0).count())
@@ -318,7 +276,6 @@ pub(crate) async fn report(
         claim_rate_bps: rate_bps(claimed_count, issued_count),
         by_product: rates.by_product,
         by_repair_service: rates.by_repair_service,
-        by_print_work: rates.by_print_work,
         by_technician: rates.by_technician,
         by_supplier: supplier_rows(&sent, today)?,
         rework_by_month: rework_months(&rework),
@@ -354,8 +311,6 @@ mod tests {
             product_key: None,
             repair_key: None,
             repair_item_key: None,
-            print_job_key: None,
-            print_job_item_key: None,
             item_name: name.to_string(),
             serial_number: None,
             quantity: 1,
@@ -448,8 +403,7 @@ mod tests {
             ),
             ("rep_3".to_string(), None),
         ]);
-        let rates =
-            claim_rates(&issued, &technicians, &HashMap::new()).expect("every job is known");
+        let rates = claim_rates(&issued, &technicians).expect("every job is known");
 
         assert_eq!(
             rates.by_product,
@@ -512,7 +466,7 @@ mod tests {
     #[test]
     fn a_repair_warranty_without_its_job_is_an_error() {
         let issued = vec![repaired("r1", "rep_gone", "Screen", 0)];
-        assert!(claim_rates(&issued, &HashMap::new(), &HashMap::new()).is_err());
+        assert!(claim_rates(&issued, &HashMap::new()).is_err());
     }
 
     fn sent(
@@ -563,10 +517,6 @@ mod tests {
             paid_repair_number: None,
             rework_repair_key: None,
             rework_repair_number: None,
-            paid_print_job_key: None,
-            paid_print_job_number: None,
-            rework_print_job_key: None,
-            rework_print_job_number: None,
             supplier: Some(SupplierClaim {
                 supplier_key: supplier.to_string(),
                 supplier_name: format!("{supplier} on {sent_on}"),

@@ -1,5 +1,4 @@
 use crate::clients::db::Db;
-use crate::clients::sqlite::like_pattern;
 use crate::clients::sqlite::{SqlFilter, bson_to_iso, generate_id_hex, now_utc_iso};
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use crate::core::error::AppResult;
@@ -51,26 +50,34 @@ pub(super) fn build_credit_note_where_clause(filter: &Document) -> SqlFilter {
             let mut or_parts = Vec::new();
             for or_item in or_arr {
                 if let Some(or_doc) = or_item.as_document() {
-                    if let Ok(number) = or_doc.get_str("credit_note_number") {
+                    if let Ok(cn_doc) = or_doc.get_document("credit_note_number") {
+                        if let Ok(regex) = cn_doc.get_str("$regex") {
+                            let clean = regex.trim_start_matches('^').trim_end_matches('$');
+                            or_parts.push("credit_note_number LIKE ?".to_string());
+                            bindings.push(format!("%{clean}%"));
+                        }
+                    } else if let Ok(cn_exact) = or_doc.get_str("credit_note_number") {
                         or_parts.push("credit_note_number = ?".to_string());
-                        bindings.push(number.to_string());
-                    }
-                    if let Ok(number) = or_doc.get_str("invoice_number") {
-                        or_parts.push("invoice_number = ?".to_string());
-                        bindings.push(number.to_string());
+                        bindings.push(cn_exact.to_string());
                     }
 
-                    for column in [
-                        "credit_note_number",
-                        "invoice_number",
-                        "customer_name_snapshot",
-                    ] {
-                        if let Ok(clause) = or_doc.get_document(column)
-                            && let Some(pattern) = like_pattern(clause)
-                        {
-                            or_parts.push(format!("{column} LIKE ? ESCAPE '\\'"));
-                            bindings.push(pattern);
+                    if let Ok(inv_doc) = or_doc.get_document("invoice_number") {
+                        if let Ok(regex) = inv_doc.get_str("$regex") {
+                            let clean = regex.trim_start_matches('^').trim_end_matches('$');
+                            or_parts.push("invoice_number LIKE ?".to_string());
+                            bindings.push(format!("%{clean}%"));
                         }
+                    } else if let Ok(inv_exact) = or_doc.get_str("invoice_number") {
+                        or_parts.push("invoice_number = ?".to_string());
+                        bindings.push(inv_exact.to_string());
+                    }
+
+                    if let Ok(cname) = or_doc.get_document("customer_name_snapshot")
+                        && let Ok(regex) = cname.get_str("$regex")
+                    {
+                        let clean = regex.trim_start_matches('^').trim_end_matches('$');
+                        or_parts.push("customer_name_snapshot LIKE ?".to_string());
+                        bindings.push(format!("%{clean}%"));
                     }
                 }
             }

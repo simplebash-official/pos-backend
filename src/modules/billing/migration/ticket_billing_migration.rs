@@ -116,11 +116,7 @@ pub async fn migrate_sqlite(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     Ok(())
 }
 
-pub(super) fn text<'a>(
-    document: &'a Document,
-    collection: &str,
-    field: &str,
-) -> AppResult<&'a str> {
+fn text<'a>(document: &'a Document, collection: &str, field: &str) -> AppResult<&'a str> {
     document
         .get_str(field)
         .map_err(|e| AppError::internal(format!("{collection}.{field}: {e}")))
@@ -128,7 +124,7 @@ pub(super) fn text<'a>(
 
 /// Narrows a filter to one shop, or to the documents that carry no shop at all (a single-shop
 /// database).
-pub(super) fn in_shop(shop: &Option<String>, mut filter: Document) -> Document {
+fn in_shop(shop: &Option<String>, mut filter: Document) -> Document {
     match shop {
         Some(shop) => filter.insert(TENANT_FIELD, shop.as_str()),
         None => filter.insert(TENANT_FIELD, Bson::Null),

@@ -693,7 +693,6 @@ async fn seed_repair_with_named(
                     key: generate_id("rit"),
                     description: "Stats test work".to_string(),
                     labor_cents: price,
-                    labor_cost_cents: None,
                     part: None,
                     part_cents: 0,
                     part_cost_cents: 0,

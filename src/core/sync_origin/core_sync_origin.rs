@@ -132,7 +132,6 @@ pub const SYNCED_COLLECTIONS: &[&str] = &[
     "warranty_events",
     "warranty_claims",
     "repair_service_templates",
-    "print_service_templates",
     "notifications",
     "notification_reads",
 ];

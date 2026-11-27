@@ -12,8 +12,6 @@ pub struct RepairServiceDocument {
     pub key: String,
     pub name: String,
     pub labor_cents: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub labor_cost_cents: Option<i64>,
     /// Stored in its API shape (camelCase), like a product's warranty.
     pub warranty: ProductWarranty,
     pub active: bool,
@@ -36,7 +34,6 @@ impl RepairServiceDocument {
             key: self.key,
             name: self.name,
             labor_cents: self.labor_cents,
-            labor_cost_cents: self.labor_cost_cents,
             warranty: self.warranty,
             active: self.active,
             version: self.version,

@@ -1,5 +1,4 @@
 use crate::clients::db::Db;
-use crate::clients::sqlite::contains_pattern;
 use crate::clients::sqlite::{
     SqlFilter, bson_to_iso, generate_id_hex, now_utc_iso, to_bson_datetime,
 };
@@ -254,11 +253,10 @@ fn sqlite_where(filter: &ListFilter) -> SqlFilter {
     let mut bindings: Vec<String> = Vec::new();
     if let Some(search) = &filter.search {
         conditions.push(
-            "(quotation_number LIKE ? ESCAPE '\\' OR customer_name LIKE ? ESCAPE '\\' \
-             OR customer_phone LIKE ? ESCAPE '\\')"
+            "(quotation_number LIKE ? OR customer_name LIKE ? OR customer_phone LIKE ?)"
                 .to_string(),
         );
-        let like = contains_pattern(search);
+        let like = format!("%{search}%");
         bindings.extend([like.clone(), like.clone(), like]);
     }
     match filter.status.as_deref() {

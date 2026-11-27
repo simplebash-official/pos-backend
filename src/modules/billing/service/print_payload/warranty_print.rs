@@ -37,11 +37,10 @@ fn printed_end(warranty: &Warranty) -> AppResult<Value> {
 }
 
 /// One warranty as the note under its invoice line. `subject` tells several warranties of one
-/// line apart: the unit's serial for a sold serial, the work for a repair or print job, empty
-/// otherwise.
+/// line apart: the unit's serial for a sold serial, the work for a repair, empty otherwise.
 fn line_note(warranty: &Warranty) -> AppResult<Value> {
     let subject = match warranty.source_type {
-        WarrantySourceType::Repair | WarrantySourceType::Print => warranty.item_name.clone(),
+        WarrantySourceType::Repair => warranty.item_name.clone(),
         WarrantySourceType::ProductSale => warranty.serial_number.clone().unwrap_or_default(),
     };
     Ok(json!({

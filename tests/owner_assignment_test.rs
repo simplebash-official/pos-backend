@@ -236,9 +236,7 @@ async fn the_owner_makes_their_own_profile_once_and_takes_no_commission() {
             "customer": { "customerKey": print_customer },
             "jobType": "t-shirt",
             "quantity": 12,
-            "items": [{ "description": "Printing", "quantity": 1,
-                    "source": { "type": "service", "unitPriceCents": 240000 },
-                    "warranty": { "coverage": { "kind": "none" } } }],
+            "estimatedCostCents": 240000,
             "assignment": assignment,
         })
     };

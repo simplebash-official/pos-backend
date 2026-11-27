@@ -303,25 +303,18 @@ pub(super) fn mock_templates_json() -> serde_json::Value {
                     "Job Receipt",
                     "job-receipt",
                     json!({
-                        "required": ["paper", "jobs", "estimateTotalCents", "termsText", "uncollectedAfterDays"],
+                        "required": ["paper", "ticketNumber", "jobKind", "estimateCents", "termsText", "uncollectedAfterDays"],
                         "properties": {
                             "paper": { "type": "string", "enum": ["a5", "thermal-58", "thermal-80"] },
-                            "jobs": { "type": "array", "minItems": 1, "maxItems": 20, "items": {
-                                "type": "object",
-                                "required": ["ticketNumber", "jobKind", "estimateCents"],
-                                "properties": {
-                                    "ticketNumber": { "type": "string" },
-                                    "jobKind": { "type": "string", "enum": ["repair", "print"] },
-                                    "estimateCents": { "type": ["integer", "null"] }
-                                }
-                            } },
-                            "estimateTotalCents": { "type": ["integer", "null"] },
+                            "ticketNumber": { "type": "string" },
+                            "jobKind": { "type": "string", "enum": ["repair", "print"] },
+                            "estimateCents": { "type": ["integer", "null"] },
                             "termsText": { "type": "string" },
                             "uncollectedAfterDays": { "type": ["integer", "null"] }
                         }
                     }),
                     true,
-                    json!({ "paper": "a5", "jobs": [{ "ticketNumber": "REP-000001", "jobKind": "repair", "estimateCents": null }], "estimateTotalCents": null, "termsText": "", "uncollectedAfterDays": null }),
+                    json!({ "paper": "a5", "ticketNumber": "REP-000001", "jobKind": "repair", "estimateCents": null, "termsText": "", "uncollectedAfterDays": null }),
                 ),
             ]
         }

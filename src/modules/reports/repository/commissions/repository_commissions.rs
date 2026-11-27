@@ -29,6 +29,7 @@ fn accumulate(
     unassigned_sentinel: &'static str,
     unassigned_label: &'static str,
     role: &'static str,
+    kind: JobKind,
 ) -> AppResult<()> {
     let bucket_key = doc
         .get_str("assigned_employee_id")
@@ -40,7 +41,7 @@ fn accumulate(
     let JobMoney {
         revenue_cents: revenue,
         cost_cents: material_cost,
-    } = job_money(doc)?;
+    } = job_money(doc, kind)?;
     let profit = job_profit_cents(revenue, material_cost);
 
     let split_type = doc.get_str("split_type").ok();
@@ -123,6 +124,7 @@ pub(crate) async fn aggregate_employee_commissions(
                     UNASSIGNED_TECHNICIAN,
                     "Unassigned Technician",
                     "technician",
+                    JobKind::Repair,
                 )?;
             }
 
@@ -146,6 +148,7 @@ pub(crate) async fn aggregate_employee_commissions(
                     UNASSIGNED_PRINTER,
                     "Unassigned Printer",
                     "printer",
+                    JobKind::Print,
                 )?;
             }
         }
@@ -177,6 +180,7 @@ pub(crate) async fn aggregate_employee_commissions(
                     UNASSIGNED_TECHNICIAN,
                     "Unassigned Technician",
                     "technician",
+                    JobKind::Repair,
                 )?;
             }
 
@@ -196,6 +200,7 @@ pub(crate) async fn aggregate_employee_commissions(
                     UNASSIGNED_PRINTER,
                     "Unassigned Printer",
                     "printer",
+                    JobKind::Print,
                 )?;
             }
         }
@@ -204,20 +209,44 @@ pub(crate) async fn aggregate_employee_commissions(
     Ok(perf_map)
 }
 
-/// What a job charges and what it costs the shop.
+/// Which job collection a raw row came from; each keeps its money in its own fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum JobKind {
+    Repair,
+    Print,
+}
+
+/// What a job charges and what its parts or materials cost.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct JobMoney {
     pub revenue_cents: i64,
     pub cost_cents: i64,
 }
 
-/// A repair or print job's money from its raw row: the items' totals, which both kinds of job
-/// store in the required `price_cents`/`cost_cents`.
-pub(crate) fn job_money(doc: &Document) -> AppResult<JobMoney> {
-    Ok(JobMoney {
-        revenue_cents: get_i64_flexible(doc, "price_cents")?,
-        cost_cents: get_i64_flexible(doc, "cost_cents")?,
-    })
+/// A job's money from its raw row. A repair stores its items' totals in the required
+/// `price_cents`/`cost_cents` (`pos_calc_core::repair`); a print job keeps its quote
+/// `estimated_cost_cents` and an optional `material_cost_cents`.
+pub(crate) fn job_money(doc: &Document, kind: JobKind) -> AppResult<JobMoney> {
+    match kind {
+        JobKind::Repair => Ok(JobMoney {
+            revenue_cents: get_i64_flexible(doc, "price_cents")?,
+            cost_cents: get_i64_flexible(doc, "cost_cents")?,
+        }),
+        JobKind::Print => Ok(JobMoney {
+            revenue_cents: recorded_cents(doc, "estimated_cost_cents")?,
+            cost_cents: recorded_cents(doc, "material_cost_cents")?,
+        }),
+    }
+}
+
+/// An amount the document may legitimately not carry (no tender on a credit sale, no estimate on
+/// a repair): an absent field counts as nothing recorded, i.e. zero in a sum. A field that is
+/// present but not numeric is still an error.
+pub(crate) fn recorded_cents(doc: &Document, key: &str) -> AppResult<i64> {
+    match doc.get(key) {
+        None | Some(Bson::Null) => Ok(0),
+        Some(_) => get_i64_flexible(doc, key),
+    }
 }
 
 /// The numeric field `key` of an aggregation row as an integer; a missing or non-numeric

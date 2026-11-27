@@ -30,8 +30,6 @@ pub use constants_prefixes::PASSWORD_RESET_TOKEN;
 pub use constants_prefixes::PAYEE;
 pub use constants_prefixes::PAYMENT;
 pub use constants_prefixes::PRINT_JOB;
-pub use constants_prefixes::PRINT_JOB_ITEM;
-pub use constants_prefixes::PRINT_SERVICE;
 pub use constants_prefixes::PRODUCT;
 pub use constants_prefixes::PRODUCT_SERIAL;
 pub use constants_prefixes::PURCHASE;

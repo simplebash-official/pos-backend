@@ -1,5 +1,4 @@
 use crate::clients::db::Db;
-use crate::clients::sqlite::search_regex;
 use crate::clients::sqlite::{bson_to_iso, generate_id_hex, to_bson_datetime};
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use crate::core::error::{AppError, AppResult};
@@ -8,7 +7,6 @@ use futures_util::TryStreamExt;
 use mongodb::bson::oid::ObjectId;
 use mongodb::bson::{DateTime as BsonDateTime, Document, doc};
 use mongodb::options::ReturnDocument;
-use std::cmp::Ordering;
 
 /// Atomically adjusts customer total purchases and outstanding balance via `$inc`.
 /// Used by billing/invoices and payments modules.
@@ -504,52 +502,67 @@ pub(crate) async fn list_customers(
                         {
                             items.retain(|c| c.outstanding_balance_cents > gt_val);
                         }
-                        if let Ok(or_arr) = clause_doc.get_array("$or")
-                            && let Some(search) = search_regex(or_arr)?
-                        {
-                            items.retain(|c| {
-                                [
-                                    Some(&c.name),
-                                    Some(&c.primary_phone),
-                                    c.secondary_phone.as_ref(),
-                                    c.email.as_ref(),
-                                    c.address.as_ref(),
-                                    c.contact_person.as_ref(),
-                                ]
-                                .into_iter()
-                                .flatten()
-                                .any(|field| search.is_match(field))
-                            });
+                        if let Ok(or_arr) = clause_doc.get_array("$or") {
+                            let mut pattern = String::new();
+                            for cond in or_arr {
+                                if let Some(cond_doc) = cond.as_document() {
+                                    for key in ["name", "primary_phone", "secondary_phone", "email"]
+                                    {
+                                        if let Ok(field_doc) = cond_doc.get_document(key)
+                                            && let Ok(regex) = field_doc.get_str("$regex")
+                                        {
+                                            pattern = regex.to_lowercase();
+                                            break;
+                                        }
+                                    }
+                                }
+                                if !pattern.is_empty() {
+                                    break;
+                                }
+                            }
+                            if !pattern.is_empty() {
+                                items.retain(|c| {
+                                    c.name.to_lowercase().contains(&pattern)
+                                        || c.primary_phone.to_lowercase().contains(&pattern)
+                                        || c.secondary_phone
+                                            .as_ref()
+                                            .map(|p| p.to_lowercase().contains(&pattern))
+                                            .unwrap_or(false)
+                                        || c.email
+                                            .as_ref()
+                                            .map(|e| e.to_lowercase().contains(&pattern))
+                                            .unwrap_or(false)
+                                });
+                            }
                         }
                     }
                 }
             }
 
-            // The service sorts by a single field.
-            if let Some((field, direction)) = sort.iter().next() {
-                let compare: fn(&CustomerDocument, &CustomerDocument) -> Ordering =
-                    match field.as_str() {
-                        "name" => |a, b| a.name.cmp(&b.name),
-                        "primary_phone" => |a, b| a.primary_phone.cmp(&b.primary_phone),
-                        "outstanding_balance_cents" => |a, b| {
-                            a.outstanding_balance_cents
-                                .cmp(&b.outstanding_balance_cents)
-                        },
-                        "total_purchases_cents" => {
-                            |a, b| a.total_purchases_cents.cmp(&b.total_purchases_cents)
-                        }
-                        "created_at" => |a, b| a.created_at.cmp(&b.created_at),
-                        "updated_at" => |a, b| a.updated_at.cmp(&b.updated_at),
-                        _ => {
-                            return Err(AppError::internal(format!(
-                                "unsupported customer sort on `{field}`"
-                            )));
-                        }
-                    };
-                if direction.as_i32() == Some(-1) {
-                    items.sort_by(|a, b| compare(b, a));
+            // Sort
+            if let Ok(dir) = sort.get_i32("name") {
+                if dir == -1 {
+                    items.sort_by(|a, b| b.name.cmp(&a.name));
                 } else {
-                    items.sort_by(compare);
+                    items.sort_by(|a, b| a.name.cmp(&b.name));
+                }
+            } else if let Ok(dir) = sort.get_i32("created_at") {
+                if dir == -1 {
+                    items.sort_by_key(|b| std::cmp::Reverse(b.created_at));
+                } else {
+                    items.sort_by_key(|a| a.created_at);
+                }
+            } else if let Ok(dir) = sort.get_i32("outstanding_balance_cents") {
+                if dir == -1 {
+                    items.sort_by(|a, b| {
+                        b.outstanding_balance_cents
+                            .cmp(&a.outstanding_balance_cents)
+                    });
+                } else {
+                    items.sort_by(|a, b| {
+                        a.outstanding_balance_cents
+                            .cmp(&b.outstanding_balance_cents)
+                    });
                 }
             }
 

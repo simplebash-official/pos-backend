@@ -67,10 +67,6 @@ pub const PAYEE: &str = "pye";
 pub const PAYMENT: &str = "pay";
 
 pub const PRINT_JOB: &str = "prn";
-/// A line of a print job.
-pub const PRINT_JOB_ITEM: &str = "pit";
-/// A ready-made print service.
-pub const PRINT_SERVICE: &str = "pst";
 
 // Standard entity ID prefixes used for generating prefixed NanoID model keys.
 pub const PRODUCT: &str = "prod";

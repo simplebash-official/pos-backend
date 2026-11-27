@@ -1,8 +1,6 @@
 use super::migrate_schema::migrate_schema;
 use crate::core::error::{AppError, AppResult};
 use crate::core::logging::SqlLogging;
-use mongodb::bson::{Bson, Document};
-use regex::{Regex, RegexBuilder};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{Column, Executor, Row, SqlitePool, TypeInfo, ValueRef};
 use std::path::Path;
@@ -133,9 +131,7 @@ pub async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     crate::modules::repairs::migration::migrate_sqlite(pool).await?;
     crate::modules::customers::migration::migrate_sqlite(pool).await?;
     crate::modules::print_jobs::migration::migrate_sqlite(pool).await?;
-    crate::modules::print_jobs::migration::migrate_items_sqlite(pool).await?;
     crate::modules::billing::migration::migrate_sqlite(pool).await?;
-    crate::modules::billing::migration::migrate_credit_note_customers_sqlite(pool).await?;
     // Sync v2 device bookkeeping: the single state row and the capture
     // triggers. Both are inert until sync is enabled (`capture_enabled = 1`).
     super::super::sync_capture::ensure_state(pool)
@@ -630,67 +626,6 @@ pub fn parse_iso_datetime(s: &str) -> AppResult<chrono::DateTime<chrono::Utc>> {
 pub struct SqlFilter {
     pub clause: String,
     pub bindings: Vec<String>,
-}
-
-/// The SQLite `LIKE` pattern (`%text%`, with `%`, `_` and `\` escaped for
-/// `ESCAPE '\'`) for a `{ "$regex": … }` search clause. Services send a BSON regex
-/// built by `build_bson_regex`, whose text is regex-escaped, so the escaping is
-/// undone first; a plain string is taken as it is.
-#[must_use]
-pub fn like_pattern(clause: &Document) -> Option<String> {
-    let regex = match clause.get("$regex")? {
-        Bson::RegularExpression(regex) => regex.pattern.to_string(),
-        Bson::String(text) => text.clone(),
-        _ => return None,
-    };
-    let mut literal = String::with_capacity(regex.len());
-    let mut chars = regex.chars();
-    while let Some(c) = chars.next() {
-        // `regex_escape` puts a backslash before each special character.
-        literal.push(match c {
-            '\\' => chars.next().unwrap_or('\\'),
-            other => other,
-        });
-    }
-    Some(contains_pattern(&literal))
-}
-
-/// `%text%` for `LIKE … ESCAPE '\'`, with the wildcards inside `text` escaped.
-#[must_use]
-pub fn contains_pattern(text: &str) -> String {
-    let mut pattern = String::with_capacity(text.len() + 2);
-    pattern.push('%');
-    for c in text.chars() {
-        if matches!(c, '%' | '_' | '\\') {
-            pattern.push('\\');
-        }
-        pattern.push(c);
-    }
-    pattern.push('%');
-    pattern
-}
-
-/// The matcher for a search `$or`, for lists filtered in memory. Every branch carries the same
-/// BSON regex (`build_bson_regex`), so the first one found stands for all; `None` when no branch
-/// has one.
-pub fn search_regex(branches: &[Bson]) -> AppResult<Option<Regex>> {
-    let found = branches
-        .iter()
-        .filter_map(Bson::as_document)
-        .flat_map(Document::values)
-        .filter_map(Bson::as_document)
-        .find_map(|clause| match clause.get("$regex") {
-            Some(Bson::RegularExpression(regex)) => Some(regex),
-            _ => None,
-        });
-    found
-        .map(|regex| {
-            RegexBuilder::new(regex.pattern.as_str())
-                .case_insensitive(regex.options.as_str().contains('i'))
-                .build()
-                .map_err(|err| AppError::internal(format!("invalid search pattern: {err}")))
-        })
-        .transpose()
 }
 
 /// Column names of `table` (empty when the table does not exist).

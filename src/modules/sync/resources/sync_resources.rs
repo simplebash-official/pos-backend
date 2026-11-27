@@ -454,15 +454,4 @@ pub const SYNC_RESOURCES: &[ResourceSpec] = &[
         order: 168,
         phase: Phase::P3a,
     },
-    // A shop's ready-made print services: the same rules as the repair services.
-    ResourceSpec {
-        name: "printServices",
-        table: "print_service_templates",
-        class: MergeClass::Lww,
-        soft_delete: false,
-        derived: &[],
-        local_only: &[],
-        order: 169,
-        phase: Phase::P3a,
-    },
 ];

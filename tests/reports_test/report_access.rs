@@ -13,7 +13,6 @@ use simplebash_pos_backend::domain::billing::InvoiceStatus;
 use simplebash_pos_backend::domain::users::Role;
 use simplebash_pos_backend::modules::billing::model::{InvoiceDocument, PaymentDocument};
 
-use simplebash_pos_backend::domain::print_jobs::PrintJobKind;
 use simplebash_pos_backend::domain::repairs::{RepairItem, RepairKind, RepairPart};
 use simplebash_pos_backend::domain::warranties::ProductWarranty;
 use simplebash_pos_backend::modules::print_jobs::model::PrintJobDocument;
@@ -516,7 +515,6 @@ async fn employee_commissions_and_performance_report() {
             key: "rit_screen".to_string(),
             description: "Screen".to_string(),
             labor_cents: 500000,
-            labor_cost_cents: None,
             part: Some(RepairPart::Outside {
                 name: "Screen".to_string(),
             }),
@@ -558,11 +556,8 @@ async fn employee_commissions_and_performance_report() {
         quantity: 10,
         promised_ready_at: None,
         status: "completed".to_string(),
-        note: None,
-        kind: PrintJobKind::Standard,
-        items: Vec::new(),
-        price_cents: 300000, // Revenue = 3,000 LKR
-        cost_cents: 100000,  // Cost = 1,000 LKR -> Profit = 2,000 LKR
+        estimated_cost_cents: 300000,      // Revenue = 3,000 LKR
+        material_cost_cents: Some(100000), // Cost = 1,000 LKR -> Profit = 2,000 LKR
         assigned_employee_id: Some("emp_2".to_string()),
         assigned_employee_name: Some("Unique Printer Suneth".to_string()),
         split_type: Some("fixed".to_string()),

@@ -4,7 +4,6 @@
 //! access and returns domain types (never BSON/`ObjectId`) to `routes`.
 
 pub mod category;
-pub mod job_parts;
 pub mod overview;
 pub mod product;
 pub mod product_serial;

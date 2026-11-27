@@ -292,7 +292,6 @@ async fn employee_commissions_survive_a_rename() {
             key: "rit_screen".to_string(),
             description: "Screen".to_string(),
             labor_cents: 500000,
-            labor_cost_cents: None,
             part: Some(RepairPart::Outside {
                 name: "Screen".to_string(),
             }),

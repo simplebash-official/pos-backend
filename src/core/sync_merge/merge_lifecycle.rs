@@ -30,17 +30,6 @@ const CREDIT_NOTE_LIFECYCLE: &[&str] = &[
 /// A quotation's post-creation changes are its lifecycle fields (active -> fulfilled -> cancelled).
 const QUOTATION_LIFECYCLE: &[&str] = &["status", "fulfilledByInvoiceKey", "fulfilledAt"];
 
-/// A credit note's customer is copied from its invoice, which older records lack and replicas fill
-/// in at different times: a blank may be filled, a value never changes.
-const CREDIT_NOTE_FILLABLE: &[&str] = &["customerKey", "customerNameSnapshot"];
-
-fn fillable_keys(resource: &str) -> &'static [&'static str] {
-    match resource {
-        "creditNotes" | "credit_notes" | "creditNote" => CREDIT_NOTE_FILLABLE,
-        _ => &[],
-    }
-}
-
 fn lifecycle_keys(resource: &str) -> Option<&'static [&'static str]> {
     match resource {
         "invoices" | "invoice" => Some(INVOICE_LIFECYCLE),
@@ -55,9 +44,8 @@ fn is_invoice(resource: &str) -> bool {
 }
 
 /// Body of an invoice / credit note with lifecycle, derived and meta columns
-/// removed (and `items[].returnedQuantity`), i.e. what must never change. `filled` names the blanks
-/// one side has filled in.
-fn immutable_body(resource: &str, payload: &Value, filled: &[&str]) -> Value {
+/// removed (and `items[].returnedQuantity`), i.e. what must never change.
+fn immutable_body(resource: &str, payload: &Value) -> Value {
     let Value::Object(map) = payload else {
         return payload.clone();
     };
@@ -67,7 +55,6 @@ fn immutable_body(resource: &str, payload: &Value, filled: &[&str]) -> Value {
         let key = k.as_str();
         if META_KEYS.contains(&key)
             || lifecycle.contains(&key)
-            || filled.contains(&key)
             || (is_invoice(resource) && (INVOICE_DERIVED.contains(&key) || key == "notes"))
         {
             continue;
@@ -114,8 +101,7 @@ fn group_tiebreak(resource: &str, payload: &Value) -> Vec<String> {
 /// `status` takes the higher lifecycle rank with its `voided*`/`closed*`
 /// columns travelling along; invoice `notes` is last-writer-wins by the
 /// payload's `updatedAt`. The derived `refundedCents`/`creditNoteCount`/
-/// `items[].returnedQuantity` are left as local (the caller recomputes them). A credit note's
-/// customer is kept from whichever side has it.
+/// `items[].returnedQuantity` are left as local (the caller recomputes them).
 #[must_use]
 pub fn merge_lifecycle(resource: &str, local: &Value, incoming: &Value) -> LifecycleMerge {
     let reject = |reason: &'static str| LifecycleMerge {
@@ -129,12 +115,7 @@ pub fn merge_lifecycle(resource: &str, local: &Value, incoming: &Value) -> Lifec
     let Some(lifecycle) = lifecycle_keys(resource) else {
         return reject("UNKNOWN_RESOURCE");
     };
-    let filled: Vec<&str> = fillable_keys(resource)
-        .iter()
-        .copied()
-        .filter(|key| local_map.contains_key(*key) != incoming_map.contains_key(*key))
-        .collect();
-    if immutable_body(resource, local, &filled) != immutable_body(resource, incoming, &filled) {
+    if immutable_body(resource, local) != immutable_body(resource, incoming) {
         return reject("IMMUTABLE_MISMATCH");
     }
 
@@ -159,11 +140,6 @@ pub fn merge_lifecycle(resource: &str, local: &Value, incoming: &Value) -> Lifec
     };
 
     let mut merged = local_map.clone();
-    for key in &filled {
-        if let Some(value) = incoming_map.get(*key) {
-            merged.insert((*key).to_string(), value.clone());
-        }
-    }
     if incoming_wins {
         for key in lifecycle {
             match incoming_map.get(*key) {

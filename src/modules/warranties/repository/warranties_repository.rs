@@ -13,8 +13,7 @@ const WARRANTIES: &str = "warranties";
 const EVENTS: &str = "warranty_events";
 
 pub(super) const WARRANTY_COLUMNS: &str = "key, id, warranty_number, source_type, invoice_key, \
-     invoice_number, line_index, product_key, repair_key, repair_item_key, print_job_key, \
-     print_job_item_key, item_name, \
+     invoice_number, line_index, product_key, repair_key, repair_item_key, item_name, \
      serial_number, quantity, claimed_quantity, customer_key, customer_name, customer_phone, customer_phone_tail, \
      coverage, warranty_type, terms, unit_price_cents, starts_on, ends_on, status, void_reason, \
      replaces_warranty_key, replaced_by_warranty_key, claim_count, version, created_at, \
@@ -67,8 +66,6 @@ pub(super) fn row_to_warranty(row: &SqliteRow) -> AppResult<WarrantyDocument> {
         product_key: row.get("product_key"),
         repair_key: row.get("repair_key"),
         repair_item_key: row.get("repair_item_key"),
-        print_job_key: row.get("print_job_key"),
-        print_job_item_key: row.get("print_job_item_key"),
         item_name: row.get("item_name"),
         serial_number: row.get("serial_number"),
         quantity: row.get("quantity"),
@@ -148,7 +145,7 @@ pub(crate) async fn insert_warranty(
             sqlx::query(&format!(
                 "INSERT INTO warranties ({WARRANTY_COLUMNS}) VALUES \
                  (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, \
-                  ?, ?, ?, ?, ?, ?, ?, ?)"
+                  ?, ?, ?, ?, ?, ?)"
             ))
             .bind(&warranty.key)
             .bind(&id)
@@ -160,8 +157,6 @@ pub(crate) async fn insert_warranty(
             .bind(&warranty.product_key)
             .bind(&warranty.repair_key)
             .bind(&warranty.repair_item_key)
-            .bind(&warranty.print_job_key)
-            .bind(&warranty.print_job_item_key)
             .bind(&warranty.item_name)
             .bind(&warranty.serial_number)
             .bind(warranty.quantity)
@@ -277,8 +272,6 @@ pub(crate) enum WarrantyFilter<'a> {
     Customer(&'a str),
     /// The items of one repair job.
     Repair(&'a str),
-    /// The items of one print job.
-    PrintJob(&'a str),
     /// In force (not held by a claim) and ending between these days (`YYYY-MM-DD`, both
     /// included).
     EndingBetween { from: &'a str, until: &'a str },
@@ -301,7 +294,6 @@ impl WarrantyFilter<'_> {
             WarrantyFilter::PhoneTail(t) => doc! { "customer_phone_tail": *t },
             WarrantyFilter::Customer(k) => doc! { "customer_key": *k },
             WarrantyFilter::Repair(k) => doc! { "repair_key": *k },
-            WarrantyFilter::PrintJob(k) => doc! { "print_job_key": *k },
             WarrantyFilter::EndingBetween { from, until } => doc! {
                 "status": "active",
                 "ends_on": { "$gte": *from, "$lte": *until },
@@ -323,7 +315,6 @@ impl WarrantyFilter<'_> {
             WarrantyFilter::PhoneTail(t) => ("customer_phone_tail = ?", vec![(*t).to_string()]),
             WarrantyFilter::Customer(k) => ("customer_key = ?", vec![(*k).to_string()]),
             WarrantyFilter::Repair(k) => ("repair_key = ?", vec![(*k).to_string()]),
-            WarrantyFilter::PrintJob(k) => ("print_job_key = ?", vec![(*k).to_string()]),
             WarrantyFilter::EndingBetween { from, until } => (
                 "status = 'active' AND ends_on >= ? AND ends_on <= ?",
                 vec![(*from).to_string(), (*until).to_string()],

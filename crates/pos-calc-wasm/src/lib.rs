@@ -30,16 +30,9 @@ pub use pos_calc_core::receipt::{
     CalcReceiptSummary, ChargeKind, CostMode, PaymentMode, PaymentSource, PricingMode,
 };
 
-pub use pos_calc_core::item_discount::ItemDiscount;
-
-pub use pos_calc_core::print_job::{
-    CalcPrintCost, CalcPrintItem, CalcPrintJobRequest, CalcPrintLine, PrintBlocker,
-    PrintBlockerCode, PrintJobPreview, PrintJobTotals, PrintLineKind,
-};
-
 pub use pos_calc_core::repair::{
-    CalcRepairItem, CalcRepairRequest, RepairBlocker, RepairBlockerCode, RepairPreview,
-    RepairTotals,
+    CalcRepairItem, CalcRepairRequest, ItemDiscount, RepairBlocker, RepairBlockerCode,
+    RepairPreview, RepairTotals,
 };
 
 pub use pos_calc_core::shares::{CalcSharesReply, CalcSharesRequest, ShareLine, SharePart};
@@ -131,11 +124,4 @@ pub fn calc_warranty(request: CalcWarrantyRequest) -> Result<CalcWarrantyReply, 
 #[wasm_bindgen]
 pub fn calc_repair(request: CalcRepairRequest) -> Result<RepairPreview, JsValue> {
     pos_calc_core::repair::compute(&request).map_err(to_js_err)
-}
-
-/// Works out what a print job charges and costs from its lines, each line's discount, and what
-/// stops it being saved.
-#[wasm_bindgen]
-pub fn calc_print_job(request: CalcPrintJobRequest) -> Result<PrintJobPreview, JsValue> {
-    pos_calc_core::print_job::compute(&request).map_err(to_js_err)
 }

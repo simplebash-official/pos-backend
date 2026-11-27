@@ -268,7 +268,7 @@ pub fn compute(input: &PulseInput) -> DashboardPulse {
                     "print",
                     &p.id,
                     &p.ticket_number,
-                    p.price_cents,
+                    p.estimated_cost_cents,
                     p.created_at,
                 )
             }),

@@ -1,4 +1,4 @@
-//! The warranty report (`GET /reports/warranties`): how often what the shop sells, repairs and prints
+//! The warranty report (`GET /reports/warranties`): how often what the shop sells and repairs
 //! comes back, how suppliers handle what is sent to them, and what free rework costs.
 
 use chrono::{DateTime, Utc};
@@ -68,9 +68,7 @@ pub struct WarrantyReport {
     pub by_product: Vec<ClaimRateRow>,
     /// Repair warranties by the work done (the item's description), most claimed first.
     pub by_repair_service: Vec<ClaimRateRow>,
-    /// Print warranties by the work done (the line's description), most claimed first.
-    pub by_print_work: Vec<ClaimRateRow>,
-    /// Repair and print warranties by the technician of the job, most claimed first.
+    /// Repair warranties by the technician of the job, most claimed first.
     pub by_technician: Vec<ClaimRateRow>,
     /// Claims sent to a supplier in the period, by supplier, most sent first.
     pub by_supplier: Vec<SupplierClaimRow>,

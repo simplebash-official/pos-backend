@@ -11,6 +11,8 @@ mod repairs_service;
 
 pub(crate) use repair_items::check_parts_in_stock;
 pub(crate) use repair_items::use_parts;
+pub(crate) use repair_reports::JobTechnician;
+pub(crate) use repair_reports::ReworkCost;
 pub(crate) use repair_reports::rework_costs;
 pub(crate) use repair_reports::technicians_by_job;
 pub(crate) use repair_services_service::create_service;

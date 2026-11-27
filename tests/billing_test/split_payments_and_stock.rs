@@ -14,13 +14,7 @@ use crate::helpers::{
     staff_token,
 };
 
-/// A priced repair ticket, and the customer it is for.
-struct SeededRepair {
-    key: String,
-    customer_key: String,
-}
-
-async fn seed_repair(app: &common::TestApp) -> SeededRepair {
+async fn seed_repair(app: &common::TestApp) -> String {
     let token = staff_token(&app.config);
     let customer_key = common::register_customer(app, "Kasun Silva", "0771234567").await;
     let (status, body) = send_authed(
@@ -37,13 +31,10 @@ async fn seed_repair(app: &common::TestApp) -> SeededRepair {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "Body: {body}");
-    SeededRepair {
-        key: body["data"]["key"]
-            .as_str()
-            .expect("the value is a string")
-            .to_string(),
-        customer_key,
-    }
+    body["data"]["key"]
+        .as_str()
+        .expect("the value is a string")
+        .to_string()
 }
 
 async fn seed_repair_without_price(app: &common::TestApp) -> String {
@@ -130,15 +121,13 @@ async fn complete_sale_split_payment_records_one_payment_per_leg() {
 async fn complete_sale_with_repair_line_marks_ticket_delivered() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);
-    let repair = seed_repair(&app).await;
-    let ticket_key = repair.key;
+    let ticket_key = seed_repair(&app).await;
 
     // unitPriceCents/assignedEmployeeName are deliberately omitted — both
     // must be resolved from the repair ticket (one item, labour 850000,
     // no assigned employee) rather than trusted from the payload.
     // sourceTicketNumber is also omitted — always server-resolved now.
     let mut payload = base_sale_payload();
-    payload["customer"] = json!({ "customerKey": repair.customer_key });
     payload["items"] = json!([{
         "name": "Screen Replacement",
         "quantity": 1,
@@ -183,12 +172,10 @@ async fn complete_sale_with_repair_line_marks_ticket_delivered() {
 async fn invoices_can_be_listed_by_the_ticket_they_billed() {
     let app = common::spawn_app().await;
     let token = staff_token(&app.config);
-    let billed = seed_repair(&app).await;
-    let billed_key = billed.key;
-    let unbilled_key = seed_repair(&app).await.key;
+    let billed_key = seed_repair(&app).await;
+    let unbilled_key = seed_repair(&app).await;
 
     let mut payload = base_sale_payload();
-    payload["customer"] = json!({ "customerKey": billed.customer_key });
     payload["items"] = json!([{
         "name": "Screen Replacement",
         "quantity": 1,

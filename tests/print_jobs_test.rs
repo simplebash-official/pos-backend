@@ -9,7 +9,6 @@ use mongodb::bson::DateTime as BsonDateTime;
 use serde_json::{Value, json};
 use simplebash_pos_backend::core::constants::roles;
 use simplebash_pos_backend::core::id::generate_id;
-use simplebash_pos_backend::domain::print_jobs::PrintJobKind;
 use simplebash_pos_backend::domain::users::Role;
 use simplebash_pos_backend::modules::print_jobs::model::PrintJobDocument;
 use tower::ServiceExt;
@@ -107,9 +106,7 @@ async fn sample_print_job_payload(app: &common::TestApp) -> Value {
         "customer": { "customerKey": customer_key },
         "jobType": "t-shirt",
         "quantity": 12,
-        "items": [{ "description": "Printing", "quantity": 1,
-                    "source": { "type": "service", "unitPriceCents": 240000 },
-                    "warranty": { "coverage": { "kind": "none" } } }],
+        "estimatedCostCents": 240000,
     })
 }
 
@@ -477,7 +474,7 @@ async fn list_print_jobs_filters_by_date_preset() {
         .as_array()
         .expect("the value is an array");
     assert_eq!(print_jobs.len(), 1, "Body: {body}");
-    assert_eq!(print_jobs[0]["priceCents"], 1000);
+    assert_eq!(print_jobs[0]["estimatedCostCents"], 1000);
 }
 
 #[tokio::test]
@@ -562,9 +559,7 @@ async fn create_print_job_takes_name_and_phone_from_the_customer_record() {
             },
             "jobType": "t-shirt",
             "quantity": 12,
-            "items": [{ "description": "Printing", "quantity": 1,
-                    "source": { "type": "service", "unitPriceCents": 240000 },
-                    "warranty": { "coverage": { "kind": "none" } } }],
+            "estimatedCostCents": 240000,
         })),
         &token,
     )
@@ -614,12 +609,12 @@ async fn update_print_job_to_another_customer_takes_that_customers_name_and_phon
 
 /// Inserts a minimal `PrintJobDocument` directly, bypassing
 /// `POST /print-jobs`, so the stats test can control `created_at`/`status`/
-/// `price_cents` precisely.
+/// `estimated_cost_cents` precisely.
 async fn seed_print_job_with_named(
     db: &mongodb::Database,
     customer_name: &str,
     status: &str,
-    price_cents: i64,
+    estimated_cost_cents: i64,
     created_at: BsonDateTime,
 ) -> String {
     let key = generate_id("prj");
@@ -635,11 +630,8 @@ async fn seed_print_job_with_named(
             quantity: 1,
             promised_ready_at: None,
             status: status.to_string(),
-            note: None,
-            kind: PrintJobKind::Standard,
-            items: Vec::new(),
-            price_cents,
-            cost_cents: 0,
+            estimated_cost_cents,
+            material_cost_cents: None,
             assigned_employee_id: None,
             assigned_employee_name: None,
             split_type: None,
@@ -660,10 +652,17 @@ async fn seed_print_job_with_named(
 async fn seed_print_job_with(
     db: &mongodb::Database,
     status: &str,
-    price_cents: i64,
+    estimated_cost_cents: i64,
     created_at: BsonDateTime,
 ) -> String {
-    seed_print_job_with_named(db, "Stats Test Customer", status, price_cents, created_at).await
+    seed_print_job_with_named(
+        db,
+        "Stats Test Customer",
+        status,
+        estimated_cost_cents,
+        created_at,
+    )
+    .await
 }
 
 #[tokio::test]

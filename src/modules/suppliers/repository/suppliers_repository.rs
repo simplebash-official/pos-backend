@@ -1,5 +1,4 @@
 use crate::clients::db::Db;
-use crate::clients::sqlite::search_regex;
 use crate::clients::sqlite::{bson_to_iso, generate_id_hex, to_bson_datetime};
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use crate::core::error::AppResult;
@@ -310,21 +309,42 @@ pub(crate) async fn list_suppliers(db: &Db, filter: Document) -> AppResult<Vec<S
                         if let Ok(cat_str) = clause_doc.get_str("supplied_categories") {
                             items.retain(|s| s.supplied_categories.iter().any(|c| c == cat_str));
                         }
-                        if let Ok(or_arr) = clause_doc.get_array("$or")
-                            && let Some(search) = search_regex(or_arr)?
-                        {
-                            items.retain(|s| {
-                                [&s.name, &s.contact_person, &s.primary_phone, &s.address]
-                                    .into_iter()
-                                    .any(|field| search.is_match(field))
-                                    || s.contact_persons.iter().any(|person| {
-                                        search.is_match(&person.name)
-                                            || person
-                                                .phone_numbers
-                                                .iter()
-                                                .any(|phone| search.is_match(phone))
-                                    })
-                            });
+                        if let Ok(or_arr) = clause_doc.get_array("$or") {
+                            let mut pattern = String::new();
+                            for cond in or_arr {
+                                if let Some(cond_doc) = cond.as_document() {
+                                    for key in ["name", "contact_person", "primary_phone", "email"]
+                                    {
+                                        if let Ok(field_doc) = cond_doc.get_document(key)
+                                            && let Ok(regex) = field_doc.get_str("$regex")
+                                        {
+                                            pattern = regex.to_lowercase();
+                                            break;
+                                        }
+                                    }
+                                }
+                                if !pattern.is_empty() {
+                                    break;
+                                }
+                            }
+                            if !pattern.is_empty() {
+                                items.retain(|s| {
+                                    s.name.to_lowercase().contains(&pattern)
+                                        || s.contact_person.to_lowercase().contains(&pattern)
+                                        || s.primary_phone.to_lowercase().contains(&pattern)
+                                        || s.contact_persons.iter().any(|cp| {
+                                            cp.name.to_lowercase().contains(&pattern)
+                                                || cp
+                                                    .phone_numbers
+                                                    .iter()
+                                                    .any(|p| p.to_lowercase().contains(&pattern))
+                                        })
+                                        || s.email
+                                            .as_ref()
+                                            .map(|e| e.to_lowercase().contains(&pattern))
+                                            .unwrap_or(false)
+                                });
+                            }
                         }
                     }
                 }

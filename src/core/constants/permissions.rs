@@ -90,8 +90,6 @@ pub const REPAIRS_WRITE: &str = "repairs:write";
 /// Add, rename, re-price and hide the shop's ready-made repair services.
 pub const REPAIR_SERVICES_MANAGE: &str = "repair_services:manage";
 pub const PRINT_JOBS_WRITE: &str = "print_jobs:write";
-/// Add, rename, re-price and hide the shop's ready-made print services.
-pub const PRINT_SERVICES_MANAGE: &str = "print_services:manage";
 pub const REPORTS_VIEW: &str = "reports:view";
 
 /// Read access to the employee HR/commission directory — every `GET` under

@@ -1,6 +1,5 @@
 //! Collection handles, row mapping and the invoice filter shared by the billing repository files.
 
-use crate::clients::sqlite::like_pattern;
 use crate::clients::sqlite::{SqlFilter, bson_to_iso, to_bson_datetime};
 use crate::clients::tenant_db::{ScopedCollection, TenantDatabase};
 use crate::core::error::{AppError, AppResult};
@@ -219,21 +218,29 @@ pub(super) fn build_invoice_where_clause(filter: &Document) -> SqlFilter {
             let mut or_parts = Vec::new();
             for or_item in or_arr {
                 if let Some(or_doc) = or_item.as_document() {
-                    if let Ok(number) = or_doc.get_str("invoice_number") {
-                        or_parts.push("invoice_number = ?".to_string());
-                        bindings.push(number.to_string());
-                    }
-                    for column in [
-                        "invoice_number",
-                        "customer_name_snapshot",
-                        "customer_phone_snapshot",
-                    ] {
-                        if let Ok(clause) = or_doc.get_document(column)
-                            && let Some(pattern) = like_pattern(clause)
-                        {
-                            or_parts.push(format!("{column} LIKE ? ESCAPE '\\'"));
-                            bindings.push(pattern);
+                    if let Ok(inv_num) = or_doc.get_document("invoice_number") {
+                        if let Ok(regex) = inv_num.get_str("$regex") {
+                            let clean = regex.trim_start_matches('^').trim_end_matches('$');
+                            or_parts.push("invoice_number LIKE ?".to_string());
+                            bindings.push(format!("%{clean}%"));
                         }
+                    } else if let Ok(inv_exact) = or_doc.get_str("invoice_number") {
+                        or_parts.push("invoice_number = ?".to_string());
+                        bindings.push(inv_exact.to_string());
+                    }
+                    if let Ok(cname) = or_doc.get_document("customer_name_snapshot")
+                        && let Ok(regex) = cname.get_str("$regex")
+                    {
+                        let clean = regex.trim_start_matches('^').trim_end_matches('$');
+                        or_parts.push("customer_name_snapshot LIKE ?".to_string());
+                        bindings.push(format!("%{clean}%"));
+                    }
+                    if let Ok(cphone) = or_doc.get_document("customer_phone_snapshot")
+                        && let Ok(regex) = cphone.get_str("$regex")
+                    {
+                        let clean = regex.trim_start_matches('^').trim_end_matches('$');
+                        or_parts.push("customer_phone_snapshot LIKE ?".to_string());
+                        bindings.push(format!("%{clean}%"));
                     }
                     if let Ok(is_cred) = or_doc.get_bool("is_credit") {
                         or_parts.push("is_credit = ?".to_string());
