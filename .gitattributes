@@ -1,0 +1,2 @@
+# Bash cannot run scripts that Windows checked out with CRLF line endings.
+*.sh text eol=lf

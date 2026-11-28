@@ -162,13 +162,17 @@ A ready-made Postman collection is in [`postman/`](postman).
 ## Development
 
 ```bash
-make check          # cargo fmt --check, clippy -D warnings, cargo test
+make check          # fmt, clippy, wasm check, all tests (needs Docker)
 cargo test          # all tests
 cargo test --test sqlite_integration_test   # one file
 ```
 
-The SQLite, OpenAPI and authorization tests need no external services. Tests
-that exercise MongoDB need a reachable instance in `MONGODB_URI` — they use
+`make check` starts its own MongoDB in Docker and removes it afterwards. On
+Windows, run it inside WSL2: see the
+[Windows setup guide](docs/windows-wsl2.md). With
+plain `cargo test`, the SQLite, OpenAPI and authorization tests need no external
+services, but tests that exercise MongoDB need a reachable instance in
+`MONGODB_URI` — they use
 their own database (the required `MONGODB_TEST_DB_NAME`, a throwaway `jt*` name),
 never your real one. CI runs them against a throwaway MongoDB replica set.
 
@@ -194,7 +198,9 @@ tests/            integration tests (one file per area)
 
 The [`Dockerfile`](Dockerfile) builds a small, non-root image. Pushes to
 `master` build `ghcr.io/simplebash-official/pos-backend:latest` and roll it
-out to the SimpleBash server; forks build but never deploy. The desktop app
+out to the SimpleBash server; forks build but never deploy. The tests do not
+block that rollout, so follow the
+[deploy checklist](docs/deploy-checklist.md) before pushing. The desktop app
 compiles this crate as a sidecar instead — see
 [pos-desktop](https://github.com/simplebash-official/pos-desktop).
 
