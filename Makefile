@@ -7,6 +7,7 @@ check-atlas:
 check:
 	cargo fmt --all --check
 	cargo clippy --workspace --all-targets --all-features -- -D warnings
-	cargo test --workspace
+	cargo check -p pos-calc-wasm --target wasm32-unknown-unknown
+	bash scripts/test-docker-mongo.sh
 
 ci: check

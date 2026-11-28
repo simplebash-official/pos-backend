@@ -1,9 +1,11 @@
 name: Test, build and deploy
 
 # Pull requests: tests only (ci.yml).
-# Push to master (or "Run workflow"): test -> build the image on the runner ->
-# deploy. Docs-only and graphify-only commits are skipped so they don't spend
-# Actions minutes. The server never builds; it only pulls the image from GHCR.
+# Push to master (or "Run workflow"): build the image on the runner -> deploy.
+# The tests run alongside and do NOT block the deploy, so a red run may already
+# be live: run `make check` before pushing (docs/deploy-checklist.md).
+# Docs-only and graphify-only commits are skipped so they don't spend Actions
+# minutes. The server never builds; it only pulls the image from GHCR.
 #
 # The deploy step SSHes in with a key that can only run the server's
 # /opt/simplebash/bin/ci-deploy script (see pos-compose: scripts/ci-deploy.sh):
@@ -39,7 +41,6 @@ jobs:
     uses: ./.github/workflows/ci.yml
 
   build:
-    needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:

@@ -20,9 +20,11 @@ The Rust/Axum API backend for **simplebash-pos**, a point-of-sale system for a r
 - `cargo run --bin seed_customers` — upserts 20 realistic retail/repair/corporate/print customer profiles into the `customers` table/collection (see `sample_customers` in `src/bin/seed_customers.rs`)
 - `cargo run --bin seed_inventory` — seeds products, stock movements, and serial numbers into the database
 - `cargo run --bin seed_api_key` — generates and inserts a random API key into the `api_keys` table/collection
-- `make check` (defined in the root `Makefile`) — runs `cargo fmt --check`, then `cargo clippy --all-targets --all-features -- -D warnings`, then `cargo test`, in that order, stopping at the first failure; `make ci` is currently just an alias for `make check` (same steps, intended as the CI entrypoint)
+- `make check` (defined in the root `Makefile`) — runs `cargo fmt --check`, then `cargo clippy --all-targets --all-features -- -D warnings`, then the `pos-calc-wasm` browser build check, then `cargo test` against a throwaway MongoDB in Docker, in that order, stopping at the first failure; `make ci` is currently just an alias for `make check` (same steps, intended as the CI entrypoint)
 
 **After every change**, run the related tests and static checks, and fix anything they report before considering the work done. `make check` is the full gate: run it once before a push, not after every task.
+
+**Pushing to `master` deploys, and the CI tests do not block it** (a red run may already be live). Before a push, start Docker Desktop, run `make check` and follow [`docs/deploy-checklist.md`](docs/deploy-checklist.md). On Windows run everything inside WSL2, never PowerShell or Command Prompt: [`docs/windows-wsl2.md`](docs/windows-wsl2.md).
 
 ```
 cargo fmt --all
